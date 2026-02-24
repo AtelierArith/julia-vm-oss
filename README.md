@@ -2,11 +2,21 @@
 
 ## Overview
 
-**JuliaVM OSS** (v0.6.5) is a minimal, fully static pipeline for executing a Julia subset. It uses a four-stage pipeline (Parser → Lowering → Compiler → VM) that accepts Julia syntax, determines feature support during lowering, compiles Core IR into bytecode, and executes bytecode in a deterministic stack-based VM. No JIT—fully App Store compliant.
+**JuliaVM OSS** (v0.6.6) is a minimal, fully static pipeline for executing a Julia subset. It uses a four-stage pipeline (Parser → Lowering → Compiler → VM) that accepts Julia syntax, determines feature support during lowering, compiles Core IR into bytecode, and executes bytecode in a deterministic stack-based VM. No JIT—fully App Store compliant.
 
 **Pure Rust Implementation**: The entire pipeline is implemented in pure Rust with no C dependencies, making it fully portable across all platforms including iOS, macOS, Linux, WebAssembly, and Android.
 
 The `subset_julia_vm` crate aims to implement a subset of upstream Julia itself, not a separate dialect.
+
+## Prerequisite
+
+Install Rust from [here](https://rust-lang.org/tools/install/):
+
+```bash
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+We expect we can use `cargo` and `rustc` commands.
 
 ## Architecture
 
@@ -128,12 +138,38 @@ The JuliaVM OSS includes an AoT compiler that compiles Julia code to native Rust
 
 ```bash
 # Compile Julia to Rust
-cargo run --release --bin aot --features aot -- ./examples/mandelbrot.jl -o output.rs
-# Compile the generated Rust
+cargo run --release --bin juliar --features aot -- ./examples/mandelbrot.jl -o output.rs
+# Compile the generated Rust (rlib is in target/release/deps/ with a hash suffix)
 rustc -O output.rs -o output_binary \
-    --extern subset_julia_vm_runtime="target/release/libsubset_julia_vm_runtime.rlib" \
+    --extern subset_julia_vm_runtime="$(ls target/release/deps/libsubset_julia_vm_runtime-*.rlib | head -1)" \
     -L target/release/deps
 
 # Run the binary
 ./output_binary
+Mandelbrot Set (50x25):
+
+                              .
+                              . .
+                              .+
+                             ###+.
+                        .   .####.
+                       .#++#########....
+                      ..##############.
+            .        ..################..
+             ...... .##################.
+            .#######.###################
+          ...##########################.
+#####################################..
+          ...##########################.
+            .#######.###################
+             ...... .##################.
+            .        ..################..
+                      ..##############.
+                       .#++#########....
+                        .   .####.
+                             ###+.
+                              .+
+                              . .
+                              .
+
 ```
