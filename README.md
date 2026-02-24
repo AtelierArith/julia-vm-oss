@@ -6,7 +6,7 @@
 
 **Pure Rust Implementation**: The entire pipeline is implemented in pure Rust with no C dependencies, making it fully portable across all platforms including iOS, macOS, Linux, WebAssembly, and Android.
 
-The `subset_julia_vm` crate aims to implement a subset of upstream Julia itself, not a separate dialect.
+95 percent of the code was written with the support of AI agents such as Claude Code, Codex, and Cursor.
 
 ## Prerequisite
 
@@ -137,15 +137,11 @@ The JuliaVM OSS includes an AoT compiler that compiles Julia code to native Rust
 ### AoT Compilation Workflow
 
 ```bash
-# Compile Julia to Rust
-cargo run --release --bin juliar --features aot -- ./examples/mandelbrot.jl -o output.rs
-# Compile the generated Rust (rlib is in target/release/deps/ with a hash suffix)
-rustc -O output.rs -o output_binary \
+$ cargo run --release --bin juliar --features aot -- ./examples/mandelbrot.jl -o output.rs
+$ rustc -O output.rs -o output_binary \
     --extern subset_julia_vm_runtime="$(ls target/release/deps/libsubset_julia_vm_runtime-*.rlib | head -1)" \
     -L target/release/deps
-
-# Run the binary
-./output_binary
+$ ./output_binary
 Mandelbrot Set (50x25):
 
                               .

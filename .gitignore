@@ -21,3 +21,7 @@ target
 #.idea/
 
 *.wasm
+
+.DS_Store
+output.rs
+output_binary
