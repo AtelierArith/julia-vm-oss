@@ -1,0 +1,77 @@
+[[tests]]
+name = "julia_manual_variables"
+file = "variables.jl"
+expected = true
+description = "Julia Manual: Variables - assignment, Unicode names, multiple assignment"
+
+[[tests]]
+name = "julia_manual_integers_and_floats"
+file = "integers_and_floats.jl"
+expected = true
+description = "Julia Manual: Integers and Floating-Point Numbers - types, arithmetic, special values"
+
+[[tests]]
+name = "julia_manual_math_operations"
+file = "math_operations.jl"
+expected = true
+description = "Julia Manual: Mathematical Operations - operators, comparisons, math functions"
+
+[[tests]]
+name = "julia_manual_strings"
+file = "strings.jl"
+expected = true
+description = "Julia Manual: Strings - creation, interpolation, concatenation, operations"
+
+[[tests]]
+name = "julia_manual_functions"
+file = "functions.jl"
+expected = true
+description = "Julia Manual: Functions - definitions, anonymous, varargs, do blocks, composition"
+
+[[tests]]
+name = "julia_manual_control_flow"
+file = "control_flow.jl"
+expected = true
+description = "Julia Manual: Control Flow - if/else, for, while, try/catch, short-circuit"
+
+[[tests]]
+name = "julia_manual_types"
+file = "types.jl"
+expected = true
+description = "Julia Manual: Types - abstract, composite, mutable, parametric, hierarchy"
+
+[[tests]]
+name = "julia_manual_methods"
+file = "methods.jl"
+expected = true
+description = "Julia Manual: Methods - multiple dispatch, specialization, parametric methods"
+
+[[tests]]
+name = "julia_manual_arrays"
+file = "arrays.jl"
+expected = true
+description = "Julia Manual: Arrays - construction, indexing, comprehensions, broadcasting"
+
+[[tests]]
+name = "julia_manual_tuples_namedtuples"
+file = "tuples_namedtuples.jl"
+expected = true
+description = "Julia Manual: Tuples - construction, destructuring, named tuples, iteration"
+
+[[tests]]
+name = "julia_manual_modules"
+file = "modules.jl"
+expected = true
+description = "Julia Manual: Modules - definition, export, qualified access"
+
+[[tests]]
+name = "julia_manual_scope"
+file = "scope.jl"
+expected = true
+description = "Julia Manual: Scope - local/global, let blocks, closures, nested functions"
+
+[[tests]]
+name = "julia_manual_native_syntax_prevention"
+file = "native_syntax_prevention.jl"
+expected = true
+description = "Prevention: Native Julia syntax that previously required workarounds (Issue #1794)"

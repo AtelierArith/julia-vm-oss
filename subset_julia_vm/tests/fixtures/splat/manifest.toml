@@ -1,0 +1,25 @@
+# Test manifest for splat category
+
+[[tests]]
+name = "splat_basic"
+file = "splat_basic.jl"
+expected = true
+description = "Basic splat operator with function call"
+
+[[tests]]
+name = "splat_array_construction"
+file = "splat_array_construction.jl"
+expected = true
+description = "Splat in array construction and multi-argument splat"
+
+[[tests]]
+name = "splat_tuple"
+file = "splat_tuple.jl"
+expected = true
+description = "Splat with tuples: passing tuple elements as function arguments"
+
+[[tests]]
+name = "splat_nested"
+file = "splat_nested.jl"
+expected = true
+description = "Nested splat: splatting into functions that themselves use splat"

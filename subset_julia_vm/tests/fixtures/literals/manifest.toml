@@ -1,0 +1,53 @@
+[[tests]]
+name = "literals_version_literal"
+file = "test_version_literal.jl"
+expected = true
+description = "Test version string literal v\"...\""
+
+[[tests]]
+name = "literals_byte_string_literal"
+file = "test_byte_string_literal.jl"
+expected = true
+description = "Test byte string literal b\"...\""
+
+[[tests]]
+name = "literals_base_pi"
+file = "base_pi.jl"
+expected = true
+description = "Access pi constant via Base.pi (same as pi)"
+
+[[tests]]
+name = "literals_binary_int"
+file = "binary_int.jl"
+expected = true
+description = "Binary integer literals: 0b0, 0b1, 0b1010, 0B1010"
+
+[[tests]]
+name = "literals_hex_float"
+file = "hex_float.jl"
+expected = true
+description = "Hex float literals with p exponent: 0x1p0, 0x1.8p3"
+
+[[tests]]
+name = "literals_hex_int"
+file = "hex_int.jl"
+expected = true
+description = "Hexadecimal integer literals: 0xff, 0xFF, 0x10, 0xAB"
+
+[[tests]]
+name = "literals_large_int"
+file = "large_int.jl"
+expected = true
+description = "Int128 and BigInt literals for values exceeding Int64 range"
+
+[[tests]]
+name = "literals_numeric"
+file = "numeric_literals.jl"
+expected = true
+description = "Comprehensive numeric literal tests (hex, binary, octal, Float32, hex float)"
+
+[[tests]]
+name = "literals_octal_int"
+file = "octal_int.jl"
+expected = true
+description = "Octal integer literals: 0o0, 0o7, 0o10, 0o777"

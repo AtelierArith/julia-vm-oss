@@ -1,0 +1,211 @@
+# Test manifest for macro category
+
+[[tests]]
+name = "macro_identity"
+file = "identity_macro.jl"
+expected = 42.0
+description = "Simple identity macro that returns its argument unchanged"
+
+[[tests]]
+name = "macro_addone"
+file = "add_one_macro.jl"
+expected = 42.0
+description = "Macro with binary operation: x + 1"
+
+[[tests]]
+name = "macro_double"
+file = "double_macro.jl"
+expected = 42.0
+description = "Macro with quote and interpolation: quote 2 * $x end"
+
+[[tests]]
+name = "macro_gensym"
+file = "gensym_test.jl"
+expected = 42.0
+description = "gensym() for generating unique symbols (hygiene)"
+
+[[tests]]
+name = "macro_gensym_in_macro"
+file = "gensym_in_macro.jl"
+expected = 13.0
+description = "gensym used as variable name in macro for hygiene"
+
+[[tests]]
+name = "macro_hygiene"
+file = "hygiene_test.jl"
+expected = 50.0
+description = "Macro hygiene: local variables don't shadow user variables"
+
+[[tests]]
+name = "macro_macroexpand"
+file = "macroexpand_test.jl"
+expected = 10.0
+description = "@macroexpand shows and evaluates macro expansion"
+
+[[tests]]
+name = "macro_nested"
+file = "nested_macro_test.jl"
+expected = 12.0
+description = "Nested macro calls - macro calling another macro"
+
+[[tests]]
+name = "macro_esc"
+file = "esc_test.jl"
+expected = 42.0
+description = "esc() for escaping expressions in macro hygiene"
+
+[[tests]]
+name = "macro_inline"
+file = "inline_macro.jl"
+expected = 42.0
+description = "@inline macro defined locally with esc(ex)"
+
+[[tests]]
+name = "macro_base_inline"
+file = "base_inline.jl"
+expected = 42.0
+description = "@inline macro from base/macros.jl (Base macro pre-registration)"
+
+[[tests]]
+name = "macro_multi_statement_quote"
+file = "multi_statement_quote.jl"
+expected = 13.0
+description = "Macro with multi-statement quote block"
+
+[[tests]]
+name = "macro_local_in_quote"
+file = "local_in_quote.jl"
+expected = 15.0
+description = "Macro with local keyword in quote block"
+
+[[tests]]
+name = "macro_eval"
+file = "eval_test.jl"
+expected = 42.0
+description = "eval() evaluates Expr AST at runtime"
+
+[[tests]]
+name = "macro_juxtaposition_quote"
+file = "juxtaposition_quote.jl"
+expected = true
+description = "Quoting and evaluating juxtaposition expressions like eval(:(2x + 1))"
+
+[[tests]]
+name = "macro_expr_fields"
+file = "expr_fields.jl"
+expected = 42.0
+description = "Expr.head and Expr.args field access (Core.Expr structure)"
+
+[[tests]]
+name = "macro_splat_interpolation_basic"
+file = "splat_interpolation_basic.jl"
+expected = 42.0
+description = "Splat interpolation $(args...) in tuple creation"
+
+[[tests]]
+name = "macro_splat_interpolation_call"
+file = "splat_interpolation_call.jl"
+expected = 42.0
+description = "Splat interpolation $(args...) in function call"
+
+[[tests]]
+name = "macro_something"
+file = "something_macro.jl"
+expected = 7.0
+description = "@something macro - return first non-nothing value (Pure Julia implementation)"
+
+[[tests]]
+name = "macro_test_basic"
+file = "test_macro_basic.jl"
+expected = 42.0
+description = "Test module macros: @test, @testset, @test_throws"
+
+[[tests]]
+name = "macro_assert_pure_julia"
+file = "assert_pure_julia.jl"
+expected = 42.0
+description = "@assert macro - Pure Julia implementation"
+
+[[tests]]
+name = "macro_show_pure_julia"
+file = "show_pure_julia.jl"
+expected = 100.0
+description = "@show macro - Pure Julia implementation returns value"
+
+[[tests]]
+name = "macro_dispatch_arity"
+file = "dispatch_arity.jl"
+expected = 12.0
+description = "Macro multiple dispatch based on arity (number of arguments)"
+
+[[tests]]
+name = "macro_dispatch_type"
+file = "dispatch_type.jl"
+expected = 3.0
+description = "Macro multiple dispatch based on argument types (Symbol vs Expr)"
+
+[[tests]]
+name = "macro_dispatch_specificity"
+file = "dispatch_specificity.jl"
+expected = 60.0
+description = "Macro dispatch specificity: Symbol > Expr > Any"
+
+[[tests]]
+name = "macro_dispatch_int"
+file = "dispatch_int.jl"
+expected = 6.0
+description = "Macro dispatch with Int literal (AST-based, not runtime)"
+
+[[tests]]
+name = "macro_dispatch_literals"
+file = "dispatch_literals.jl"
+expected = 600.0
+description = "Macro dispatch with Float64, String, Int literals"
+
+[[tests]]
+name = "macro_varargs"
+file = "varargs_macro.jl"
+expected = 42.0
+description = "Macro varargs (rest...) parameter support"
+
+[[tests]]
+name = "macro_not_in_macro"
+file = "not_in_macro.jl"
+expected = true
+description = "! operator in macro-generated code (Issue #290)"
+
+[[tests]]
+name = "macro_assert_with_message"
+file = "assert_with_message.jl"
+expected = 42
+description = "@assert with message and comparison operators (Issue #307)"
+
+[[tests]]
+name = "macro_inbounds_basic"
+file = "inbounds_basic.jl"
+expected = true
+description = "@inbounds, @boundscheck - no-op macros for compatibility (Issue #763)"
+
+[[tests]]
+name = "macro_file_dir"
+file = "file_dir_macros.jl"
+expected = true
+description = "@__FILE__ and @__DIR__ macros for source file information (Issue #460)"
+
+[[tests]]
+name = "macro_line_module"
+file = "line_module_macros.jl"
+expected = true
+description = "@__LINE__ and @__MODULE__ macros for source location information (Issue #460)"
+
+[[tests]]
+name = "macro_timev"
+file = "timev_macro.jl"
+expected = true
+description = "@timev macro - verbose timing measurement (Issue #460)"
+
+[[tests]]
+name = "macro_show_user_defined_function"
+file = "show_user_defined_function.jl"
+expected = true
+description = "@show macro with user-defined functions (Issue #1330)"

@@ -1,0 +1,13 @@
+# Test manifest for essentials category
+
+[[tests]]
+name = "essentials_basic"
+file = "essentials_basic.jl"
+expected = true
+description = "Essential functions: ifelse"
+
+[[tests]]
+name = "essentials_identity_misc"
+file = "essentials_identity_misc.jl"
+expected = true
+description = "Essential functions: identity, iszero, isone, typeof (Issue #3123)"

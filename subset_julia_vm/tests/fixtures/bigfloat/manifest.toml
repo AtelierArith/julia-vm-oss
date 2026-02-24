@@ -1,0 +1,17 @@
+[[tests]]
+name = "bigfloat_precision_basic"
+file = "precision_basic.jl"
+expected = true
+description = "Test precision() for BigFloat type and values"
+
+[[tests]]
+name = "bigfloat_setprecision"
+file = "setprecision.jl"
+expected = true
+description = "Test setprecision() for BigFloat"
+
+[[tests]]
+name = "bigfloat_rounding"
+file = "rounding.jl"
+expected = true
+description = "Test rounding() and setrounding() for BigFloat"

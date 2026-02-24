@@ -1,0 +1,193 @@
+# Test manifest for io category
+
+[[tests]]
+name = "io_iobuffer_basic"
+file = "iobuffer_basic.jl"
+expected = true
+description = "IOBuffer basic operations"
+
+[[tests]]
+name = "io_display_dump"
+file = "display_dump.jl"
+expected = true
+description = "display and dump output functions"
+
+[[tests]]
+name = "io_dump_expr"
+file = "dump_expr.jl"
+expected = true
+description = "dump function produces Julia-compatible tree structure for Expr"
+
+[[tests]]
+name = "io_sprint_varargs"
+file = "sprint_varargs.jl"
+expected = true
+description = "sprint with varargs support (5+ arguments)"
+
+[[tests]]
+name = "io_sprint_function"
+file = "sprint_function.jl"
+expected = true
+description = "sprint(f, args...) with user-defined functions"
+
+[[tests]]
+name = "io_sprint_lambda"
+file = "test_sprint_lambda.jl"
+expected = true
+description = "sprint with lambda functions (Issue #411)"
+
+[[tests]]
+name = "io_dump"
+file = "dump.jl"
+expected = true
+description = "dump function produces Julia-compatible output format"
+
+[[tests]]
+name = "io_displaysize"
+file = "displaysize.jl"
+expected = true
+description = "displaysize returns terminal size as (rows, cols) tuple"
+
+[[tests]]
+name = "io_write_char"
+file = "test_write_char.jl"
+expected = true
+description = "write(io, char) supports character literals directly"
+
+[[tests]]
+name = "io_iocontext"
+file = "test_iocontext.jl"
+expected = true
+description = "IOContext type with property storage and get/haskey"
+
+[[tests]]
+name = "io_type_dispatch"
+file = "io_type_dispatch.jl"
+expected = true
+description = "IO type dispatch: functions with io::IO parameter dispatch correctly for IOBuffer (Issue #399)"
+
+[[tests]]
+name = "io_float_display"
+file = "float_display.jl"
+expected = true
+description = "Float display: whole Float64/Float32 values preserve type for oftype and convert"
+
+[[tests]]
+name = "io_endian_bom"
+file = "test_endian_bom.jl"
+expected = true
+description = "ENDIAN_BOM constant indicates native byte order"
+
+[[tests]]
+name = "io_printstyled"
+file = "test_printstyled.jl"
+expected = true
+description = "printstyled function for ANSI color output"
+
+[[tests]]
+name = "io_show_array"
+file = "show_array.jl"
+expected = true
+description = "show method for arrays uses eltype to display correct element type"
+
+[[tests]]
+name = "io_println_array"
+file = "println_array.jl"
+expected = true
+description = "println displays arrays with element type (Vector{T}, Matrix{T})"
+
+[[tests]]
+name = "io_println_struct_show"
+file = "println_struct_show.jl"
+expected = true
+description = "println uses Base.show for user-defined structs when defined"
+
+[[tests]]
+name = "io_print_iobuffer"
+file = "print_iobuffer.jl"
+expected = true
+description = "print(io, ...) writes to IOBuffer and returns updated IO (Issue #1217)"
+
+[[tests]]
+name = "io_show_basic_types"
+file = "show_basic_types.jl"
+expected = true
+description = "show(io, x) for basic types (Bool, Nothing, Int, Float, Char, String, Symbol)"
+
+[[tests]]
+name = "io_show_container_types"
+file = "show_container_types.jl"
+expected = true
+description = "show(io, x) for container types (Tuple, Pair)"
+
+[[tests]]
+name = "io_show_range_types"
+file = "show_range_types.jl"
+expected = true
+description = "show(io, x) for range types (UnitRange, StepRange)"
+
+[[tests]]
+name = "io_show_numeric_types"
+file = "show_numeric_types.jl"
+expected = true
+description = "show(io, x) for numeric types (Complex, Rational)"
+
+[[tests]]
+name = "io_iocontext_properties"
+file = "test_iocontext_properties.jl"
+expected = true
+description = "IOContext property access using ioget and iohaskey"
+
+[[tests]]
+name = "io_repr_julia"
+file = "repr_julia.jl"
+expected = true
+description = "repr function implemented in Pure Julia using show(io, x)"
+
+[[tests]]
+name = "io_print_show_difference"
+file = "print_show_difference.jl"
+expected = true
+description = "Verify print vs show behavior: print without quotes, show with quotes"
+
+[[tests]]
+name = "io_mime_type_system"
+file = "mime_type_system.jl"
+expected = true
+description = "MIME type system: creation, istextmime, showable, and 3-argument show"
+
+[[tests]]
+name = "io_iocontext_comprehensive"
+file = "test_iocontext_sprint.jl"
+expected = true
+description = "IOContext comprehensive: creation, property access, and usage patterns"
+
+[[tests]]
+name = "io_summary"
+file = "summary.jl"
+expected = true
+description = "summary function returns type description string (Issue #439)"
+
+[[tests]]
+name = "io_file_io_open_close"
+file = "file_io_open_close.jl"
+expected = true
+description = "Test file I/O operations: open, close, isopen, eof, readline (Issue #347)"
+
+[[tests]]
+name = "io_dump_struct"
+file = "dump_struct.jl"
+expected = true
+description = "Test dump() for user-defined structs with nested field introspection (Issue #370)"
+
+[[tests]]
+name = "io_namedtuple_operations"
+file = "test_namedtuple_dump.jl"
+expected = true
+description = "NamedTuple typeof, isa, keys, values, pairs operations (Issue #412)"
+
+[[tests]]
+name = "io_show_pure_julia"
+file = "test_show_pure_julia.jl"
+expected = true
+description = "show/repr Pure Julia: basic types, containers, ranges, numerics (Issue #2583)"

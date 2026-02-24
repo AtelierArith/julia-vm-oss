@@ -1,0 +1,43 @@
+# Test manifest for exports category
+
+[[tests]]
+name = "exports_misc"
+file = "test_misc_exports.jl"
+expected = true
+description = "getindex, sprint, uppercase, lowercase, parse exports"
+
+[[tests]]
+name = "exports_reflection"
+file = "test_reflection_exports.jl"
+expected = true
+description = "fieldnames, fieldtypes, dump exports"
+
+[[tests]]
+name = "exports_io_sorting"
+file = "test_io_sorting_exports.jl"
+expected = true
+description = "IOBuffer, IOContext, sortperm! exports"
+
+[[tests]]
+name = "exports_split"
+file = "test_split_exports.jl"
+expected = true
+description = "split and rsplit string functions"
+
+[[tests]]
+name = "exports_string_builtins"
+file = "test_string_builtins.jl"
+expected = true
+description = "ascii, bitstring, bytes2hex, hex2bytes, repr"
+
+[[tests]]
+name = "exports_string_indexing"
+file = "test_string_indexing.jl"
+expected = true
+description = "codeunit, codeunits, ncodeunits, nextind, prevind, thisind"
+
+[[tests]]
+name = "exports_string_functions2"
+file = "test_string_functions2.jl"
+expected = true
+description = "isnumeric, isvalid, reverseind, unescape_string"

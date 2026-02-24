@@ -1,0 +1,25 @@
+# Test manifest for abstract category
+
+[[tests]]
+name = "abstract_basic_hierarchy"
+file = "basic_hierarchy.jl"
+expected = true
+description = "Abstract type hierarchy with struct inheritance"
+
+[[tests]]
+name = "abstract_type_dispatch"
+file = "type_dispatch.jl"
+expected = true
+description = "Multiple dispatch on abstract type subtypes"
+
+[[tests]]
+name = "abstract_multilevel"
+file = "abstract_multilevel.jl"
+expected = true
+description = "Multi-level abstract type hierarchy with dispatch"
+
+[[tests]]
+name = "abstract_parametric"
+file = "abstract_parametric.jl"
+expected = true
+description = "Abstract types with parametric struct subtypes"

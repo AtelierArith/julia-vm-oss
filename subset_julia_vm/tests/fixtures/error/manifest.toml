@@ -1,0 +1,97 @@
+# Test manifest for error category
+
+[[tests]]
+name = "error_p0_error_types"
+file = "test_p0_error_types.jl"
+expected = true
+description = "P0 error exception types - ErrorException, ArgumentError, etc."
+
+[[tests]]
+name = "error_throw_catch"
+file = "throw_catch.jl"
+expected = true
+description = "Try/catch with DomainError and error message extraction"
+
+[[tests]]
+name = "error_explicit_throw"
+file = "error_explicit_throw.jl"
+expected = true
+description = "Explicitly thrown exceptions (throw(), error()) are catchable and have correct types (Issue #2847)"
+
+[[tests]]
+name = "error_float_arithmetic"
+file = "error_float_arithmetic.jl"
+expected = true
+description = "IEEE 754 float arithmetic: Inf, NaN, isinf, isnan, isfinite (Issue #2847)"
+
+[[tests]]
+name = "error_try_finally"
+file = "error_try_finally.jl"
+expected = true
+description = "try/catch/finally semantics: finally always runs regardless of exceptions (Issue #2847)"
+
+[[tests]]
+name = "error_nested_try"
+file = "error_nested_try.jl"
+expected = true
+description = "Nested try/catch: inner exceptions, rethrow, sequential blocks (Issue #2847)"
+
+[[tests]]
+name = "error_negative_dimensions"
+file = "error_negative_dimensions.jl"
+expected = true
+description = "Negative array dimensions produce errors instead of silent overflow (Issue #2880)"
+
+[[tests]]
+name = "error_division_by_zero"
+file = "error_division_by_zero.jl"
+expected = true
+description = "Integer division by zero raises a catchable error (Issue #2918)"
+
+[[tests]]
+name = "error_bounds_error"
+file = "error_bounds_error.jl"
+expected = true
+description = "Out-of-bounds array and tuple access raises catchable errors (Issue #2918)"
+
+[[tests]]
+name = "error_inexact_error"
+file = "error_inexact_error.jl"
+expected = true
+description = "Inexact (lossy) float-to-integer conversion raises catchable InexactError (Issue #2918)"
+
+[[tests]]
+name = "error_type_error"
+file = "error_type_error.jl"
+expected = true
+description = "Non-boolean in boolean context raises catchable TypeError (Issue #2918)"
+
+[[tests]]
+name = "error_pair_bounds_error"
+file = "error_pair_bounds_error.jl"
+expected = true
+description = "Pair/tuple index out of bounds raises catchable BoundsError (Issue #3062)"
+
+[[tests]]
+name = "error_integer_inexact"
+file = "error_integer_inexact.jl"
+expected = true
+description = "Integer-to-integer conversion out of range raises catchable InexactError (Issue #3063)"
+
+[[tests]]
+name = "error_tuple_first_second"
+file = "error_tuple_first_second.jl"
+expected = true
+description = "first() on empty tuple raises catchable BoundsError (Issue #3068)"
+
+[[tests]]
+name = "error_set_pop_empty"
+file = "error_set_pop_empty.jl"
+expected = true
+description = "pop! on empty Set raises catchable ArgumentError (Issue #3068)"
+
+[[tests]]
+name = "error_try_catch_widening"
+file = "error_try_catch_widening.jl"
+expected = true
+description = "try/catch type-widening: variables assigned in both branches (Issue #3070)"

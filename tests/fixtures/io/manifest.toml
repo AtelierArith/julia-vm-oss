@@ -1,0 +1,23 @@
+[[tests]]
+name = "io_display_stack_basic"
+file = "display_stack_basic.jl"
+expected = true
+description = "Test basic display stack functionality with AbstractDisplay and TextDisplay"
+
+[[tests]]
+name = "io_display_stack_push_pop"
+file = "display_stack_push_pop.jl"
+expected = true
+description = "Test pushdisplay and popdisplay stack operations"
+
+[[tests]]
+name = "io_display_types"
+file = "display_types.jl"
+expected = true
+description = "Test display with various value types"
+
+[[tests]]
+name = "io_isa_primitive_types"
+file = "isa_primitive_types.jl"
+expected = true
+description = "Test isa() with primitive type identifiers like Float64, Int64 (Issue #1267)"

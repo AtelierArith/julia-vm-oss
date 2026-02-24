@@ -1,0 +1,57 @@
+[[tests]]
+name = "promotion_promote_rule_basic"
+file = "promote_rule_basic.jl"
+expected = true
+description = "Test basic promote_rule for primitive types"
+
+[[tests]]
+name = "promotion_promote_rule_default"
+file = "promote_rule_default.jl"
+expected = true
+description = "Test promote_rule default fallback (Union{})"
+
+[[tests]]
+name = "promotion_type_pattern_basic"
+file = "promote_type_basic.jl"
+expected = true
+description = "Test promote_type bidirectional lookup"
+
+[[tests]]
+name = "promotion_user_defined_promote_rule"
+file = "user_defined_promote_rule.jl"
+expected = true
+description = "Test user-defined promote_rule extension"
+
+[[tests]]
+name = "promotion_float32_mixed_type_arithmetic"
+file = "float32_mixed_type_arithmetic.jl"
+expected = true
+description = "Test Float32 mixed-type arithmetic operations (Issue #1659)"
+
+# Separated Float32 tests for Issue #1661 prevention
+# These tests isolate each type combination to prevent dispatch conflicts
+# NOTE: Some tests are skipped due to known bugs - see linked issues
+
+[[tests]]
+name = "promotion_float32_same_type"
+file = "float32_same_type.jl"
+expected = true
+description = "Float32 same-type arithmetic (Issue #1661 prevention, fixed in Issue #1759)"
+
+[[tests]]
+name = "promotion_float32_int64"
+file = "float32_int64.jl"
+expected = true
+description = "Float32 × Int64 arithmetic (Issue #1661 prevention, fixed in Issue #1759)"
+
+[[tests]]
+name = "promotion_float32_float64"
+file = "float32_float64.jl"
+expected = true
+description = "Float32 × Float64 arithmetic with promotion (Issue #1661 prevention, fixed in Issue #1759)"
+
+[[tests]]
+name = "promotion_float32_bool"
+file = "float32_bool.jl"
+expected = true
+description = "Float32 × Bool arithmetic (Issue #1661 prevention, fixed in Issue #1759)"

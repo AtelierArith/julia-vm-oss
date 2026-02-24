@@ -1,0 +1,25 @@
+# Test manifest for mathconstants category
+
+[[tests]]
+name = "mathconstants_basic"
+file = "constants.jl"
+expected = true
+description = "Mathematical constants: pi, e, gamma, phi, catalan (Issue #484)"
+
+[[tests]]
+name = "mathconstants_arithmetic"
+file = "constant_arithmetic.jl"
+expected = true
+description = "Arithmetic with mathematical constants: sin(pi), exp(0), log(e)"
+
+[[tests]]
+name = "mathconstants_trig"
+file = "mathconstants_trig.jl"
+expected = true
+description = "Trigonometric identities using pi and e"
+
+[[tests]]
+name = "mathconstants_precision"
+file = "mathconstants_precision.jl"
+expected = true
+description = "Mathematical constant precision and relationships (golden ratio, Euler-Mascheroni)"

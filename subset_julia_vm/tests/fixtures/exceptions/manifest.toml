@@ -1,0 +1,67 @@
+# Test manifest for exceptions category
+
+[[tests]]
+name = "exception_types_basic"
+file = "test_exception_types.jl"
+expected = true
+description = "Exception types: DimensionMismatch, KeyError, StringIndexError (Issue #342)"
+
+[[tests]]
+name = "exception_field_access"
+file = "test_exception_field_access.jl"
+expected = true
+description = "Access exception struct fields in catch blocks (Issue #362)"
+
+[[tests]]
+name = "error_function"
+file = "error_function.jl"
+expected = true
+description = "error() function throws ErrorException (Issue #477)"
+
+[[tests]]
+name = "exception_exports"
+file = "test_exception_exports.jl"
+expected = true
+description = "Exception types are exported and usable"
+
+[[tests]]
+name = "new_exception_types"
+file = "new_exception_types.jl"
+expected = true
+description = "New exception types: CanonicalIndexError, CapturedException, CompositeException, TaskFailedException, ProcessFailedException (Issue #429)"
+
+[[tests]]
+name = "showerror_function"
+file = "showerror.jl"
+expected = true
+description = "showerror function for exception display (Issue #382)"
+
+[[tests]]
+name = "rethrow_function"
+file = "rethrow.jl"
+expected = true
+description = "rethrow() function - re-throws current exception from catch blocks (Issue #448)"
+
+[[tests]]
+name = "systemerror_function"
+file = "systemerror.jl"
+expected = true
+description = "systemerror() function - raises SystemError exceptions (Issue #448)"
+
+[[tests]]
+name = "exponential_backoff"
+file = "exponential_backoff.jl"
+expected = true
+description = "ExponentialBackOff iterator for retry with exponential delays (Issue #448)"
+
+[[tests]]
+name = "backtrace_stubs"
+file = "backtrace_stubs.jl"
+expected = true
+description = "Stub implementations for backtrace, catch_backtrace, stacktrace, current_exceptions (Issue #448)"
+
+[[tests]]
+name = "try_block_return"
+file = "try_block_return.jl"
+expected = true
+description = "Return from inside try block (Issue #1447)"

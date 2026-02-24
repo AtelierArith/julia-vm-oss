@@ -1,0 +1,31 @@
+# Test manifest for getindex category
+
+[[tests]]
+name = "getindex_explicit_basic"
+file = "getindex_explicit_basic.jl"
+expected = true
+description = "getindex(arr, i) is equivalent to arr[i]"
+
+[[tests]]
+name = "getindex_string_basic"
+file = "getindex_string_basic.jl"
+expected = true
+description = "getindex(s, i) returns character from string"
+
+[[tests]]
+name = "getindex_string_slice"
+file = "getindex_string_slice.jl"
+expected = true
+description = "getindex(s, range) returns substring"
+
+[[tests]]
+name = "getindex_tuple_basic"
+file = "getindex_tuple_basic.jl"
+expected = true
+description = "getindex(tuple, i) returns tuple element"
+
+[[tests]]
+name = "setindex_array_basic"
+file = "setindex_array_basic.jl"
+expected = true
+description = "setindex!(arr, v, i) modifies array in place"

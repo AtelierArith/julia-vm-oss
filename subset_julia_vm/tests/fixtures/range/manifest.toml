@@ -1,0 +1,53 @@
+[[tests]]
+name = "range_linrange_basic"
+file = "linrange_basic.jl"
+expected = true
+description = "Test LinRange type - lazy linearly spaced range (Issue #325)"
+
+[[tests]]
+name = "range_steprangelen_basic"
+file = "steprangelen_basic.jl"
+expected = true
+description = "Test StepRangeLen type - lazy range with step (Issue #325)"
+
+[[tests]]
+name = "range_oneto_basic"
+file = "oneto_basic.jl"
+expected = true
+description = "Test OneTo type - lazy 1:n range (Issue #325)"
+
+[[tests]]
+name = "range_logrange_basic"
+file = "logrange_basic.jl"
+expected = true
+description = "Test LogRange type - lazy logarithmically spaced range (Issue #1833)"
+
+[[tests]]
+name = "range_variable_int64"
+file = "range_variable_int64.jl"
+expected = true
+description = "Range stored in variable iterates with Int64 not Float64 (Issue #2106)"
+
+[[tests]]
+name = "range_keyword_forms"
+file = "range_keyword_forms.jl"
+expected = true
+description = "range() with keyword argument forms: length, step, stop (Issue #2167)"
+
+[[tests]]
+name = "range_logrange_errors"
+file = "logrange_errors.jl"
+expected = true
+description = "Test LogRange error cases - invalid inputs (Issue #1835)"
+
+[[tests]]
+name = "range_logrange_integration"
+file = "logrange_integration.jl"
+expected = true
+description = "Test LogRange with comprehensions, map, filter, sum (Issue #1835)"
+
+[[tests]]
+name = "range_interface_methods"
+file = "range_interface_methods.jl"
+expected = true
+description = "Test range types have size/length interface methods (Issue #2706)"

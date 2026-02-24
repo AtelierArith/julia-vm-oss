@@ -1,0 +1,47 @@
+[[tests]]
+name = "hof_type_inference"
+file = "test_type_inference.jl"
+expected = true
+description = "Test HOF type inference for map/filter/reduce (Issue #1640)"
+
+[[tests]]
+name = "hof_foldl"
+file = "test_foldl.jl"
+expected = true
+description = "Test foldl function (left-associative fold)"
+
+[[tests]]
+name = "hof_foldr"
+file = "test_foldr.jl"
+expected = true
+description = "Test foldr function (right-associative fold)"
+
+[[tests]]
+name = "hof_filter_inplace"
+file = "test_filter_inplace.jl"
+expected = true
+description = "Test in-place filter function"
+
+[[tests]]
+name = "hof_map_inplace"
+file = "test_map_inplace.jl"
+expected = true
+description = "Test in-place map function"
+
+[[tests]]
+name = "hof_mapfoldl"
+file = "test_mapfoldl.jl"
+expected = true
+description = "Test mapfoldl function"
+
+[[tests]]
+name = "hof_mapfoldr"
+file = "test_mapfoldr.jl"
+expected = true
+description = "Test mapfoldr function"
+
+[[tests]]
+name = "hof_foreach_userfunc"
+file = "test_foreach_userfunc.jl"
+expected = true
+description = "Test foreach with user-defined functions"

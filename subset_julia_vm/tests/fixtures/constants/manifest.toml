@@ -1,0 +1,25 @@
+# Test manifest for constants category
+
+[[tests]]
+name = "constants_global_constants"
+file = "global_constants.jl"
+expected = true
+description = "Global constants like stdout, stderr, C_NULL, devnull, Inf16, NaN16 (Issue #430)"
+
+[[tests]]
+name = "constants_numeric_limits"
+file = "numeric_limits.jl"
+expected = true
+description = "Numeric limits: typemax, typemin, Inf, NaN predicates"
+
+[[tests]]
+name = "constants_bool_nothing"
+file = "constants_bool_nothing.jl"
+expected = true
+description = "Boolean and nothing constants: types, arithmetic, isnothing"
+
+[[tests]]
+name = "constants_type_limits"
+file = "constants_type_limits.jl"
+expected = true
+description = "Integer type limits for Int8, Int16, Int32, UInt variants"

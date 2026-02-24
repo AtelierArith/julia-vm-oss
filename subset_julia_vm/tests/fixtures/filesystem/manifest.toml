@@ -1,0 +1,37 @@
+# Filesystem and path operation tests
+
+[[tests]]
+name = "filesystem_path_functions"
+file = "path_functions.jl"
+expected = true
+description = "Test dirname and basename path functions"
+
+[[tests]]
+name = "filesystem_file_io"
+file = "file_io.jl"
+expected = true
+description = "Test file I/O operations: isfile, isdir, ispath (Issue #347)"
+
+[[tests]]
+name = "filesystem_pwd_readdir"
+file = "pwd_readdir.jl"
+expected = true
+description = "Test pwd() and readdir() functions (Issue #457)"
+
+[[tests]]
+name = "filesystem_mkdir_rm"
+file = "mkdir_rm.jl"
+expected = true
+description = "Test mkdir, mkpath, rm, tempdir, tempname, touch, cd, islink functions (Issue #457)"
+
+[[tests]]
+name = "filesystem_cp_mv_mtime"
+file = "cp_mv_mtime.jl"
+expected = true
+description = "Test cp, mv, mtime functions (Issue #457)"
+
+[[tests]]
+name = "filesystem_countlines_readline"
+file = "countlines_readline.jl"
+expected = true
+description = "Test countlines and readline functions (Issue #482)"

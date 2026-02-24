@@ -1,0 +1,35 @@
+[[tests]]
+name = "missing_isequal"
+file = "isequal_isless.jl"
+expected = true
+description = "isequal function for Missing type"
+
+[[tests]]
+name = "missing_isless"
+file = "isless.jl"
+expected = true
+description = "isless function for Missing type"
+
+[[tests]]
+name = "missing_comparison"
+file = "comparison.jl"
+expected = true
+description = "Comparison operators with Missing (==, <, >, etc.) return missing"
+
+[[tests]]
+name = "missing_coalesce_macro"
+file = "coalesce_macro.jl"
+expected = true
+description = "@coalesce macro - return first non-missing value (Issue #446)"
+
+[[tests]]
+name = "missing_arithmetic"
+file = "arithmetic.jl"
+expected = true
+description = "Arithmetic operations with missing return missing (Issue #486)"
+
+[[tests]]
+name = "missing_nonmissingtype"
+file = "nonmissingtype.jl"
+expected = true
+description = "nonmissingtype function - remove Missing from Union type (Issue #1316)"

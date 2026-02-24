@@ -1,0 +1,34 @@
+# Type stability fixture tests
+# These tests verify that type-stable functions work correctly in SubsetJuliaVM
+
+[[tests]]
+name = "type_stability_stable_arithmetic"
+file = "stable_arithmetic.jl"
+expected = true
+description = "Type-stable arithmetic functions with typed parameters"
+
+[[tests]]
+name = "type_stability_stable_array"
+file = "stable_array.jl"
+expected = true
+description = "Type-stable array and loop operations"
+
+[[tests]]
+name = "type_stability_narrowing_field"
+file = "type_narrowing_field.jl"
+expected = true
+description = "Type narrowing for field access in conditional branches (Issue #1740)"
+# Previously blocked by Issue #1747: Field access type narrowing at runtime (now fixed)
+
+[[tests]]
+name = "type_stability_narrowing_index"
+file = "type_narrowing_index.jl"
+expected = true
+description = "Type narrowing for index access in conditional branches (Issue #1740)"
+# Previously blocked by Issue #1748: Parametric tuple type dispatch (now fixed)
+
+[[tests]]
+name = "type_stability_narrowing_e2e"
+file = "type_narrowing_e2e.jl"
+expected = true
+description = "End-to-end type narrowing: compound &&/||, negation, nested, early return (Issue #1750)"

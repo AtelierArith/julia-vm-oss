@@ -1,0 +1,49 @@
+# Test manifest for module category
+
+[[tests]]
+name = "module_with_using_statistics"
+file = "module_with_using_statistics.jl"
+expected = true
+description = "Module with using Statistics statement"
+
+[[tests]]
+name = "module_with_struct"
+file = "module_with_struct.jl"
+expected = true
+description = "Basic struct definition inside module"
+
+[[tests]]
+name = "module_with_parametric_struct"
+file = "module_with_parametric_struct.jl"
+expected = true
+description = "Parametric struct with function inside module"
+
+[[tests]]
+name = "module_struct_with_operator"
+file = "module_struct_with_operator.jl"
+expected = true
+description = "Struct with operator overloading inside module"
+
+[[tests]]
+name = "module_struct_isa"
+file = "module_struct_isa.jl"
+expected = true
+description = "isa and typeof work correctly for structs in modules"
+
+[[tests]]
+name = "module_geometry"
+file = "module_geometry.jl"
+expected = true
+description = "Module with parametric struct, operators, dynamic type parameters (Point{Tnew})"
+
+[[tests]]
+name = "module_qualified_inline_comparison"
+file = "module_qualified_inline_comparison.jl"
+expected = true
+description = "Module qualified function call (MyGeometry.centroid) in inline assert comparison"
+
+[[tests]]
+name = "baremodule_basic"
+file = "baremodule_basic.jl"
+expected = 1.0
+description = "Baremodule syntax without automatic Base import"

@@ -1,0 +1,17 @@
+[[tests]]
+name = "strings_html_literal"
+file = "html_literal.jl"
+expected = true
+description = "Test html\"...\" string literal creates HTML{String} object"
+
+[[tests]]
+name = "strings_text_literal"
+file = "text_literal.jl"
+expected = true
+description = "Test text\"...\" string literal creates Text{String} object"
+
+[[tests]]
+name = "strings_custom_str_macro"
+file = "custom_str_macro.jl"
+expected = true
+description = "Test custom string macros (prefix_str functions) work correctly"

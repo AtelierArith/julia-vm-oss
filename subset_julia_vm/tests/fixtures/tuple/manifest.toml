@@ -1,0 +1,163 @@
+# Test manifest for tuple category
+
+[[tests]]
+name = "tuple_ntuple_basic"
+file = "ntuple_basic.jl"
+expected = 15.0
+description = "ntuple(f, n) creates tuple by calling f(i) for i in 1:n"
+
+[[tests]]
+name = "tuple_equality"
+file = "equality.jl"
+expected = true
+description = "Tuple == and != comparison operators"
+
+[[tests]]
+name = "tuple_comprehension_basic"
+file = "comprehension_tuple.jl"
+expected = true
+description = "Basic tuple comprehension: [(i, i^2) for i in 1:3]"
+
+[[tests]]
+name = "tuple_reverse_basic"
+file = "reverse_basic.jl"
+expected = true
+description = "reverse((1,2,3)): returns tuple (3,2,1) not array (Issue #496)"
+
+[[tests]]
+name = "tuple_reverse_empty"
+file = "reverse_empty.jl"
+expected = true
+description = "reverse(()): empty tuple returns empty tuple (Issue #496)"
+
+[[tests]]
+name = "tuple_reverse_single"
+file = "reverse_single.jl"
+expected = true
+description = "reverse((42,)): single element tuple (Issue #496)"
+
+[[tests]]
+name = "tuple_front_basic"
+file = "front_basic.jl"
+expected = true
+description = "front((1,2,3)): returns (1,2) - all but last element (Issue #496)"
+
+[[tests]]
+name = "tuple_front_single"
+file = "front_single.jl"
+expected = true
+description = "front((42,)): returns empty tuple (Issue #496)"
+
+[[tests]]
+name = "tuple_first_basic"
+file = "first_basic.jl"
+expected = true
+description = "first((1,2,3)): returns first element 1 (Issue #496)"
+
+[[tests]]
+name = "tuple_first_single"
+file = "first_single.jl"
+expected = true
+description = "first((42,)): returns first element 42 (Issue #496)"
+
+[[tests]]
+name = "tuple_last_basic"
+file = "last_basic.jl"
+expected = true
+description = "last((1,2,3)): returns last element 3 (Issue #496)"
+
+[[tests]]
+name = "tuple_last_single"
+file = "last_single.jl"
+expected = true
+description = "last((42,)): returns last element 42 (Issue #496)"
+
+[[tests]]
+name = "tuple_tail_basic"
+file = "tail_basic.jl"
+expected = true
+description = "tail((1,2,3)): returns (2,3) - all but first element (Issue #490)"
+
+[[tests]]
+name = "tuple_tail_single"
+file = "tail_single.jl"
+expected = true
+description = "tail((1,)): returns empty tuple (Issue #490)"
+
+[[tests]]
+name = "tuple_safe_tail"
+file = "safe_tail.jl"
+expected = true
+description = "safe_tail: non-throwing version of tail for empty tuples (Issue #490)"
+
+[[tests]]
+name = "tuple_copy"
+file = "copy_tuple.jl"
+expected = true
+description = "copy(Tuple) returns the same tuple (identity for immutable types)"
+
+[[tests]]
+name = "tuple_function"
+file = "tuple_function.jl"
+expected = true
+description = "tuple() function creates tuples from arguments (Issue #2173)"
+
+[[tests]]
+name = "tuple_parametric_dispatch"
+file = "parametric_dispatch.jl"
+expected = true
+description = "Parametric tuple type dispatch prevention tests (Issue #1752)"
+
+[[tests]]
+name = "tuple_where_clause_binding"
+file = "where_clause_binding.jl"
+expected = true
+description = "Where-clause type variable binding from tuple arguments (Issue #2304)"
+
+[[tests]]
+name = "tuple_type_locals_reassignment"
+file = "type_locals_reassignment.jl"
+expected = true
+description = "Parametric tuple type preservation through reassignment and function returns (Issue #2305)"
+
+[[tests]]
+name = "tuple_specificity_dispatch"
+file = "specificity_dispatch.jl"
+expected = true
+description = "TupleOf specificity-based dispatch: Tuple{Int64,Int64} preferred over Tuple{Any,Any} (Issue #2302)"
+
+[[tests]]
+name = "tuple_function_return_dispatch"
+file = "function_return_dispatch.jl"
+expected = true
+description = "Function return values propagate parametric tuple type for dispatch (Issue #2317)"
+
+[[tests]]
+name = "tuple_chained_return_dispatch"
+file = "chained_return_dispatch.jl"
+expected = true
+description = "Chained function return values propagate parametric tuple type for dispatch (Issue #2323)"
+
+[[tests]]
+name = "tuple_three_element_specificity"
+file = "three_element_specificity.jl"
+expected = true
+description = "3-element tuple specificity dispatch with varying concrete positions (Issue #2321)"
+
+[[tests]]
+name = "tuple_conditional_expression_dispatch"
+file = "conditional_expression_dispatch.jl"
+expected = true
+description = "Tuple from if-else/ternary expression preserves parametric type for dispatch (Issue #2319)"
+
+[[tests]]
+name = "tuple_bounded_where_clause"
+file = "bounded_where_clause.jl"
+expected = true
+description = "Bounded type variables (T<:Real) and mixed concrete/TypeVar tuple patterns (Issue #2316)"
+
+[[tests]]
+name = "tuple_type_dispatch"
+file = "test_tuple_type_dispatch.jl"
+expected = true
+description = "Tuple type pattern matching dispatch: Tuple{}, Tuple{Any}, Tuple{Any,Any} (Issue #2524)"

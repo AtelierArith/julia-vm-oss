@@ -1,0 +1,71 @@
+{
+  "tag": "Func",
+  "name": "f",
+  "args": ["N"],
+  "body": {
+    "tag": "Block",
+    "stmts": [
+      {
+        "tag": "Assign",
+        "lhs": "cnt",
+        "rhs": { "tag": "I64", "value": 0 }
+      },
+      {
+        "tag": "ForRange",
+        "var": "_",
+        "start": { "tag": "I64", "value": 1 },
+        "stop": { "tag": "Var", "name": "N" },
+        "body": {
+          "tag": "Block",
+          "stmts": [
+            {
+              "tag": "AddAssign",
+              "lhs": "cnt",
+              "rhs": {
+                "tag": "Call",
+                "fn": "ifelse",
+                "args": [
+                  {
+                    "tag": "Call",
+                    "fn": "<",
+                    "args": [
+                      {
+                        "tag": "Call",
+                        "fn": "+",
+                        "args": [
+                          {
+                            "tag": "Call",
+                            "fn": "*",
+                            "args": [
+                              { "tag": "Call", "fn": "rand", "args": [] },
+                              { "tag": "Call", "fn": "rand", "args": [] }
+                            ]
+                          },
+                          {
+                            "tag": "Call",
+                            "fn": "*",
+                            "args": [
+                              { "tag": "Call", "fn": "rand", "args": [] },
+                              { "tag": "Call", "fn": "rand", "args": [] }
+                            ]
+                          }
+                        ]
+                      },
+                      { "tag": "I64", "value": 1 }
+                    ]
+                  },
+                  { "tag": "I64", "value": 1 },
+                  { "tag": "I64", "value": 0 }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tag": "Return",
+        "value": { "tag": "Var", "name": "cnt" }
+      }
+    ]
+  }
+}

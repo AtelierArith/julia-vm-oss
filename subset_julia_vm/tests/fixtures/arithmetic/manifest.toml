@@ -1,0 +1,85 @@
+# Test manifest for arithmetic category
+
+[[tests]]
+name = "arithmetic_basic"
+file = "basic.jl"
+expected = true
+description = "Basic arithmetic operations"
+
+[[tests]]
+name = "arithmetic_precedence"
+file = "precedence.jl"
+expected = true
+description = "Operator precedence"
+
+[[tests]]
+name = "arithmetic_power"
+file = "power.jl"
+expected = true
+description = "Power operator"
+
+[[tests]]
+name = "arithmetic_int128"
+file = "int128_arithmetic.jl"
+expected = true
+description = "Int128 arithmetic operations (Issue #1904)"
+
+[[tests]]
+name = "arithmetic_max_min_variadic"
+file = "max_min_variadic.jl"
+expected = true
+description = "Variadic max/min with 3+ arguments reduce pairwise (Issue #2135)"
+
+[[tests]]
+name = "arithmetic_compound_mod_intdiv"
+file = "compound_mod_intdiv.jl"
+expected = true
+description = "Compound assignment %= and ÷= operators (Issue #2145)"
+
+[[tests]]
+name = "arithmetic_negfloat_type_preservation"
+file = "negfloat_type_preservation.jl"
+expected = true
+description = "NegFloat intrinsic preserves Float32/Float16 type (Issue #2220)"
+
+[[tests]]
+name = "arithmetic_float_bool_type_preservation"
+file = "float_bool_arithmetic.jl"
+expected = true
+description = "Float32/Float16 + Bool arithmetic preserves float type (Issue #2203)"
+
+[[tests]]
+name = "arithmetic_float32_int64_type_preservation"
+file = "float32_int64_arithmetic.jl"
+expected = true
+description = "Float32/Float16 + Int64 arithmetic preserves float type (Issue #2204)"
+
+[[tests]]
+name = "arithmetic_float_division_type_preservation"
+file = "float_division_type_preservation.jl"
+expected = true
+description = "Float32/Float16 division preserves float type (Issue #2225)"
+
+[[tests]]
+name = "arithmetic_float_small_int_type_preservation"
+file = "float_small_int_type_preservation.jl"
+expected = true
+description = "Float32/Float16 + Int8/UInt8 arithmetic preserves float type (Issue #2225)"
+
+[[tests]]
+name = "arithmetic_float_chained_type_preservation"
+file = "float_chained_type_preservation.jl"
+expected = true
+description = "Chained Float32/Float16 operations preserve float type (Issue #2225)"
+
+[[tests]]
+name = "arithmetic_bitwise_operators"
+file = "bitwise_operators.jl"
+expected = true
+description = "Bit-shift (<<, >>, >>>) and bitwise (&, |, ⊻, ~) operators (Issue #2618)"
+
+[[tests]]
+name = "arithmetic_promotion_canary"
+file = "test_promotion_canary.jl"
+expected = true
+description = "Canary test: promotion and isequal(nothing,nothing) still work after base changes (Issue #2721)"

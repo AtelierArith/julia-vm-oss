@@ -1,0 +1,67 @@
+# Closure tests - verifying nested function variable capture
+
+[[tests]]
+name = "closures_basic_closure"
+file = "basic_closure.jl"
+expected = true
+description = "Basic closure functionality: capturing outer scope variables (Issue #1734)"
+
+[[tests]]
+name = "closures_nested"
+file = "test_nested_closure.jl"
+expected = true
+description = "Additional closure patterns: no-arg closures, local capture, multiple use (Issue #1738)"
+
+[[tests]]
+name = "closures_shadowing"
+file = "test_shadowing.jl"
+expected = true
+description = "Closure scoping: variable shadowing and parameter capture (Issue #1738, #1743)"
+
+[[tests]]
+name = "closures_captured_mutation"
+file = "test_captured_mutation.jl"
+expected = true
+description = "Test mutable captured variables in closures (Issue #1738)"
+
+[[tests]]
+name = "closures_deep_nesting"
+file = "test_deep_nesting.jl"
+expected = true
+description = "Deeply nested closures (3+ levels) with multi-level capture (Issue #1744)"
+
+[[tests]]
+name = "closures_with_loops"
+file = "test_closure_with_loops.jl"
+expected = true
+description = "Closures inside functions containing while/for loops (Issue #2241)"
+
+[[tests]]
+name = "closures_tuple_index_call"
+file = "test_tuple_index_call.jl"
+expected = true
+description = "Calling closures via tuple indexing e.g. tuple[1]() (Issue #2240)"
+
+[[tests]]
+name = "closures_testset_capture"
+file = "testset_closure_capture.jl"
+expected = true
+description = "Closures inside @testset capture outer variables (Issue #2358)"
+
+[[tests]]
+name = "closures_mixed_closure_nonclosure"
+file = "test_mixed_closure_nonclosure.jl"
+expected = true
+description = "Mixed closure and non-closure nested functions (Issue #1758)"
+
+[[tests]]
+name = "closures_nested_loops"
+file = "nested_loops_closure.jl"
+expected = true
+description = "Closures with nested loops and explicit returns in loops (Issue #2255)"
+
+[[tests]]
+name = "closures_very_deep_nesting"
+file = "test_very_deep_nesting.jl"
+expected = true
+description = "Very deeply nested closures (5-6 levels), sibling capture, deep shadowing (Issue #1764)"

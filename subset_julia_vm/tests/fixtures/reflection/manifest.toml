@@ -1,0 +1,109 @@
+# Test manifest for reflection category
+
+[[tests]]
+name = "reflection_deepcopy_basic"
+file = "deepcopy_basic.jl"
+expected = true
+description = "deepcopy - recursive deep copy of mutable struct"
+
+[[tests]]
+name = "reflection_nfields_basic"
+file = "nfields_basic.jl"
+expected = true
+description = "nfields - number of fields in a struct (returns Int64)"
+
+[[tests]]
+name = "reflection_fieldnames_basic"
+file = "fieldnames_basic.jl"
+expected = true
+description = "fieldnames - tuple of field names (length returns Int64)"
+
+[[tests]]
+name = "reflection_fieldtypes_basic"
+file = "fieldtypes_basic.jl"
+expected = true
+description = "fieldtypes - tuple of field types (length returns Int64)"
+
+[[tests]]
+name = "reflection_hasmethod_basic"
+file = "hasmethod.jl"
+expected = true
+description = "hasmethod - check if method exists for given signature"
+
+[[tests]]
+name = "reflection_which_basic"
+file = "which.jl"
+expected = true
+description = "which - get the method that would be called"
+
+[[tests]]
+name = "reflection_methods_basic"
+file = "methods.jl"
+expected = true
+description = "methods - get all methods for a function"
+
+[[tests]]
+name = "reflection_version_constant"
+file = "version_constant.jl"
+expected = true
+description = "VERSION constant: global version string (Issue #340)"
+
+[[tests]]
+name = "reflection_args_constant"
+file = "args_constant.jl"
+expected = true
+description = "ARGS constant: command-line arguments array (Issue #340)"
+
+[[tests]]
+name = "reflection_program_file_constant"
+file = "program_file_constant.jl"
+expected = true
+description = "PROGRAM_FILE constant: path to running script (Issue #340)"
+
+[[tests]]
+name = "reflection_nameof_type"
+file = "nameof_type.jl"
+expected = true
+description = "nameof: get name of type or function as Symbol (Issue #493)"
+
+[[tests]]
+name = "reflection_fieldname_fieldtype"
+file = "test_fieldname_fieldtype.jl"
+expected = true
+description = "fieldname/fieldtype: get field name as Symbol and type (Issue #352)"
+
+[[tests]]
+name = "reflection_hasproperty"
+file = "hasproperty_basic.jl"
+expected = true
+description = "hasproperty: check if object has property (Issue #449)"
+
+[[tests]]
+name = "reflection_ispublic_isexported"
+file = "ispublic_isexported.jl"
+expected = true
+description = "ispublic/isexported: check if symbol is public or exported from module (Issue #876)"
+
+[[tests]]
+name = "reflection_env_constant"
+file = "env_constant.jl"
+expected = true
+description = "ENV constant: environment variable dictionary (Issue #340)"
+
+[[tests]]
+name = "reflection_getfield_basic"
+file = "getfield_basic.jl"
+expected = true
+description = "getfield: field access by name (Symbol) or index (Int) (Issue #1313)"
+
+[[tests]]
+name = "reflection_property_functions"
+file = "property_functions.jl"
+expected = true
+description = "getproperty, setproperty!, propertynames: property access functions (Issue #1450)"
+
+[[tests]]
+name = "reflection_methods_type_filter"
+file = "methods_type_filter.jl"
+expected = true
+description = "methods(f, types): type-filtered method lookup (Issue #3257)"

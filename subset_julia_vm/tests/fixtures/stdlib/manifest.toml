@@ -1,0 +1,41 @@
+[[tests]]
+name = "stdlib_interactiveutils_versioninfo"
+file = "interactiveutils_versioninfo.jl"
+expected = true
+description = "Test InteractiveUtils.versioninfo() function displays version information"
+
+[[tests]]
+name = "stdlib_interactiveutils_version_access"
+file = "interactiveutils_version_access.jl"
+expected = true
+description = "Test VERSION constant access from within InteractiveUtils module"
+
+[[tests]]
+name = "stdlib_base64_basic"
+file = "base64_basic.jl"
+expected = true
+description = "Base64 encoding and decoding (base64encode, base64decode) (Issue #1846)"
+
+[[tests]]
+name = "stdlib_random_shuffle_randperm"
+file = "random_shuffle_randperm.jl"
+expected = true
+description = "Random module shuffle, shuffle!, randperm, randperm! functions (Issue #1917)"
+
+[[tests]]
+name = "stdlib_random_randcycle_randsubseq"
+file = "random_randcycle_randsubseq.jl"
+expected = true
+description = "Random module randcycle, randcycle!, randsubseq, randsubseq! functions (Issue #1919)"
+
+[[tests]]
+name = "stdlib_printf_sprintf"
+file = "printf_sprintf.jl"
+expected = true
+description = "Printf/sprintf formatting with %d, %s, %f, %x, %X, %o, %c, %% specifiers (Issue #2864)"
+
+[[tests]]
+name = "stdlib_test_module"
+file = "test_module.jl"
+expected = true
+description = "Test module macros: @test, @testset, @test_throws, @test_broken (Issue #2864)"

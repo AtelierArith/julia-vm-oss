@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "subset_julia_vm",
+    "subset_julia_vm_parser",
+    "subset_julia_vm_web",
+    "subset_julia_vm_runtime",
+]
+resolver = "2"
+
+# Workspace-level lint configuration (Issue #3108)
+# Warn when a public type lacks a Debug implementation, so test authors
+# can always use `{:?}` in assert!(matches!()) failure messages.
+[workspace.lints.rust]
+missing_debug_implementations = "warn"

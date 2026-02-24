@@ -1,0 +1,19 @@
+# Module syntax tests
+
+[[tests]]
+name = "import_multiple"
+file = "import_multiple.jl"
+expected = true
+description = "Test import with multiple items (import A: b, c)"
+
+[[tests]]
+name = "using_as"
+file = "using_as.jl"
+expected = true
+description = "Test using with alias (using A: b as c)"
+
+[[tests]]
+name = "public_keyword"
+file = "public_keyword.jl"
+expected = true
+description = "Test public keyword (Julia 1.11+)"

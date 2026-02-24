@@ -1,0 +1,29 @@
+[[tests]]
+name = "kwargs_splat_basic"
+file = "kwargs_splat_basic.jl"
+expected = true
+description = "Basic kwargs... functionality"
+
+[[tests]]
+name = "kwargs_splat_access"
+file = "kwargs_splat_access.jl"
+expected = true
+description = "Accessing collected kwargs by key"
+
+[[tests]]
+name = "kwargs_splat_mixed"
+file = "kwargs_splat_mixed.jl"
+expected = true
+description = "Mixed kwargs and explicit arguments"
+
+[[tests]]
+name = "kwargs_splat_positional"
+file = "kwargs_splat_positional.jl"
+expected = true
+description = "kwargs... with positional arguments"
+
+[[tests]]
+name = "kwargs_multiple_explicit"
+file = "multiple_explicit.jl"
+expected = true
+description = "Multiple explicit keyword arguments in function definition"

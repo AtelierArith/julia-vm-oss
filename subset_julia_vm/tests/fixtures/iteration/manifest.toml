@@ -1,0 +1,278 @@
+# Test manifest for iteration category
+
+[[tests]]
+name = "iteration_array_forloop"
+file = "array_forloop.jl"
+expected = true
+description = "for loop over Array using iterate protocol"
+
+[[tests]]
+name = "iteration_tuple_forloop"
+file = "tuple_forloop.jl"
+expected = true
+description = "for loop over Tuple using iterate protocol"
+
+[[tests]]
+name = "iteration_range_forloop"
+file = "range_forloop.jl"
+expected = true
+description = "for loop over UnitRange using iterate protocol"
+
+[[tests]]
+name = "iteration_range_float_param"
+file = "range_float_param.jl"
+expected = true
+description = "Function returning Range with Float64 parameters (issue #354)"
+
+[[tests]]
+name = "iteration_linrange_basic"
+file = "linrange_basic.jl"
+expected = true
+description = "LinRange basic construction (Issue #529)"
+
+[[tests]]
+name = "iteration_linrange_iteration"
+file = "linrange_iteration.jl"
+expected = true
+description = "LinRange iteration with for loop (Issue #529)"
+
+[[tests]]
+name = "iteration_linrange_indexing"
+file = "linrange_indexing.jl"
+expected = true
+description = "LinRange first and last element (Issue #529)"
+
+[[tests]]
+name = "iteration_steprangelen_basic"
+file = "steprangelen_basic.jl"
+expected = true
+description = "StepRangeLen basic construction (Issue #529)"
+
+[[tests]]
+name = "iteration_steprangelen_iteration"
+file = "steprangelen_iteration.jl"
+expected = true
+description = "StepRangeLen iteration with for loop (Issue #529)"
+
+[[tests]]
+name = "iteration_range_function_linrange"
+file = "range_function_linrange.jl"
+expected = true
+description = "range function returns LinRange (Issue #529)"
+
+[[tests]]
+name = "iteration_range_step_length"
+file = "range_step_length.jl"
+expected = true
+description = "range with step and length returns StepRangeLen (Issue #529)"
+
+[[tests]]
+name = "iteration_string_forloop"
+file = "string_forloop.jl"
+expected = true
+description = "for loop over String using iterate protocol"
+
+[[tests]]
+name = "iteration_custom_iterator"
+file = "custom_iterator.jl"
+expected = true
+description = "Custom iterator with user-defined iterate methods"
+
+[[tests]]
+name = "iteration_enumerate_basic"
+file = "enumerate_basic.jl"
+expected = true
+description = "enumerate: for (i, x) in enumerate(arr) iterates with index"
+
+[[tests]]
+name = "iteration_zip_basic"
+file = "zip_basic.jl"
+expected = true
+description = "zip: for (x, y) in zip(a, b) iterates two arrays in parallel"
+
+[[tests]]
+name = "iteration_take_basic"
+file = "take_basic.jl"
+expected = true
+description = "take: iterate first N elements of collection"
+
+[[tests]]
+name = "iteration_drop_basic"
+file = "drop_basic.jl"
+expected = true
+description = "drop: skip first N elements of collection"
+
+[[tests]]
+name = "iteration_iterators"
+file = "iterators.jl"
+expected = true
+description = "Iterator constructs: enumerate, take, drop, zip"
+
+[[tests]]
+name = "iteration_eachcol_basic"
+file = "iteration_eachcol_basic.jl"
+expected = true
+description = "eachcol: iterate over columns of a matrix"
+
+[[tests]]
+name = "iteration_eachrow_basic"
+file = "iteration_eachrow_basic.jl"
+expected = true
+description = "eachrow: iterate over rows of a matrix"
+
+[[tests]]
+name = "iteration_collect_type_inference"
+file = "collect_type_inference.jl"
+expected = true
+description = "collect returns typed arrays (Int64 for integer ranges)"
+
+[[tests]]
+name = "iteration_cartesian_indices"
+file = "cartesian_indices.jl"
+expected = true
+description = "CartesianIndices iteration in column-major order"
+
+[[tests]]
+name = "iteration_cartesian_index_array"
+file = "cartesian_index_array.jl"
+expected = true
+description = "CartesianIndex array indexing: A[CartesianIndex((i,j))] == A[i,j]"
+
+[[tests]]
+name = "iteration_linear_indices"
+file = "linear_indices.jl"
+expected = true
+description = "LinearIndices iteration over array dimensions"
+
+[[tests]]
+name = "iteration_flatten"
+file = "iteration_flatten.jl"
+expected = true
+description = "flatten - flatten nested iterables"
+
+[[tests]]
+name = "iteration_rest"
+file = "iteration_rest.jl"
+expected = true
+description = "rest - all but first element of collection"
+
+[[tests]]
+name = "iteration_cycle"
+file = "iteration_cycle.jl"
+expected = true
+description = "cycle - infinite repetition of collection"
+
+[[tests]]
+name = "iteration_repeated"
+file = "iteration_repeated.jl"
+expected = true
+description = "repeated - repeat a value n times or infinitely"
+
+[[tests]]
+name = "iteration_partition"
+file = "iteration_partition.jl"
+expected = true
+description = "partition - group elements into chunks"
+
+[[tests]]
+name = "iteration_product"
+file = "iteration_product.jl"
+expected = true
+description = "product - Cartesian product of iterables"
+
+[[tests]]
+name = "iteration_eachsplit"
+file = "iteration_eachsplit.jl"
+expected = true
+description = "eachsplit - split string into iterator"
+
+[[tests]]
+name = "iteration_oneto_basic"
+file = "oneto_basic.jl"
+expected = true
+description = "OneTo - AbstractUnitRange that behaves like 1:n (Issue #490)"
+
+[[tests]]
+name = "iteration_oneto_empty"
+file = "oneto_empty.jl"
+expected = true
+description = "OneTo(0) - empty range (Issue #490)"
+
+[[tests]]
+name = "iteration_oneto_function"
+file = "oneto_function.jl"
+expected = true
+description = "oneto function - convenience constructor for OneTo (Issue #490)"
+
+[[tests]]
+name = "iteration_peel_basic"
+file = "peel_basic.jl"
+expected = true
+description = "peel - split iterator into first element and rest (Issue #759)"
+
+[[tests]]
+name = "iteration_peel_empty"
+file = "peel_empty.jl"
+expected = true
+description = "peel with empty collection returns nothing (Issue #759)"
+
+[[tests]]
+name = "iteration_union_nothing_tuple_return"
+file = "union_nothing_tuple_return.jl"
+expected = true
+description = "Functions returning Union{Nothing, Tuple} work correctly (Issue #777)"
+
+[[tests]]
+name = "iteration_nth_basic"
+file = "nth_basic.jl"
+expected = true
+description = "nth function - get nth element of iterator"
+
+[[tests]]
+name = "iteration_generator_pure_julia"
+file = "generator_pure_julia.jl"
+expected = true
+description = "Generator iterate protocol in Pure Julia using field function calls"
+
+[[tests]]
+name = "iteration_hof_pure_julia"
+file = "hof_pure_julia.jl"
+expected = true
+description = "Higher-Order Functions (map, filter, reduce) in Pure Julia"
+
+[[tests]]
+name = "iteration_binary_func_call"
+file = "binary_func_call.jl"
+expected = true
+description = "Calling binary function passed as parameter"
+
+[[tests]]
+name = "iteration_reduce_minimal"
+file = "reduce_minimal.jl"
+expected = true
+description = "Minimal reduce-like operation test"
+
+[[tests]]
+name = "iteration_takewhile_basic"
+file = "takewhile_basic.jl"
+expected = true
+description = "takewhile: yield elements while predicate is true (Issue #1815)"
+
+[[tests]]
+name = "iteration_dropwhile_basic"
+file = "dropwhile_basic.jl"
+expected = true
+description = "dropwhile: skip elements while predicate is true (Issue #1815)"
+
+[[tests]]
+name = "iteration_zip_nary"
+file = "zip_nary.jl"
+expected = true
+description = "zip with 3 and 4 arguments for parallel iteration (Issue #1990)"
+
+[[tests]]
+name = "iteration_hof_chain_unknown_type"
+file = "hof_chain_unknown_type.jl"
+expected = true
+description = "Prevention: HOF chains with compile-time unknown types (Issue #1673)"
+

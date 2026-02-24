@@ -1,0 +1,13 @@
+# Test manifest for pair category
+
+[[tests]]
+name = "pair_basic"
+file = "pair_basic.jl"
+expected = true
+description = "Pair construction, field access, and mixed types"
+
+[[tests]]
+name = "pair_operations"
+file = "pair_operations.jl"
+expected = true
+description = "Pair equality, nesting, different types (Issue #3123)"

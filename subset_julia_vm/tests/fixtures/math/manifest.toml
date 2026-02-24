@@ -1,0 +1,169 @@
+# Test manifest for math category
+
+[[tests]]
+name = "math_exp2_exp10"
+file = "exp2_exp10.jl"
+expected = true
+description = "exp2 and exp10: exponential base 2 and 10 (Issue #483)"
+
+[[tests]]
+name = "math_clamp_inplace"
+file = "clamp_inplace.jl"
+expected = true
+description = "clamp! - in-place array element clamping"
+
+[[tests]]
+name = "math_mathconstants_basic"
+file = "mathconstants_basic.jl"
+expected = true
+description = "MathConstants module - π, ℯ, γ, φ, catalan (Issue #761)"
+
+[[tests]]
+name = "math_mathconstants_module"
+file = "mathconstants_module.jl"
+expected = true
+description = "MathConstants module access - MathConstants.π etc (Issue #761)"
+
+[[tests]]
+name = "math_fma_muladd"
+file = "fma_muladd.jl"
+expected = true
+description = "fma and muladd - fused multiply-add functions (Issue #489)"
+
+[[tests]]
+name = "math_deg2rad_rad2deg"
+file = "deg2rad_rad2deg.jl"
+expected = true
+description = "deg2rad and rad2deg - angle conversion functions (Issue #1378)"
+
+[[tests]]
+name = "math_cbrt_basic"
+file = "cbrt_basic.jl"
+expected = true
+description = "cbrt - cube root function (Issue #1857)"
+
+[[tests]]
+name = "math_fourthroot_basic"
+file = "fourthroot_basic.jl"
+expected = true
+description = "fourthroot - fourth root function (Issue #1859)"
+
+[[tests]]
+name = "math_sign_basic"
+file = "sign_basic.jl"
+expected = true
+description = "sign - return sign of a number (Issue #1861)"
+
+[[tests]]
+name = "math_hypot_basic"
+file = "hypot_basic.jl"
+expected = true
+description = "hypot - hypotenuse length (Issue #1861)"
+
+[[tests]]
+name = "math_copysign_minmax"
+file = "copysign_minmax.jl"
+expected = true
+description = "copysign and minmax functions (Issue #1861)"
+
+[[tests]]
+name = "math_divrem_fldmod"
+file = "divrem_fldmod.jl"
+expected = true
+description = "divrem, fldmod, mod1, fld1, fldmod1 functions (Issue #1861)"
+
+[[tests]]
+name = "math_evalpoly_basic"
+file = "evalpoly_basic.jl"
+expected = true
+description = "evalpoly - Horner's method polynomial evaluation (Issue #1861)"
+
+[[tests]]
+name = "math_sinpi_cospi"
+file = "sinpi_cospi.jl"
+expected = true
+description = "sinpi, cospi, sincospi functions (Issue #1861)"
+
+[[tests]]
+name = "math_sinc_cosc"
+file = "sinc_cosc.jl"
+expected = true
+description = "sinc and cosc - normalized sinc and derivative (Issue #1861)"
+
+[[tests]]
+name = "math_log_variants"
+file = "log_variants.jl"
+expected = true
+description = "log2, log10, log1p - logarithm variants (Issue #1861)"
+
+[[tests]]
+name = "math_hyperbolic_basic"
+file = "hyperbolic_basic.jl"
+expected = true
+description = "sinh, cosh, tanh, asinh, acosh, atanh - hyperbolic functions (Issue #1861)"
+
+[[tests]]
+name = "math_reciprocal_trig"
+file = "reciprocal_trig.jl"
+expected = true
+description = "sec, csc, cot, asec, acsc, acot - reciprocal trig functions (Issue #1863)"
+
+[[tests]]
+name = "math_reciprocal_hyperbolic"
+file = "reciprocal_hyperbolic.jl"
+expected = true
+description = "sech, csch, coth - reciprocal hyperbolic functions (Issue #1863)"
+
+[[tests]]
+name = "math_trig_degrees"
+file = "trig_degrees.jl"
+expected = true
+description = "sind, cosd, tand, asind, acosd, atand, sincosd - degree-based trig (Issue #1863)"
+
+[[tests]]
+name = "math_reciprocal_trig_degrees"
+file = "reciprocal_trig_degrees.jl"
+expected = true
+description = "secd, cscd, cotd, asecd, acscd, acotd - degree-based reciprocal trig (Issue #1863)"
+
+[[tests]]
+name = "math_sincos_basic"
+file = "sincos_basic.jl"
+expected = true
+description = "sincos(x) - returns (sin(x), cos(x)) tuple (Issue #1877)"
+
+[[tests]]
+name = "math_mod_rem_fld"
+file = "mod_rem_fld.jl"
+expected = true
+description = "mod, rem, fld - modulo, remainder, floored division (Issue #1877)"
+
+[[tests]]
+name = "math_mod2pi_rem2pi"
+file = "mod2pi_rem2pi.jl"
+expected = true
+description = "mod2pi, rem2pi - modular arithmetic with 2pi (Issue #1877)"
+
+[[tests]]
+name = "math_expm1_basic"
+file = "expm1_basic.jl"
+expected = true
+description = "expm1 - exp(x) - 1 (Issue #2095)"
+
+[[tests]]
+name = "math_log_two_arg"
+file = "log_two_arg.jl"
+expected = true
+description = "log(base, x) - logarithm with arbitrary base (Issue #2175)"
+
+[[tests]]
+name = "math_intrinsics_type_preservation"
+file = "intrinsics_type_preservation.jl"
+expected = true
+description = "Math intrinsics (sqrt, floor, ceil, trunc, abs, copysign) preserve Float32/Float16 type (Issue #2202)"
+
+[[tests]]
+name = "math_pythagorean_identity"
+file = "pythagorean_identity.jl"
+expected = true
+description = "Property test: sin(θ)² + cos(θ)² ≈ 1 for random θ"

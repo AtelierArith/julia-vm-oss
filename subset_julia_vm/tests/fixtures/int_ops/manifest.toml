@@ -1,0 +1,19 @@
+# Test manifest for int_ops category
+
+[[tests]]
+name = "int_ops_basic"
+file = "int_basic.jl"
+expected = true
+description = "Integer operations: parity, abs, gcd, divrem, bitwise"
+
+[[tests]]
+name = "int_ops_conversion"
+file = "int_ops_conversion.jl"
+expected = true
+description = "Integer conversion, count_ones, ndigits, min/max (Issue #3123)"
+
+[[tests]]
+name = "int_ops_narrow_int_locals"
+file = "narrow_int_locals.jl"
+expected = true
+description = "Narrow integer types (I8/I16/I32/U8/U16/U32/U64) preserve type through local vars and params (Issue #3255)"

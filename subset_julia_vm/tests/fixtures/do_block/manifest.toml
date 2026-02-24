@@ -1,0 +1,25 @@
+# Test manifest for do_block category
+
+[[tests]]
+name = "do_block_map_basic"
+file = "map_basic.jl"
+expected = true
+description = "Basic do block with map"
+
+[[tests]]
+name = "do_block_filter_basic"
+file = "filter_basic.jl"
+expected = true
+description = "Do block with filter - returns filtered array length"
+
+[[tests]]
+name = "do_block_reduce_two_params"
+file = "reduce_two_params.jl"
+expected = true
+description = "Do block with reduce - two parameters (acc, val)"
+
+[[tests]]
+name = "do_block_multiline"
+file = "multiline_body.jl"
+expected = true
+description = "Do block with multiline body"

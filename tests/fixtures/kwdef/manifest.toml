@@ -1,0 +1,17 @@
+[[tests]]
+name = "kwdef_basic"
+file = "basic.jl"
+expected = true
+description = "Test @kwdef with all default values"
+
+[[tests]]
+name = "kwdef_required"
+file = "required.jl"
+expected = true
+description = "Test @kwdef with required fields (no defaults)"
+
+[[tests]]
+name = "kwdef_mutable"
+file = "mutable.jl"
+expected = true
+description = "Test @kwdef with mutable struct"

@@ -1,0 +1,25 @@
+# Function definition tests
+
+[[tests]]
+name = "functions_short_form_varargs"
+file = "short_form_varargs.jl"
+expected = true
+description = "Short-form varargs function definitions (Issue #1721 regression prevention)"
+
+[[tests]]
+name = "functions_default_args"
+file = "default_args.jl"
+expected = true
+description = "Functions with default argument values"
+
+[[tests]]
+name = "functions_composition"
+file = "functions_composition.jl"
+expected = true
+description = "Function composition using ∘ operator"
+
+[[tests]]
+name = "functions_anonymous"
+file = "functions_anonymous.jl"
+expected = true
+description = "Anonymous functions (lambdas) and higher-order usage"

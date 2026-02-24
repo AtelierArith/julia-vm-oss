@@ -1,0 +1,17 @@
+[[tests]]
+name = "sets_pure_julia_core"
+file = "test_pure_julia_core.jl"
+expected = true
+description = "Phase 4-3: Set core operations via Pure Julia intrinsics (Issue #2574)"
+
+[[tests]]
+name = "sets_pure_julia_algebra"
+file = "test_pure_julia_algebra.jl"
+expected = true
+description = "Phase 4-4: Set algebra operations in Pure Julia (Issue #2575)"
+
+[[tests]]
+name = "sets_pure_julia_inplace"
+file = "test_pure_julia_inplace.jl"
+expected = true
+description = "Phase 4-4: Set in-place operations in Pure Julia (Issue #2575)"

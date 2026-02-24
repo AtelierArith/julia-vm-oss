@@ -1,0 +1,542 @@
+# Test manifest for array category
+
+[[tests]]
+name = "array_literal_type_inference"
+file = "literal_type_inference.jl"
+expected = true
+description = "Array literals create arrays with correct element types (Issue #609)"
+
+[[tests]]
+name = "array_zeros_ones_typed"
+file = "zeros_ones_typed.jl"
+expected = true
+description = "zeros(Type, dims...) and ones(Type, dims...) create typed arrays (Issue #589)"
+
+[[tests]]
+name = "array_sum"
+file = "sum.jl"
+expected = true
+description = "Sum of array elements"
+
+[[tests]]
+name = "array_comprehension"
+file = "comprehension.jl"
+expected = true
+description = "Array comprehension"
+
+[[tests]]
+name = "array_indexing"
+file = "indexing.jl"
+expected = true
+description = "Array indexing"
+
+[[tests]]
+name = "array_vcat_basic"
+file = "vcat_basic.jl"
+expected = true
+description = "vcat: vertical concatenation length (Int64)"
+
+[[tests]]
+name = "array_vcat_element"
+file = "vcat_element.jl"
+expected = true
+description = "vcat: element value check"
+
+[[tests]]
+name = "array_hcat_basic"
+file = "hcat_basic.jl"
+expected = true
+description = "hcat: horizontal concatenation column count (Int64)"
+
+[[tests]]
+name = "array_hcat_element"
+file = "hcat_element.jl"
+expected = true
+description = "hcat: element value check"
+
+[[tests]]
+name = "array_matrix_literal_storage"
+file = "matrix_literal_storage.jl"
+expected = true
+description = "Matrix literal [1 2; 3 4] uses column-major storage order"
+
+[[tests]]
+name = "array_vec_1d"
+file = "vec_1d.jl"
+expected = true
+description = "vec: flatten 1D preserves length (Int64)"
+
+[[tests]]
+name = "array_vec_2d"
+file = "vec_2d.jl"
+expected = true
+description = "vec: flatten 2D matrix (column-major)"
+
+[[tests]]
+name = "array_findfirst_found"
+file = "findfirst_found.jl"
+expected = true
+description = "findfirst: find first occurrence (returns Int64 index)"
+
+[[tests]]
+name = "array_findlast_found"
+file = "findlast_found.jl"
+expected = true
+description = "findlast: find last occurrence (returns Int64 index)"
+
+[[tests]]
+name = "array_findfirst_predicate"
+file = "findfirst_predicate.jl"
+expected = true
+description = "findfirst(f, A): find first index where predicate is true (Issue #1996)"
+
+[[tests]]
+name = "array_findlast_predicate"
+file = "findlast_predicate.jl"
+expected = true
+description = "findlast(f, A): find last index where predicate is true (Issue #1996)"
+
+[[tests]]
+name = "array_findall_count"
+file = "findall_count.jl"
+expected = true
+description = "findall: count all occurrences (length returns Int64)"
+
+[[tests]]
+name = "array_findall_index"
+file = "findall_index.jl"
+expected = true
+description = "findall: second index value (returns Int64)"
+
+[[tests]]
+name = "array_findall_basic"
+file = "findall_basic.jl"
+expected = 1.0
+description = "findall: single-argument form for boolean arrays"
+
+[[tests]]
+name = "array_findall_hof_chain"
+file = "findall_hof_chain.jl"
+expected = true
+description = "findall(A::Array) dispatch over findall(x::Bool) after HOF chains (Issue #2296)"
+
+[[tests]]
+name = "array_fill_mutate"
+file = "fill_mutate.jl"
+expected = true
+description = "fill!: mutating fill with value"
+
+[[tests]]
+name = "array_copyto_basic"
+file = "copyto_basic.jl"
+expected = true
+description = "copyto!: copy elements between arrays"
+
+[[tests]]
+name = "array_first_last"
+file = "first_last.jl"
+expected = true
+description = "first and last functions work with arrays"
+
+[[tests]]
+name = "array_linear_index_2d_get"
+file = "linear_index_2d_get.jl"
+expected = true
+description = "Linear indexing on 2D array (get)"
+
+[[tests]]
+name = "array_linear_index_2d_set"
+file = "linear_index_2d_set.jl"
+expected = true
+description = "Linear indexing on 2D array (set)"
+
+[[tests]]
+name = "array_linear_index_vec_2d"
+file = "linear_index_vec_2d.jl"
+expected = true
+description = "vec on 2D array using linear indexing"
+
+[[tests]]
+name = "array_empty_literal"
+file = "array_empty_literal.jl"
+expected = true
+description = "Empty array literals: [] and Type[]"
+
+[[tests]]
+name = "axes_basic"
+file = "axes_basic.jl"
+expected = true
+description = "axes(arr, 1) returns index range for dimension"
+
+[[tests]]
+name = "axes_2d"
+file = "axes_2d.jl"
+expected = true
+description = "axes(matrix) returns tuple of ranges for each dimension"
+
+[[tests]]
+name = "permutedims_1d"
+file = "permutedims_1d.jl"
+expected = true
+description = "permutedims for 1D vector returns 1×N row vector"
+
+[[tests]]
+name = "permutedims_2d"
+file = "permutedims_2d.jl"
+expected = true
+description = "permutedims for 2D matrix transposes dimensions"
+
+[[tests]]
+name = "permutedims_3d"
+file = "permutedims_3d.jl"
+expected = true
+description = "permutedims for 3D array with permutation argument"
+
+[[tests]]
+name = "reshape_basic"
+file = "reshape_basic.jl"
+expected = true
+description = "reshape changes array dimensions"
+
+[[tests]]
+name = "array_ndims_basic"
+file = "ndims_basic.jl"
+expected = true
+description = "ndims: return number of dimensions (Issue #587)"
+
+[[tests]]
+name = "array_utilities_type_preservation"
+file = "utilities_type_preservation.jl"
+expected = true
+description = "Array utilities preserve element types (Issue #424)"
+
+[[tests]]
+name = "array_resize"
+file = "resize.jl"
+expected = true
+description = "resize!: change array size with preservation or initialization"
+
+[[tests]]
+name = "array_keepat"
+file = "keepat.jl"
+expected = true
+description = "keepat!: keep only elements at specified indices"
+
+[[tests]]
+name = "array_circshift_inplace"
+file = "circshift_inplace.jl"
+expected = true
+description = "circshift!: circular shift array in place"
+
+[[tests]]
+name = "array_copy_inplace"
+file = "copy_inplace.jl"
+expected = true
+description = "copy! - in-place array copying with resize for vectors"
+
+[[tests]]
+name = "array_conj_inplace"
+file = "conj_inplace.jl"
+expected = true
+description = "conj! - in-place complex conjugate for arrays"
+
+[[tests]]
+name = "array_copyto_offsets"
+file = "copyto_offsets.jl"
+expected = true
+description = "copyto! with offset arguments (dstart, sstart, n)"
+
+[[tests]]
+name = "array_dequeue_operations"
+file = "dequeue_operations.jl"
+expected = true
+description = "Dequeue operations: pushfirst!, popfirst!, insert!, append!, prepend!, deleteat!"
+
+[[tests]]
+name = "array_permutation_functions"
+file = "permutation_functions.jl"
+expected = true
+description = "Permutation functions: indexin, isperm, invperm"
+
+[[tests]]
+name = "array_empty_filter_inplace"
+file = "empty_filter_inplace.jl"
+expected = true
+description = "In-place collection functions: empty!, filter!"
+
+[[tests]]
+name = "array_splice_inplace"
+file = "splice_inplace.jl"
+expected = true
+description = "splice! - remove and optionally replace elements in-place"
+
+[[tests]]
+name = "array_map_inplace"
+file = "map_inplace.jl"
+expected = true
+description = "map! - apply function to array elements in-place"
+
+[[tests]]
+name = "array_clamp_inplace"
+file = "clamp_inplace.jl"
+expected = true
+description = "clamp! - clamp array values in place (Issue #433)"
+
+[[tests]]
+name = "array_issue_825_mutation"
+file = "issue_825_mutation.jl"
+expected = true
+description = "Array mutation operations: pop!, push!, resize!, unique! (Issue #825)"
+
+[[tests]]
+name = "array_adjoint_transpose"
+file = "adjoint_transpose.jl"
+expected = true
+description = "adjoint and transpose for arrays (Pure Julia implementation)"
+
+[[tests]]
+name = "array_slice_2d_dimension"
+file = "slice_2d_dimension.jl"
+expected = true
+description = "2D slice dimension handling: A[:, i] returns 1D vector (Issue #1562)"
+
+[[tests]]
+name = "array_slice_2d_shape_debug"
+file = "slice_2d_shape_debug.jl"
+expected = true
+description = "Debug test for 2D slice shape"
+
+[[tests]]
+name = "array_slice_2d_size_check"
+file = "slice_2d_size_check.jl"
+expected = true
+description = "Explicit size check for 2D slicing"
+
+[[tests]]
+name = "array_slice_2d_explicit_shape"
+file = "slice_2d_explicit_shape.jl"
+expected = true
+description = "Explicit shape verification for 2D slicing"
+
+[[tests]]
+name = "array_slice_bool"
+file = "slice_bool_array.jl"
+expected = true
+description = "Bool array slicing preserves element type (Issue #1565)"
+
+[[tests]]
+name = "array_slice_string"
+file = "slice_string_array.jl"
+expected = true
+description = "String array slicing preserves element type (Issue #1565)"
+
+[[tests]]
+name = "array_slice_bool_2d"
+file = "slice_bool_2d.jl"
+expected = true
+description = "2D Bool array slicing preserves element type (Issue #1565)"
+
+[[tests]]
+name = "array_slice_3d_basic"
+file = "slice_3d_basic.jl"
+expected = true
+description = "3D array slicing (Issue #1564)"
+
+
+[[tests]]
+name = "array_typed_undef_constructor"
+file = "typed_array_undef_constructor.jl"
+expected = true
+description = "Vector{T}(undef, n) and Array{T}(undef, dims...) constructors (Issue #1586)"
+
+[[tests]]
+name = "array_typed_edge_cases"
+file = "typed_array_edge_cases.jl"
+expected = true
+description = "Typed array constructor edge cases: zero-length, single-element, multi-dim, zeros/ones (Issue #1607)"
+
+[[tests]]
+name = "array_isassigned_basic"
+file = "isassigned_basic.jl"
+expected = true
+description = "isassigned(array, i) checks if index is valid (Issue #1836)"
+
+[[tests]]
+name = "array_accumulate_basic"
+file = "accumulate_basic.jl"
+expected = true
+description = "accumulate(op, A) cumulative operation for vectors (Issue #1839)"
+
+[[tests]]
+name = "array_matrix_rotation"
+file = "matrix_rotation.jl"
+expected = true
+description = "rotl90, rotr90, rot180 - matrix rotation functions (Issue #1879)"
+
+[[tests]]
+name = "array_first_last_n"
+file = "first_last_n.jl"
+expected = true
+description = "first(arr, n) and last(arr, n) - multi-element variants (Issue #1887)"
+
+[[tests]]
+name = "array_stack_selectdim"
+file = "stack_selectdim.jl"
+expected = true
+description = "stack and selectdim array utility functions (Issue #1942)"
+
+[[tests]]
+name = "array_eachrow_eachcol_dropdims"
+file = "eachrow_eachcol_dropdims.jl"
+expected = true
+description = "eachrow, eachcol, dropdims array utility functions (Issue #1946)"
+
+[[tests]]
+name = "array_cat_eachslice_mapslices"
+file = "cat_eachslice_mapslices.jl"
+expected = true
+description = "cat, eachslice, mapslices array utility functions (Issue #1952)"
+
+[[tests]]
+name = "array_reduce_dims"
+file = "reduce_dims.jl"
+expected = true
+description = "sum, prod, maximum, minimum, extrema with dims keyword argument (Issue #1958)"
+
+[[tests]]
+name = "array_partialsortperm_sortslices"
+file = "partialsortperm_sortslices.jl"
+expected = true
+description = "partialsortperm, partialsortperm!, sortslices (Issue #1962)"
+
+[[tests]]
+name = "array_inplace_reductions"
+file = "inplace_reductions.jl"
+expected = true
+description = "In-place reduction functions: sum!, prod!, maximum!, minimum! (Issue #1964)"
+
+[[tests]]
+name = "array_permutedims_inplace"
+file = "permutedims_inplace.jl"
+expected = true
+description = "permutedims! in-place dimension permutation (Issue #1964)"
+
+[[tests]]
+name = "array_cumulative_inplace"
+file = "cumulative_inplace.jl"
+expected = true
+description = "In-place cumulative functions: cumsum!, cumprod!, accumulate! (Issue #1966)"
+
+[[tests]]
+name = "array_sort_keywords"
+file = "sort_keywords.jl"
+expected = true
+description = "sort/sort! keyword arguments: by, rev, lt (Issue #2011)"
+
+[[tests]]
+name = "array_similar_basic"
+file = "similar_basic.jl"
+expected = true
+description = "similar() function for creating uninitialized arrays (Issue #2129)"
+
+[[tests]]
+name = "array_multi_comprehension"
+file = "multi_comprehension.jl"
+expected = true
+description = "Multi-variable array comprehension [expr for i in R1, j in R2] (Issue #2143)"
+
+[[tests]]
+name = "array_insertdims"
+file = "insertdims.jl"
+expected = true
+description = "insertdims: insert singleton dimensions, inverse of dropdims (Issue #2153)"
+
+[[tests]]
+name = "array_stride_strides"
+file = "stride_strides.jl"
+expected = true
+description = "stride and strides: memory stride for column-major arrays (Issue #2157)"
+
+[[tests]]
+name = "array_vcat_hcat_varargs"
+file = "vcat_hcat_varargs.jl"
+expected = true
+description = "vcat/hcat with 3+ arguments (varargs) (Issue #2169)"
+
+[[tests]]
+name = "array_scalar_ndims_length"
+file = "scalar_ndims_length.jl"
+expected = true
+description = "ndims(::Number) = 0 and length(::Number) = 1 for scalar types (Issue #2171)"
+
+[[tests]]
+name = "array_fill_non_numeric"
+file = "fill_non_numeric.jl"
+expected = true
+description = "fill() with non-numeric types: String, Bool (Issue #2177)"
+
+[[tests]]
+name = "array_scalar_size"
+file = "scalar_size.jl"
+expected = true
+description = "size(::Number) returns empty tuple for scalars (Issue #2179)"
+
+[[tests]]
+name = "array_typed_undef_roundtrip"
+file = "typed_undef_roundtrip.jl"
+expected = true
+description = "Write-read round-trip for all typed undef array constructors: Float64, Int64, Bool, Complex (Issue #1804)"
+
+[[tests]]
+name = "array_vector_bool_indexstore"
+file = "vector_bool_indexstore.jl"
+expected = true
+description = "Indexed assignment to Vector{Bool}(undef, n) handles Bool values (Issue #2207)"
+
+[[tests]]
+name = "array_typed_indexstore_all_types"
+file = "typed_array_indexstore_all_types.jl"
+expected = true
+description = "IndexStore roundtrip for all numeric element types: Int8-Int64, UInt8-UInt64, Float16-Float64, Bool (Issue #2218)"
+
+[[tests]]
+name = "array_begin_indexing"
+file = "begin_indexing.jl"
+expected = true
+description = "begin keyword in indexing context: a[begin], a[begin+1], a[begin:end] (Issue #2310)"
+
+[[tests]]
+name = "array_vectorof_specificity"
+file = "vectorof_specificity.jl"
+expected = true
+description = "VectorOf specificity dispatch: Vector{Int64} preferred over Vector{Any} (Issue #2352)"
+
+[[tests]]
+name = "array_vectorof_type_locals"
+file = "vectorof_type_locals.jl"
+expected = true
+description = "VectorOf type tracking through reassignment and conditional expressions (Issue #2319)"
+
+[[tests]]
+name = "array_begin_end_multidim"
+file = "begin_end_multidim.jl"
+expected = true
+description = "Multi-dimensional begin/end indexing: m[begin, end] uses dimension-aware firstindex/lastindex (Issue #2349)"
+
+[[tests]]
+name = "array_memory_creation"
+file = "test_array_memory_creation.jl"
+expected = true
+description = "Array creation via Memory pipeline: zeros/ones/similar/undef use MemoryValue internally (Issue #2762)"
+
+[[tests]]
+name = "array_pure_julia_struct"
+file = "test_array_pure_julia.jl"
+expected = true
+description = "Array{T,N} as Pure Julia mutable struct wrapping Memory{T} (Issue #2760)"
+
+[[tests]]
+name = "array_multidim_3d_construction"
+file = "multidim_3d_construction.jl"
+expected = true
+description = "3D array construction via zeros+setindex! and multi-dimensional indexing (Issue #3259)"

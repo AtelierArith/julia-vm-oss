@@ -1,0 +1,17 @@
+{
+  "name": "subset_julia_vm_web",
+  "type": "module",
+  "description": "WebAssembly binding for SubsetJuliaVM - Julia subset interpreter",
+  "version": "0.5.3",
+  "license": "MIT",
+  "files": [
+    "subset_julia_vm_web_bg.wasm",
+    "subset_julia_vm_web.js",
+    "subset_julia_vm_web.d.ts"
+  ],
+  "main": "subset_julia_vm_web.js",
+  "types": "subset_julia_vm_web.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

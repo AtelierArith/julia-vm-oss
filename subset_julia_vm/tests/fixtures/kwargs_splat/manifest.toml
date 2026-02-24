@@ -1,0 +1,37 @@
+# Test manifest for kwargs_splat category
+
+[[tests]]
+name = "kwargs_splat_basic"
+file = "basic_splat.jl"
+expected = true
+description = "Basic kwargs splatting in function call: f(; opts...)"
+
+[[tests]]
+name = "kwargs_splat_collecting"
+file = "collecting_kwargs.jl"
+expected = true
+description = "Collecting kwargs in function definition: function g(; kwargs...)"
+
+[[tests]]
+name = "kwargs_splat_mixed_with_named"
+file = "mixed_with_named.jl"
+expected = true
+description = "Named kwargs combined with kwargs...: function h(; x=0, kwargs...)"
+
+[[tests]]
+name = "kwargs_splat_with_positional"
+file = "with_positional.jl"
+expected = true
+description = "Positional args with kwargs...: function p(x, y; kwargs...)"
+
+[[tests]]
+name = "kwargs_splat_symbol_index"
+file = "symbol_index.jl"
+expected = true
+description = "Julia-compatible kwargs symbol indexing: kwargs[:a] + kwargs[:b]"
+
+[[tests]]
+name = "kwargs_splat_short_form"
+file = "short_form_kwargs.jl"
+expected = true
+description = "Short-form function definitions with kwargs varargs f(x; kwargs...) = expr (Issue #2242)"

@@ -1,0 +1,260 @@
+# Test manifest for promotion category
+
+[[tests]]
+name = "promotion_type_pattern_basic"
+file = "type_pattern_basic.jl"
+expected = true
+description = "promote_type(Float64, Int64) returns Float64 via Type{T} dispatch"
+
+[[tests]]
+name = "promotion_promote_rule_basic"
+file = "promote_rule_basic.jl"
+expected = true
+description = "promote_type(Float64, Int64) === Float64"
+
+[[tests]]
+name = "promotion_promote_rule_default"
+file = "promote_rule_default.jl"
+expected = true
+description = "promote_rule(String, Int64) === Union{} (undefined type pair)"
+
+[[tests]]
+name = "promotion_user_defined_promote_rule"
+file = "user_defined_promote_rule.jl"
+expected = true
+description = "User-defined types can participate in type promotion via promote_rule (Issue #2557)"
+
+[[tests]]
+name = "promotion_generic_promote_rule"
+file = "generic_promote_rule.jl"
+expected = true
+description = "Test generic promote_rule with where clause pattern (Issue #1339)"
+
+[[tests]]
+name = "promotion_bool_float_arithmetic"
+file = "bool_float_arithmetic.jl"
+expected = true
+description = "Test Bool + Float arithmetic (Issue #1634)"
+
+[[tests]]
+name = "promotion_float32_arithmetic"
+file = "float32_arithmetic.jl"
+expected = true
+description = "Test Float32 arithmetic operations with all type combinations (Issue #1629)"
+
+[[tests]]
+name = "promotion_float32_arithmetic_comprehensive"
+file = "float32_arithmetic_comprehensive.jl"
+expected = true
+description = "Comprehensive Float32 test template - all operations and type combinations (Issue #1649)"
+
+[[tests]]
+name = "promotion_float32_bool_arithmetic"
+file = "float32_bool_arithmetic.jl"
+expected = true
+description = "Float32 × Bool arithmetic returns Float32, not Float64 (Issue #1759)"
+
+# Separated Float32 tests for Issue #1661 prevention
+# These tests isolate each type combination to prevent dispatch conflicts
+
+[[tests]]
+name = "promotion_float32_same_type"
+file = "float32_same_type.jl"
+expected = true
+description = "Float32 same-type arithmetic preserves Float32 type (Issue #1760)"
+
+[[tests]]
+name = "promotion_float32_int64"
+file = "float32_int64.jl"
+expected = true
+description = "Float32 × Int64 arithmetic returns Float32 (Issue #1661 prevention)"
+
+[[tests]]
+name = "promotion_float32_float64"
+file = "float32_float64.jl"
+expected = true
+description = "Float32 × Float64 arithmetic promotes to Float64 (Issue #1661 prevention)"
+
+[[tests]]
+name = "promotion_float32_bool"
+file = "float32_bool.jl"
+expected = true
+description = "Float32 × Bool arithmetic returns Float32 (Issue #1661 prevention)"
+
+[[tests]]
+name = "promotion_float32_mod"
+file = "float32_mod.jl"
+expected = true
+description = "Float32 mod/rem operations (Issue #1776, #1778 prevention)"
+
+[[tests]]
+name = "promotion_promote_type_float32"
+file = "promote_type_float32.jl"
+expected = true
+description = "promote_type correctly handles Float32 type pairs (Issue #1772)"
+
+[[tests]]
+name = "promotion_promote_float32_values"
+file = "promote_float32_values.jl"
+expected = true
+description = "promote correctly converts Float32 mixed-type values (Issue #1772)"
+
+[[tests]]
+name = "promotion_convert_runtime_float32"
+file = "convert_runtime_float32.jl"
+expected = true
+description = "convert(T, x) where T is runtime Float32 DataType variable (Issue #1786)"
+
+# Combined regression test for Issue #1659 / #1661
+# Verifies that Float32 mixed-type arithmetic works in a single file
+# with all type combinations in nested @testset blocks
+
+[[tests]]
+name = "promotion_float32_mixed_combined"
+file = "float32_mixed_combined.jl"
+expected = true
+description = "Float32 all type combinations in single file regression test (Issue #1659, #1661)"
+
+# Float16 type system gap fixes (Issues #1848, #1849, #1850, #1851)
+
+[[tests]]
+name = "promotion_float16_binary_inference"
+file = "float16_binary_inference.jl"
+expected = true
+description = "Float16 binary operation type inference returns Float16 (Issue #1850)"
+
+[[tests]]
+name = "promotion_float16_primitive_dispatch"
+file = "float16_primitive_dispatch.jl"
+expected = true
+description = "Float16 included in primitive type check for dynamic dispatch (Issue #1848)"
+
+[[tests]]
+name = "promotion_float32_div"
+file = "float32_div.jl"
+expected = true
+description = "Float32 div() integer division with mixed types (Issue #1849)"
+
+[[tests]]
+name = "promotion_float16_union_conversion"
+file = "float16_union_conversion.jl"
+expected = true
+description = "Union to Float16 type conversion via DynamicToF16 (Issue #1851)"
+
+# Number fallback operator tests (Julia-layer type promotion)
+
+[[tests]]
+name = "promotion_number_fallback_basic"
+file = "number_fallback_basic.jl"
+expected = true
+description = "Basic mixed-type arithmetic via Number fallback operators"
+
+[[tests]]
+name = "promotion_number_fallback_no_recursion"
+file = "number_fallback_no_recursion.jl"
+expected = true
+description = "Same-type operations do not recurse through Number fallback"
+
+[[tests]]
+name = "promotion_number_fallback_comparison"
+file = "number_fallback_comparison.jl"
+expected = true
+description = "Mixed-type comparison operators via Number/Real fallback"
+
+[[tests]]
+name = "promotion_number_fallback_dispatch_priority"
+file = "number_fallback_dispatch_priority.jl"
+expected = true
+description = "Concrete and parametric types take precedence over Number fallback"
+
+# Float32 power, mod type preservation, and negation (Issue #1762)
+
+[[tests]]
+name = "promotion_float32_pow"
+file = "float32_pow.jl"
+expected = true
+description = "Float32 power (^) operations with type preservation (Issue #1762)"
+
+[[tests]]
+name = "promotion_float32_mod_typeof"
+file = "float32_mod_typeof.jl"
+expected = true
+description = "Float32 mod/rem type preservation (Issue #1762)"
+
+[[tests]]
+name = "promotion_float32_neg"
+file = "float32_neg.jl"
+expected = true
+description = "Float32 unary negation type preservation (Issue #1762)"
+
+# Float32 div() type preservation (Issue #1970)
+
+[[tests]]
+name = "promotion_float32_div_typeof"
+file = "float32_div_typeof.jl"
+expected = true
+description = "Float32 div() type preservation with typeof checks (Issue #1970)"
+
+# Float16 power, mod, and negation (Issue #1972)
+
+[[tests]]
+name = "promotion_float16_pow"
+file = "float16_pow.jl"
+expected = true
+description = "Float16 power (^) operations with type preservation (Issue #1972)"
+
+[[tests]]
+name = "promotion_float16_mod_typeof"
+file = "float16_mod_typeof.jl"
+expected = true
+description = "Float16 mod/rem type preservation (Issue #1972)"
+
+[[tests]]
+name = "promotion_float16_neg"
+file = "float16_neg.jl"
+expected = true
+description = "Float16 unary negation type preservation (Issue #1972)"
+
+[[tests]]
+name = "promotion_primitive_type_combinations"
+file = "primitive_type_combinations.jl"
+expected = true
+description = "All primitive float type mixed-type arithmetic combinations (prevention for Issue #1659/#1667)"
+
+# Promote handler prevention tests (Issue #1790)
+
+[[tests]]
+name = "promotion_promote_float32_small_int"
+file = "promote_float32_small_int.jl"
+expected = true
+description = "promote correctly converts Float32 with Int32/Int16/Int8 types (Issue #1790)"
+
+[[tests]]
+name = "promotion_promote_float16_values"
+file = "promote_float16_values.jl"
+expected = true
+description = "promote correctly handles Float16 mixed-type values (Issue #1790, #2251)"
+
+[[tests]]
+name = "promotion_promote_bool_mixed"
+file = "promote_bool_mixed.jl"
+expected = true
+description = "promote correctly handles Bool with Int64/Float64 and small int fallback to Julia (Issue #2250)"
+
+[[tests]]
+name = "promotion_promote_three_arg"
+file = "promote_three_arg.jl"
+expected = true
+description = "3-argument and 4-argument promote/promote_type with multi-char type vars (Issue #2248)"
+
+[[tests]]
+name = "promotion_integer_type_combinations"
+file = "integer_type_combinations.jl"
+expected = true
+description = "All integer type mixed-type arithmetic and comparison combinations (Issue #1614)"
+
+[[tests]]
+name = "promotion_promote_complex_bool"
+file = "promote_complex_bool.jl"
+expected = true
+description = "promote correctly handles Complex with Bool/Int64 (Issue #2257)"

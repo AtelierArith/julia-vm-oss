@@ -1,0 +1,14 @@
+# Type stability fixture tests
+# These tests verify that type-stable functions work correctly in SubsetJuliaVM
+
+[[tests]]
+name = "type_stability_stable_arithmetic"
+file = "stable_arithmetic.jl"
+expected = true
+description = "Type-stable arithmetic functions with typed parameters"
+
+[[tests]]
+name = "type_stability_stable_array"
+file = "stable_array.jl"
+expected = true
+description = "Type-stable array and loop operations"

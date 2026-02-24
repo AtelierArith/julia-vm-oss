@@ -1,0 +1,5 @@
+[[tests]]
+name = "array_utilities"
+file = "array_utilities.jl"
+expected = true
+description = "Test array utility functions: reverse, reverse!, copy, fill!, circshift, circshift!"

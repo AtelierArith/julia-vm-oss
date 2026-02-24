@@ -1,0 +1,79 @@
+# Test manifest for function category
+
+[[tests]]
+name = "function_basic"
+file = "basic.jl"
+expected = true
+description = "Basic function definition and call"
+
+[[tests]]
+name = "function_recursive"
+file = "recursive.jl"
+expected = true
+description = "Recursive factorial function"
+
+[[tests]]
+name = "function_higher_order"
+file = "higher_order.jl"
+expected = true
+description = "Higher-order function (map + sum)"
+
+[[tests]]
+name = "function_type_specialization"
+file = "type_specialization.jl"
+expected = true
+description = "Function preserves input type: f(Int) returns Int, f(Float) returns Float"
+
+[[tests]]
+name = "function_operator_method"
+file = "operator_method.jl"
+expected = 10.0
+description = "Operator method definitions using short form: +(a, b) = expr"
+
+[[tests]]
+name = "function_return_type_annotation"
+file = "return_type_annotation.jl"
+expected = true
+description = "Function with return type annotation (f(x)::Int syntax)"
+
+[[tests]]
+name = "function_return_type_convert"
+file = "return_type_convert.jl"
+expected = true
+description = "Return type annotation applies convert() to return values (Issue #415)"
+
+[[tests]]
+name = "function_symbol_kwarg_default"
+file = "test_symbol_kwarg_default.jl"
+expected = true
+description = "Symbol default values in keyword arguments preserve type (Issue #830)"
+
+[[tests]]
+name = "function_implicit_return_if"
+file = "implicit_return_if.jl"
+expected = true
+description = "Implicit return from if/else blocks without explicit return (Issue #1119)"
+
+[[tests]]
+name = "function_bare_comma_return"
+file = "bare_comma_return.jl"
+expected = true
+description = "Bare comma return syntax: return a, b => return (a, b) (Issue #2076)"
+
+[[tests]]
+name = "function_default_args"
+file = "default_args.jl"
+expected = true
+description = "Default function arguments desugar into stub methods (Issue #2090)"
+
+[[tests]]
+name = "function_implicit_return_specialize"
+file = "implicit_return_specialize.jl"
+expected = true
+description = "Implicit return handling in runtime specialization with untyped Bool parameters (Issue #1726)"
+
+[[tests]]
+name = "function_sync_exec_varargs_splat"
+file = "sync_exec_varargs_splat.jl"
+expected = true
+description = "sync_exec CallWithSplat collects excess args into varargs Tuple (Issue #2213)"

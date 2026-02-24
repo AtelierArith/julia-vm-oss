@@ -1,0 +1,127 @@
+# Type Inference Tests
+
+[[tests]]
+name = "type_inference_loop_element"
+file = "loop_element_inference.jl"
+expected = true
+description = "Tests loop variable type inference from iterables (Array, String, Tuple, Range)"
+
+[[tests]]
+name = "type_inference_conditional_narrowing"
+file = "conditional_narrowing.jl"
+expected = true
+description = "Tests conditional type narrowing in branches"
+
+[[tests]]
+name = "type_inference_union_types"
+file = "union_types.jl"
+expected = true
+description = "Tests Union type inference in conditional expressions"
+
+[[tests]]
+name = "type_inference_array_element"
+file = "array_element_inference.jl"
+expected = true
+description = "Tests array element type inference from array indexing"
+
+[[tests]]
+name = "type_inference_loop"
+file = "loop_inference.jl"
+expected = true
+description = "Tests basic loop variable type inference"
+
+[[tests]]
+name = "type_inference_loop_var"
+file = "loop_var_inference.jl"
+expected = true
+description = "Tests loop variable type inference from various iterator types"
+
+[[tests]]
+name = "type_inference_nothing_narrowing"
+file = "nothing_narrowing.jl"
+expected = true
+description = "Tests type narrowing with === nothing checks"
+
+[[tests]]
+name = "type_inference_numeric"
+file = "numeric_inference.jl"
+expected = true
+description = "Tests numeric type inference through arithmetic operations"
+
+[[tests]]
+name = "type_inference_range_dict_set"
+file = "range_dict_set.jl"
+expected = true
+description = "Tests type inference for Range, Dict, and Set iteration"
+
+[[tests]]
+name = "type_inference_struct_iterable"
+file = "struct_iterable_inference.jl"
+expected = true
+description = "Tests type inference for struct iterables (LinRange, StepRangeLen, etc.)"
+
+[[tests]]
+name = "type_inference_struct_field"
+file = "struct_field_inference.jl"
+expected = true
+description = "Tests type inference for user-defined struct field access"
+
+[[tests]]
+name = "type_inference_function_chain"
+file = "function_chain_inference.jl"
+expected = true
+description = "Tests inter-procedural type propagation through function call chains"
+
+[[tests]]
+name = "type_inference_hof"
+file = "hof_type_inference.jl"
+expected = true
+description = "Tests HOF type inference"
+
+[[tests]]
+name = "type_inference_builtin_type_dispatch"
+file = "builtin_type_dispatch.jl"
+expected = true
+description = "Tests builtin type names dispatch to Type{T} even when they have methods defined (Issue #1692, #1701)"
+
+[[tests]]
+name = "type_inference_tuple_const_index"
+file = "tuple_const_index.jl"
+expected = true
+description = "Tests Tuple constant index type inference (Issue #1638)"
+
+[[tests]]
+name = "type_inference_namedtuple_getfield"
+file = "namedtuple_getfield.jl"
+expected = true
+description = "Tests NamedTuple getfield type inference with constant Symbol (Issue #1638)"
+
+[[tests]]
+name = "type_inference_union_preservation"
+file = "union_preservation.jl"
+expected = true
+description = "Tests Union type preservation in codegen to prevent regression (Issue #1682)"
+
+[[tests]]
+name = "type_inference_ternary_float_promotion"
+file = "ternary_float_promotion.jl"
+expected = true
+description = "Tests ternary/ifelse type inference with Float32/Float16 promotion (Issue #1892)"
+
+[[tests]]
+name = "type_inference_numeric_bit_width"
+file = "numeric_bit_width.jl"
+expected = true
+description = "Numeric type constructors preserve bit width (prevention for Issue #1663)"
+
+[[tests]]
+name = "type_inference_arithmetic_bit_width"
+file = "arithmetic_bit_width.jl"
+expected = true
+description = "Arithmetic on same-type small integers preserves bit width (Issue #2278)"
+
+[[tests]]
+name = "type_inference_math_intrinsics_type_preservation"
+file = "math_intrinsics_type_preservation.jl"
+expected = true
+description = "Math intrinsics (sqrt, floor, ceil, trunc, abs) preserve Float16/Float32 types (Issue #2221)"

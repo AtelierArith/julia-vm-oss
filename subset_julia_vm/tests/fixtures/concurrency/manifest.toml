@@ -1,0 +1,17 @@
+[[tests]]
+name = "task_basic"
+file = "task_basic.jl"
+expected = true
+description = "Test basic Task type and functions: Task, schedule, fetch, istaskdone, istaskstarted, istaskfailed"
+
+[[tests]]
+name = "channel_basic"
+file = "channel_basic.jl"
+expected = true
+description = "Test basic Channel type and functions: Channel, put!, take!, isopen, close, isready, isfull"
+
+[[tests]]
+name = "lock_basic"
+file = "lock_basic.jl"
+expected = true
+description = "Test basic lock types and functions: ReentrantLock, lock, unlock, trylock, islocked"

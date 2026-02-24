@@ -1,0 +1,31 @@
+# Test manifest for comparison category
+
+[[tests]]
+name = "comparison_bool_equality"
+file = "bool_equality.jl"
+expected = true
+description = "Bool-Bool comparison operators: ==, !="
+
+[[tests]]
+name = "comparison_chained"
+file = "chained_comparison.jl"
+expected = true
+description = "Chained comparisons: a < b < c expanded to (a < b) && (b < c) (Issue #368)"
+
+[[tests]]
+name = "comparison_bigint_int64"
+file = "bigint_comparison.jl"
+expected = true
+description = "BigInt/Int64 mixed comparison operators (Issue #512)"
+
+[[tests]]
+name = "gcd_lcm_bigint"
+file = "gcd_lcm_bigint.jl"
+expected = true
+description = "gcd and lcm with BigInt types (Issue #505)"
+
+[[tests]]
+name = "comparison_singleton_parity"
+file = "singleton_comparison_parity.jl"
+expected = true
+description = "Singleton comparison parity: == vs === and != vs !== for nothing, DataType, Symbol, Char (Issue #1754)"

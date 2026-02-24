@@ -1,0 +1,11 @@
+[[tests]]
+name = "multimedia_mime_basic"
+file = "mime_basic.jl"
+expected = true
+description = "Test MIME type system basics"
+
+[[tests]]
+name = "multimedia_io"
+file = "multimedia_io.jl"
+expected = true
+description = "Test multimedia I/O functions: displayable, redisplay, showable, HTML, Text (Issue #455)"

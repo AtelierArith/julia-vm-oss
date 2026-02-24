@@ -1,0 +1,13 @@
+# Test manifest for hashing category
+
+[[tests]]
+name = "hashing_basic"
+file = "hash_basic.jl"
+expected = true
+description = "Hash determinism, type, and negative zero contract"
+
+[[tests]]
+name = "hashing_collections"
+file = "hashing_collections.jl"
+expected = true
+description = "Hash on tuples, equality contract, and distinct values (Issue #3123)"

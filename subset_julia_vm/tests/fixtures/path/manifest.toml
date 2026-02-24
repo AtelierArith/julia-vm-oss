@@ -1,0 +1,13 @@
+# Test manifest for path manipulation category
+
+[[tests]]
+name = "path_basic"
+file = "basic.jl"
+expected = true
+description = "basename, dirname, splitdir, splitext, joinpath, isabspath, isdirpath"
+
+[[tests]]
+name = "path_splitpath"
+file = "test_splitpath.jl"
+expected = true
+description = "splitpath - split a path into all its components"

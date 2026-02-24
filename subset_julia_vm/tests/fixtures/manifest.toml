@@ -1,0 +1,20 @@
+# Test Manifest for SubsetJuliaVM
+# 
+# This manifest contains global configuration.
+# Test definitions are distributed in each category's manifest.toml.
+#
+# Test discovery:
+# - tests/fixtures/<category>/manifest.toml - category-specific tests
+#
+# Supported by:
+# - cargo test (Rust): fixture_tests.rs
+# - julia: scripts/run_julia_tests.jl
+#
+# All tests must produce identical results in both Julia and SubsetJuliaVM.
+
+[config]
+# Tolerance for floating-point comparison
+epsilon = 1e-10
+
+# Tests are now distributed in each category directory's manifest.toml
+# Example: tests/fixtures/arithmetic/manifest.toml

@@ -1,0 +1,211 @@
+# Test manifest for collections category
+
+[[tests]]
+name = "collections_dict_mutating"
+file = "dict_mutating.jl"
+expected = true
+description = "Dict mutating functions: get!, merge!, empty!"
+
+[[tests]]
+name = "collections_foldl_foldr"
+file = "foldl_foldr.jl"
+expected = 4.0
+description = "foldl and foldr - left and right associative folds"
+
+[[tests]]
+name = "collections_mapreduce"
+file = "mapreduce.jl"
+expected = 4.0
+description = "mapreduce - apply function and reduce results"
+
+[[tests]]
+name = "collections_mapfoldl_mapfoldr"
+file = "mapfoldl_mapfoldr.jl"
+expected = 6.0
+description = "mapfoldl and mapfoldr - map then left/right fold"
+
+[[tests]]
+name = "collections_dict_comprehension"
+file = "dict_comprehension.jl"
+expected = true
+description = "Dict comprehension: Dict(k => v for k in iter [if cond])"
+
+[[tests]]
+name = "collections_set_basic"
+file = "set_basic.jl"
+expected = true
+description = "Basic Set creation and length"
+
+[[tests]]
+name = "collections_set_union_simple"
+file = "set_union_simple.jl"
+expected = true
+description = "Simple Set union"
+
+[[tests]]
+name = "collections_set_delete_test"
+file = "set_delete_test.jl"
+expected = true
+description = "Test push! and delete! on Set"
+
+[[tests]]
+name = "collections_set_comprehension"
+file = "set_comprehension.jl"
+expected = true
+description = "Set comprehension: Set(x for x in iter [if cond])"
+
+[[tests]]
+name = "collections_set_operations"
+file = "set_operations.jl"
+expected = true
+description = "Set operations: union, intersect, setdiff, symdiff, issubset, isdisjoint, push!, delete!"
+
+[[tests]]
+name = "collections_issetequal"
+file = "issetequal.jl"
+expected = true
+description = "issetequal - check if two collections have the same elements as sets"
+
+[[tests]]
+name = "collections_isdisjoint_array"
+file = "isdisjoint_array.jl"
+expected = true
+description = "isdisjoint - check if arrays and sets have no common elements"
+
+[[tests]]
+name = "collections_keytype_valtype"
+file = "keytype_valtype.jl"
+expected = true
+description = "keytype and valtype - get key/value types of collections"
+
+[[tests]]
+name = "collections_pair"
+file = "test_pair.jl"
+expected = true
+description = "Pair type - key-value container with first and second fields (Issue #531)"
+
+[[tests]]
+name = "collections_unique_inplace"
+file = "unique_inplace.jl"
+expected = true
+description = "unique! - remove duplicate elements in-place while preserving order"
+
+[[tests]]
+name = "collections_getkey_basic"
+file = "getkey_basic.jl"
+expected = true
+description = "getkey - return the key if it exists, else default"
+
+[[tests]]
+name = "collections_dict_pop"
+file = "dict_pop.jl"
+expected = true
+description = "pop! for Dict - remove and return value for key"
+
+[[tests]]
+name = "collections_set_iteration"
+file = "set_iteration.jl"
+expected = true
+description = "Set iteration in for loops yields each element (Issue #1122)"
+
+[[tests]]
+name = "collections_set_inplace_operations"
+file = "set_inplace_operations.jl"
+expected = true
+description = "Set in-place operations: union!, intersect!, setdiff!, symdiff! (Issue #1454)"
+
+[[tests]]
+name = "collections_set_in_bang"
+file = "set_in_bang.jl"
+expected = true
+description = "in! - check membership and insert if not present (Issue #1459)"
+
+[[tests]]
+name = "collections_empty_basic"
+file = "empty_basic.jl"
+expected = 4.0
+description = "empty() function - create empty collection of same type (incl. Set)"
+
+[[tests]]
+name = "collections_sizehint"
+file = "sizehint.jl"
+expected = true
+description = "sizehint! no-op performance hint returns collection unchanged"
+
+[[tests]]
+name = "collections_copy_set"
+file = "copy_set.jl"
+expected = true
+description = "copy(Set) returns a new Set with same elements"
+
+[[tests]]
+name = "collections_push_set"
+file = "push_set.jl"
+expected = true
+description = "push!(Set, x) adds element to Set via runtime dispatch (Issue #1828)"
+
+[[tests]]
+name = "collections_pop_set"
+file = "pop_set.jl"
+expected = true
+description = "pop!(Set) removes and returns an arbitrary element (Issue #1832)"
+
+[[tests]]
+name = "collections_any_dispatch"
+file = "collection_any_dispatch.jl"
+expected = true
+description = "Collection operations through Any-typed function parameters (Issue #1832)"
+
+[[tests]]
+name = "collections_pairs_keys_values_array_tuple"
+file = "pairs_keys_values_array_tuple.jl"
+expected = true
+description = "pairs(), keys(), values() for arrays and tuples (Issue #1872)"
+
+[[tests]]
+name = "collections_unique_allunique_allequal"
+file = "unique_allunique_allequal.jl"
+expected = true
+description = "unique, allunique, allequal - array set utility functions (Issue #1883)"
+
+[[tests]]
+name = "collections_set_ops_array"
+file = "set_ops_array.jl"
+expected = true
+description = "union/intersect/setdiff/symdiff with Array arguments (Issue #2007)"
+
+[[tests]]
+name = "collections_count_string"
+file = "count_string.jl"
+expected = true
+description = "count(pattern, string) for string/char pattern counting (Issue #2009)"
+
+[[tests]]
+name = "collections_findall_string"
+file = "findall_string.jl"
+expected = true
+description = "findall(pattern, string) for string pattern searching (Issue #2013)"
+
+[[tests]]
+name = "collections_findnext_findprev_predicate"
+file = "findnext_findprev_predicate.jl"
+expected = true
+description = "findnext/findprev with predicate function and array (Issue #2109)"
+
+[[tests]]
+name = "collections_dict_inplace_mutation"
+file = "dict_inplace_mutation.jl"
+expected = true
+description = "Dict in-place mutation: empty! and merge! modify dict variable (Issue #2134)"
+
+[[tests]]
+name = "collections_unique_function"
+file = "unique_function.jl"
+expected = true
+description = "unique(f, itr): unique elements by function (Issue #2155)"
+
+[[tests]]
+name = "collections_copy_type_preservation"
+file = "copy_type_preservation.jl"
+expected = true
+description = "copy() preserves type for all collection types (Issue #1829)"

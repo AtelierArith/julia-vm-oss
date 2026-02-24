@@ -1,0 +1,335 @@
+[[tests]]
+name = "types_typed_local_var"
+file = "typed_local_var.jl"
+expected = true
+description = "Test typed local variable declarations (x::Type = value)"
+
+[[tests]]
+name = "types_array_return_type"
+file = "array_return_type.jl"
+expected = true
+description = "Test array return type annotations (::Array{T,N}, ::Vector{T}, ::Matrix{T})"
+
+[[tests]]
+name = "types_datatype_equality"
+file = "test_datatype_equality.jl"
+expected = true
+description = "Test equality comparison for DataType values (== and !=)"
+
+[[tests]]
+name = "types_char_comparison"
+file = "char_comparison.jl"
+expected = true
+description = "Char comparison operators (==, !=)"
+
+[[tests]]
+name = "types_dynamic_type_change"
+file = "dynamic_type_change.jl"
+expected = true
+description = "Variable types can change dynamically"
+
+[[tests]]
+name = "types_eltype"
+file = "eltype_test.jl"
+expected = true
+description = "eltype function returns element type of collections"
+
+[[tests]]
+name = "types_hof_type_inference"
+file = "hof_type_inference.jl"
+expected = 1.0
+description = "HOF return type inference with map and filter"
+
+[[tests]]
+name = "types_isa_infix"
+file = "isa_infix.jl"
+expected = true
+description = "isa infix syntax: a isa T => isa(a, T)"
+
+[[tests]]
+name = "types_isbits_basic"
+file = "isbits_basic.jl"
+expected = true
+description = "isbits/isbitstype - check if type is bits type"
+
+[[tests]]
+name = "types_ismutable_structref"
+file = "ismutable_structref.jl"
+expected = true
+description = "ismutable with StructRef (mutable structs on heap)"
+
+[[tests]]
+name = "types_length_returns_int"
+file = "length_returns_int.jl"
+expected = true
+description = "length() returns Int64 type for Array"
+
+[[tests]]
+name = "types_length_returns_int_range"
+file = "length_returns_int_range.jl"
+expected = true
+description = "length() returns Int64 type for Range"
+
+[[tests]]
+name = "types_length_returns_int_string"
+file = "length_returns_int_string.jl"
+expected = true
+description = "length() returns Int64 type for String"
+
+[[tests]]
+name = "types_length_returns_int_tuple"
+file = "length_returns_int_tuple.jl"
+expected = true
+description = "length() returns Int64 type for Tuple"
+
+[[tests]]
+name = "types_missing_basic"
+file = "missing_basic.jl"
+expected = true
+description = "Missing type: literal, typeof, ismissing, coalesce functions"
+
+[[tests]]
+name = "types_power_any_param"
+file = "power_any_param.jl"
+expected = true
+description = "Power operator with Any-typed parameter preserves input type"
+
+[[tests]]
+name = "types_promote_type"
+file = "promote_type.jl"
+expected = true
+description = "promote_type function for type promotion"
+
+[[tests]]
+name = "types_sizeof_basic"
+file = "sizeof_basic.jl"
+expected = true
+description = "sizeof - get size of value in bytes"
+
+[[tests]]
+name = "types_covariant_type_params"
+file = "test_covariant_type_params.jl"
+expected = true
+description = "Covariant type parameters in dispatch"
+
+[[tests]]
+name = "types_index_style"
+file = "test_index_style.jl"
+expected = true
+description = "IndexStyle types (IndexLinear, IndexCartesian)"
+
+[[tests]]
+name = "types_rounding_mode"
+file = "test_rounding_mode.jl"
+expected = true
+description = "RoundingMode types and instances"
+
+[[tests]]
+name = "types_traits"
+file = "test_traits.jl"
+expected = true
+description = "Trait types (ArithmeticStyle, RangeStepStyle)"
+
+[[tests]]
+name = "types_type_alias"
+file = "test_type_alias.jl"
+expected = true
+description = "Type aliases with const assignment"
+
+[[tests]]
+name = "types_type_as_value"
+file = "test_type_as_value.jl"
+expected = true
+description = "Type{T} as first-class values"
+
+[[tests]]
+name = "types_type_t_pattern"
+file = "test_type_t_pattern.jl"
+expected = true
+description = "Type{T} pattern matching in function dispatch"
+
+[[tests]]
+name = "types_version"
+file = "test_version.jl"
+expected = true
+description = "VersionNumber type and VERSION constant"
+
+[[tests]]
+name = "types_typeof_reassignment"
+file = "typeof_reassignment.jl"
+expected = true
+description = "typeof after variable reassignment"
+
+[[tests]]
+name = "types_typeof_reassignment_in_function"
+file = "typeof_reassignment_in_function.jl"
+expected = true
+description = "typeof after reassignment inside function"
+
+[[tests]]
+name = "types_typeof_set"
+file = "typeof_set.jl"
+expected = true
+description = "typeof for Set collections"
+
+[[tests]]
+name = "types_fieldcount"
+file = "types_fieldcount.jl"
+expected = true
+description = "fieldcount - number of fields in type"
+
+[[tests]]
+name = "types_hasfield"
+file = "types_hasfield.jl"
+expected = true
+description = "hasfield - check if type has a field"
+
+[[tests]]
+name = "types_isabstracttype"
+file = "types_isabstracttype.jl"
+expected = true
+description = "isabstracttype - check if type is abstract"
+
+[[tests]]
+name = "types_isconcretetype"
+file = "types_isconcretetype.jl"
+expected = true
+description = "isconcretetype - check if type is concrete"
+
+[[tests]]
+name = "types_ismutable"
+file = "types_ismutable.jl"
+expected = true
+description = "ismutable - check if value is mutable"
+
+[[tests]]
+name = "types_isprimitivetype"
+file = "types_isprimitivetype.jl"
+expected = true
+description = "isprimitivetype - check if type is primitive"
+
+[[tests]]
+name = "types_isstructtype"
+file = "types_isstructtype.jl"
+expected = true
+description = "isstructtype - check if type is a struct"
+
+[[tests]]
+name = "types_isunordered"
+file = "types_isunordered.jl"
+expected = true
+description = "isunordered - check if value is unordered (NaN, Missing)"
+
+[[tests]]
+name = "types_objectid"
+file = "types_objectid.jl"
+expected = true
+description = "objectid - get unique object identifier"
+
+[[tests]]
+name = "types_supertype"
+file = "types_supertype.jl"
+expected = true
+description = "supertype - get parent type in type hierarchy"
+
+[[tests]]
+name = "types_union_subtype"
+file = "union_subtype.jl"
+expected = true
+description = "Union type subtype checking: T <: Union{A, B}"
+
+[[tests]]
+name = "types_widen"
+file = "widen.jl"
+expected = true
+description = "widen function for type widening"
+
+[[tests]]
+name = "types_bool_struct_fields"
+file = "bool_struct_fields.jl"
+expected = true
+description = "Bool struct field access (regression test for Issue #1612)"
+
+[[tests]]
+name = "types_float_field_type_preservation"
+file = "float_field_type_preservation.jl"
+expected = true
+description = "Float field type preservation in parametric structs (prevention for Issue #1651/#1655)"
+
+[[tests]]
+name = "types_collection_type_identity"
+file = "collection_type_identity.jl"
+expected = true
+description = "Collection type identity for Dict, Set, NamedTuple (Issue #1894)"
+
+[[tests]]
+name = "types_typed_f32_f16_instructions"
+file = "typed_f32_f16_instructions.jl"
+expected = true
+description = "Typed Return/Store/Load instructions for Float32 and Float16 (Issue #1893)"
+
+[[tests]]
+name = "types_compound_field_assignment"
+file = "compound_field_assignment.jl"
+expected = true
+description = "Compound assignment on mutable struct fields: obj.field += expr (Issue #2140)"
+
+[[tests]]
+name = "types_float_all_numeric"
+file = "float_all_numeric.jl"
+expected = true
+description = "float() supports all numeric types: identity for AbstractFloat, Float64 for Integer (Issue #2165)"
+
+[[tests]]
+name = "types_zero_type_correctness"
+file = "zero_type_correctness.jl"
+expected = true
+description = "zero(T) and zero(x) return correct types for all numeric types (Issue #2181)"
+
+[[tests]]
+name = "types_float_type_preservation"
+file = "float_type_preservation.jl"
+expected = true
+description = "Float arithmetic type preservation for F16, F32, F64 (prevention for Issue #1647/#1653)"
+
+[[tests]]
+name = "types_diagonal_rule"
+file = "diagonal_rule.jl"
+expected = true
+description = "Diagonal Rule: type variables with multiple covariant occurrences must bind to concrete types (Issue #2554)"
+
+[[tests]]
+name = "types_typejoin"
+file = "test_typejoin.jl"
+expected = true
+description = "typejoin(A, B) computes smallest common supertype (Pure Julia, Issue #2569)"
+
+[[tests]]
+name = "types_const_type_alias_dispatch"
+file = "test_const_type_alias_dispatch.jl"
+expected = true
+description = "Const type aliases in dispatch: const Alias = ExistingType{Param} (Issue #2527)"
+
+[[tests]]
+name = "types_isunordered_pure_julia"
+file = "test_isunordered_pure_julia.jl"
+expected = true
+description = "isunordered Pure Julia: NaN, Missing, normal values (Issue #2715)"
+
+[[tests]]
+name = "types_isequal_pure_julia"
+file = "test_isequal_pure_julia.jl"
+expected = true
+description = "isequal Pure Julia: Float64, cross-type, Missing, Array, Tuple (Issue #2718)"
+
+[[tests]]
+name = "types_hash_pure_julia"
+file = "test_hash_pure_julia.jl"
+expected = true
+description = "hash Pure Julia: 1-arg and 2-arg forms with _hash intrinsic (Issue #2582)"
+
+[[tests]]
+name = "types_eltype_pure_julia"
+file = "test_eltype_pure_julia.jl"
+expected = true
+description = "eltype Pure Julia: arrays, strings, mixed types (Issue #2570)"

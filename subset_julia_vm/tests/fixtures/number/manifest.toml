@@ -1,0 +1,37 @@
+# Test manifest for number category
+
+[[tests]]
+name = "number_widemul_basic"
+file = "widemul_basic.jl"
+expected = true
+description = "widemul: multiply with widening (Issue #487)"
+
+[[tests]]
+name = "number_scalar_iteration"
+file = "scalar_iteration.jl"
+expected = true
+description = "Number scalar iteration and indexing methods (Issue #487)"
+
+[[tests]]
+name = "number_zero_one"
+file = "zero_one.jl"
+expected = true
+description = "zero, one, oneunit - numeric identity functions (Issue #1870)"
+
+[[tests]]
+name = "number_flipsign_basic"
+file = "flipsign_basic.jl"
+expected = true
+description = "flipsign - flip sign of x based on sign of y (Issue #1870)"
+
+[[tests]]
+name = "number_predicates"
+file = "number_predicates.jl"
+expected = true
+description = "isreal, abs2, float, inv - number utility functions (Issue #1877)"
+
+[[tests]]
+name = "number_type_param_return_types"
+file = "type_param_return_types.jl"
+expected = true
+description = "Type{T}→T function return types: typemin, typemax, zero, one (Issue #2245)"

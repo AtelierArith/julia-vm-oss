@@ -1,0 +1,29 @@
+[[tests]]
+name = "float16_basic"
+file = "float16_basic.jl"
+expected = true
+description = "Test Float16 special values (Inf16, NaN16) and type checking"
+
+[[tests]]
+name = "numeric_int_overflow"
+file = "int_overflow.jl"
+expected = true
+description = "Integer overflow wrapping behavior for Int64"
+
+[[tests]]
+name = "numeric_float16"
+file = "numeric_float16.jl"
+expected = true
+description = "Float16 arithmetic operations and type preservation"
+
+[[tests]]
+name = "numeric_type_conversions"
+file = "numeric_type_conversions.jl"
+expected = true
+description = "Numeric type conversions between Int, Float, and unsigned types"
+
+[[tests]]
+name = "numeric_narrow_int_return_preservation"
+file = "narrow_int_return_preservation.jl"
+expected = true
+description = "Narrow integer return type preservation: I8/I16/I32/I128/U8-U128/Bool (Issue #3255 / PR #3270)"

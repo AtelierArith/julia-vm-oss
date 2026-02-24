@@ -1,0 +1,223 @@
+# Test manifest for operators category
+
+[[tests]]
+name = "operator_egal_basic"
+file = "egal_basic.jl"
+expected = true
+description = "=== (egal) operator - object identity"
+
+[[tests]]
+name = "operator_egal_nan"
+file = "egal_nan.jl"
+expected = true
+description = "=== with NaN and -0.0"
+
+[[tests]]
+name = "operator_isequal_basic"
+file = "isequal_basic.jl"
+expected = true
+description = "isequal function - NaN-aware equality"
+
+[[tests]]
+name = "operator_subtype_basic"
+file = "subtype_basic.jl"
+expected = true
+description = "<: subtype expression"
+
+[[tests]]
+name = "operator_integer_division"
+file = "integer_division.jl"
+expected = true
+description = "÷ integer division operator (floor division)"
+
+[[tests]]
+name = "operators_unicode_math_operators"
+file = "unicode_math_operators.jl"
+expected = true
+description = "Unicode math operators: √ ∛ ∜ ≈ ≉"
+
+[[tests]]
+name = "operators_unicode_identity"
+file = "unicode_identity.jl"
+expected = true
+description = "Unicode identity operators: ≡ (===) and ≢ (!==)"
+
+[[tests]]
+name = "operators_compose_operator"
+file = "compose_operator.jl"
+expected = 30
+description = "Compose operator: f ∘ g with nested composition support"
+
+[[tests]]
+name = "operators_compose_closure"
+file = "compose_closure.jl"
+expected = true
+description = "Compose operator with closures: Closure ∘ Closure, Function ∘ Closure, etc. (Issue #2298)"
+
+[[tests]]
+name = "operators_bit_operations"
+file = "bit_operations.jl"
+expected = true
+description = "Bit operations: count_ones, count_zeros, leading_zeros, trailing_ones, bitreverse"
+
+[[tests]]
+name = "operators_math_and_bit_functions"
+file = "math_and_bit_functions.jl"
+expected = true
+description = "Math and bit functions: leading_ones, trailing_zeros, bitrotate, bswap, fma, muladd, exponent, significand, frexp, isnegative, ispositive, issubnormal, maxintfloat"
+
+[[tests]]
+name = "operators_hyperbolic_inverse_reciprocal"
+file = "hyperbolic_inverse_reciprocal.jl"
+expected = true
+description = "Inverse reciprocal hyperbolic functions: asech, acsch, acoth"
+
+[[tests]]
+name = "operators_tanpi_test"
+file = "tanpi_test.jl"
+expected = true
+description = "tanpi function: tan(π*x) with special cases for integers and half-integers"
+
+[[tests]]
+name = "operators_nextprod_test"
+file = "nextprod_test.jl"
+expected = true
+description = "nextprod function: Next integer >= n that is product of factors"
+
+[[tests]]
+name = "operators_unsafe_trunc_test"
+file = "unsafe_trunc_test.jl"
+expected = true
+description = "unsafe_trunc function: Unsafe truncation without error checking"
+
+[[tests]]
+name = "operators_evalpoly_test"
+file = "evalpoly_test.jl"
+expected = true
+description = "@evalpoly macro: Polynomial evaluation using Horner's method"
+
+[[tests]]
+name = "operators_nand_nor"
+file = "operators_nand_nor.jl"
+expected = true
+description = "NAND and NOR operators (⊼ and ⊽)"
+
+[[tests]]
+name = "operators_identity"
+file = "operators_identity.jl"
+expected = true
+description = "identity operators === and !=="
+
+[[tests]]
+name = "operators_supertype"
+file = "operators_supertype.jl"
+expected = true
+description = "supertype operator >:"
+
+[[tests]]
+name = "operators_set"
+file = "operators_set.jl"
+expected = true
+description = "set operators (issubset, in, proper subset/superset)"
+
+[[tests]]
+name = "operators_not_bug"
+file = "operators_not_bug.jl"
+expected = true
+description = "negation of function return values (regression test for Bool type error)"
+
+[[tests]]
+name = "operators_identity_func"
+file = "identity.jl"
+expected = true
+description = "identity function - returns argument unchanged"
+
+[[tests]]
+name = "operators_pipe"
+file = "pipe.jl"
+expected = true
+description = "pipe operator |> - applies function to argument"
+
+[[tests]]
+name = "operators_isgreater"
+file = "isgreater.jl"
+expected = true
+description = "isgreater function - descending total order comparison"
+
+[[tests]]
+name = "operators_identity_operators"
+file = "identity_operators.jl"
+expected = true
+description = "!== (≢) operator - not identical (negation of ===)"
+
+[[tests]]
+name = "operators_in"
+file = "in_operator.jl"
+expected = true
+description = "in operator - check if element is in collection (Issue #488)"
+
+[[tests]]
+name = "operators_juxtaposition_call"
+file = "juxtaposition_call.jl"
+expected = true
+description = "Juxtaposition with function calls - 2f(x) should be 2 * f(x)"
+
+[[tests]]
+name = "operators_cmp_isless"
+file = "cmp_isless.jl"
+expected = true
+description = "cmp and isless - comparison functions (Issue #1870)"
+
+[[tests]]
+name = "operators_min_max_minmax"
+file = "min_max_minmax.jl"
+expected = true
+description = "min, max, minmax - pairwise comparison operations (Issue #1883)"
+
+[[tests]]
+name = "operators_copysign_isapprox"
+file = "copysign_isapprox.jl"
+expected = true
+description = "copysign and isapprox - sign copy and approximate equality (Issue #1883)"
+
+[[tests]]
+name = "operators_widen_mod1"
+file = "widen_mod1.jl"
+expected = true
+description = "widen, mod1, fld1, fldmod1 - type widening and modular arithmetic (Issue #1883)"
+
+[[tests]]
+name = "operators_round_type_arg"
+file = "round_type_arg.jl"
+expected = true
+description = "round(T,x)/floor(T,x)/ceil(T,x)/trunc(T,x) - rounding with type argument (Issue #2028)"
+
+[[tests]]
+name = "operators_integer_xor"
+file = "integer_xor.jl"
+expected = true
+description = "xor() on integers - bitwise exclusive or (Issue #2042)"
+
+[[tests]]
+name = "operators_round_digits"
+file = "round_digits.jl"
+expected = true
+description = "round(x; digits=N) and round(x; sigdigits=N) keyword arguments (Issue #2051)"
+
+[[tests]]
+name = "operators_floor_ceil_digits"
+file = "floor_ceil_digits.jl"
+expected = true
+description = "floor(x; digits=N), ceil(x; digits=N) and sigdigits keyword arguments (Issue #2054)"
+
+[[tests]]
+name = "operators_trunc_digits"
+file = "trunc_digits.jl"
+expected = true
+description = "trunc(x; digits=N) and trunc(x; sigdigits=N) keyword arguments (Issue #2059)"
+
+[[tests]]
+name = "operators_isless_pure_julia"
+file = "test_isless_pure_julia.jl"
+expected = true
+description = "isless Pure Julia: NaN, Missing, cross-type, string, char, bool (Issue #2712)"

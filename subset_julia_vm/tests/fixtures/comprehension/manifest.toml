@@ -1,0 +1,31 @@
+# Test manifest for comprehension category
+
+[[tests]]
+name = "comprehension_conditional_basic"
+file = "conditional_basic.jl"
+expected = true
+description = "Conditional comprehension - basic filter (x > 5)"
+
+[[tests]]
+name = "comprehension_conditional_even"
+file = "conditional_even.jl"
+expected = true
+description = "Conditional comprehension - filter even numbers"
+
+[[tests]]
+name = "comprehension_conditional_transform"
+file = "conditional_transform.jl"
+expected = true
+description = "Conditional comprehension - transform + filter (square odd numbers)"
+
+[[tests]]
+name = "comprehension_element_type"
+file = "comprehension_element_type.jl"
+expected = true
+description = "Comprehension element type preservation - Int64 range produces Vector{Int64} (Issue #2125)"
+
+[[tests]]
+name = "comprehension_multi_var"
+file = "multi_var_comprehension.jl"
+expected = true
+description = "Multi-variable comprehension [expr for i in R1, j in R2] with column-major order (Issue #2143)"

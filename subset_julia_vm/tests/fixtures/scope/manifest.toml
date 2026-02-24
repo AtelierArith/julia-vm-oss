@@ -1,0 +1,19 @@
+# Test manifest for scope category
+
+[[tests]]
+name = "global_compound_assignment"
+file = "global_compound_assignment.jl"
+expected = true
+description = "Global variable compound assignment syntax (global x += expr)"
+
+[[tests]]
+name = "global_compound_assignment_sub"
+file = "global_compound_assignment_sub.jl"
+expected = true
+description = "Global variable compound subtraction (global x -= expr)"
+
+[[tests]]
+name = "global_compound_assignment_mul"
+file = "global_compound_assignment_mul.jl"
+expected = true
+description = "Global variable compound multiplication (global x *= expr)"

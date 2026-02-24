@@ -1,0 +1,67 @@
+# Test manifest for generated category
+
+[[tests]]
+name = "generated_fallback_basic"
+file = "fallback_basic.jl"
+expected = true
+description = "@generated with fallback: executes else branch (Phase 1)"
+
+[[tests]]
+name = "generated_fallback_tuple"
+file = "fallback_tuple.jl"
+expected = true
+description = "@generated with sum of squares fallback"
+
+[[tests]]
+name = "generated_fallback_where"
+file = "fallback_where.jl"
+expected = true
+description = "@generated with where clause uses fallback"
+
+[[tests]]
+name = "generated_val_basic"
+file = "val_basic.jl"
+expected = true
+description = "Val{N} type basic usage and function dispatch"
+
+[[tests]]
+name = "generated_val_loop"
+file = "val_loop.jl"
+expected = true
+description = "Val{N} where N is used as integer in loop"
+
+[[tests]]
+name = "generated_phase3_unquote"
+file = "phase3_unquote.jl"
+expected = true
+description = "Phase 3: Simple quoted expressions are unquoted and executed (SubsetJuliaVM-only, will fail in standard Julia)"
+
+[[tests]]
+name = "generated_val_bool"
+file = "val_bool.jl"
+expected = true
+description = "Val{true}/Val{false} boolean specialization with @generated"
+
+[[tests]]
+name = "generated_val_symbol"
+file = "val_symbol.jl"
+expected = true
+description = "Val{:symbol} symbol specialization with @generated"
+
+[[tests]]
+name = "generated_phase3_ternary"
+file = "phase3_ternary.jl"
+expected = true
+description = "Phase 3: ternary operator in quoted expressions"
+
+[[tests]]
+name = "generated_phase3_multi_stmt"
+file = "phase3_multi_stmt.jl"
+expected = true
+description = "Phase 3: multiple statements in quotes"
+
+[[tests]]
+name = "generated_phase3_begin_block"
+file = "phase3_begin_block.jl"
+expected = true
+description = "Phase 3: begin/end block unquoting"

@@ -1,0 +1,55 @@
+# Test manifest for floatprops category
+
+[[tests]]
+name = "floatprops_eps_basic"
+file = "eps_basic.jl"
+expected = true
+description = "eps() returns machine epsilon (1.0 + eps() > 1.0)"
+
+[[tests]]
+name = "floatprops_floatmin_basic"
+file = "floatmin_basic.jl"
+expected = true
+description = "floatmin() returns smallest positive normalized Float64"
+
+[[tests]]
+name = "floatprops_floatmax_basic"
+file = "floatmax_basic.jl"
+expected = true
+description = "floatmax() returns largest finite Float64"
+
+[[tests]]
+name = "floatprops_typemax_int64"
+file = "typemax_int64.jl"
+expected = true
+description = "typemax(Int64) returns maximum Int64 value"
+
+[[tests]]
+name = "floatprops_typemin_int64"
+file = "typemin_int64.jl"
+expected = true
+description = "typemin(Int64) returns minimum Int64 value"
+
+[[tests]]
+name = "floatprops_modf_ldexp"
+file = "modf_ldexp.jl"
+expected = true
+description = "modf (fractional/integer split) and ldexp (x * 2^n)"
+
+[[tests]]
+name = "floatprops_nextfloat_prevfloat"
+file = "nextfloat_prevfloat.jl"
+expected = true
+description = "nextfloat and prevfloat - adjacent floating point values"
+
+[[tests]]
+name = "floatprops_inf_nan_constants"
+file = "inf_nan_constants.jl"
+expected = true
+description = "Test Inf32, NaN32, Inf64, NaN64 special float constants"
+
+[[tests]]
+name = "floatprops_typemin_typemax_float"
+file = "typemin_typemax_float.jl"
+expected = true
+description = "typemin/typemax for Float64/Float32/Float16 return Inf (Issue #2094)"

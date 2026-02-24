@@ -1,0 +1,17 @@
+[[tests]]
+name = "array_utilities"
+file = "array_utilities.jl"
+expected = true
+description = "Test array utility functions: reverse, reverse!, copy, fill!, circshift, circshift!"
+
+[[tests]]
+name = "array_sort_operations"
+file = "sort_operations.jl"
+expected = true
+description = "Test array sort and unique: sort, sort!, sort(rev=true), unique (Issue #2846)"
+
+[[tests]]
+name = "array_search_operations"
+file = "search_operations.jl"
+expected = true
+description = "Test array search: findfirst, findlast, findall, count, filter (Issue #2846)"

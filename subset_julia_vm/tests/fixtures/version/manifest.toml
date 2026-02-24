@@ -1,0 +1,13 @@
+# Test manifest for version category
+
+[[tests]]
+name = "version_basic"
+file = "version_basic.jl"
+expected = true
+description = "VersionNumber construction and VERSION constant"
+
+[[tests]]
+name = "version_comparison"
+file = "version_comparison.jl"
+expected = true
+description = "VersionNumber equality, string repr, default args (Issue #3123)"

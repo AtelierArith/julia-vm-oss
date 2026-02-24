@@ -1,0 +1,29 @@
+[[tests]]
+name = "logging_info_basic"
+file = "info_basic.jl"
+expected = true
+description = "@info macro basic usage"
+
+[[tests]]
+name = "logging_info_kwargs"
+file = "info_kwargs.jl"
+expected = true
+description = "@info macro with key-value arguments"
+
+[[tests]]
+name = "logging_warn_basic"
+file = "warn_basic.jl"
+expected = true
+description = "@warn macro basic usage"
+
+[[tests]]
+name = "logging_debug_basic"
+file = "debug_basic.jl"
+expected = true
+description = "@debug macro basic usage"
+
+[[tests]]
+name = "logging_error_basic"
+file = "error_log_basic.jl"
+expected = true
+description = "@error macro (logging, not exception) basic usage"

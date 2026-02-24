@@ -1,0 +1,61 @@
+# Test manifest for bigint category
+
+[[tests]]
+name = "bigint_predicates"
+file = "predicates.jl"
+expected = true
+description = "BigInt predicates: iszero, isone, sign (Issue #416)"
+
+[[tests]]
+name = "bigint_string_macro"
+file = "string_macro.jl"
+expected = 8.0
+description = "big string macro: big\"...\" creates BigInt literal (Issue #556)"
+
+[[tests]]
+name = "bigfloat_string_macro"
+file = "big_float_literals.jl"
+expected = true
+description = "big string macro: big\"100.0\" creates BigFloat literal (Issue #554)"
+
+[[tests]]
+name = "bigint_type_preservation"
+file = "type_preservation.jl"
+expected = true
+description = "BigInt type preservation for arithmetic operations (Issue #1688, #1696)"
+
+[[tests]]
+name = "bigint_power"
+file = "power.jl"
+expected = true
+description = "BigInt power with Int64 exponent (Issue #1708)"
+
+[[tests]]
+name = "bigint_big_type_inference"
+file = "big_type_inference.jl"
+expected = true
+description = "big() return type correctly inferred for method dispatch (Issue #1910)"
+
+[[tests]]
+name = "bigfloat_arithmetic"
+file = "bigfloat_arithmetic.jl"
+expected = true
+description = "BigFloat arithmetic, mixed-type promotion, and comparisons (Issue #2496)"
+
+[[tests]]
+name = "bigint_promotion"
+file = "bigint_promotion.jl"
+expected = true
+description = "BigInt promotion, mixed-type operations, and subtype dispatch (Issue #2492, #2496)"
+
+[[tests]]
+name = "bigint_abstract_numeric_dispatch"
+file = "abstract_numeric_dispatch.jl"
+expected = true
+description = "BigInt/BigFloat arithmetic inside ::Number/::Real/::Integer-typed functions (Issue #2498)"
+
+[[tests]]
+name = "bigint_promote_bigint_integer"
+file = "promote_bigint_integer.jl"
+expected = true
+description = "BigInt promotion with integer types: promote(big(1), 3) returns (BigInt, BigInt) (Issue #2512)"

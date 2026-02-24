@@ -1,0 +1,271 @@
+# Test manifest for rational category
+
+[[tests]]
+name = "rational_construction_basic"
+file = "construction_basic.jl"
+expected = true
+description = "Basic Rational construction with normalization (2//2 -> 1//1)"
+
+[[tests]]
+name = "rational_construction_reduction"
+file = "construction_reduction.jl"
+expected = true
+description = "Rational construction with reduction (6//9 -> 2//3)"
+
+[[tests]]
+name = "rational_construction_negative_den"
+file = "construction_negative_den.jl"
+expected = true
+description = "Rational with negative denominator normalized (-3//4)"
+
+[[tests]]
+name = "rational_accessor_numerator"
+file = "accessor_numerator.jl"
+expected = true
+description = "numerator accessor function"
+
+[[tests]]
+name = "rational_accessor_denominator"
+file = "accessor_denominator.jl"
+expected = true
+description = "denominator accessor function"
+
+[[tests]]
+name = "rational_predicate_iszero"
+file = "predicate_iszero.jl"
+expected = true
+description = "iszero predicate for Rational"
+
+[[tests]]
+name = "rational_predicate_isone"
+file = "predicate_isone.jl"
+expected = true
+description = "isone predicate for Rational"
+
+[[tests]]
+name = "rational_predicate_isinteger"
+file = "predicate_isinteger.jl"
+expected = true
+description = "isinteger predicate for Rational"
+
+[[tests]]
+name = "rational_predicate_signbit"
+file = "predicate_signbit.jl"
+expected = true
+description = "signbit predicate for Rational (Issue #491)"
+
+[[tests]]
+name = "rational_unary_negation"
+file = "unary_negation.jl"
+expected = true
+description = "Unary negation for Rational"
+
+[[tests]]
+name = "rational_unary_inv"
+file = "unary_inv.jl"
+expected = true
+description = "inv (reciprocal) for Rational"
+
+[[tests]]
+name = "rational_binary_add"
+file = "binary_add.jl"
+expected = true
+description = "Addition of two Rationals: 1//2 + 1//3 = 5//6"
+
+[[tests]]
+name = "rational_binary_sub"
+file = "binary_sub.jl"
+expected = true
+description = "Subtraction of two Rationals: 3//4 - 1//4 = 1//2"
+
+[[tests]]
+name = "rational_binary_mul"
+file = "binary_mul.jl"
+expected = true
+description = "Multiplication of two Rationals: 2//3 * 3//5 = 2//5"
+
+[[tests]]
+name = "rational_binary_div"
+file = "binary_div.jl"
+expected = true
+description = "Division of two Rationals: 1//2 / 3//4 = 2//3"
+
+[[tests]]
+name = "rational_compare_equal"
+file = "compare_equal.jl"
+expected = true
+description = "Equality comparison for Rationals"
+
+[[tests]]
+name = "rational_compare_less"
+file = "compare_less.jl"
+expected = true
+description = "Less-than comparison: 1//3 < 1//2"
+
+[[tests]]
+name = "rational_compare_greater"
+file = "compare_greater.jl"
+expected = true
+description = "Greater-than comparison: 2//3 > 1//2"
+
+[[tests]]
+name = "rational_math_abs"
+file = "math_abs.jl"
+expected = true
+description = "abs function for negative Rational"
+
+[[tests]]
+name = "rational_math_sign"
+file = "math_sign.jl"
+expected = true
+description = "sign function for positive, negative, and zero Rationals"
+
+[[tests]]
+name = "rational_math_floor"
+file = "math_floor.jl"
+expected = true
+description = "floor function for Rational 7//3"
+
+[[tests]]
+name = "rational_math_ceil"
+file = "math_ceil.jl"
+expected = true
+description = "ceil function for Rational 7//3"
+
+[[tests]]
+name = "rational_math_round"
+file = "math_round.jl"
+expected = true
+description = "round function for Rational 5//3"
+
+[[tests]]
+name = "rational_power_positive"
+file = "power_positive.jl"
+expected = true
+description = "Power with positive exponent: (2//3)^3"
+
+[[tests]]
+name = "rational_power_negative"
+file = "power_negative.jl"
+expected = true
+description = "Power with negative exponent: (2//3)^-2"
+
+[[tests]]
+name = "rational_power_zero"
+file = "power_zero.jl"
+expected = true
+description = "Power with zero exponent: (2//3)^0"
+
+[[tests]]
+name = "rational_mixed_sub_int_rational"
+file = "mixed_sub_int_rational.jl"
+expected = true
+description = "Int - Rational: 2 - 3//4"
+
+[[tests]]
+name = "rational_mixed_sub_rational_int"
+file = "mixed_sub_rational_int.jl"
+expected = true
+description = "Rational - Int: 7//4 - 1"
+
+[[tests]]
+name = "rational_mixed_div_rational_int"
+file = "mixed_div_rational_int.jl"
+expected = true
+description = "Rational / Int: 3//4 / 2"
+
+[[tests]]
+name = "rational_mixed_div_int_rational"
+file = "mixed_div_int_rational.jl"
+expected = true
+description = "Int / Rational: 2 / 3//4"
+
+[[tests]]
+name = "rational_float_conversion"
+file = "float_conversion.jl"
+expected = true
+description = "float conversion for Rational"
+
+[[tests]]
+name = "rational_rationalize_basic"
+file = "rationalize_basic.jl"
+expected = true
+description = "rationalize() - convert float to rational approximation"
+
+[[tests]]
+name = "rational_arithmetic_gcd"
+file = "arithmetic_gcd.jl"
+expected = true
+description = "Rational arithmetic GCD reduction (Issue #2091)"
+
+[[tests]]
+name = "rational_generic_int32_basic"
+file = "generic_int32_basic.jl"
+expected = true
+description = "Rational{Int32} construction, reduction, and typeof"
+
+[[tests]]
+name = "rational_generic_int32_arithmetic"
+file = "generic_int32_arithmetic.jl"
+expected = true
+description = "Rational{Int32} arithmetic operations (+, -, *, /, unary -)"
+
+[[tests]]
+name = "rational_generic_int16_basic"
+file = "generic_int16_basic.jl"
+expected = true
+description = "Rational{Int16} construction and arithmetic"
+
+[[tests]]
+name = "rational_generic_mixed_promote"
+file = "generic_mixed_promote.jl"
+expected = true
+description = "Rational mixed-type promotion (Int32+Int64, Integer+Rational)"
+
+[[tests]]
+name = "rational_mixed_narrow_int_rational"
+file = "mixed_narrow_int_rational.jl"
+expected = true
+description = "Mixed narrow-integer + Rational{T} operations: Int32/Int16 +,-,*,// with Rational (Issue #2475)"
+
+[[tests]]
+name = "rational_mixed_narrow_int_comparison"
+file = "mixed_narrow_int_comparison.jl"
+expected = true
+description = "Mixed narrow-integer comparison with Rational{T}: <, >, <=, >=, == (Issue #2478)"
+
+[[tests]]
+name = "rational_mixed_narrow_int_div"
+file = "mixed_narrow_int_div.jl"
+expected = true
+description = "Mixed narrow-integer / with Rational{T}: Int / Rational (Issue #2478)"
+
+[[tests]]
+name = "rational_div_integer_rational"
+file = "div_integer_rational.jl"
+expected = true
+description = "div(Integer, Rational{T}) and div(Rational{T}, Integer) (Issue #2480)"
+
+[[tests]]
+name = "rational_div_fld_cld_rem_mod"
+file = "test_div_fld_cld_rem_mod.jl"
+expected = true
+description = "div, fld, cld, rem, mod, trunc for Rational (Issue #2486)"
+
+[[tests]]
+name = "rational_bigint_mixed_ops"
+file = "bigint_mixed_ops.jl"
+expected = true
+description = "BigInt + Rational mixed-type operations (Issue #2497)"
+
+[[tests]]
+name = "rational_bigint_rational_construction"
+file = "bigint_rational_construction.jl"
+expected = true
+description = "BigInt Rational construction via // operator (Issue #2508)"
+
+[[tests]]
+name = "rational_cross_type_equality"
+file = "cross_type_equality.jl"
+expected = true
+description = "Cross-type Rational comparisons: Rational{BigInt} == / < / > Rational{Int64} (Issue #2511)"

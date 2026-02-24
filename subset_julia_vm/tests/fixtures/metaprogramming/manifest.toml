@@ -1,0 +1,242 @@
+# Test manifest for metaprogramming category
+
+[[tests]]
+name = "meta_runtime_splat"
+file = "runtime_splat.jl"
+expected = true
+description = "Runtime splat expansion in quote expressions: :(f($(args...)))"
+
+[[tests]]
+name = "meta_parse"
+file = "meta_parse.jl"
+expected = true
+description = "Meta.parse: parse strings to Expr AST nodes"
+
+[[tests]]
+name = "meta_module_reference"
+file = "meta_module_reference.jl"
+expected = true
+description = "Meta module can be referenced directly (typeof(Meta), m = Meta)"
+
+[[tests]]
+name = "meta_keyword_symbols"
+file = "keyword_symbols.jl"
+expected = true
+description = "Keyword symbols: :if, :for, :quote, :end as Symbol values"
+
+[[tests]]
+name = "meta_quote_ternary"
+file = "quote_ternary.jl"
+expected = true
+description = "Quote of ternary expression: :(a ? b : c) becomes Expr(:if, ...)"
+
+[[tests]]
+name = "meta_quote_if"
+file = "quote_if.jl"
+expected = true
+description = "Quote of if statement: quote if ... end end becomes Expr(:if, ...)"
+
+[[tests]]
+name = "meta_quote_while"
+file = "quote_while.jl"
+expected = true
+description = "Quote of while statement: quote while cond ... end end becomes Expr(:while, ...)"
+
+[[tests]]
+name = "meta_quote_for"
+file = "quote_for.jl"
+expected = true
+description = "Quote of for statement: quote for i in iter ... end end becomes Expr(:for, ...)"
+
+[[tests]]
+name = "meta_quote_arrow"
+file = "quote_arrow.jl"
+expected = true
+description = "Quote of arrow function: :(x -> expr) becomes Expr(:(->), ...)"
+
+[[tests]]
+name = "meta_quote_elseif"
+file = "quote_elseif.jl"
+expected = true
+description = "Quote of if with elseif: quote if a; elseif b; end end becomes Expr(:if, ..., Expr(:elseif, ...))"
+
+[[tests]]
+name = "meta_symbol_equality"
+file = "symbol_equality.jl"
+expected = true
+description = "Symbol equality comparison: :x == :x, ex.args[1] == :+ in Expr"
+
+[[tests]]
+name = "meta_gensym"
+file = "gensym.jl"
+expected = true
+description = "gensym() generates unique symbols for macro hygiene"
+
+[[tests]]
+name = "meta_linenumbernode_fields"
+file = "linenumbernode_fields.jl"
+expected = true
+description = "LineNumberNode field access: .line, .file and constructor"
+
+[[tests]]
+name = "meta_isidentifier"
+file = "meta_isidentifier.jl"
+expected = true
+description = "Meta.isidentifier - validate identifier syntax"
+
+[[tests]]
+name = "meta_isoperator"
+file = "meta_isoperator.jl"
+expected = true
+description = "Meta.isoperator family - validate operator symbols"
+
+[[tests]]
+name = "meta_globalref"
+file = "globalref.jl"
+expected = true
+description = "GlobalRef constructor and field access: GlobalRef(mod, name), .mod, .name"
+
+[[tests]]
+name = "meta_globalref_callable"
+file = "globalref_callable.jl"
+expected = true
+description = "GlobalRef callable: ref(args...) calls the referenced function (Issue #302). NOTE: This is a SubsetJuliaVM extension - GlobalRef is not callable in official Julia."
+skip_julia_test = true
+
+[[tests]]
+name = "metaprogramming_dump_linenumbernode"
+file = "dump_linenumbernode.jl"
+expected = true
+description = "dump() for LineNumberNode - shows line and file fields"
+
+[[tests]]
+name = "metaprogramming_dump_quotenode"
+file = "dump_quotenode.jl"
+expected = true
+description = "dump() for QuoteNode - shows value field and nested structure"
+
+[[tests]]
+name = "meta_quote_linenumbernode"
+file = "quote_linenumbernode.jl"
+expected = true
+description = "LineNumberNode insertion in quote blocks"
+
+[[tests]]
+name = "meta_linenumbernode_reflection"
+file = "linenumbernode_reflection.jl"
+expected = true
+description = "Reflection methods (nfields, fieldnames) for LineNumberNode"
+
+[[tests]]
+name = "metaprogramming_quote_for_loop"
+file = "quote_for_loop.jl"
+expected = true
+description = "Quote expansion for :for loops - macro generates for loop in quote block"
+
+[[tests]]
+name = "metaprogramming_eval_not_operator"
+file = "eval_not_operator.jl"
+expected = true
+description = "eval with ! operator - eval(Expr(:call, :!, bool)) should negate boolean"
+
+[[tests]]
+name = "metaprogramming_copy_expr"
+file = "copy_expr.jl"
+expected = true
+description = "copy(::Expr) - deep copy of Expr AST nodes (Issue #298)"
+
+[[tests]]
+name = "meta_unblock"
+file = "meta_unblock.jl"
+expected = true
+description = "Meta.unblock - peel away redundant block expressions"
+
+[[tests]]
+name = "meta_unescape"
+file = "meta_unescape.jl"
+expected = true
+description = "Meta.unescape - peel away escape expressions"
+
+[[tests]]
+name = "meta_show_sexpr"
+file = "meta_show_sexpr.jl"
+expected = true
+description = "Meta.show_sexpr - show expression as S-expression"
+
+[[tests]]
+name = "meta_expr_equality"
+file = "expr_equality.jl"
+expected = true
+description = "Expr isequal comparison for structural equality (Issue #287)"
+
+[[tests]]
+name = "meta_iter_expr_args"
+file = "iter_expr_args.jl"
+expected = true
+description = "Iteration over ex.args works directly (Issue #286)"
+
+[[tests]]
+name = "metaprogramming_quote_prefix_operator"
+file = "quote_prefix_operator.jl"
+expected = true
+description = "Quote syntax with prefix operators: :(!true), :(-x) etc. (Issue #304)"
+
+[[tests]]
+name = "meta_lower"
+file = "meta_lower.jl"
+expected = true
+description = "Meta.lower - lower expressions to Core IR representation (Issue #297)"
+
+[[tests]]
+name = "meta_macroexpand_function"
+file = "macroexpand_function.jl"
+expected = true
+description = "macroexpand() and macroexpand!() functions - explicit macro expansion (Issue #300, #296)"
+
+[[tests]]
+name = "meta_show_return_value"
+file = "show_return_value.jl"
+expected = true
+description = "@show macro return value verification - tests that @show returns evaluated value, not just side effects (Issue #1347)"
+
+[[tests]]
+name = "meta_time_return_value"
+file = "time_return_value.jl"
+expected = true
+description = "@time macro return value verification - tests that @time returns evaluated value along with timing output (Issue #1347)"
+
+[[tests]]
+name = "meta_assert_return_value"
+file = "assert_return_value.jl"
+expected = true
+description = "@assert macro behavior - tests that @assert returns nothing on success (Issue #1347)"
+
+[[tests]]
+name = "meta_include_string"
+file = "include_string.jl"
+expected = true
+description = "include_string(m, code) - parse and evaluate code string"
+
+[[tests]]
+name = "meta_evalfile"
+file = "evalfile.jl"
+expected = true
+description = "evalfile(path) - evaluate all expressions in a file"
+
+[[tests]]
+name = "meta_include_string_assignment"
+file = "include_string_assignment.jl"
+expected = true
+description = "include_string assignment support (Issue #1433)"
+
+[[tests]]
+name = "meta_generated_unquote"
+file = "generated_unquote.jl"
+expected = true
+description = "Phase 3 @generated unquoting: return, multi-statement blocks, function calls in quotes"
+
+[[tests]]
+name = "meta_static_basic"
+file = "static_basic.jl"
+expected = true
+description = "@static macro - compile-time conditional evaluation"

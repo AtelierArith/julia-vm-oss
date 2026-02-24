@@ -1,0 +1,32 @@
+[package]
+name = "subset_julia_vm_parser"
+version = "0.1.0"
+edition = "2021"
+authors = ["SubsetJuliaVM Team"]
+description = "Pure Rust parser for Julia subset - faithful reimplementation of tree-sitter-julia"
+license = "MIT"
+repository = "https://github.com/AtelierArith/SubsetJuliaVM"
+keywords = ["julia", "parser", "wasm"]
+categories = ["parsing", "wasm"]
+
+[dependencies]
+logos = "0.15"
+memchr = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+insta = { version = "1.41", features = ["yaml"] }
+
+[features]
+default = []
+# Enable test utilities for external test code
+testing = []
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints.clippy]
+type_complexity = "allow"

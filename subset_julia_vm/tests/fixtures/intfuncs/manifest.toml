@@ -1,0 +1,67 @@
+# Test manifest for intfuncs category
+
+[[tests]]
+name = "intfuncs_clamp"
+file = "clamp.jl"
+expected = true
+description = "clamp: restrict value to specified range (Issue #481)"
+
+[[tests]]
+name = "intfuncs_parity"
+file = "parity.jl"
+expected = true
+description = "iseven/isodd: check integer parity (Issue #480)"
+
+[[tests]]
+name = "intfuncs_typebounds"
+file = "typebounds.jl"
+expected = true
+description = "typemax/typemin: integer type bounds (Issue #480)"
+
+[[tests]]
+name = "intfuncs_divrem"
+file = "divrem.jl"
+expected = true
+description = "divrem: division with remainder (Issue #480)"
+
+[[tests]]
+name = "intfuncs_gcd_lcm"
+file = "gcd_lcm.jl"
+expected = true
+description = "gcd and lcm for Int64 (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_isqrt_basic"
+file = "isqrt_basic.jl"
+expected = true
+description = "isqrt - integer square root (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_powermod_invmod"
+file = "powermod_invmod.jl"
+expected = true
+description = "powermod and invmod - modular arithmetic (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_gcdx_basic"
+file = "gcdx_basic.jl"
+expected = true
+description = "gcdx - extended Euclidean algorithm (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_ispow2_nextpow"
+file = "ispow2_nextpow.jl"
+expected = true
+description = "ispow2, nextpow, prevpow - power of 2 functions (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_digits_ndigits"
+file = "digits_ndigits.jl"
+expected = true
+description = "digits and ndigits - digit extraction (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_binomial_basic"
+file = "binomial_basic.jl"
+expected = true
+description = "binomial - binomial coefficients (Issue #1865)"

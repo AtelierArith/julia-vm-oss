@@ -1,0 +1,79 @@
+# Test manifest for varargs category
+
+[[tests]]
+name = "varargs_basic"
+file = "varargs_basic.jl"
+expected = true
+description = "Basic varargs function summing arguments"
+
+[[tests]]
+name = "varargs_debug"
+file = "varargs_debug.jl"
+expected = true
+description = "Varargs with inspection"
+
+[[tests]]
+name = "varargs_simple"
+file = "varargs_simple.jl"
+expected = true
+description = "Simple varargs function with typeof and length"
+
+[[tests]]
+name = "varargs_typed"
+file = "varargs_typed.jl"
+expected = true
+description = "Varargs with type annotations (Issue #1678)"
+
+[[tests]]
+name = "varargs_parametric"
+file = "varargs_parametric.jl"
+expected = true
+description = "Varargs with parametric type annotations like Vector{T}... (Issue #1685)"
+
+[[tests]]
+name = "varargs_union"
+file = "varargs_union.jl"
+expected = true
+description = "Varargs with Union type annotations like Union{Int64,Float64}... (Issue #1685)"
+
+[[tests]]
+name = "varargs_parametric_where"
+file = "varargs_parametric_where.jl"
+expected = true
+description = "Varargs with where T clause like (x::T, ys::T...) where T (Issue #1684)"
+
+[[tests]]
+name = "varargs_complex"
+file = "varargs_complex.jl"
+expected = true
+description = "Varargs with Complex type annotations like Complex{Float64}... (Issue #1684)"
+
+[[tests]]
+name = "varargs_hof"
+file = "varargs_hof.jl"
+expected = true
+description = "Higher-Order Functions with varargs like apply(f, args...) (Issue #1679/#1657)"
+
+[[tests]]
+name = "varargs_real_complex"
+file = "varargs_real_complex.jl"
+expected = true
+description = "real() on varargs function result returns Float64 not Complex (Issue #1717)"
+
+[[tests]]
+name = "varargs_short_form"
+file = "varargs_short_form.jl"
+expected = true
+description = "Short-form function definitions with varargs f(args...) = expr (Issue #1721)"
+
+[[tests]]
+name = "varargs_closure"
+file = "varargs_closure.jl"
+expected = true
+description = "Closure capturing varargs-derived variables (Issue #1722)"
+
+[[tests]]
+name = "varargs_form_duality"
+file = "varargs_form_duality.jl"
+expected = true
+description = "SplatParameter/SplatExpression duality: full-form vs short-form (Issue #2253)"

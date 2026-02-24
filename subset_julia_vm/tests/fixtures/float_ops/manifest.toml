@@ -1,0 +1,13 @@
+# Test manifest for float_ops category
+
+[[tests]]
+name = "float_ops_basic"
+file = "float_basic.jl"
+expected = true
+description = "Float64 arithmetic, comparisons, abs, and signbit"
+
+[[tests]]
+name = "float_ops_special_values"
+file = "float_ops_special_values.jl"
+expected = true
+description = "Float special values: Inf, NaN, rounding, conversion (Issue #3123)"

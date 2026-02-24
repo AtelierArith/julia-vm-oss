@@ -1,0 +1,31 @@
+# Test manifest for combinatorics category
+
+[[tests]]
+name = "combinatorics_isperm"
+file = "isperm.jl"
+expected = true
+description = "isperm: check if array is a valid permutation (Issue #353)"
+
+[[tests]]
+name = "combinatorics_invperm"
+file = "invperm.jl"
+expected = true
+description = "invperm: compute inverse permutation (Issue #353)"
+
+[[tests]]
+name = "combinatorics_factorial"
+file = "factorial.jl"
+expected = true
+description = "factorial: compute n! for Int64 and BigInt (Issue #507)"
+
+[[tests]]
+name = "combinatorics_permute"
+file = "permute.jl"
+expected = true
+description = "permute!: permute vector in-place according to permutation (Issue #353)"
+
+[[tests]]
+name = "combinatorics_invpermute"
+file = "invpermute.jl"
+expected = true
+description = "invpermute!: inverse permute vector in-place (Issue #353)"

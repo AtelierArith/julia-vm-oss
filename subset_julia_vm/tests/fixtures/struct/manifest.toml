@@ -1,0 +1,73 @@
+# Test manifest for struct category
+
+[[tests]]
+name = "struct_inner_constructor_basic"
+file = "inner_constructor_basic.jl"
+expected = true
+description = "Basic inner constructor with new()"
+
+[[tests]]
+name = "struct_inner_constructor_multiple"
+file = "inner_constructor_multiple.jl"
+expected = true
+description = "Multiple inner constructors"
+
+[[tests]]
+name = "struct_inner_constructor_transform"
+file = "inner_constructor_transform.jl"
+expected = true
+description = "Inner constructor that transforms inputs"
+
+[[tests]]
+name = "struct_inner_constructor_longform"
+file = "inner_constructor_longform.jl"
+expected = true
+description = "Long-form inner constructor with function...end syntax"
+
+[[tests]]
+name = "untyped_string_field"
+file = "untyped_string_field.jl"
+expected = true
+description = "Untyped struct field containing String (Issue #361)"
+
+[[tests]]
+name = "struct_field_function_call"
+file = "field_function_call.jl"
+expected = true
+description = "Calling a function stored in struct field (g.f(x) pattern)"
+
+[[tests]]
+name = "struct_module_vs_field_call"
+file = "module_vs_field_call.jl"
+expected = true
+description = "Distinguishing module calls (Base.func) from field function calls (obj.f) - Issue #1360"
+
+[[tests]]
+name = "struct_compound_field_assignment"
+file = "compound_field_assignment.jl"
+expected = true
+description = "Compound assignment on mutable struct fields (obj.field += expr) (Issue #2139)"
+
+[[tests]]
+name = "struct_nested_field_assignment"
+file = "nested_field_assignment.jl"
+expected = true
+description = "Nested field assignment (obj.inner.field = value) (Issue #2309)"
+
+[[tests]]
+name = "struct_nested_field_context"
+file = "nested_field_context.jl"
+expected = true
+description = "Nested field assignment in closure and loop contexts (Issue #2314)"
+
+[[tests]]
+name = "struct_callable_struct"
+file = "test_callable_struct.jl"
+expected = true
+description = "Callable struct syntax: (::Type)(args) = body (Issue #2671)"
+
+[[tests]]
+name = "struct_parametric_mutable_struct"
+file = "test_parametric_mutable_struct.jl"
+expected = true
+description = "Parametric mutable struct support (Issue #2744)"

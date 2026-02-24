@@ -1,0 +1,31 @@
+# Test manifest for let_blocks category
+
+[[tests]]
+name = "let_blocks_basic"
+file = "basic_let.jl"
+expected = true
+description = "Basic let block with single binding"
+
+[[tests]]
+name = "let_blocks_multiple"
+file = "multiple_bindings.jl"
+expected = true
+description = "Let block with multiple variable bindings"
+
+[[tests]]
+name = "let_blocks_shadowing"
+file = "shadowing.jl"
+expected = true
+description = "Let block variable shadowing with scope restoration"
+
+[[tests]]
+name = "let_blocks_nested"
+file = "nested_let.jl"
+expected = true
+description = "Nested let blocks"
+
+[[tests]]
+name = "let_blocks_in_expression"
+file = "let_in_expression.jl"
+expected = true
+description = "Let block used as expression in arithmetic"

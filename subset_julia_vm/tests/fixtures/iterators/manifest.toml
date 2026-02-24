@@ -1,0 +1,67 @@
+# Test manifest for iterators category
+
+[[tests]]
+name = "iterators_countfrom_basic"
+file = "countfrom_basic.jl"
+expected = true
+description = "countfrom(): infinite counting from 1 with step 1 (Issue #530)"
+
+[[tests]]
+name = "iterators_countfrom_with_start"
+file = "countfrom_with_start.jl"
+expected = true
+description = "countfrom(n): counting from n with step 1 (Issue #530)"
+
+[[tests]]
+name = "iterators_countfrom_with_step"
+file = "countfrom_with_step.jl"
+expected = true
+description = "countfrom(start, step): counting with custom step (Issue #530)"
+
+[[tests]]
+name = "iterators_using_module"
+file = "using_iterators.jl"
+expected = true
+description = "using Iterators module (Issue #759)"
+
+[[tests]]
+name = "iterators_linrange_iteration"
+file = "linrange_iteration.jl"
+expected = true
+description = "LinRange iteration for for loops (Issue #944)"
+
+[[tests]]
+name = "iterators_enumerate_zip"
+file = "enumerate_zip.jl"
+expected = true
+description = "enumerate and zip iterator combinators (Issue #1885)"
+
+[[tests]]
+name = "iterators_take_drop"
+file = "take_drop.jl"
+expected = true
+description = "take and drop iterator combinators (Issue #1885)"
+
+[[tests]]
+name = "iterators_module_namespace"
+file = "iterators_module.jl"
+expected = true
+description = "Iterators module namespace: Iterators.flatten, Iterators.enumerate, etc. (Issue #2066)"
+
+[[tests]]
+name = "iterators_flatmap"
+file = "flatmap.jl"
+expected = true
+description = "Iterators.flatmap - map then flatten (Issue #2115)"
+
+[[tests]]
+name = "iterators_map_untyped_dispatch"
+file = "map_untyped_dispatch.jl"
+expected = true
+description = "map(f, arr) dispatches correctly when f is an untyped parameter (Issue #2119)"
+
+[[tests]]
+name = "iterators_reexports"
+file = "iterators_reexports.jl"
+expected = true
+description = "Iterators module re-exports: filter, map, reverse, accumulate, takewhile, dropwhile, flatmap (Issue #2159)"

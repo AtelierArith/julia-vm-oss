@@ -1,0 +1,41 @@
+[[tests]]
+name = "kwargs_multiple_explicit"
+file = "multiple_explicit.jl"
+expected = true
+description = "Multiple explicit keyword arguments in function definition"
+
+[[tests]]
+name = "kwargs_shorthand"
+file = "shorthand.jl"
+expected = true
+description = "Keyword argument shorthand syntax g(;a, b) expands to g(;a=a, b=b)"
+
+[[tests]]
+name = "kwargs_default_dispatch"
+file = "kwarg_default_dispatch.jl"
+expected = true
+description = "Keyword argument dispatch with defaults (Issue #1331)"
+
+[[tests]]
+name = "kwargs_lambda_in_kwargs"
+file = "lambda_in_kwargs.jl"
+expected = true
+description = "Lambda expressions as keyword argument values (Issue #2073)"
+
+[[tests]]
+name = "kwargs_varargs_empty"
+file = "kwargs_varargs_empty.jl"
+expected = true
+description = "kwargs varargs receives empty Pairs when no kwargs passed (Issue #2247)"
+
+[[tests]]
+name = "kwargs_varargs_with_splat"
+file = "kwargs_varargs_with_splat.jl"
+expected = true
+description = "kwargs varargs receives empty Pairs when called via positional splat (Issue #2269)"
+
+[[tests]]
+name = "kwargs_splat_dispatch"
+file = "kwargs_splat_dispatch.jl"
+expected = true
+description = "kwargs varargs + splat dispatch combinations via bind_kwargs_defaults (Issue #3324)"

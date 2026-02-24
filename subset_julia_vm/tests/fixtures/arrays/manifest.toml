@@ -1,0 +1,140 @@
+# Test manifest for arrays category
+
+[[tests]]
+name = "arrays_vector_complex"
+file = "vector_complex.jl"
+expected = true
+description = "Vector{Complex{Float64}} creation and indexing"
+
+[[tests]]
+name = "arrays_repeat"
+file = "repeat.jl"
+expected = true
+description = "Array repeat: repeat(v, n) and repeat(arr, m, n)"
+
+[[tests]]
+name = "arrays_logical_indexing"
+file = "logical_indexing.jl"
+expected = true
+description = "Logical indexing: arr[arr .> 0], arr[[true, false, true]]"
+
+[[tests]]
+name = "tuple_array_basic"
+file = "tuple_array_basic.jl"
+expected = true
+description = "Tuple array creation and indexing"
+
+[[tests]]
+name = "tuple_array_pushpop"
+file = "tuple_array_pushpop.jl"
+expected = true
+description = "Tuple array push! operation"
+
+[[tests]]
+name = "tuple_array_setindex"
+file = "tuple_array_setindex.jl"
+expected = true
+description = "Tuple array setindex! operation"
+
+[[tests]]
+name = "arrays_permutedims"
+file = "permutedims.jl"
+expected = true
+description = "permutedims - dimension permutation for vectors and matrices"
+
+[[tests]]
+name = "arrays_checkbounds"
+file = "checkbounds.jl"
+expected = true
+description = "checkbounds and checkindex for bounds checking"
+
+[[tests]]
+name = "array_popat_basic"
+file = "popat_basic.jl"
+expected = true
+description = "popat!(arr, i): remove and return element at index (Issue #436)"
+
+[[tests]]
+name = "array_popat_with_default"
+file = "popat_with_default.jl"
+expected = true
+description = "popat!(arr, i, default): return default if index out of bounds (Issue #436)"
+
+[[tests]]
+name = "array_trues_basic"
+file = "trues_basic.jl"
+expected = true
+description = "trues(n): create array of true values (Issue #668)"
+
+[[tests]]
+name = "array_falses_basic"
+file = "falses_basic.jl"
+expected = true
+description = "falses(n): create array of false values (Issue #669)"
+
+[[tests]]
+name = "array_fill_basic"
+file = "fill_basic.jl"
+expected = true
+description = "fill(value, n): create array filled with value (Issue #690)"
+
+[[tests]]
+name = "arrays_ndims"
+file = "test_ndims.jl"
+expected = true
+description = "ndims - get number of dimensions"
+
+[[tests]]
+name = "arrays_string_array_ops"
+file = "string_array_ops.jl"
+expected = true
+description = "String array setindex!, reverse, reverse! (Issue #811)"
+
+[[tests]]
+name = "arrays_insert_basic"
+file = "insert_basic.jl"
+expected = true
+description = "insert!(a, i, x): insert element at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_deleteat_basic"
+file = "deleteat_basic.jl"
+expected = true
+description = "deleteat!(a, i): delete element at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_append_prepend"
+file = "append_prepend.jl"
+expected = true
+description = "append!(a, items) and prepend!(a, items) (Issue #2860)"
+
+[[tests]]
+name = "arrays_pushfirst_popfirst"
+file = "pushfirst_popfirst.jl"
+expected = true
+description = "pushfirst!(a, x) and popfirst!(a) (Issue #2860)"
+
+[[tests]]
+name = "arrays_splice_basic"
+file = "splice_basic.jl"
+expected = true
+description = "splice!(a, i) and splice!(a, i, v): remove/replace at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_resize_basic"
+file = "resize_basic.jl"
+expected = true
+description = "resize!(a, n): shrink and grow array (Issue #2860)"
+
+[[tests]]
+name = "arrays_keepat_basic"
+file = "keepat_basic.jl"
+expected = true
+description = "keepat!(a, inds): keep elements at specified indices (Issue #2860)"
+
+[[tests]]
+name = "arrays_findnext_findprev"
+file = "findnext_findprev.jl"
+expected = true
+description = "findnext(f, A, start) and findprev(f, A, start) with predicate (Issue #2860)"
+

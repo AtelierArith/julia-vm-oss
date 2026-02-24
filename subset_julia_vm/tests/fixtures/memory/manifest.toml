@@ -1,0 +1,43 @@
+# Test manifest for memory category
+
+[[tests]]
+name = "memory_basic"
+file = "test_memory_basic.jl"
+expected = true
+description = "Test Memory{T} basic operations: construction, length, size, getindex, setindex!, fill!, copy"
+
+[[tests]]
+name = "memory_bounds"
+file = "test_memory_bounds.jl"
+expected = true
+description = "Test Memory{T} bounds checking: BoundsError on out-of-range access"
+
+[[tests]]
+name = "memory_types"
+file = "test_memory_types.jl"
+expected = true
+description = "Test Memory{T} with multiple type parameters: Int64, Float64, String"
+
+[[tests]]
+name = "memory_primitive"
+file = "test_memory_primitive.jl"
+expected = true
+description = "Test Memory{T} Rust primitive: constructor, getindex, setindex!"
+
+[[tests]]
+name = "memory_mutation"
+file = "test_memory_mutation.jl"
+expected = true
+description = "Test Memory{T} mutation patterns: in-place update, element swap, fill!, accumulation"
+
+[[tests]]
+name = "memory_integer_types"
+file = "test_memory_integer_types.jl"
+expected = true
+description = "Test Memory{T} with small integer types: Int8, Int32, UInt8, Float32"
+
+[[tests]]
+name = "memory_large"
+file = "test_memory_large.jl"
+expected = true
+description = "Test Memory{T} with 100+ elements: iteration, sum, copy independence"

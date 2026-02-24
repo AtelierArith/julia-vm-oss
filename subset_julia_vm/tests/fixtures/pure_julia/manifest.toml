@@ -1,0 +1,97 @@
+# Test manifest for pure_julia category
+
+[[tests]]
+name = "pure_julia_sinh_zero"
+file = "sinh_zero.jl"
+expected = true
+description = "sinh(0) = 0 (Pure Julia implementation)"
+
+[[tests]]
+name = "pure_julia_cosh_zero"
+file = "cosh_zero.jl"
+expected = true
+description = "cosh(0) = 1 (Pure Julia implementation)"
+
+[[tests]]
+name = "pure_julia_tanh_zero"
+file = "tanh_zero.jl"
+expected = true
+description = "tanh(0) = 0 (Pure Julia implementation)"
+
+[[tests]]
+name = "pure_julia_mean_basic"
+file = "mean_basic.jl"
+expected = true
+description = "mean([2,4,6]) = 4 (Pure Julia implementation)"
+
+[[tests]]
+name = "pure_julia_prod_basic"
+file = "prod_basic.jl"
+expected = true
+description = "prod([2,3,4]) = 24 (Pure Julia implementation)"
+
+[[tests]]
+name = "pure_julia_only"
+file = "only_basic.jl"
+expected = true
+description = "only(x) - returns single element from collection"
+
+[[tests]]
+name = "pure_julia_cis"
+file = "cis_basic.jl"
+expected = true
+description = "cis(x) - returns cos(x) + im*sin(x)"
+
+[[tests]]
+name = "pure_julia_cispi"
+file = "cispi_basic.jl"
+expected = true
+description = "cispi(x) - returns cos(pi*x) + im*sin(pi*x)"
+
+[[tests]]
+name = "pure_julia_reim"
+file = "reim_complex.jl"
+expected = true
+description = "reim(z) - returns (real(z), imag(z)) tuple"
+
+[[tests]]
+name = "pure_julia_something"
+file = "something_basic.jl"
+expected = true
+description = "something(x, y, ...) - returns first non-nothing value"
+
+[[tests]]
+name = "pure_julia_euler"
+file = "euler_constant.jl"
+expected = true
+description = "exp(1) matches Euler's number"
+
+[[tests]]
+name = "pure_julia_empty"
+file = "empty_basic.jl"
+expected = true
+description = "empty - create empty collection"
+
+[[tests]]
+name = "pure_julia_oftype"
+file = "oftype_basic.jl"
+expected = true
+description = "oftype - convert to type of reference value"
+
+[[tests]]
+name = "pure_julia_ifelse"
+file = "ifelse_basic.jl"
+expected = true
+description = "ifelse - conditional without short-circuit"
+
+[[tests]]
+name = "pure_julia_returns"
+file = "returns_basic.jl"
+expected = true
+description = "Returns - functor that returns constant value"
+
+[[tests]]
+name = "pure_julia_some"
+file = "some_basic.jl"
+expected = true
+description = "Some - optional value wrapper"

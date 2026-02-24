@@ -1,0 +1,65 @@
+[[tests]]
+name = "reduce_findmax_bang"
+file = "test_findmax_bang.jl"
+expected = true
+description = "Test findmax! in-place function"
+
+[[tests]]
+name = "reduce_findmin_bang"
+file = "test_findmin_bang.jl"
+expected = true
+description = "Test findmin! in-place function"
+
+[[tests]]
+name = "reduce_argmax_argmin"
+file = "argmax_argmin.jl"
+expected = true
+description = "argmax and argmin: return index of max/min element (Issue #492)"
+
+[[tests]]
+name = "reduce_count_basic"
+file = "count_basic.jl"
+expected = true
+description = "count() with predicate function"
+
+[[tests]]
+name = "reduce_extrema_diff"
+file = "extrema_diff.jl"
+expected = true
+description = "extrema and diff - reduction functions (Issue #1874)"
+
+[[tests]]
+name = "reduce_findmax_findmin"
+file = "findmax_findmin.jl"
+expected = true
+description = "findmax and findmin - return value and index (Issue #1874)"
+
+[[tests]]
+name = "reduce_findmax_findmin_func"
+file = "findmax_findmin_func.jl"
+expected = true
+description = "findmax(f, A) and findmin(f, A) - function argument forms (Issue #1998)"
+
+[[tests]]
+name = "reduce_argmax_argmin_func"
+file = "argmax_argmin_func.jl"
+expected = true
+description = "argmax(f, A) and argmin(f, A) - function argument forms (Issue #1998)"
+
+[[tests]]
+name = "reduce_maximum_minimum_func"
+file = "maximum_minimum_func.jl"
+expected = true
+description = "maximum(f, A) and minimum(f, A) - function argument forms (Issue #2000)"
+
+[[tests]]
+name = "reduce_extrema_func"
+file = "extrema_func.jl"
+expected = true
+description = "extrema(f, A) - function argument form (Issue #2000)"
+
+[[tests]]
+name = "reduce_prod_func"
+file = "prod_func.jl"
+expected = true
+description = "prod(f, A) - function argument form (Issue #2000)"

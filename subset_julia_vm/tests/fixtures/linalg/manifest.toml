@@ -1,0 +1,223 @@
+# Test manifest for linalg category
+
+[[tests]]
+name = "linalg_tr_basic"
+file = "tr_basic.jl"
+expected = true
+description = "tr (trace) - sum of diagonal elements"
+
+[[tests]]
+name = "linalg_dot_basic"
+file = "dot_basic.jl"
+expected = true
+description = "dot (inner product) of vectors"
+
+[[tests]]
+name = "linalg_norm_basic"
+file = "norm_basic.jl"
+expected = true
+description = "norm - L1, L2, Inf norms of vectors"
+
+[[tests]]
+name = "linalg_cross_basic"
+file = "cross_basic.jl"
+expected = true
+description = "cross - cross product of 3D vectors"
+
+[[tests]]
+name = "linalg_kron_basic"
+file = "kron.jl"
+expected = true
+description = "kron: Kronecker product of matrices and vectors (Issue #349)"
+
+[[tests]]
+name = "linalg_det_basic"
+file = "det_basic.jl"
+expected = true
+description = "det: matrix determinant using LU decomposition (Issue #590)"
+
+[[tests]]
+name = "linalg_inv_basic"
+file = "inv_basic.jl"
+expected = 2.0
+description = "inv: matrix inverse using LU decomposition (Issue #626)"
+
+[[tests]]
+name = "linalg_ldiv_basic"
+file = "ldiv_basic.jl"
+expected = true
+description = "backslash: solve Ax=b linear system (Issue #628)"
+
+[[tests]]
+name = "linalg_lu_basic"
+file = "lu_basic.jl"
+expected = true
+description = "lu: LU decomposition with partial pivoting (Issue #590)"
+
+[[tests]]
+name = "linalg_svd_basic"
+file = "svd_basic.jl"
+expected = true
+description = "svd: Singular Value Decomposition (Issue #630)"
+
+[[tests]]
+name = "linalg_qr_basic"
+file = "qr.jl"
+expected = true
+description = "qr: QR Decomposition (Issue #639)"
+
+[[tests]]
+name = "linalg_eigvals_basic"
+file = "eigvals_basic.jl"
+expected = true
+description = "eigvals: Eigenvalue decomposition (Issue #641)"
+
+[[tests]]
+name = "linalg_eigen_basic"
+file = "eigen_basic.jl"
+expected = true
+description = "eigen: Eigen decomposition"
+
+[[tests]]
+name = "linalg_cholesky_basic"
+file = "cholesky_basic.jl"
+expected = true
+description = "cholesky: Cholesky decomposition (Issue #643)"
+
+[[tests]]
+name = "linalg_rank_basic"
+file = "rank_basic.jl"
+expected = true
+description = "rank: Matrix rank computation (Issue #645)"
+
+[[tests]]
+name = "linalg_cond_basic"
+file = "cond_basic.jl"
+expected = true
+description = "cond: Matrix condition number (Issue #647)"
+
+[[tests]]
+name = "linalg_diagonal_basic"
+file = "diagonal_test.jl"
+expected = true
+description = "Diagonal: construction, indexing, and multiplication (Issue #851)"
+
+[[tests]]
+name = "linalg_diagonal_simple"
+file = "diagonal_simple_test.jl"
+expected = 7.0
+description = "Diagonal: size/getindex sanity check (Issue #851)"
+
+[[tests]]
+name = "linalg_matmul_basic"
+file = "matmul_basic.jl"
+expected = true
+description = "matrix multiplication: A * B"
+
+[[tests]]
+name = "linalg_matmul_svd_reconstruct"
+file = "matmul_svd_reconstruct.jl"
+expected = true
+description = "matrix multiplication: backslash and SVD reconstruction"
+
+[[tests]]
+name = "linalg_user_snippet_inv_svd"
+file = "user_snippet_inv_svd.jl"
+expected = true
+description = "User snippet: backslash + SVD reconstruction + V' ≈ Vt"
+
+[[tests]]
+name = "linalg_eigen_requires_using"
+file = "eigen_requires_using.jl"
+expected = true
+description = "eigen() requires using LinearAlgebra - should fail without it"
+
+[[tests]]
+name = "linalg_matmul_complex_vec"
+file = "matmul_complex_vec.jl"
+expected = true
+description = "matrix * complex vector multiplication (Issue #1560)"
+
+[[tests]]
+name = "linalg_eigen_matrix_vector_mul"
+file = "eigen_matrix_vector_mul.jl"
+expected = true
+description = "A * v1 where v1 is an eigenvector (Issue #1560)"
+
+[[tests]]
+name = "linalg_eigen_nonsymmetric"
+file = "eigen_nonsymmetric.jl"
+expected = true
+description = "eigen() for non-symmetric matrices with complex eigenvalues (Issue #1563)"
+
+[[tests]]
+name = "linalg_eigen_ios_repro"
+file = "eigen_ios_repro.jl"
+expected = true
+description = "iOS eigen reproduction test (Issue #1587)"
+
+[[tests]]
+name = "linalg_matrix_vector_mul"
+file = "matrix_vector_mul.jl"
+expected = true
+description = "matrix-vector multiplication: A * x"
+
+[[tests]]
+name = "linalg_pinv_eigvecs"
+file = "pinv_eigvecs.jl"
+expected = true
+description = "pinv (pseudo-inverse) and eigvecs (eigenvector extraction) (Issue #1921)"
+
+[[tests]]
+name = "linalg_transpose_svd_field"
+file = "transpose_svd_field.jl"
+expected = true
+description = "transpose() on matrices from SVD NamedTuple fields (Issue #1922)"
+
+[[tests]]
+name = "linalg_normalize_diag_issymmetric"
+file = "normalize_diag_issymmetric.jl"
+expected = true
+description = "normalize, diag, issymmetric, ishermitian (Issue #1928)"
+
+[[tests]]
+name = "linalg_triu_tril_diagm_opnorm"
+file = "triu_tril_diagm_opnorm.jl"
+expected = true
+description = "triu, tril, diagm, opnorm (Issue #1932)"
+
+[[tests]]
+name = "linalg_nullspace_logdet_adjoint"
+file = "nullspace_logdet_adjoint.jl"
+expected = true
+description = "nullspace, logdet, logabsdet, adjoint (Issue #1934)"
+
+[[tests]]
+name = "linalg_isdiag_istriu_istril_isposdef"
+file = "isdiag_istriu_istril_isposdef.jl"
+expected = true
+description = "isdiag, istriu, istril, isposdef (Issue #1938)"
+
+[[tests]]
+name = "linalg_hermitianpart_eigmax_eigmin"
+file = "hermitianpart_eigmax_eigmin.jl"
+expected = true
+description = "hermitianpart, eigmax, eigmin (Issue #1940)"
+
+[[tests]]
+name = "linalg_checksquare_axpy_rmul"
+file = "checksquare_axpy_rmul.jl"
+expected = true
+description = "checksquare, axpy!, axpby!, rmul!, lmul! (Issue #1950)"
+
+[[tests]]
+name = "linalg_mul_ldiv_rdiv"
+file = "mul_ldiv_rdiv.jl"
+expected = true
+description = "mul!, ldiv!, rdiv! in-place operations (Issue #1956)"
+
+[[tests]]
+name = "linalg_kron_bang"
+file = "kron_bang.jl"
+expected = true
+description = "kron! in-place Kronecker product (Issue #1960)"

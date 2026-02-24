@@ -1,0 +1,79 @@
+# Test manifest for macros category
+
+[[tests]]
+name = "macros_timev"
+file = "test_timev.jl"
+expected = true
+description = "@timev macro for verbose timing output"
+
+[[tests]]
+name = "macros_something_coalesce"
+file = "test_something_coalesce.jl"
+expected = true
+description = "@something and @coalesce macros for handling nothing/missing values"
+
+[[tests]]
+name = "macros_isdefined"
+file = "isdefined.jl"
+expected = true
+description = "@isdefined macro for checking if variable is defined"
+
+[[tests]]
+name = "macros_showtime"
+file = "test_showtime.jl"
+expected = true
+description = "@showtime macro for timing with expression display"
+
+[[tests]]
+name = "macros_allocation"
+file = "test_allocation_macros.jl"
+expected = true
+description = "@allocated and @allocations macros (stub implementations)"
+
+[[tests]]
+name = "macros_simd"
+file = "simd.jl"
+expected = true
+description = "@simd macro (no-op in SubsetJuliaVM)"
+
+[[tests]]
+name = "macros_inbounds"
+file = "inbounds.jl"
+expected = true
+description = "@inbounds macro (no-op in SubsetJuliaVM)"
+
+[[tests]]
+name = "macros_testset_function"
+file = "testset_function.jl"
+expected = true
+description = "Function definitions inside @testset blocks (Issue #902)"
+
+[[tests]]
+name = "macros_show_expression_string"
+file = "show_expression_string.jl"
+expected = true
+description = "Test @show macro displays source expression correctly (fix for #1352)"
+
+[[tests]]
+name = "macros_showtime_expression_string"
+file = "showtime_expression_string.jl"
+expected = true
+description = "Test @showtime macro displays source expression with timing"
+
+[[tests]]
+name = "macros_macroexpand_show"
+file = "macroexpand_show.jl"
+expected = true
+description = "Test @macroexpand @show produces correct expansion structure"
+
+[[tests]]
+name = "macros_nospecialize"
+file = "nospecialize.jl"
+expected = true
+description = "@nospecialize macro (no-op in SubsetJuliaVM, Issue #2528)"
+
+[[tests]]
+name = "macros_base_in_function"
+file = "test_base_macro_in_function.jl"
+expected = true
+description = "Base macros (@inbounds, @simd, @assert) work inside function bodies via no-context path (Issue #2604)"

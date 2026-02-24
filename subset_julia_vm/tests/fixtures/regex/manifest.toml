@@ -1,0 +1,29 @@
+[[tests]]
+name = "regex_literal"
+file = "regex_literal.jl"
+expected = true
+description = "Test r\"...\" regex literal syntax"
+
+[[tests]]
+name = "regex_occursin"
+file = "occursin.jl"
+expected = true
+description = "Test occursin with Regex"
+
+[[tests]]
+name = "regex_match"
+file = "match.jl"
+expected = true
+description = "Test match function with Regex"
+
+[[tests]]
+name = "regex_eachmatch"
+file = "eachmatch.jl"
+expected = true
+description = "Test eachmatch function with Regex"
+
+[[tests]]
+name = "regex_match_field_access"
+file = "match_field_access.jl"
+expected = true
+description = "RegexMatch field access: m.match, m.captures, m.offset, m.offsets (Issue #2116)"

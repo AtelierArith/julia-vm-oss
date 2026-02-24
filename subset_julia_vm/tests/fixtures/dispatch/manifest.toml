@@ -1,0 +1,127 @@
+# Test manifest for dispatch category
+
+[[tests]]
+name = "dispatch_any_dispatch"
+file = "test_any_dispatch.jl"
+expected = true
+description = "Runtime dispatch for Any-typed parameters (Issue #401)"
+
+[[tests]]
+name = "dispatch_struct_field_access"
+file = "test_struct_field_access.jl"
+expected = true
+description = "Dynamic field access on Any-typed struct values (Issue #401)"
+
+[[tests]]
+name = "dispatch_anonymous_typed"
+file = "anonymous_typed_dispatch.jl"
+expected = true
+description = "Method dispatch for anonymous typed parameters (::StructType) (Issue #635)"
+
+[[tests]]
+name = "dispatch_abstract_type"
+file = "abstract_type_dispatch.jl"
+expected = true
+description = "Method dispatch with abstract type parameters (Issue #636)"
+
+[[tests]]
+name = "dispatch_float64_method"
+file = "float64_method_dispatch.jl"
+expected = true
+description = "Float64/Float32 dispatch to user-defined methods for custom types (Issue #634)"
+
+[[tests]]
+name = "dispatch_symbol_type_param"
+file = "symbol_type_param_dispatch.jl"
+expected = true
+description = "Symbol type parameters and Float64 dispatch through wrapper function (Issue #633)"
+
+[[tests]]
+name = "dispatch_array_type"
+file = "array_type_dispatch.jl"
+expected = true
+description = "::Array type annotation in function parameters (Issue #662)"
+
+[[tests]]
+name = "dispatch_parametric_array"
+file = "parametric_array_dispatch.jl"
+expected = true
+description = "Parametric array type dispatch: Vector{Int64} vs Vector{Float64} (Issue #1237)"
+
+[[tests]]
+name = "dispatch_bool_int64"
+file = "bool_int_dispatch.jl"
+expected = true
+description = "Bool argument dispatches to Bool method, not Int64 method (Issue #1441)"
+
+[[tests]]
+name = "dispatch_global_const_function_access"
+file = "global_const_function_access.jl"
+expected = true
+description = "Functions can access global const values from prelude (Issue #1443)"
+
+[[tests]]
+name = "dispatch_number_array_bug"
+file = "number_array_dispatch_bug.jl"
+expected = true
+description = "Abstract type Number should not match Array types in dispatch (Issue #1658)"
+
+[[tests]]
+name = "dispatch_float16_mixed_type"
+file = "float16_mixed_type_dispatch.jl"
+expected = true
+description = "Float16 mixed-type arithmetic dispatch: F16+I64, F16+F32, F16+F64 (Issue #1898)"
+
+[[tests]]
+name = "dispatch_uint_int_mixed_comparison"
+file = "uint_int_mixed_comparison.jl"
+expected = true
+description = "UInt8/Int64 mixed-type comparison, promotion, and arithmetic (Issue #1853)"
+
+[[tests]]
+name = "dispatch_parametric_function"
+file = "parametric_function_dispatch.jl"
+expected = true
+description = "Function dispatch inside where T context and workarounds (Issue #2388)"
+
+[[tests]]
+name = "dispatch_where_context"
+file = "where_context_dispatch.jl"
+expected = true
+description = "TypeVar upper bounds used for dispatch in where T context (Issue #2556)"
+
+[[tests]]
+name = "dispatch_user_convert_promote"
+file = "user_convert_promote.jl"
+expected = true
+description = "User-defined convert and promote_rule for custom types (Issue #2587)"
+
+[[tests]]
+name = "dispatch_parametric_abstract"
+file = "test_parametric_abstract_dispatch.jl"
+expected = true
+description = "Parametric abstract type dispatch with type params preserved at runtime (Issue #2523)"
+
+[[tests]]
+name = "dispatch_covariant_type"
+file = "test_covariant_type_dispatch.jl"
+expected = true
+description = "Covariant bounds (<:T) in Type dispatch: Type{<:Animal} matches subtypes (Issue #2526)"
+
+[[tests]]
+name = "dispatch_vararg_typed"
+file = "test_vararg_typed_dispatch.jl"
+expected = true
+description = "Vararg{T} and Vararg{T,N} typed varargs dispatch (Issue #2525)"
+
+[[tests]]
+name = "dispatch_user_base_coexist"
+file = "test_user_base_coexist.jl"
+expected = true
+description = "User-defined function coexists with base function of same name without breaking cache alignment (Issue #2726)"
+
+[[tests]]
+name = "dispatch_multi_level_abstract"
+file = "multi_level_abstract_dispatch.jl"
+expected = true
+description = "Multi-level abstract type hierarchy dispatch with sibling abstract types (Issue #3147)"

@@ -1,0 +1,49 @@
+# Test manifest for floatfuncs category
+
+[[tests]]
+name = "floatfuncs_maxintfloat"
+file = "maxintfloat.jl"
+expected = true
+description = "maxintfloat: largest exact integer in Float64 (Issue #479)"
+
+[[tests]]
+name = "floatfuncs_precision"
+file = "precision.jl"
+expected = true
+description = "precision: number of significant bits in Float64 (Issue #478)"
+
+[[tests]]
+name = "floatfuncs_zero_subnormals"
+file = "zero_subnormals.jl"
+expected = true
+description = "get_zero_subnormals/set_zero_subnormals: subnormal float control (Issue #441)"
+
+[[tests]]
+name = "floatfuncs_float_jl_base_ops"
+file = "float_jl_base_ops.jl"
+expected = true
+description = "float.jl base operations: Float64/Float32 arithmetic, mixed-type dispatch, comparisons, signbit, abs (Issue #1765, #1771)"
+
+[[tests]]
+name = "floatfuncs_isinteger_isfinite"
+file = "isinteger_isfinite.jl"
+expected = true
+description = "isinteger, isfinite, isinf, isnan - float query functions (Issue #1870)"
+
+[[tests]]
+name = "floatfuncs_cld_basic"
+file = "cld_basic.jl"
+expected = true
+description = "cld - ceiling division (Issue #1870)"
+
+[[tests]]
+name = "floatfuncs_float_utility_functions"
+file = "float_utility_functions.jl"
+expected = true
+description = "exponent, significand, frexp, nextfloat, prevfloat - float utility functions (Issue #2101)"
+
+[[tests]]
+name = "floatfuncs_typemin_typemax_comparison"
+file = "typemin_typemax_comparison.jl"
+expected = true
+description = "typemin/typemax return type inference for comparisons and arithmetic (Issue #2231)"

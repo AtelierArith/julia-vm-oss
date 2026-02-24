@@ -1,0 +1,43 @@
+# Test manifest for ternary category
+
+[[tests]]
+name = "ternary_basic_true"
+file = "basic_true.jl"
+expected = true
+description = "Basic ternary with true condition"
+
+[[tests]]
+name = "ternary_basic_false"
+file = "basic_false.jl"
+expected = true
+description = "Basic ternary with false condition"
+
+[[tests]]
+name = "ternary_with_expressions"
+file = "with_expressions.jl"
+expected = true
+description = "Ternary with arithmetic expressions"
+
+[[tests]]
+name = "ternary_nested"
+file = "nested.jl"
+expected = true
+description = "Nested ternary operators"
+
+[[tests]]
+name = "ternary_nested_equal"
+file = "nested_equal.jl"
+expected = true
+description = "Nested ternary with equal values"
+
+[[tests]]
+name = "ternary_in_assignment"
+file = "in_assignment.jl"
+expected = true
+description = "Ternary used in variable assignment"
+
+[[tests]]
+name = "ternary_in_loop"
+file = "in_loop.jl"
+expected = true
+description = "Ternary inside a for loop"

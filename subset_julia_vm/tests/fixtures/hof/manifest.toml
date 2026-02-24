@@ -1,0 +1,163 @@
+# Test manifest for hof category
+
+[[tests]]
+name = "hof_mapfoldl"
+file = "test_mapfoldl.jl"
+expected = true
+description = "mapfoldl - map then left-fold (Issue #351)"
+
+[[tests]]
+name = "hof_mapfoldr"
+file = "test_mapfoldr.jl"
+expected = true
+description = "mapfoldr - map then right-fold (Issue #351)"
+
+[[tests]]
+name = "hof_map_inplace"
+file = "test_map_inplace.jl"
+expected = true
+description = "map! - in-place map operation (Issue #351)"
+
+[[tests]]
+name = "hof_filter_inplace"
+file = "test_filter_inplace.jl"
+expected = true
+description = "filter! - in-place filter operation (Issue #351)"
+
+[[tests]]
+name = "hof_foldl"
+file = "test_foldl.jl"
+expected = true
+description = "foldl - left-associative fold (Issue #351)"
+
+[[tests]]
+name = "hof_foldl_strings"
+file = "test_foldl_strings.jl"
+expected = true
+description = "foldl with string arrays (Issue #409)"
+
+[[tests]]
+name = "hof_foldr"
+file = "test_foldr.jl"
+expected = true
+description = "foldr - right-associative fold (Issue #351)"
+
+[[tests]]
+name = "hof_foreach"
+file = "test_foreach.jl"
+expected = true
+description = "foreach - apply function for side effects (Issue #1379)"
+
+[[tests]]
+name = "hof_first_class_functions"
+file = "first_class_functions.jl"
+expected = true
+description = "First-class functions: passing functions as arguments and calling them (Issue #1457)"
+
+[[tests]]
+name = "hof_edge_cases"
+file = "hof_edge_cases.jl"
+expected = true
+description = "HOF edge cases: multi-arg callers, nested HOF, function composition (Issue #1551)"
+
+[[tests]]
+name = "hof_arrow_function_comprehensive"
+file = "arrow_function_comprehensive.jl"
+expected = true
+description = "Comprehensive arrow function test"
+
+[[tests]]
+name = "hof_map_number"
+file = "test_map_number.jl"
+expected = true
+description = "map for scalar Numbers - map(f, x::Number, ys::Number...) (Issue #1646)"
+
+[[tests]]
+name = "hof_variadic_splat"
+file = "variadic_splat.jl"
+expected = true
+description = "HOF parameter call with variadic splat f(args...) (Issue #1657)"
+
+[[tests]]
+name = "hof_operator_as_argument"
+file = "operator_as_argument.jl"
+expected = true
+description = "Bare operators (+, -, *) passed as function arguments to HOFs (Issue #1985)"
+
+[[tests]]
+name = "hof_identity_lambda"
+file = "identity_lambda.jl"
+expected = true
+description = "Identity lambda x -> x regression test (Issue #2001)"
+
+[[tests]]
+name = "hof_mapreduce_bare_operator"
+file = "mapreduce_bare_operator.jl"
+expected = true
+description = "mapreduce/mapfoldl/mapfoldr with bare operators +, -, * (Issue #2004)"
+
+[[tests]]
+name = "hof_map_multi_array"
+file = "map_multi_array.jl"
+expected = true
+description = "map(f, A, B) - map with multiple array arguments (Issue #2019)"
+
+[[tests]]
+name = "hof_any_all_bool_return"
+file = "any_all_bool_return.jl"
+expected = true
+description = "any(f, arr) and all(f, arr) return Bool, not Int64 (Issue #2031)"
+
+[[tests]]
+name = "hof_builtin_as_argument"
+file = "builtin_as_hof_argument.jl"
+expected = true
+description = "Builtin functions (uppercase, lowercase, string) as HOF arguments (Issue #2070)"
+
+[[tests]]
+name = "hof_nested_hof_calls"
+file = "nested_hof_calls.jl"
+expected = true
+description = "Nested HOF calls like filter(f, map(g, arr)) (Issue #2072)"
+
+[[tests]]
+name = "hof_reduce_init_keyword"
+file = "reduce_init_keyword.jl"
+expected = true
+description = "reduce/foldl/foldr/mapreduce with init keyword argument (Issue #2077)"
+
+[[tests]]
+name = "hof_variadic_splat_sources"
+file = "variadic_splat_sources.jl"
+expected = true
+description = "HOF variadic splat with array/tuple/range sources and nested HOF (Issue #1675)"
+
+[[tests]]
+name = "hof_type_inference_dispatch"
+file = "hof_type_inference_dispatch.jl"
+expected = true
+description = "HOF type inference: named functions, lambdas, and chaining (Issue #1671)"
+
+[[tests]]
+name = "hof_operator_partial_apply"
+file = "operator_partial_apply.jl"
+expected = true
+description = "Operator partial application: ==(x), >(x), <(x) as predicate closures (Issue #3119)"
+
+[[tests]]
+name = "hof_operator_partial_edge"
+file = "hof_operator_partial_edge.jl"
+expected = true
+description = "Operator partial application edge cases: comparisons, filter/any/all (Issue #3129)"
+
+[[tests]]
+name = "hof_arity_resolution"
+file = "hof_arity_resolution.jl"
+expected = true
+description = "HOF arity resolution: sprint/show, map with string/typeof/length (Issue #3125)"
+
+[[tests]]
+name = "hof_issue_1587_regression"
+file = "issue_1587_regression.jl"
+expected = true
+description = "Regression: arrow function map(_ -> Complex(0.0, 0.0), 1:m) was UnsupportedExpression (Issue #1587)"

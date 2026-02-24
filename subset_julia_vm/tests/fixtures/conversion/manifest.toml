@@ -1,0 +1,79 @@
+# Test manifest for conversion category
+
+[[tests]]
+name = "conversion_convert_basic"
+file = "convert_basic.jl"
+expected = true
+description = "convert(T, x) - Int to Float64 and Float64 to Int"
+
+[[tests]]
+name = "conversion_promote_basic"
+file = "promote_basic.jl"
+expected = true
+description = "promote(x, y, ...) - type promotion to common type"
+
+[[tests]]
+name = "conversion_type_constructor"
+file = "type_constructor.jl"
+expected = true
+description = "T(x) dynamic type constructor with function parameter"
+
+[[tests]]
+name = "conversion_type_conversion_functions"
+file = "type_conversion_functions.jl"
+expected = true
+description = "Type conversion functions: signed, unsigned, float, widemul"
+
+[[tests]]
+name = "conversion_float_basic"
+file = "float_basic.jl"
+expected = true
+description = "float() function - Int64, Float64, Rational, Complex conversions"
+
+[[tests]]
+name = "reinterpret_float64_int64"
+file = "reinterpret_float64_int64.jl"
+expected = true
+description = "reinterpret Float64 <-> Int64 bit conversion"
+
+[[tests]]
+name = "reinterpret_float32_int32"
+file = "reinterpret_float32_int32.jl"
+expected = true
+description = "reinterpret Float32 <-> Int32 bit conversion"
+
+[[tests]]
+name = "reinterpret_int_uint"
+file = "reinterpret_int_uint.jl"
+expected = true
+description = "reinterpret signed <-> unsigned integers"
+
+[[tests]]
+name = "conversion_big_integer"
+file = "big_integer.jl"
+expected = true
+description = "big() function for integer types -> BigInt"
+
+[[tests]]
+name = "conversion_big_float"
+file = "big_float.jl"
+expected = true
+description = "big() function for float types -> BigFloat"
+
+[[tests]]
+name = "conversion_big_type"
+file = "big_type.jl"
+expected = true
+description = "big(::Type{T}) type-to-type conversions"
+
+[[tests]]
+name = "conversion_uint_float32"
+file = "convert_uint_float32.jl"
+expected = true
+description = "convert UInt/Bool to Float32/Float64/Int64 (Issue #2249)"
+
+[[tests]]
+name = "conversion_convert_all_integer_types"
+file = "convert_all_integer_types.jl"
+expected = true
+description = "convert() for all integer target types: Int8-Int128, UInt8-UInt128 (Issue #2267)"

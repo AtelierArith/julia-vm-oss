@@ -1,0 +1,5 @@
+[[tests]]
+name = "metaprogramming_static_basic"
+file = "static_basic.jl"
+expected = true
+description = "Test @static macro for compile-time conditional evaluation"

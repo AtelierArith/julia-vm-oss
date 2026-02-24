@@ -1,0 +1,25 @@
+# Test manifest for generator category
+
+[[tests]]
+name = "generator_basic"
+file = "basic.jl"
+expected = true
+description = "Basic generator expression with collect"
+
+[[tests]]
+name = "generator_filtered"
+file = "filtered.jl"
+expected = true
+description = "Filtered generator expression"
+
+[[tests]]
+name = "generator_sum_direct"
+file = "sum_direct.jl"
+expected = true
+description = "Generator with sum directly (no collect)"
+
+[[tests]]
+name = "generator_typeof"
+file = "typeof_generator.jl"
+expected = true
+description = "typeof(generator) returns Base.Generator (Issue #414)"

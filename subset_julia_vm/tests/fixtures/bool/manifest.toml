@@ -1,0 +1,19 @@
+# Test manifest for bool category
+
+[[tests]]
+name = "bool_type_predicates"
+file = "type_predicates.jl"
+expected = true
+description = "Bool type bounds and predicates (typemin/typemax/iszero/isone) (Issue #472, #604)"
+
+[[tests]]
+name = "bool_pow_typeof"
+file = "pow_typeof.jl"
+expected = true
+description = "Bool ^ Bool returns Bool with x || !y semantics (Issue #1971)"
+
+[[tests]]
+name = "bool_numeric_coverage"
+file = "test_bool_numeric_coverage.jl"
+expected = true
+description = "Bool coverage in Pure Julia numeric functions: zero, one, float, abs, signbit (Issue #2724)"

@@ -1,0 +1,404 @@
+# Test manifest for strings category
+
+[[tests]]
+name = "string_strip_basic"
+file = "strip_basic.jl"
+expected = true
+description = "strip, lstrip, rstrip - remove leading/trailing whitespace"
+
+[[tests]]
+name = "string_startswith_basic"
+file = "startswith_basic.jl"
+expected = true
+description = "startswith(s, prefix) - Pure Julia (Issue #679)"
+
+[[tests]]
+name = "string_endswith_basic"
+file = "endswith_basic.jl"
+expected = true
+description = "endswith(s, suffix) - Pure Julia (Issue #680)"
+
+[[tests]]
+name = "string_occursin_basic"
+file = "occursin_basic.jl"
+expected = true
+description = "occursin(needle, haystack) - Pure Julia (Issue #681)"
+
+[[tests]]
+name = "string_replace_basic"
+file = "replace_basic.jl"
+expected = true
+description = "replace(s, old => new) - Pure Julia (Issue #682)"
+
+[[tests]]
+name = "string_join_basic"
+file = "join_basic.jl"
+expected = true
+description = "join(arr, delim) - Pure Julia (Issue #684)"
+
+[[tests]]
+name = "string_chomp_basic"
+file = "chomp_basic.jl"
+expected = true
+description = "chomp - remove ONE trailing newline (\n or \r\n)"
+
+[[tests]]
+name = "string_chop_basic"
+file = "chop_basic.jl"
+expected = true
+description = "chop - remove last character"
+
+[[tests]]
+name = "string_sprintf"
+file = "sprintf.jl"
+expected = true
+description = "sprintf - C-style format string"
+
+[[tests]]
+name = "string_contains"
+file = "contains.jl"
+expected = true
+description = "contains - check if string contains substring"
+
+[[tests]]
+name = "string_codeunits"
+file = "codeunits.jl"
+expected = true
+description = "codeunits - get string as Vector{UInt8}"
+
+[[tests]]
+name = "strings_lpad"
+file = "lpad_basic.jl"
+expected = true
+description = "lpad(s, n) - left pad string"
+
+[[tests]]
+name = "strings_rpad"
+file = "rpad_basic.jl"
+expected = true
+description = "rpad(s, n) - right pad string"
+
+[[tests]]
+name = "strings_chopprefix"
+file = "chopprefix_basic.jl"
+expected = true
+description = "chopprefix(s, prefix) - remove prefix"
+
+[[tests]]
+name = "strings_chopsuffix"
+file = "chopsuffix_basic.jl"
+expected = true
+description = "chopsuffix(s, suffix) - remove suffix"
+
+[[tests]]
+name = "strings_case_escape"
+file = "string_case_escape.jl"
+expected = true
+description = "lowercasefirst, uppercasefirst, escape_string"
+
+[[tests]]
+name = "strings_split"
+file = "string_split.jl"
+expected = true
+description = "split(s, delim) - Pure Julia string split function"
+
+[[tests]]
+name = "strings_rsplit"
+file = "string_rsplit.jl"
+expected = true
+description = "rsplit(s, delim) - reverse split"
+
+[[tests]]
+name = "strings_bitstring"
+file = "string_bitstring.jl"
+expected = true
+description = "bitstring(x) - binary representation as string"
+
+[[tests]]
+name = "strings_ascii"
+file = "string_ascii.jl"
+expected = true
+description = "ascii(s) - validate ASCII string"
+
+[[tests]]
+name = "strings_nextind_prevind"
+file = "string_nextind_prevind.jl"
+expected = true
+description = "nextind/prevind - UTF-8 index navigation"
+
+[[tests]]
+name = "strings_bytes2hex"
+file = "string_bytes2hex.jl"
+expected = true
+description = "bytes2hex(a) - convert byte array to hex string"
+
+[[tests]]
+name = "strings_hex2bytes"
+file = "string_hex2bytes.jl"
+expected = true
+description = "hex2bytes(s) - convert hex string to byte array"
+
+[[tests]]
+name = "strings_thisind_reverseind"
+file = "string_thisind_reverseind.jl"
+expected = true
+description = "thisind/reverseind - string index functions"
+
+[[tests]]
+name = "strings_unescape"
+file = "string_unescape.jl"
+expected = true
+description = "unescape_string(s) - unescape string escape sequences"
+
+[[tests]]
+name = "strings_isnumeric"
+file = "string_isnumeric.jl"
+expected = true
+description = "isnumeric(c) - check if character is numeric (Unicode)"
+
+[[tests]]
+name = "strings_isvalid"
+file = "string_isvalid.jl"
+expected = true
+description = "isvalid(s, i) - check if index is valid character boundary"
+
+[[tests]]
+name = "strings_tryparse"
+file = "string_tryparse.jl"
+expected = true
+description = "tryparse(T, s) - parse string, return nothing on failure"
+
+[[tests]]
+name = "strings_raw_literals"
+file = "raw_string_literals.jl"
+expected = true
+description = "raw string literals - raw\"...\" and r\"...\" (Issue #554)"
+
+[[tests]]
+name = "strings_findnext_findprev"
+file = "string_findnext_findprev.jl"
+expected = true
+description = "findnext/findprev - find next/previous occurrence in string"
+
+[[tests]]
+name = "strings_codepoint"
+file = "string_codepoint.jl"
+expected = true
+description = "codepoint() - get Unicode code point of character"
+
+[[tests]]
+name = "strings_textwidth"
+file = "string_textwidth.jl"
+expected = true
+description = "textwidth() - get display width of string/character"
+
+[[tests]]
+name = "strings_concat_in_function"
+file = "string_concat_in_function.jl"
+expected = true
+description = "String concatenation in function (Issue #289)"
+
+[[tests]]
+name = "string_exports"
+file = "test_string_exports.jl"
+expected = true
+description = "String manipulation functions: chomp, chop, contains, join, replace, etc."
+
+
+[[tests]]
+name = "string_comparison_dynamic"
+file = "string_comparison_dynamic.jl"
+expected = true
+description = "String comparison with dynamic dispatch (Issue #1218)"
+
+[[tests]]
+name = "strings_html_literal"
+file = "html_literal.jl"
+expected = true
+description = "Test html\"...\" string literal creates HTML{String} object (Issue #468)"
+
+[[tests]]
+name = "strings_text_literal"
+file = "text_literal.jl"
+expected = true
+description = "Test text\"...\" string literal creates Text{String} object (Issue #468)"
+
+[[tests]]
+name = "strings_custom_str_macro"
+file = "custom_str_macro.jl"
+expected = true
+description = "Test custom string macros (prefix_str functions) work correctly (Issue #468)"
+
+[[tests]]
+name = "strings_repeat"
+file = "repeat.jl"
+expected = true
+description = "Test string repeat function and ^ operator (Issue #1377)"
+
+[[tests]]
+name = "strings_int128_literal"
+file = "int128_literal.jl"
+expected = true
+description = "Test Int128\"...\" and UInt128\"...\" string macro literals"
+
+[[tests]]
+name = "strings_ascii_basic"
+file = "ascii_basic.jl"
+expected = true
+description = "ascii(s) validates string contains only ASCII characters (Issue #1842)"
+
+[[tests]]
+name = "strings_char_classification"
+file = "char_classification.jl"
+expected = true
+description = "iscntrl, ispunct, isxdigit - character classification functions (Issue #1874)"
+
+[[tests]]
+name = "strings_char_predicates"
+file = "char_predicates.jl"
+expected = true
+description = "isdigit, isletter, isuppercase, islowercase, isascii, isspace, isprint (Issue #1885)"
+
+[[tests]]
+name = "strings_eachrsplit"
+file = "string_eachrsplit.jl"
+expected = true
+description = "eachrsplit(s, delim) - reverse string split iterator (Issue #1994)"
+
+[[tests]]
+name = "strings_collect_string"
+file = "collect_string.jl"
+expected = true
+description = "collect(string) - collect string into character array (Issue #2027)"
+
+[[tests]]
+name = "strings_findfirst_findlast_char"
+file = "findfirst_findlast_char.jl"
+expected = true
+description = "findfirst/findlast with Char patterns and UnitRange return for String patterns (Issue #2030)"
+
+[[tests]]
+name = "strings_vector_char_equality"
+file = "vector_char_equality.jl"
+expected = true
+description = "Vector{Char} == Vector{Char} comparison regression test (Issue #2032)"
+
+[[tests]]
+name = "strings_char_arithmetic"
+file = "char_arithmetic.jl"
+expected = true
+description = "Char arithmetic and Char-Int conversion: Int('A'), 'a'+1, 'z'-'a' (Issue #2035)"
+
+[[tests]]
+name = "strings_string_from_chars"
+file = "string_from_chars.jl"
+expected = true
+description = "String(::Vector{Char}) constructor - char array to string (Issue #2038)"
+
+[[tests]]
+name = "strings_string_parse_base"
+file = "string_parse_base.jl"
+expected = true
+description = "string(x; base=N) and parse(T, s; base=N) number base conversion (Issue #2036)"
+
+[[tests]]
+name = "strings_isascii_string"
+file = "isascii_string.jl"
+expected = true
+description = "isascii(::String) - check if all string characters are ASCII (Issue #2046)"
+
+[[tests]]
+name = "strings_first_last_string"
+file = "first_last_string.jl"
+expected = true
+description = "first(::String) and last(::String) - get first/last character (Issue #2048)"
+
+[[tests]]
+name = "strings_reverse_string"
+file = "reverse_string.jl"
+expected = true
+description = "reverse(::String) returns reversed String, not Vector{Char} (Issue #2053)"
+
+[[tests]]
+name = "strings_repeat_char"
+file = "repeat_char.jl"
+expected = true
+description = "repeat(c::Char, n) returns String of repeated character (Issue #2057)"
+
+[[tests]]
+name = "strings_strip_predicate"
+file = "strip_predicate.jl"
+expected = true
+description = "lstrip/rstrip/strip with predicate function (Issue #2057)"
+
+[[tests]]
+name = "strings_filter_string"
+file = "filter_string.jl"
+expected = true
+description = "filter(pred, s::String) returns String, not Vector{Char} (Issue #2062)"
+
+[[tests]]
+name = "strings_uppercase_lowercase_char"
+file = "uppercase_lowercase_char.jl"
+expected = true
+description = "uppercase(c::Char) and lowercase(c::Char) support (Issue #2064)"
+
+[[tests]]
+name = "strings_titlecase_char"
+file = "titlecase_char.jl"
+expected = true
+description = "titlecase(c::Char) support (Issue #2067)"
+
+[[tests]]
+name = "strings_count_predicate_string"
+file = "count_predicate_string.jl"
+expected = true
+description = "count(predicate, string) for character counting (Issue #2078)"
+
+[[tests]]
+name = "strings_curried_string_search"
+file = "curried_string_search.jl"
+expected = true
+description = "Curried forms: startswith(prefix), endswith(suffix), contains(needle), occursin(haystack) (Issue #2100)"
+
+[[tests]]
+name = "strings_regex_replace"
+file = "regex_replace.jl"
+expected = true
+description = "replace(s, r\"pattern\" => new) with Regex patterns (Issue #2112)"
+
+[[tests]]
+name = "strings_regex_match_fields"
+file = "regex_match_fields.jl"
+expected = true
+description = "RegexMatch field access: .match, .captures, .offset, .offsets (Issue #2116)"
+
+[[tests]]
+name = "strings_interpolation_bang"
+file = "string_interpolation_bang.jl"
+expected = true
+description = "String interpolation $name! treats ! as literal, not part of identifier (Issue #2130)"
+
+[[tests]]
+name = "strings_string_char_concat"
+file = "string_char_concat.jl"
+expected = true
+description = "String * Char concatenation and chained expressions (Issue #2127)"
+
+[[tests]]
+name = "strings_map_string"
+file = "map_string.jl"
+expected = true
+description = "map(f, s::String) returns String, not Vector{Any} (Issue #2609)"
+
+[[tests]]
+name = "strings_titlecase_edge_cases"
+file = "test_titlecase_edge_cases.jl"
+expected = true
+description = "titlecase edge cases verified against official Julia (Issue #2612)"
+
+[[tests]]
+name = "strings_occursin_hybrid_dispatch"
+file = "test_occursin_hybrid_dispatch.jl"
+expected = true
+description = "occursin hybrid dispatch: String path (Pure Julia) + Regex path (Rust builtin) (Issue #2614)"

@@ -1,0 +1,85 @@
+# Test manifest for control_flow category
+
+[[tests]]
+name = "if_basic"
+file = "if_basic.jl"
+expected = true
+description = "Basic if statement"
+
+[[tests]]
+name = "if_else"
+file = "if_else.jl"
+expected = true
+description = "If-else statement"
+
+[[tests]]
+name = "for_loop_sum"
+file = "for_loop_sum.jl"
+expected = true
+description = "For loop summing 1 to 10"
+
+[[tests]]
+name = "while_loop"
+file = "while_loop.jl"
+expected = true
+description = "While loop counting"
+
+[[tests]]
+name = "short_circuit_return"
+file = "short_circuit_return.jl"
+expected = true
+description = "Short-circuit && return pattern"
+
+[[tests]]
+name = "short_circuit_or_return"
+file = "short_circuit_or_return.jl"
+expected = true
+description = "Short-circuit || return pattern"
+
+[[tests]]
+name = "short_circuit_break"
+file = "short_circuit_break.jl"
+expected = true
+description = "Short-circuit && break pattern"
+
+[[tests]]
+name = "short_circuit_continue"
+file = "short_circuit_continue.jl"
+expected = true
+description = "Short-circuit && continue pattern"
+
+[[tests]]
+name = "control_flow_reassign_in_if"
+file = "reassign_in_if.jl"
+expected = true
+description = "Variable reassignment inside if block (regression test)"
+
+[[tests]]
+name = "goto_label_basic"
+file = "goto_label_basic.jl"
+expected = true
+description = "@goto/@label basic control flow (forward jump, backward jump, multiple labels, nested)"
+
+[[tests]]
+name = "while_loop_narrowing"
+file = "while_loop_narrowing.jl"
+expected = true
+description = "While loop type narrowing (Issue #2303)"
+
+[[tests]]
+name = "and_throw"
+file = "test_and_throw.jl"
+expected = true
+description = "Short-circuit && and || with throw()/error() (Issue #2598)"
+
+[[tests]]
+name = "begin_block_scoping"
+file = "begin_block_scoping.jl"
+expected = true
+description = "begin...end blocks share the enclosing scope (Issue #2868)"
+
+[[tests]]
+name = "begin_block_mutation"
+file = "begin_block_mutation.jl"
+expected = true
+description = "begin...end blocks preserve all side effects (mutations, assignments) — Issue #3102"

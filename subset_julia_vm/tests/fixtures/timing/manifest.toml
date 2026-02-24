@@ -1,0 +1,25 @@
+# Test manifest for timing category
+
+[[tests]]
+name = "timing_time_ns_basic"
+file = "time_ns_basic.jl"
+expected = true
+description = "time_ns() returns current time in nanoseconds"
+
+[[tests]]
+name = "timing_time_macro_basic"
+file = "time_macro_basic.jl"
+expected = true
+description = "@time macro measures time and returns result (Pure Julia)"
+
+[[tests]]
+name = "timing_elapsed_basic"
+file = "timing_elapsed_basic.jl"
+expected = true
+description = "@elapsed macro returns elapsed time in seconds"
+
+[[tests]]
+name = "timing_timed_basic"
+file = "timing_timed_basic.jl"
+expected = true
+description = "@timed macro returns (result, elapsed) tuple"

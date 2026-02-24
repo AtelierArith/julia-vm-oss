@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SubsetJuliaVM Web Test Runner</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1f1c;
+            color: #f8f8f2;
+            padding: 2rem;
+        }
+
+        h1 {
+            margin-bottom: 1rem;
+        }
+
+        .controls {
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        button.primary {
+            background: #66d9ef;
+            color: #1e1f1c;
+        }
+
+        button.primary:hover {
+            background: #52b5d6;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .summary {
+            padding: 1rem;
+            background: #272822;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-family: monospace;
+        }
+
+        .summary .pass { color: #a6e22e; }
+        .summary .fail { color: #f92672; }
+        .summary .skip { color: #75715e; }
+
+        .results {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .test-item {
+            padding: 1rem;
+            background: #272822;
+            border-radius: 8px;
+            border-left: 4px solid #75715e;
+        }
+
+        .test-item.pass {
+            border-left-color: #a6e22e;
+        }
+
+        .test-item.fail {
+            border-left-color: #f92672;
+        }
+
+        .test-item.running {
+            border-left-color: #66d9ef;
+        }
+
+        .test-item .name {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .test-item .status {
+            font-size: 0.875rem;
+        }
+
+        .test-item .status.pass { color: #a6e22e; }
+        .test-item .status.fail { color: #f92672; }
+        .test-item .status.running { color: #66d9ef; }
+
+        .test-item .error {
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: rgba(249, 38, 114, 0.1);
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #f92672;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .test-item .output {
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: #1e1f1c;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+        }
+
+        .progress {
+            height: 4px;
+            background: #3e3d32;
+            border-radius: 2px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #66d9ef;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <h1>SubsetJuliaVM Web Test Runner</h1>
+
+    <div class="controls">
+        <button id="run-all" class="primary" disabled>Run All Tests</button>
+        <button id="run-failed" disabled>Re-run Failed</button>
+        <span id="status"></span>
+    </div>
+
+    <div class="progress">
+        <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+    </div>
+
+    <div class="summary" id="summary">
+        Click "Run All Tests" to start testing all samples.
+    </div>
+
+    <div class="results" id="results"></div>
+
+    <script type="module">
+        import { samplesIR } from './samples_ir.js?v=23';
+
+        let wasm = null;
+        let testResults = [];
+
+        // Initialize
+        async function init() {
+            document.getElementById('status').textContent = 'Loading...';
+
+            try {
+                // Load WASM (includes Pure Rust parser - no tree-sitter needed)
+                const module = await import('./pkg/subset_julia_vm_web.js');
+                await module.default();
+                wasm = module;
+                console.log('WASM loaded (using Pure Rust parser)');
+
+                document.getElementById('status').textContent = 'Ready';
+                document.getElementById('run-all').disabled = false;
+
+                // Show sample list
+                showSampleList();
+            } catch (e) {
+                document.getElementById('status').textContent = 'Error: ' + e.message;
+                console.error(e);
+            }
+        }
+
+        function showSampleList() {
+            const results = document.getElementById('results');
+            results.innerHTML = samplesIR.map((sample, idx) => `
+                <div class="test-item" id="test-${idx}">
+                    <div class="name">${idx + 1}. ${sample.name}</div>
+                    <div class="status">Pending</div>
+                </div>
+            `).join('');
+        }
+
+        // Run single test
+        async function runTest(sample, idx) {
+            const testItem = document.getElementById(`test-${idx}`);
+            const statusEl = testItem.querySelector('.status');
+
+            testItem.className = 'test-item running';
+            statusEl.className = 'status running';
+            statusEl.textContent = 'Running...';
+
+            // Remove old error/output
+            const oldError = testItem.querySelector('.error');
+            const oldOutput = testItem.querySelector('.output');
+            if (oldError) oldError.remove();
+            if (oldOutput) oldOutput.remove();
+
+            try {
+                const code = sample.code;
+                const seed = 42;
+                let result;
+
+                if (sample.ir) {
+                    // Use pre-compiled IR
+                    result = wasm.run_ir_json(sample.ir, BigInt(seed));
+                } else {
+                    // Parse and run using Pure Rust parser (same as Playground)
+                    result = wasm.run_from_source(code, BigInt(seed));
+                }
+
+                if (result.success) {
+                    testItem.className = 'test-item pass';
+                    statusEl.className = 'status pass';
+                    statusEl.textContent = 'PASS';
+
+                    if (result.output) {
+                        const outputEl = document.createElement('div');
+                        outputEl.className = 'output';
+                        outputEl.textContent = result.output;
+                        testItem.appendChild(outputEl);
+                    }
+
+                    return { pass: true };
+                } else {
+                    throw new Error(result.error_message || 'Execution failed');
+                }
+            } catch (e) {
+                testItem.className = 'test-item fail';
+                statusEl.className = 'status fail';
+                statusEl.textContent = 'FAIL';
+
+                const errorEl = document.createElement('div');
+                errorEl.className = 'error';
+                errorEl.textContent = e.message;
+                testItem.appendChild(errorEl);
+
+                return { pass: false, error: e.message };
+            }
+        }
+
+        // Run all tests
+        async function runAllTests(onlyFailed = false) {
+            const runAllBtn = document.getElementById('run-all');
+            const runFailedBtn = document.getElementById('run-failed');
+            const statusEl = document.getElementById('status');
+            const progressBar = document.getElementById('progress-bar');
+
+            runAllBtn.disabled = true;
+            runFailedBtn.disabled = true;
+
+            testResults = [];
+            let passed = 0;
+            let failed = 0;
+
+            const samplesToRun = onlyFailed
+                ? samplesIR.map((s, i) => ({ sample: s, idx: i }))
+                    .filter((_, i) => testResults[i] && !testResults[i].pass)
+                : samplesIR.map((s, i) => ({ sample: s, idx: i }));
+
+            for (let i = 0; i < samplesToRun.length; i++) {
+                const { sample, idx } = samplesToRun[i];
+                statusEl.textContent = `Running ${i + 1}/${samplesToRun.length}: ${sample.name}`;
+                progressBar.style.width = `${((i + 1) / samplesToRun.length) * 100}%`;
+
+                const result = await runTest(sample, idx);
+                testResults[idx] = result;
+
+                if (result.pass) {
+                    passed++;
+                } else {
+                    failed++;
+                }
+
+                // Small delay to allow UI update
+                await new Promise(r => setTimeout(r, 10));
+            }
+
+            // Update summary
+            const summary = document.getElementById('summary');
+            summary.innerHTML = `
+                <span class="pass">PASS: ${passed}</span> |
+                <span class="fail">FAIL: ${failed}</span> |
+                Total: ${samplesToRun.length}
+            `;
+
+            statusEl.textContent = 'Done';
+            runAllBtn.disabled = false;
+            runFailedBtn.disabled = failed === 0;
+        }
+
+        // Event listeners
+        document.getElementById('run-all').addEventListener('click', () => runAllTests(false));
+        document.getElementById('run-failed').addEventListener('click', () => runAllTests(true));
+
+        // Start
+        init();
+    </script>
+</body>
+</html>

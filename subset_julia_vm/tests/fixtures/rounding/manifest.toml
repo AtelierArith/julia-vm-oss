@@ -1,0 +1,13 @@
+# Test manifest for rounding category
+
+[[tests]]
+name = "rounding_basic"
+file = "rounding_basic.jl"
+expected = true
+description = "RoundingMode type and standard rounding constants"
+
+[[tests]]
+name = "rounding_functions"
+file = "rounding_functions.jl"
+expected = true
+description = "floor, ceil, round, trunc with Int conversion (Issue #3123)"

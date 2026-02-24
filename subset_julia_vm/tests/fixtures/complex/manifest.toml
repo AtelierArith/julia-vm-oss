@@ -1,0 +1,175 @@
+# Test manifest for complex category
+
+[[tests]]
+name = "complex_parametric_float64"
+file = "parametric_float64.jl"
+expected = true
+description = "Complex{Float64}(3, 4) - explicit Float64 type parameter"
+
+[[tests]]
+name = "complex_parametric_int64"
+file = "parametric_int64.jl"
+expected = true
+description = "Complex{Int64}(5, 6) - explicit Int64 type parameter"
+
+[[tests]]
+name = "complex_parametric_float32"
+file = "parametric_float32.jl"
+expected = true
+description = "Complex{Float32} - explicit Float32 type parameter"
+
+[[tests]]
+name = "complex_inference_int"
+file = "inference_int.jl"
+expected = true
+description = "Complex(2, 3) - type inference from Int64 arguments"
+
+[[tests]]
+name = "complex_widening"
+file = "widening.jl"
+expected = true
+description = "Complex(1, 2.5) - type widening Int64 + Float64 -> Float64"
+
+[[tests]]
+name = "complex_adjoint_double"
+file = "adjoint_double.jl"
+expected = true
+description = "adjoint(adjoint(z)) == z - double adjoint returns original"
+
+[[tests]]
+name = "complex_array_interleaved"
+file = "complex_array_interleaved.jl"
+expected = true
+description = "Complex array with interleaved storage"
+
+[[tests]]
+name = "complex_predicates"
+file = "predicates.jl"
+expected = true
+description = "Complex predicates: isfinite, isnan, isinf (Issue #475)"
+
+[[tests]]
+name = "complex_wrapped_functions"
+file = "wrapped_functions.jl"
+expected = true
+description = "Complex functions (conj, real, imag) called through wrapper functions (Issue #932)"
+
+[[tests]]
+name = "complex_im_literal_operations"
+file = "im_literal_operations.jl"
+expected = true
+description = "Complex{Int64} operations with im literal syntax (Issue #920)"
+
+[[tests]]
+name = "complex_complexf32_support"
+file = "complexf32_support.jl"
+expected = true
+description = "ComplexF32 (Complex{Float32}) type alias and operations (Issue #1399)"
+
+[[tests]]
+name = "complex_scalar_complex_array_mul"
+file = "scalar_complex_array_mul.jl"
+expected = true
+description = "Real scalar * Complex array multiplication (Issue #1594)"
+
+[[tests]]
+name = "complex_array_broadcast"
+file = "complex_array_broadcast.jl"
+expected = true
+description = "Complex array broadcast operations: +, -, .* (Issue #1591)"
+
+[[tests]]
+name = "complex_float32_field_access"
+file = "complex_float32_field_access.jl"
+expected = true
+description = "Complex{Float32} field access returns Float32 (Issue #1651)"
+
+[[tests]]
+name = "complex_scalar_real_array_mul"
+file = "complex_scalar_real_array_mul.jl"
+expected = true
+description = "Complex scalar * Real array multiplication (Issue #1601, #1605)"
+
+[[tests]]
+name = "complex_mixed_real_complex_array_ops"
+file = "mixed_real_complex_array_ops.jl"
+expected = true
+description = "Mixed Real/Complex array element-wise operations: +, -, .* (Issue #1605)"
+
+[[tests]]
+name = "complex_undef_array_write"
+file = "complex_undef_array_write.jl"
+expected = true
+description = "Write to and read from Vector{Complex{Float64}}(undef, n) (Issue #1801)"
+
+[[tests]]
+name = "complex_math"
+file = "complex_math.jl"
+expected = true
+description = "abs, abs2, angle, exp, sqrt, log for Complex (Issue #1881)"
+
+[[tests]]
+name = "complex_trig"
+file = "complex_trig.jl"
+expected = true
+description = "sin, cos, tan for Complex with identity check (Issue #1881)"
+
+[[tests]]
+name = "complex_cis_reim"
+file = "complex_cis_reim.jl"
+expected = true
+description = "cis, cispi, reim - complex exponential and decomposition (Issue #1881)"
+
+[[tests]]
+name = "complex_im_broadcast_scalar"
+file = "im_broadcast_scalar.jl"
+expected = true
+description = "im .* array broadcast preserves Complex type (sync_exec nested call fix)"
+
+[[tests]]
+name = "complex_primitive_dispatch"
+file = "complex_primitive_dispatch.jl"
+expected = true
+description = "Complex + Float32/Bool dispatch uses is_builtin_numeric (Issue #2235)"
+
+[[tests]]
+name = "complex_generic_dispatch"
+file = "complex_generic_dispatch.jl"
+expected = true
+description = "Generic Complex arithmetic via parametric type dispatch (Issue #2409)"
+
+[[tests]]
+name = "complex_bool_strong_zero"
+file = "test_bool_strong_zero.jl"
+expected = true
+description = "Bool strong zero: false * NaN == 0.0, false * Inf == 0.0 (Issue #2428)"
+
+[[tests]]
+name = "complex_equality"
+file = "test_complex_equality.jl"
+expected = true
+description = "Complex ===, isequal, hash via generic Struct path (Issue #2434)"
+
+[[tests]]
+name = "complex_nested_expr_type"
+file = "nested_expr_type.jl"
+expected = true
+description = "Complex type preserved in nested expressions like cx * log(z) (Issue #2425)"
+
+[[tests]]
+name = "complex_mixed_array_promotion"
+file = "test_mixed_array_promotion.jl"
+expected = true
+description = "Mixed numeric + Complex array literal promotes to Vector{Complex{Int64}} (Issue #2472)"
+
+[[tests]]
+name = "complex_display_formatting"
+file = "test_complex_display.jl"
+expected = true
+description = "Complex display formatting preserves type (3.0 + 2.0im not 3 + 2im) (Issue #2434)"
+
+[[tests]]
+name = "complex_im_in_function_body"
+file = "im_in_function_body.jl"
+expected = true
+description = "im (global const) correctly typed inside function bodies via global_types propagation (Issue #3088)"

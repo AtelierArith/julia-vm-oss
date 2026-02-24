@@ -1,0 +1,10 @@
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.4"
+manifest_format = "2.0"
+project_hash = "f352ceee806168c8ae38887a01d7bae6ca62470b"
+
+[[deps.LinearAlgebra]]
+path = "."
+uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+version = "1.12.0"

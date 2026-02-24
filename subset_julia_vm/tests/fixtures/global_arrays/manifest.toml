@@ -1,0 +1,25 @@
+# Test manifest for global_arrays category
+
+[[tests]]
+name = "global_array_const_modify"
+file = "const_array_modify.jl"
+expected = 6.0
+description = "Functions can modify global const arrays (Issue #341)"
+
+[[tests]]
+name = "global_array_patterns"
+file = "global_array_patterns.jl"
+expected = true
+description = "Global const arrays: read-only access, mutation via functions, accumulation, Float64 (Issue #2846)"
+
+[[tests]]
+name = "global_array_mutations"
+file = "global_array_mutations.jl"
+expected = true
+description = "Global arrays mutated via push!/pop!/pushfirst!/popfirst!/insert!/deleteat! inside functions (Issue #3121)"
+
+[[tests]]
+name = "global_array_store_reload"
+file = "global_array_store_reload.jl"
+expected = true
+description = "StoreArray-for-globals: in-place mutation, read-after-write, element swap (Issue #3131)"

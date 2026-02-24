@@ -1,0 +1,67 @@
+# Test manifest for sort category
+
+[[tests]]
+name = "sort_issorted_basic"
+file = "issorted_basic.jl"
+expected = true
+description = "issorted: check if array is sorted (Issue #495)"
+
+[[tests]]
+name = "sort_searchsorted"
+file = "searchsorted.jl"
+expected = true
+description = "searchsorted: return range of indices for value in sorted array"
+
+[[tests]]
+name = "sort_collect_copy"
+file = "collect_copy.jl"
+expected = true
+description = "collect(array) creates independent copy for sort operations (Issue #423)"
+
+[[tests]]
+name = "sort_sortperm_bang"
+file = "sortperm_bang.jl"
+expected = true
+description = "sortperm! fills array with permutation indices in-place (Issue #495)"
+
+[[tests]]
+name = "sort_algorithm_types"
+file = "test_algorithm_types.jl"
+expected = true
+description = "Sorting algorithm types: Algorithm, InsertionSort, QuickSort, MergeSort, PartialQuickSort"
+
+[[tests]]
+name = "sort_basic"
+file = "sort_basic.jl"
+expected = true
+description = "sort! and sort - in-place and copy sorting (Issue #1879)"
+
+[[tests]]
+name = "sort_partialsort_insorted"
+file = "partialsort_insorted.jl"
+expected = true
+description = "partialsort, insorted, reverse! - partial sort, sorted search, array reversal (Issue #1879)"
+
+[[tests]]
+name = "sort_keywords"
+file = "sort_keywords.jl"
+expected = true
+description = "sort/sort! with by and rev keyword arguments (Issue #2011)"
+
+[[tests]]
+name = "sort_sortperm_issorted_keywords"
+file = "sortperm_issorted_keywords.jl"
+expected = true
+description = "sortperm/sortperm!/issorted with by, rev, lt keyword arguments (Issue #2015)"
+
+[[tests]]
+name = "sort_strings"
+file = "sort_strings.jl"
+expected = true
+description = "sort on string arrays and string comparison operators (Issue #2025)"
+
+[[tests]]
+name = "sort_insorted_argument_order"
+file = "insorted_argument_order.jl"
+expected = true
+description = "insorted(x, arr) argument order matches Julia's insorted(x, v) (Issue #2163)"

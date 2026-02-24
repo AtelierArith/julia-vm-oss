@@ -1,0 +1,29 @@
+[[tests]]
+name = "subarray_view_basic"
+file = "view_basic.jl"
+expected = true
+description = "Test basic view creation and indexing"
+
+[[tests]]
+name = "subarray_view_modification"
+file = "view_modification.jl"
+expected = true
+description = "Test that view modifications affect parent array"
+
+[[tests]]
+name = "subarray_view_length"
+file = "view_length.jl"
+expected = true
+description = "Test length and size operations on SubArray"
+
+[[tests]]
+name = "subarray_view_macro"
+file = "view_macro.jl"
+expected = true
+description = "Test @view macro transforms A[i:j] to view(A, i:j) (Issue #320)"
+
+[[tests]]
+name = "subarray_views_macro"
+file = "views_macro.jl"
+expected = true
+description = "Test @views macro transforms all indexing to views (Issue #466)"

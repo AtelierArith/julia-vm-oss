@@ -1,0 +1,55 @@
+# Test manifest for where category
+
+[[tests]]
+name = "where_basic_unbounded"
+file = "basic_unbounded.jl"
+expected = true
+description = "Function with unbounded where clause (where T)"
+
+[[tests]]
+name = "where_bounded_real"
+file = "bounded_real.jl"
+expected = true
+description = "Function with bounded where clause (where T<:Real) - identity function"
+
+[[tests]]
+name = "where_short_function"
+file = "short_function.jl"
+expected = 6.0
+description = "Short function syntax with where clause"
+
+[[tests]]
+name = "where_multiple_params"
+file = "multiple_params.jl"
+expected = true
+description = "Function with multiple type parameters in where clause - returns first arg"
+
+[[tests]]
+name = "where_parametric_complex"
+file = "parametric_complex.jl"
+expected = true
+description = "Parametric dispatch: Complex{Float64} matches Complex{T} where T<:Real"
+
+[[tests]]
+name = "where_unionall_basic"
+file = "unionall_basic.jl"
+expected = true
+description = "Basic UnionAll type functionality with type parameters"
+
+[[tests]]
+name = "where_complex_constraints"
+file = "complex_constraints.jl"
+expected = true
+description = "Complex type parameter constraints with upper bounds (T<:Number, T<:Real)"
+
+[[tests]]
+name = "where_multi_char_type_vars"
+file = "multi_char_type_vars.jl"
+expected = true
+description = "Multi-character type variable names T1, T2, S1 in where clauses (Issue #2273)"
+
+[[tests]]
+name = "where_runtime_dispatch_type_params"
+file = "runtime_dispatch_type_params.jl"
+expected = true
+description = "Runtime dispatch binds where T type parameters (Issue #2468)"

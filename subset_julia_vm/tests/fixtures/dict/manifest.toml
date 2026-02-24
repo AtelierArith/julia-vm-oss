@@ -1,0 +1,91 @@
+# Test manifest for dict category
+
+[[tests]]
+name = "dict_iteration"
+file = "dict_iteration.jl"
+expected = true
+description = "Dict iteration in for loops yields Pair(key, value) (Issue #1114)"
+
+[[tests]]
+name = "dict_mergewith"
+file = "mergewith.jl"
+expected = true
+description = "mergewith! and mergewith - merge dicts with custom combine function (Issue #1813)"
+
+[[tests]]
+name = "dict_indexing_any"
+file = "dict_indexing_any.jl"
+expected = true
+description = "Dict string-key indexing with Any-typed function parameters (Issue #1814)"
+
+[[tests]]
+name = "dict_copy"
+file = "copy_dict.jl"
+expected = true
+description = "copy(Dict) returns a new Dict, not Vector (Issue #1821)"
+
+[[tests]]
+name = "dict_indexing_dispatch"
+file = "dict_indexing_dispatch.jl"
+expected = true
+description = "Dict indexing dispatch: multi-layer functions, Symbol keys, mixed ops (Issue #1820)"
+
+[[tests]]
+name = "dict_get_pure_julia"
+file = "test_get_pure_julia.jl"
+expected = true
+description = "Dict Pure Julia operations: haskey, get, getkey, get!, delete!, empty! (Issue #2572)"
+
+[[tests]]
+name = "dict_merge_pure_julia"
+file = "test_merge_pure_julia.jl"
+expected = true
+description = "Dict merge Pure Julia: merge, copy, mergewith (Issue #2573)"
+
+[[tests]]
+name = "dict_keys_values_pairs_pure_julia"
+file = "test_keys_values_pairs_pure_julia.jl"
+expected = true
+description = "Dict keys/values/pairs Pure Julia: _dict_keys, _dict_values, _dict_pairs intrinsics (Issue #2669, #2573)"
+
+[[tests]]
+name = "dict_type_params"
+file = "test_dict_type_params.jl"
+expected = true
+description = "Dict{K,V} type parameters are tracked at runtime"
+
+[[tests]]
+name = "dict_memory_hashtable"
+file = "test_dict_memory_hashtable.jl"
+expected = true
+description = "Dict Memory-based hash table: insert, delete, rehash, iteration, merge (Issue #2763)"
+
+[[tests]]
+name = "dict_abstractdict_parametric"
+file = "test_abstractdict_parametric.jl"
+expected = true
+description = "AbstractDict{K,V} parametric abstract type: subtyping and isa checks (Issue #2745)"
+
+[[tests]]
+name = "dict_hash_table_ops"
+file = "test_hash_table_ops.jl"
+expected = true
+description = "Hash table helper functions: _tablesz, _shorthash7, hashindex, constants (Issue #2747)"
+
+[[tests]]
+name = "dict_pure_julia_struct"
+file = "test_pure_julia_dict.jl"
+expected = true
+description = "Dict{K,V} Pure Julia mutable struct: constructor, insert, lookup, delete, iterate (Issue #2748)"
+
+[[tests]]
+name = "dict_setindex_struct_dispatch"
+file = "dict_setindex_struct_dispatch.jl"
+expected = true
+description = "DictSet dispatches setindex! to user methods on non-Dict StructRef (Issue #3169)"
+
+[[tests]]
+name = "dict_delete_struct_dispatch"
+file = "dict_delete_struct_dispatch.jl"
+expected = true
+description = "DictDelete dispatches delete! to user methods on non-Dict StructRef (Issue #3169)"

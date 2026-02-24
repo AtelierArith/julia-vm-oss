@@ -1,0 +1,5 @@
+[[tests]]
+name = "struct_field_function_call"
+file = "field_function_call.jl"
+expected = true
+description = "Calling a function stored in struct field (g.f(x) pattern)"

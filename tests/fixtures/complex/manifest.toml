@@ -1,0 +1,11 @@
+[[tests]]
+name = "complex_simple_add"
+file = "simple_add.jl"
+expected = true
+description = "Test Complex{Int64} direct addition"
+
+[[tests]]
+name = "complex_im_literal_operations"
+file = "im_literal_operations.jl"
+expected = true
+description = "Test Complex{Int64} operations with im literals"

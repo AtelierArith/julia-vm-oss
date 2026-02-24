@@ -1,0 +1,31 @@
+# Test manifest for meta category
+
+[[tests]]
+name = "meta_isexpr_pure_julia"
+file = "meta_isexpr_pure_julia.jl"
+expected = true
+description = "Meta.isexpr Pure Julia implementation - check Expr head and args length"
+
+[[tests]]
+name = "meta_quot_pure_julia"
+file = "meta_quot_pure_julia.jl"
+expected = true
+description = "Meta.quot Pure Julia implementation - create quoted expressions"
+
+[[tests]]
+name = "meta_isidentifier_validation"
+file = "meta_isidentifier_validation.jl"
+expected = true
+description = "Meta.isidentifier - validate Julia identifier strings and symbols"
+
+[[tests]]
+name = "meta_operator_predicates"
+file = "meta_operator_predicates.jl"
+expected = true
+description = "Meta.isoperator, isunaryoperator, isbinaryoperator, ispostfixoperator"
+
+[[tests]]
+name = "meta_show_sexpr_basics"
+file = "meta_show_sexpr_basics.jl"
+expected = true
+description = "Meta.show_sexpr - display expression as S-expression"

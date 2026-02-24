@@ -1,0 +1,85 @@
+# Test manifest for dates category
+
+[[tests]]
+name = "dates_date_constructor"
+file = "date_constructor.jl"
+expected = true
+description = "Date constructor and year/month/day accessors"
+
+[[tests]]
+name = "dates_datetime_constructor"
+file = "datetime_constructor.jl"
+expected = true
+description = "DateTime constructor and hour/minute/second accessors"
+
+[[tests]]
+name = "dates_time_constructor"
+file = "time_constructor.jl"
+expected = true
+description = "Time constructor and hour/minute/second accessors"
+
+[[tests]]
+name = "dates_isleapyear"
+file = "isleapyear.jl"
+expected = true
+description = "isleapyear function for various years"
+
+[[tests]]
+name = "dates_daysinmonth"
+file = "daysinmonth.jl"
+expected = true
+description = "daysinmonth for various months including leap year February"
+
+[[tests]]
+name = "dates_dayofweek"
+file = "dayofweek.jl"
+expected = true
+description = "dayofweek returns 1-7 (Monday-Sunday)"
+
+[[tests]]
+name = "dates_date_arithmetic"
+file = "date_arithmetic.jl"
+expected = true
+description = "Date + Day arithmetic"
+
+[[tests]]
+name = "dates_year_arithmetic"
+file = "year_arithmetic.jl"
+expected = true
+description = "Date + Year arithmetic with leap year handling"
+
+[[tests]]
+name = "dates_month_arithmetic"
+file = "month_arithmetic.jl"
+expected = true
+description = "Date + Month arithmetic with day clamping"
+
+[[tests]]
+name = "dates_date_difference"
+file = "date_difference.jl"
+expected = true
+description = "Date subtraction returns Day period"
+
+[[tests]]
+name = "dates_period_value"
+file = "period_value.jl"
+expected = true
+description = "Period value accessor function"
+
+[[tests]]
+name = "dates_period_arithmetic"
+file = "period_arithmetic.jl"
+expected = true
+description = "Period arithmetic (+, -, *)"
+
+[[tests]]
+name = "dates_dayofyear"
+file = "dayofyear.jl"
+expected = true
+description = "dayofyear function for various dates"
+
+[[tests]]
+name = "dates_quarter"
+file = "quarter.jl"
+expected = true
+description = "quarterofyear function returns 1-4"

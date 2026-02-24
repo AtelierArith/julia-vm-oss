@@ -1,0 +1,17 @@
+[[tests]]
+name = "statistics_basic"
+file = "statistics_basic.jl"
+expected = true
+description = "Test Statistics module functions: mean, var, std, median, quantile, cov, cor"
+
+[[tests]]
+name = "statistics_mean_extended"
+file = "statistics_mean_extended.jl"
+expected = true
+description = "Test mean(f, itr) and mean(arr; dims) variants (Issue #2151)"
+
+[[tests]]
+name = "statistics_inplace"
+file = "statistics_inplace.jl"
+expected = true
+description = "median!, quantile!, and quantile with vector of probabilities (Issue #2161)"

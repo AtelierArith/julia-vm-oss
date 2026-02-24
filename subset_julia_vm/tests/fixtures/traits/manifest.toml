@@ -1,0 +1,13 @@
+# Test manifest for traits category
+
+[[tests]]
+name = "traits_basic"
+file = "traits_basic.jl"
+expected = true
+description = "Type traits: OrderStyle hierarchy"
+
+[[tests]]
+name = "traits_type_dispatch"
+file = "traits_type_dispatch.jl"
+expected = true
+description = "Traits dispatch on concrete types, subtype relationships (Issue #3123)"

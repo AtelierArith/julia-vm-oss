@@ -1,0 +1,23 @@
+[[tests]]
+name = "iocontext_sprint_context"
+file = "test_sprint_context.jl"
+expected = true
+description = "Test sprint with IOContext :compact support"
+
+[[tests]]
+name = "iocontext_sprint_basic"
+file = "sprint_basic.jl"
+expected = true
+description = "Test sprint with show, print, println; string capture patterns (Issue #2846)"
+
+[[tests]]
+name = "iocontext_properties"
+file = "iocontext_properties.jl"
+expected = true
+description = "IOContext key-value property access with get() and haskey()"
+
+[[tests]]
+name = "iocontext_get_haskey"
+file = "iocontext_get_haskey.jl"
+expected = true
+description = "Test get() and haskey() dispatch on IOContext (Issue #3152)"

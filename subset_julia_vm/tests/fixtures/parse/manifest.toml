@@ -1,0 +1,13 @@
+# Test manifest for parse category
+
+[[tests]]
+name = "parse_basic"
+file = "parse_basic.jl"
+expected = true
+description = "parse() and tryparse() for Int64 strings"
+
+[[tests]]
+name = "parse_float_bool"
+file = "parse_float_bool.jl"
+expected = true
+description = "parse/tryparse for Float64 and Int with bases (Issue #3123)"

@@ -1,0 +1,13 @@
+# Test manifest for some category
+
+[[tests]]
+name = "some_basic"
+file = "some_basic.jl"
+expected = true
+description = "Some type and something() function"
+
+[[tests]]
+name = "some_coalesce"
+file = "some_coalesce.jl"
+expected = true
+description = "Some wrapping, isnothing, Some(nothing) (Issue #3123)"

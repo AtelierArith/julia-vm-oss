@@ -1,0 +1,11 @@
+[[tests]]
+name = "error_handling_type_errors"
+file = "type_errors.jl"
+expected = true
+description = "Test that type errors are caught gracefully instead of causing VM panics"
+
+[[tests]]
+name = "error_handling_method_errors"
+file = "method_errors.jl"
+expected = true
+description = "Test that method errors (no matching method) are raised properly"

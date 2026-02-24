@@ -1,0 +1,79 @@
+# Test manifest for mixed category
+
+[[tests]]
+name = "mixed_int_plus_complex"
+file = "int_plus_complex.jl"
+expected = true
+description = "Int + Complex{Float64} - integer added to complex number"
+
+[[tests]]
+name = "mixed_complex_plus_int"
+file = "complex_plus_int.jl"
+expected = true
+description = "Complex{Float64} + Int - complex number added to integer"
+
+[[tests]]
+name = "mixed_int_times_complex"
+file = "int_times_complex.jl"
+expected = true
+description = "Int * Complex{Float64} - integer times complex number"
+
+[[tests]]
+name = "mixed_int_minus_complex"
+file = "int_minus_complex.jl"
+expected = true
+description = "Int - Complex{Float64} - integer minus complex number"
+
+[[tests]]
+name = "mixed_int_plus_rational"
+file = "int_plus_rational.jl"
+expected = true
+description = "Int + Rational{Int64} - integer added to rational number"
+
+[[tests]]
+name = "mixed_rational_plus_int"
+file = "rational_plus_int.jl"
+expected = true
+description = "Rational{Int64} + Int - rational number added to integer"
+
+[[tests]]
+name = "mixed_int_times_rational"
+file = "int_times_rational.jl"
+expected = true
+description = "Int * Rational{Int64} - integer times rational number"
+
+[[tests]]
+name = "mixed_int_minus_rational"
+file = "int_minus_rational.jl"
+expected = true
+description = "Int - Rational{Int64} - integer minus rational number (Issue #1783)"
+
+[[tests]]
+name = "mixed_rational_minus_int"
+file = "rational_minus_int.jl"
+expected = true
+description = "Rational{Int64} - Int - rational number minus integer (Issue #1785)"
+
+[[tests]]
+name = "mixed_int_div_rational"
+file = "int_div_rational.jl"
+expected = true
+description = "Int / Rational{Int64} - integer divided by rational number (Issue #1785)"
+
+[[tests]]
+name = "mixed_rational_div_int"
+file = "rational_div_int.jl"
+expected = true
+description = "Rational{Int64} / Int - rational number divided by integer (Issue #1785)"
+
+[[tests]]
+name = "mixed_rational_times_int"
+file = "rational_times_int.jl"
+expected = true
+description = "Rational{Int64} * Int - rational number times integer (Issue #1785)"
+
+[[tests]]
+name = "mixed_rational_symmetry"
+file = "rational_symmetry.jl"
+expected = true
+description = "Symmetry test: n op r == r op n for commutative operators +, * (Issue #1785)"

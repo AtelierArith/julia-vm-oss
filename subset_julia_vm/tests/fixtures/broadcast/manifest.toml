@@ -1,0 +1,317 @@
+# Test manifest for broadcast category
+
+[[tests]]
+name = "broadcast_function"
+file = "broadcast_function.jl"
+expected = true
+description = "broadcast(f, A, B) with user-defined functions"
+
+[[tests]]
+name = "broadcast_shapes"
+file = "broadcast_shapes.jl"
+expected = true
+description = "broadcast(f, A, B) with scalar and array combinations"
+
+[[tests]]
+name = "broadcast_inplace"
+file = "broadcast_inplace.jl"
+expected = true
+description = "broadcast!(f, dest, A, B) in-place broadcast"
+
+[[tests]]
+name = "tuple_binary_add"
+file = "tuple_binary_add.jl"
+expected = 21.0
+description = "Binary tuple broadcast: (1,2,3) .+ (4,5,6)"
+
+[[tests]]
+name = "tuple_binary_mul"
+file = "tuple_binary_mul.jl"
+expected = 12.0
+description = "Binary tuple broadcast with scalar: (1,2,3) .* 2"
+
+[[tests]]
+name = "tuple_scalar_sub"
+file = "tuple_scalar_sub.jl"
+expected = 24.0
+description = "Scalar .- Tuple: 10 .- (1,2,3)"
+
+[[tests]]
+name = "array_tuple_broadcast"
+file = "array_tuple_broadcast.jl"
+expected = 42.0
+description = "Array-Tuple mixed broadcast: [1,2,3] .+ (4,5,6) returns array"
+
+[[tests]]
+name = "tuple_type_preserve"
+file = "tuple_type_preserve.jl"
+expected = 1.0
+description = "Type preservation in tuple broadcast: Int64+Int64→Int64"
+
+[[tests]]
+name = "tuple_extra_args"
+file = "tuple_extra_args.jl"
+expected = 5.0
+description = "Tuple broadcast with extra arguments (Issue #417)"
+
+[[tests]]
+name = "broadcast_using_module"
+file = "using_broadcast.jl"
+expected = true
+description = "using Broadcast module (Issue #760)"
+
+[[tests]]
+name = "broadcast_int64_type"
+file = "broadcast_int64_type.jl"
+expected = true
+description = "Int64 broadcast type preservation: Int64 .* Int64 returns Int64"
+
+[[tests]]
+name = "scalar_array_mul"
+file = "scalar_array_mul.jl"
+expected = true
+description = "Scalar * Array multiplication with various numeric types (Issue #1601)"
+
+[[tests]]
+name = "scalar_array_add"
+file = "scalar_array_add.jl"
+expected = true
+description = "Scalar .+ Array and Scalar .- Array operations (Issue #1601)"
+
+[[tests]]
+name = "scalar_array_div"
+file = "scalar_array_div.jl"
+expected = true
+description = "Scalar ./ Array and Array ./ Scalar division operations (Issue #1601)"
+
+[[tests]]
+name = "scalar_array_plain_mul"
+file = "scalar_array_plain_mul.jl"
+expected = true
+description = "Plain scalar * array (non-broadcast) for real types (Issue #1795)"
+
+[[tests]]
+name = "scalar_array_plain_div"
+file = "scalar_array_plain_div.jl"
+expected = true
+description = "Plain array / scalar and scalar / array division (Issue #1929)"
+
+[[tests]]
+name = "broadcast_style_types"
+file = "test_broadcast_style_types.jl"
+expected = true
+description = "BroadcastStyle type hierarchy (Issue #2531)"
+
+[[tests]]
+name = "broadcast_style_combine"
+file = "test_broadcast_style_combine.jl"
+expected = true
+description = "BroadcastStyle binary combination rules (Issue #2532)"
+
+[[tests]]
+name = "broadcast_shape_calc"
+file = "test_broadcast_shape_calc.jl"
+expected = true
+description = "broadcast_shape / _bcs / _bcs1 shape computation (Issue #2535)"
+
+[[tests]]
+name = "bcs1_dimension"
+file = "test_bcs1_dimension.jl"
+expected = true
+description = "_bcs1 single dimension broadcast computation (Issue #2535)"
+
+[[tests]]
+name = "check_broadcast_shape"
+file = "test_check_broadcast_shape.jl"
+expected = true
+description = "check_broadcast_shape validation (Issue #2536)"
+
+[[tests]]
+name = "broadcasted_struct"
+file = "test_broadcasted_struct.jl"
+expected = true
+description = "Broadcasted lazy wrapper struct (Issue #2534)"
+
+[[tests]]
+name = "broadcast_extruded"
+file = "test_extruded.jl"
+expected = true
+description = "Extruded struct, newindexer, newindex functions (Issue #2537)"
+
+[[tests]]
+name = "broadcast_getindex"
+file = "test_broadcast_getindex.jl"
+expected = true
+description = "_broadcast_getindex element access for broadcasting (Issue #2538)"
+
+[[tests]]
+name = "broadcast_broadcasted_type"
+file = "test_broadcasted_type.jl"
+expected = true
+description = "Broadcasted struct and basic operations (Issue #2534 workaround)"
+
+[[tests]]
+name = "broadcast_instantiate"
+file = "test_instantiate.jl"
+expected = true
+description = "instantiate function for Broadcasted (Issue #2539)"
+
+[[tests]]
+name = "broadcast_materialize"
+file = "test_materialize.jl"
+expected = true
+description = "materialize and materialize! functions (Issue #2540)"
+
+[[tests]]
+name = "broadcast_copy_copyto"
+file = "test_copy_copyto.jl"
+expected = true
+description = "copy and copyto! for Broadcasted (Issue #2541)"
+
+[[tests]]
+name = "broadcast_copyto_same_shape_fastpath"
+file = "test_copyto_same_shape_fastpath.jl"
+expected = true
+description = "same-shape binary copyto! fast path for generic typed arrays"
+
+[[tests]]
+name = "broadcast_copyto_array_scalar_fastpath"
+file = "test_copyto_array_scalar_fastpath.jl"
+expected = true
+description = "array-scalar/Ref scalar copyto! fast path (including Complex scalar)"
+
+[[tests]]
+name = "broadcast_copyto_2d_binary_fastpath"
+file = "test_copyto_2d_binary_fastpath.jl"
+expected = true
+description = "2D binary copyto! fast path for array-style broadcast patterns"
+
+[[tests]]
+name = "broadcast_preprocess"
+file = "test_preprocess.jl"
+expected = true
+description = "preprocess and broadcast_unalias functions (Issue #2543)"
+
+[[tests]]
+name = "broadcast_combine_eltypes"
+file = "test_combine_eltypes.jl"
+expected = true
+description = "combine_eltypes and similar for Broadcasted (Issue #2542)"
+
+# === Regression test suite (Issue #2550) ===
+
+[[tests]]
+name = "broadcast_regression_dotops"
+file = "broadcast_regression_dotops.jl"
+expected = true
+description = "Regression: all dot operators (.+, .-, .*, ./, .^, .>, .<, .>=, .<=, .==, .!=) (Issue #2550)"
+
+[[tests]]
+name = "broadcast_regression_unary"
+file = "broadcast_regression_unary.jl"
+expected = true
+description = "Regression: unary function broadcast (sqrt., abs., sin., cos.) (Issue #2550)"
+
+[[tests]]
+name = "broadcast_regression_nested"
+file = "broadcast_regression_nested.jl"
+expected = true
+description = "Regression: nested/compound broadcast expressions (Issue #2550)"
+
+[[tests]]
+name = "broadcast_regression_mixed_types"
+file = "broadcast_regression_mixed_types.jl"
+expected = true
+description = "Regression: mixed Int64/Float64 type promotion in broadcasts (Issue #2550)"
+
+[[tests]]
+name = "broadcast_regression_ref"
+file = "broadcast_regression_ref.jl"
+expected = true
+description = "Regression: Ref() wrapping in broadcasts (Issue #2550)"
+
+[[tests]]
+name = "broadcast_regression_tuple"
+file = "broadcast_regression_tuple.jl"
+expected = true
+description = "Regression: comprehensive tuple broadcast patterns (Issue #2550)"
+
+[[tests]]
+name = "broadcast_regression_inplace"
+file = "broadcast_regression_inplace.jl"
+expected = true
+description = "Regression: in-place broadcast! and .= assignment (Issue #2550)"
+
+# === @. / @__dot__ macro (Issue #2547) ===
+
+[[tests]]
+name = "broadcast_dot_macro"
+file = "test_dot_macro.jl"
+expected = true
+description = "@. / @__dot__ macro basic binary broadcast (Issue #2547)"
+
+# === Phase 5-2: AndAnd/OrOr short-circuit broadcast (Issue #2545) ===
+
+[[tests]]
+name = "broadcast_andand_oror"
+file = "test_andand_oror.jl"
+expected = true
+description = "AndAnd/OrOr short-circuit broadcast operators .&& and .|| (Issue #2545)"
+
+# === Phase 7-3: show/display methods (Issue #2551) ===
+
+[[tests]]
+name = "broadcast_show"
+file = "test_broadcast_show.jl"
+expected = true
+description = "show/display methods for Broadcasted and BroadcastStyle types (Issue #2551)"
+
+[[tests]]
+name = "broadcast_perf_fastpath_regression"
+file = "broadcast_perf_fastpath_regression.jl"
+expected = true
+description = "Regression: broadcast numeric array path should not be drastically slower than for loop"
+
+[[tests]]
+name = "broadcast_perf_int_fastpath_regression"
+file = "broadcast_perf_int_fastpath_regression.jl"
+expected = true
+description = "Regression: same-shape Int array broadcast should not be drastically slower than for loop"
+
+# === Phase 5-1: flatten/isflat loop fusion (Issue #2544) ===
+
+[[tests]]
+name = "broadcast_flatten"
+file = "test_flatten.jl"
+expected = true
+description = "flatten/isflat/cat_nested/make_makeargs loop fusion infrastructure (Issue #2544)"
+
+# === Issue #2679: Loop fusion end-to-end via dot expressions ===
+
+[[tests]]
+name = "broadcast_flatten_loop_fusion"
+file = "test_flatten_loop_fusion.jl"
+expected = true
+description = "End-to-end loop fusion via dot expressions: sin.(x).+cos.(x), abs.(sin.(x)), mixed scalar/array (Issue #2679)"
+
+# === Phase 6-3: Pure Julia entry points (Issue #2548) ===
+
+[[tests]]
+name = "broadcast_entrypoint"
+file = "test_broadcast_entrypoint.jl"
+expected = true
+description = "broadcasted/broadcast/broadcast! Pure Julia entry points (Issue #2548)"
+
+[[tests]]
+name = "broadcast_range_size_2d"
+file = "test_range_size_broadcast.jl"
+expected = true
+description = "Range size() methods and 2D broadcast with transposed LinRange (Issue #2689)"
+
+# === Regression: similar(::Broadcasted, ::Type) guard (Issue #2702) ===
+
+[[tests]]
+name = "broadcast_similar_guard"
+file = "test_similar_broadcasted_guard.jl"
+expected = true
+description = "Regression: similar(::Broadcasted, ::Type) must not be intercepted by builtin (Issue #2702)"

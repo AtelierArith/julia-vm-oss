@@ -1,0 +1,5 @@
+[[tests]]
+name = "missing_coalesce"
+file = "coalesce.jl"
+expected = true
+description = "Test coalesce function and @coalesce macro for missing values"
