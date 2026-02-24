@@ -1,3 +1,4 @@
+use super::escape_rust_ident;
 use super::AotCodeGenerator;
 use crate::aot::ir::{AotExpr, AotStmt};
 use crate::aot::types::StaticType;
@@ -20,7 +21,7 @@ impl AotCodeGenerator {
                 let mut_kw = if *is_mutable { "mut " } else { "" };
                 self.write_line(&format!(
                     "let {}{}: {} = {};",
-                    mut_kw, name, rust_ty, value_str
+                    mut_kw, escape_rust_ident(name), rust_ty, value_str
                 ));
             }
 

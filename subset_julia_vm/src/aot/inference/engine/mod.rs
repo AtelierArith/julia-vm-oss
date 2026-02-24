@@ -1036,7 +1036,10 @@ impl TypeInferenceEngine {
     fn infer_expr_type_with_env(&self, expr: &Expr, env: &TypeEnv) -> StaticType {
         match expr {
             Expr::Literal(lit, _) => self.literal_type(lit),
-            Expr::Var(name, _) => env.get(name).cloned().unwrap_or(StaticType::Any),
+            Expr::Var(name, _) => env
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| self.lookup_global_or_const(name)),
             Expr::AssignExpr { value, .. } => self.infer_expr_type_with_env(value, env),
             Expr::LetBlock { bindings, body, .. } => {
                 let mut local_env = env.clone();

@@ -344,6 +344,30 @@ pub enum AotBuiltinOp {
     // Type conversion intrinsics
     Sitofp, // Signed int to floating point
     Fptosi, // Floating point to signed int
+
+    // Error handling (Issue #3406)
+    /// throw(x) — emits panic! in generated Rust code
+    Throw,
+
+    // String operations (Issue #3405)
+    /// string(args...) — concatenates arguments into a String
+    StringConcat,
+
+    // Complex number operations (Issue #3410)
+    /// abs2(z) — squared absolute value: re^2 + im^2
+    Abs2,
+    /// real(z) — real part of complex number
+    Real,
+    /// imag(z) — imaginary part of complex number
+    Imag,
+
+    // Transpose (Issue #3410)
+    /// adjoint(x) — transpose/conjugate transpose (identity for 1D)
+    Adjoint,
+
+    // Range construction (Issue #3413)
+    /// linspace(start, stop, n) — linearly spaced vector
+    Linspace,
 }
 
 impl AotBuiltinOp {
@@ -457,6 +481,32 @@ impl AotBuiltinOp {
             // Type conversion intrinsics
             AotBuiltinOp::Sitofp => StaticType::F64,
             AotBuiltinOp::Fptosi => StaticType::I64,
+
+            // Error handling — throw never returns (but we model as Nothing)
+            AotBuiltinOp::Throw => StaticType::Nothing,
+
+            // String concatenation
+            AotBuiltinOp::StringConcat => StaticType::Str,
+
+            // Complex number operations (Issue #3410)
+            AotBuiltinOp::Abs2 => StaticType::F64,
+            AotBuiltinOp::Real => StaticType::F64,
+            AotBuiltinOp::Imag => StaticType::F64,
+
+            // Transpose — returns same type as input
+            AotBuiltinOp::Adjoint => {
+                if arg_types.is_empty() {
+                    StaticType::Any
+                } else {
+                    arg_types[0].clone()
+                }
+            }
+
+            // Linspace returns Vec<f64>
+            AotBuiltinOp::Linspace => StaticType::Array {
+                element: Box::new(StaticType::F64),
+                ndims: Some(1),
+            },
         }
     }
 
@@ -538,6 +588,18 @@ impl AotBuiltinOp {
             // Type conversion intrinsics
             "sitofp" => Some(AotBuiltinOp::Sitofp),
             "fptosi" => Some(AotBuiltinOp::Fptosi),
+
+            // String concatenation (Issue #3405)
+            "string" => Some(AotBuiltinOp::StringConcat),
+
+            // Complex number operations (Issue #3410)
+            "abs2" => Some(AotBuiltinOp::Abs2),
+            "real" => Some(AotBuiltinOp::Real),
+            "imag" => Some(AotBuiltinOp::Imag),
+
+            // Transpose (Issue #3410)
+            "adjoint" => Some(AotBuiltinOp::Adjoint),
+
             _ => None,
         }
     }
@@ -624,6 +686,21 @@ impl fmt::Display for AotBuiltinOp {
             // Type conversion intrinsics
             AotBuiltinOp::Sitofp => "sitofp",
             AotBuiltinOp::Fptosi => "fptosi",
+
+            // Error handling + string concat
+            AotBuiltinOp::Throw => "throw",
+            AotBuiltinOp::StringConcat => "string",
+
+            // Complex number operations
+            AotBuiltinOp::Abs2 => "abs2",
+            AotBuiltinOp::Real => "real",
+            AotBuiltinOp::Imag => "imag",
+
+            // Transpose
+            AotBuiltinOp::Adjoint => "adjoint",
+
+            // Linspace
+            AotBuiltinOp::Linspace => "linspace",
         };
         write!(f, "{}", name)
     }

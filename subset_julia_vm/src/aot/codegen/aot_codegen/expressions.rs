@@ -1,3 +1,4 @@
+use super::escape_rust_ident;
 use super::AotCodeGenerator;
 use crate::aot::ir::{AotBinOp, AotBuiltinOp, AotExpr, AotFunction, AotUnaryOp};
 use crate::aot::types::StaticType;
@@ -44,7 +45,15 @@ impl AotCodeGenerator {
             AotExpr::LitNothing => Ok("()".to_string()),
 
             // Variable
-            AotExpr::Var { name, .. } => Ok(name.clone()),
+            AotExpr::Var { name, .. } => {
+                // Map Julia `im` to the prelude constant `IM` (uppercase) to avoid
+                // shadowing the `im` field in Complex::new(re, im) (Issue #3410).
+                if name == "im" {
+                    Ok("IM".to_string())
+                } else {
+                    Ok(escape_rust_ident(name))
+                }
+            }
 
             // Binary operations
             AotExpr::BinOpStatic {
@@ -66,12 +75,20 @@ impl AotCodeGenerator {
                 // For now, generate static code with a comment
                 let left_str = self.emit_expr_to_string(left)?;
                 let right_str = self.emit_expr_to_string(right)?;
-                Ok(format!(
-                    "({} {} {}) /* dynamic */",
-                    left_str,
-                    op.to_rust_op(),
-                    right_str
-                ))
+                // Pow is a method call, not an infix operator
+                if matches!(op, AotBinOp::Pow) {
+                    Ok(format!(
+                        "{}.powf({} as f64) /* dynamic */",
+                        left_str, right_str
+                    ))
+                } else {
+                    Ok(format!(
+                        "({} {} {}) /* dynamic */",
+                        left_str,
+                        op.to_rust_op(),
+                        right_str
+                    ))
+                }
             }
 
             // Unary operations
@@ -706,6 +723,49 @@ impl AotCodeGenerator {
                     Ok(format!("({} as i64)", args[0]))
                 } else {
                     Ok("/* fptosi: missing args */ 0_i64".to_string())
+                }
+            }
+
+            // Error handling: throw(msg) -> panic!("{}", msg) (Issue #3406)
+            AotBuiltinOp::Throw => {
+                if args.len() == 1 {
+                    Ok(format!("panic!(\"{{:?}}\", {})", args[0]))
+                } else {
+                    Ok("panic!(\"error\")".to_string())
+                }
+            }
+
+            // Complex number operations (Issue #3410)
+            AotBuiltinOp::Abs2 => Ok(format!("abs2_complex({})", args[0])),
+            AotBuiltinOp::Real => Ok(format!("real_complex({})", args[0])),
+            AotBuiltinOp::Imag => Ok(format!("imag_complex({})", args[0])),
+
+            // Transpose (Issue #3410)
+            AotBuiltinOp::Adjoint => Ok(format!("adjoint_vec({})", args[0])),
+
+            // Linspace (Issue #3413)
+            AotBuiltinOp::Linspace => {
+                if args.len() >= 3 {
+                    Ok(format!("linspace({}, {}, {})", args[0], args[1], args[2]))
+                } else {
+                    Ok("vec![]".to_string())
+                }
+            }
+
+            // String concatenation: string(a, b, ...) -> format!("{}{}", a, b, ...) (Issue #3405)
+            AotBuiltinOp::StringConcat => {
+                if args.is_empty() {
+                    Ok("String::new()".to_string())
+                } else if args.len() == 1 {
+                    Ok(format!("format!(\"{{}}\", {})", args[0]))
+                } else {
+                    let format_specifiers: String =
+                        args.iter().map(|_| "{}").collect::<Vec<_>>().join("");
+                    Ok(format!(
+                        "format!(\"{}\", {})",
+                        format_specifiers,
+                        args.join(", ")
+                    ))
                 }
             }
         }

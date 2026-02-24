@@ -69,11 +69,32 @@ impl<'a> IrConverter<'a> {
             None
         }
     }
+    /// Struct names that are defined in the AoT prelude and should be skipped
+    /// during conversion to avoid duplicate definitions (Issue #3410).
+    const PRELUDE_STRUCT_NAMES: &'static [&'static str] = &[
+        "ErrorException",
+        "LinRange",
+        "StepRangeLen",
+        "OneTo",
+        "Broadcasted",
+        "Rational",
+    ];
+
     pub(crate) fn convert_program(&mut self, program: &Program) -> AotResult<AotProgram> {
         let mut aot_program = AotProgram::new();
 
-        // Convert struct definitions
+        // Convert struct definitions, deduplicating by name (Issue #3410).
+        // The prelude already defines ErrorException; Base may also emit it.
+        let mut seen_structs: HashSet<String> = HashSet::new();
         for struct_def in &program.structs {
+            // Skip structs that are already defined in the prelude
+            if Self::PRELUDE_STRUCT_NAMES.contains(&struct_def.name.as_str()) {
+                continue;
+            }
+            // Skip duplicate struct definitions
+            if !seen_structs.insert(struct_def.name.clone()) {
+                continue;
+            }
             let aot_struct = self.convert_struct(struct_def)?;
             aot_program.add_struct(aot_struct);
         }
@@ -141,7 +162,13 @@ impl<'a> IrConverter<'a> {
         let mut aot_struct = AotStruct::new(struct_def.name.clone(), struct_def.is_mutable);
 
         for field in &struct_def.fields {
-            let ty = if let Some(jt) = field.as_julia_type() {
+            let ty = if struct_def.name == "Complex" {
+                // Complex{T<:Real} has type-variable fields (re::T, im::T).
+                // as_julia_type() returns None for type variables, falling back to Any/Value.
+                // AoT codegen hardcodes Complex Add/Mul operators that require f64 fields,
+                // so force F64 here to match (Issue #3407).
+                StaticType::F64
+            } else if let Some(jt) = field.as_julia_type() {
                 self.julia_type_to_static(&jt)
             } else {
                 StaticType::Any

@@ -713,13 +713,13 @@ fn test_convert_expr_call_includes_kwargs_in_static_dispatch() {
     };
 
     let result = converter.convert_expr(&expr).unwrap();
+    // range(start, stop; length=n) is now intercepted as Linspace builtin (Issue #3413)
     assert!(
-        matches!(&result, AotExpr::CallStatic { .. }),
-        "Expected CallStatic, got {:?}",
+        matches!(&result, AotExpr::CallBuiltin { builtin: AotBuiltinOp::Linspace, .. }),
+        "Expected CallBuiltin Linspace, got {:?}",
         result
     );
-    if let AotExpr::CallStatic { function, args, .. } = result {
-        assert_eq!(function, "range");
+    if let AotExpr::CallBuiltin { args, .. } = result {
         assert_eq!(args.len(), 3);
         assert!(matches!(args[2], AotExpr::LitI64(50)));
     }

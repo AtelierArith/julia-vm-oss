@@ -200,7 +200,20 @@ impl<'a> IrConverter<'a> {
             "pushfirst!" | "popfirst!" | "insert!" | "deleteat!" |
             "zeros" | "ones" | "fill" | "reshape" | "sum" | "collect" |
             // Other built-ins
-            "println" | "print" | "string" | "repr" | "show"
+            "println" | "print" | "string" | "repr" | "show" |
+            // Error/throw (intercepted in IR converter) (Issue #3410)
+            "error" | "throw" |
+            // Range dispatch functions — nothing-dispatch patterns don't translate to Rust (Issue #3413)
+            "range" | "_range" | "range_start_stop" | "range_start_stop_length" |
+            "range_start_step_length" | "range_start_length" | "range_start_step_stop" |
+            // Broadcast internals (Issue #3415)
+            "materialize" | "copy" | "instantiate" |
+            // Transpose/adjoint (Issue #3415)
+            "adjoint" |
+            // Complex intrinsics
+            "abs2" | "real" | "imag" |
+            // Constructors handled in prelude
+            "Complex" | "Broadcasted" | "LinRange" | "StepRangeLen" | "OneTo"
         )
     }
 }

@@ -203,6 +203,44 @@ impl<'a> IrConverter<'a> {
             }));
         }
 
+        // 1D .op 1D outer product: row ⊕ column → 2D matrix (Issue #3410).
+        // This handles patterns like `xs' .+ im .* ys` where both sides are 1D vectors.
+        if shape(&lhs_ty) == 1 && shape(&rhs_ty) == 1 {
+            let lhs_elem_ty = elem_ty(&lhs_ty);
+            let rhs_elem_ty = elem_ty(&rhs_ty);
+            let binop = match fn_name.as_str() {
+                "+" => AotBinOp::Add,
+                "-" => AotBinOp::Sub,
+                "*" => AotBinOp::Mul,
+                "/" => AotBinOp::Div,
+                _ => AotBinOp::Add, // default
+            };
+            let result_elem =
+                self.engine
+                    .binop_result_type_static(&binop, &lhs_elem_ty, &rhs_elem_ty);
+            let fn_impl = format!(
+                "{}_{}_{}",
+                AotFunction::sanitize_function_name(&fn_name),
+                lhs_elem_ty.mangle_suffix(),
+                rhs_elem_ty.mangle_suffix()
+            );
+            return Ok(Some(AotExpr::CallStatic {
+                function: "__aot_broadcast_outer_product".to_string(),
+                args: vec![
+                    AotExpr::Var {
+                        name: fn_impl,
+                        ty: StaticType::Any,
+                    },
+                    lhs_aot,
+                    rhs_aot,
+                ],
+                return_ty: StaticType::Array {
+                    element: Box::new(result_elem),
+                    ndims: Some(2),
+                },
+            }));
+        }
+
         // matrix .(f, Ref(scalar))
         if shape(&lhs_ty) == 2 && shape(&rhs_ty) == 0 {
             let matrix_elem_ty = elem_ty(&lhs_ty);
@@ -213,11 +251,29 @@ impl<'a> IrConverter<'a> {
                         .call_result_type(&fn_name, &[matrix_elem_ty.clone(), rhs_ty.clone()])
                 });
 
+            // Only use mangled name if the function has multiple dispatch methods.
+            // For single-method functions, the codegen emits the sanitized name directly.
+            let has_multiple_methods = self
+                .typed
+                .get_functions(&fn_name)
+                .map_or(false, |methods| methods.len() > 1);
+            let func_ref_name = if has_multiple_methods {
+                // Use mangled name that matches the actual element types
+                format!(
+                    "{}_{}_{}",
+                    AotFunction::sanitize_function_name(&fn_name),
+                    matrix_elem_ty.mangle_suffix(),
+                    rhs_ty.mangle_suffix()
+                )
+            } else {
+                AotFunction::sanitize_function_name(&fn_name)
+            };
+
             return Ok(Some(AotExpr::CallStatic {
                 function: "__aot_broadcast_call_matrix_scalar_2".to_string(),
                 args: vec![
                     AotExpr::Var {
-                        name: AotFunction::sanitize_function_name(&fn_name),
+                        name: func_ref_name,
                         ty: StaticType::Any,
                     },
                     lhs_aot,
@@ -309,6 +365,41 @@ impl<'a> IrConverter<'a> {
                 }
             }
             // Other expressions don't contain free variables
+            _ => {}
+        }
+    }
+
+    /// Extract a human-readable error message from error()/throw() call arguments.
+    ///
+    /// When error() bodies are inlined, the arguments may reference variables from
+    /// the original function scope that don't exist in the inlined context
+    /// (e.g., `string(a, b, c, d)` from `error(a, b, c, d)` in base/error.jl).
+    /// This method extracts string literal content directly from the Core IR
+    /// expressions, avoiding undefined variable references (Issues #3405, #3406).
+    fn extract_error_message(args: &[&Expr]) -> String {
+        let mut parts = Vec::new();
+        for arg in args {
+            Self::collect_string_literals(arg, &mut parts);
+        }
+        if parts.is_empty() {
+            "error".to_string()
+        } else {
+            parts.join("")
+        }
+    }
+
+    /// Recursively collect string literal content from an expression tree.
+    fn collect_string_literals(expr: &Expr, parts: &mut Vec<String>) {
+        match expr {
+            Expr::Literal(Literal::Str(s), _) => parts.push(s.clone()),
+            Expr::Call { function, args, .. } => {
+                // Recurse into nested calls like ErrorException(string(...))
+                if function == "ErrorException" || function == "string" {
+                    for arg in args {
+                        Self::collect_string_literals(arg, parts);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -553,6 +644,42 @@ impl<'a> IrConverter<'a> {
                 // Ref(x) in broadcast contexts should remain scalar.
                 if function == "Ref" && call_args.len() == 1 {
                     return self.convert_expr(call_args[0]);
+                }
+
+                // Special handling for error() and throw() — intercept BEFORE converting
+                // arguments to avoid emitting undefined variable references from improperly
+                // inlined function bodies (Issues #3405, #3406).
+                if function == "error" || function == "throw" {
+                    let message = Self::extract_error_message(&call_args);
+                    return Ok(AotExpr::CallBuiltin {
+                        builtin: AotBuiltinOp::Throw,
+                        args: vec![AotExpr::LitStr(message)],
+                        return_ty: StaticType::Nothing,
+                    });
+                }
+
+                // Intercept range(start, stop; length=n) and emit linspace (Issue #3413).
+                // The lowering phase inlines range() which produces broken nothing-dispatch code.
+                // Instead, detect the keyword pattern and emit a call to the prelude linspace().
+                if function == "range" && !kwargs.is_empty() {
+                    // Check for `length` keyword argument
+                    if let Some((_, length_expr)) = kwargs.iter().find(|(k, _)| k == "length") {
+                        let aot_start = self.convert_expr(&args[0])?;
+                        let aot_stop = if args.len() > 1 {
+                            self.convert_expr(&args[1])?
+                        } else {
+                            AotExpr::LitF64(0.0)
+                        };
+                        let aot_length = self.convert_expr(length_expr)?;
+                        return Ok(AotExpr::CallBuiltin {
+                            builtin: AotBuiltinOp::Linspace,
+                            args: vec![aot_start, aot_stop, aot_length],
+                            return_ty: StaticType::Array {
+                                element: Box::new(StaticType::F64),
+                                ndims: Some(1),
+                            },
+                        });
+                    }
                 }
 
                 let arg_types: Vec<_> = call_args

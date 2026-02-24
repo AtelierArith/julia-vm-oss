@@ -6,6 +6,8 @@ use crate::aot::types::StaticType;
 use crate::aot::AotResult;
 use std::collections::{HashMap, HashSet};
 
+use super::escape_rust_ident;
+
 impl AotCodeGenerator {
     /// Build the method table for multiple dispatch
     pub(super) fn build_method_table(&mut self, program: &AotProgram) {
@@ -161,6 +163,13 @@ impl AotCodeGenerator {
         self.write_line("#![allow(unused_variables)]");
         self.write_line("#![allow(unused_mut)]");
         self.write_line("#![allow(dead_code)]");
+        self.write_line("#![allow(non_upper_case_globals)]");
+        self.write_line("#![allow(non_snake_case)]");
+        self.blank_line();
+        // Import the dynamic Value type from the AoT runtime crate.
+        // `Value` is used for fields/variables whose static type is unknown.
+        self.write_line("extern crate subset_julia_vm_runtime;");
+        self.write_line("use subset_julia_vm_runtime::Value;");
         self.blank_line();
 
         // AoT broadcast helpers used by ir_converter broadcast lowering.
@@ -230,6 +239,136 @@ impl AotCodeGenerator {
         self.dedent();
         self.write_line("}");
         self.blank_line();
+
+        // ErrorException struct and throw function for Julia error handling (Issue #3406).
+        // Julia's throw(ErrorException(msg)) maps to Rust's panic!.
+        self.write_line("#[derive(Debug)]");
+        self.write_line("struct ErrorException { msg: String }");
+        self.write_line("impl ErrorException {");
+        self.indent();
+        self.write_line("fn new(s: String) -> Self { ErrorException { msg: s } }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+        self.write_line("fn throw<T: std::fmt::Debug>(e: T) -> ! { panic!(\"{:?}\", e); }");
+        self.blank_line();
+
+        // linspace: linearly spaced vector (replacement for range(start,stop;length=n)) (Issue #3413)
+        self.write_line("fn linspace(start: f64, stop: f64, n: i64) -> Vec<f64> {");
+        self.indent();
+        self.write_line("if n <= 0 { return vec![]; }");
+        self.write_line("if n == 1 { return vec![start]; }");
+        self.write_line("let step = (stop - start) / ((n - 1) as f64);");
+        self.write_line("(0..n).map(|i| start + (i as f64) * step).collect()");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        // Operator function wrappers used by broadcast helpers
+        self.write_line("fn op_add(a: f64, b: f64) -> f64 { a + b }");
+        self.write_line("fn op_sub(a: f64, b: f64) -> f64 { a - b }");
+        self.write_line("fn op_mul(a: f64, b: f64) -> f64 { a * b }");
+        self.write_line("fn op_div(a: f64, b: f64) -> f64 { a / b }");
+        self.blank_line();
+
+        // Broadcast helper for 1D + 1D outer product: row ⊕ col → 2D matrix (Issue #3410).
+        self.write_line("fn __aot_broadcast_outer_product<F, A: Clone, B: Clone, R>(f: F, row: Vec<A>, col: Vec<B>) -> Vec<Vec<R>>");
+        self.write_line("where");
+        self.indent();
+        self.write_line("F: Fn(A, B) -> R + Copy,");
+        self.dedent();
+        self.write_line("{");
+        self.indent();
+        self.write_line("col.iter().map(|c| {");
+        self.indent();
+        self.write_line("row.iter().map(|r| f(r.clone(), c.clone())).collect()");
+        self.dedent();
+        self.write_line("}).collect()");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+    }
+
+    /// Emit prelude stubs that depend on struct definitions (emitted after structs).
+    /// These reference Complex and other user-defined types (Issue #3410).
+    pub(super) fn emit_struct_dependent_prelude(&mut self, has_complex: bool) {
+        if !has_complex {
+            return;
+        }
+        self.blank_line();
+
+        // `im` constant for complex number construction.
+        // Named `IM` (uppercase) to avoid shadowing the `im` field in Complex::new(re, im).
+        self.write_line("const IM: Complex = Complex { re: 0.0, im: 1.0 };");
+        self.blank_line();
+
+        // Mixed-type operator impls for Complex arithmetic
+        self.write_line("impl std::ops::Sub for Complex {");
+        self.indent();
+        self.write_line("type Output = Complex;");
+        self.write_line("fn sub(self, rhs: Complex) -> Self::Output { Complex::new(self.re - rhs.re, self.im - rhs.im) }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        self.write_line("impl std::ops::Mul<Complex> for f64 {");
+        self.indent();
+        self.write_line("type Output = Complex;");
+        self.write_line("fn mul(self, rhs: Complex) -> Complex { Complex::new(self * rhs.re, self * rhs.im) }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        self.write_line("impl std::ops::Mul<Complex> for i64 {");
+        self.indent();
+        self.write_line("type Output = Complex;");
+        self.write_line("fn mul(self, rhs: Complex) -> Complex { Complex::new((self as f64) * rhs.re, (self as f64) * rhs.im) }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        self.write_line("impl std::ops::Add<Complex> for f64 {");
+        self.indent();
+        self.write_line("type Output = Complex;");
+        self.write_line("fn add(self, rhs: Complex) -> Complex { Complex::new(self + rhs.re, rhs.im) }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        self.write_line("impl std::ops::Add<f64> for Complex {");
+        self.indent();
+        self.write_line("type Output = Complex;");
+        self.write_line("fn add(self, rhs: f64) -> Complex { Complex::new(self.re + rhs, self.im) }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        self.write_line("impl std::ops::Add<i64> for Complex {");
+        self.indent();
+        self.write_line("type Output = Complex;");
+        self.write_line("fn add(self, rhs: i64) -> Complex { Complex::new(self.re + (rhs as f64), self.im) }");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
+        // abs2 for Complex numbers: |z|^2 = re^2 + im^2
+        self.write_line("fn abs2_complex(z: Complex) -> f64 { z.re * z.re + z.im * z.im }");
+        self.write_line("fn abs2_f64(x: f64) -> f64 { x * x }");
+        self.blank_line();
+
+        // real/imag for Complex numbers
+        self.write_line("fn real_f64_complex(z: Complex) -> f64 { z.re }");
+        self.write_line("fn imag_f64_complex(z: Complex) -> f64 { z.im }");
+        self.blank_line();
+
+        // adjoint: identity for 1D vectors
+        self.write_line("fn adjoint_vec(x: Vec<f64>) -> Vec<f64> { x }");
+        self.blank_line();
+
+        // Complex operator wrappers for broadcast (only those not already emitted by emit_struct)
+        self.write_line("fn op_add_complex_complex(a: Complex, b: Complex) -> Complex { a + b }");
+        self.write_line("fn op_mul_complex_i64(a: Complex, b: i64) -> Complex { Complex::new(a.re * (b as f64), a.im * (b as f64)) }");
+        self.blank_line();
     }
 
     /// Emit a struct definition
@@ -251,7 +390,8 @@ impl AotCodeGenerator {
 
         for (field_name, field_ty) in &s.fields {
             let rust_ty = self.type_to_rust(field_ty);
-            self.write_line(&format!("pub {}: {},", field_name, rust_ty));
+            let escaped = escape_rust_ident(field_name);
+            self.write_line(&format!("pub {}: {},", escaped, rust_ty));
         }
 
         self.dedent();
@@ -266,14 +406,16 @@ impl AotCodeGenerator {
         let params: Vec<_> = s
             .fields
             .iter()
-            .map(|(name, ty)| format!("{}: {}", name, self.type_to_rust(ty)))
+            .map(|(name, ty)| {
+                format!("{}: {}", escape_rust_ident(name), self.type_to_rust(ty))
+            })
             .collect();
         self.write_line(&format!("pub fn new({}) -> Self {{", params.join(", ")));
         self.indent();
         self.write_line("Self {");
         self.indent();
         for (field_name, _) in &s.fields {
-            self.write_line(&format!("{},", field_name));
+            self.write_line(&format!("{},", escape_rust_ident(field_name)));
         }
         self.dedent();
         self.write_line("}");
@@ -468,10 +610,11 @@ impl AotCodeGenerator {
             .params
             .iter()
             .map(|(name, ty)| {
+                let escaped = escape_rust_ident(name);
                 if reassigned_params.contains(name) {
-                    format!("mut {}: {}", name, self.type_to_rust(ty))
+                    format!("mut {}: {}", escaped, self.type_to_rust(ty))
                 } else {
-                    format!("{}: {}", name, self.type_to_rust(ty))
+                    format!("{}: {}", escaped, self.type_to_rust(ty))
                 }
             })
             .collect();

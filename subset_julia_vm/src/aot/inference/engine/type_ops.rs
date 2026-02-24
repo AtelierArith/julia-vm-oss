@@ -149,6 +149,11 @@ impl TypeInferenceEngine {
             "nothing" => StaticType::Nothing,
             "missing" => StaticType::Missing,
             "typemax" | "typemin" => StaticType::Any,
+            // Complex imaginary unit (Issue #3410)
+            "im" => StaticType::Struct {
+                type_id: 0,
+                name: "Complex".to_string(),
+            },
             _ => StaticType::Any,
         }
     }

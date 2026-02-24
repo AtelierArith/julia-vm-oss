@@ -17,6 +17,25 @@ use crate::aot::types::StaticType;
 use crate::aot::AotResult;
 use std::collections::{HashMap, HashSet};
 
+/// Escape identifiers that are Rust reserved keywords by prefixing with `r#`.
+pub(super) fn escape_rust_ident(name: &str) -> String {
+    // Rust strict keywords (cannot be used as identifiers without r#)
+    const KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern",
+        "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
+        "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
+        "super", "trait", "true", "type", "unsafe", "use", "where", "while",
+        // Reserved for future use
+        "abstract", "async", "await", "become", "box", "do", "dyn", "final",
+        "macro", "override", "priv", "try", "typeof", "unsized", "virtual", "yield",
+    ];
+    if KEYWORDS.contains(&name) {
+        format!("r#{}", name)
+    } else {
+        name.to_string()
+    }
+}
+
 /// AoT Code Generator for high-level IR
 ///
 /// Generates Rust code from AotProgram, AotFunction, AotStmt, and AotExpr.
@@ -120,10 +139,15 @@ impl AotCodeGenerator {
         self.emit_prelude();
 
         // Emit struct definitions
+        let has_complex = program.structs.iter().any(|s| s.name == "Complex");
         for s in &program.structs {
             self.emit_struct(s)?;
             self.blank_line();
         }
+
+        // Emit struct-dependent prelude (Complex operators, im constant, etc.)
+        // Must come after struct definitions so types are available (Issue #3410).
+        self.emit_struct_dependent_prelude(has_complex);
 
         // Emit enum definitions (as i32 constants)
         for e in &program.enums {
@@ -142,8 +166,21 @@ impl AotCodeGenerator {
         // Check if user defined a main function
         let has_user_main = program.functions.iter().any(|f| f.name == "main");
 
-        // Emit function definitions (with mangled names for multidispatch)
+        // Emit function definitions (with mangled names for multidispatch).
+        // Deduplicate: multiple Julia methods may resolve to the same mangled
+        // Rust name when their concrete type signatures are identical.  Emitting
+        // the same function twice causes a Rust compile error, so we keep only
+        // the first occurrence.
+        let mut emitted_func_names: HashSet<String> = HashSet::new();
         for func in &program.functions {
+            let func_name = if self.needs_dispatch(&func.name) {
+                func.mangled_name()
+            } else {
+                AotFunction::sanitize_function_name(&func.name)
+            };
+            if !emitted_func_names.insert(func_name) {
+                continue;
+            }
             self.emit_function(func)?;
             self.blank_line();
         }

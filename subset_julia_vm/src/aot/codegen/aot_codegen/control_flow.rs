@@ -1,3 +1,4 @@
+use super::escape_rust_ident;
 use super::AotCodeGenerator;
 use crate::aot::ir::{AotExpr, AotStmt, AotUnaryOp, CompoundAssignOp};
 use crate::aot::AotResult;
@@ -119,6 +120,7 @@ impl AotCodeGenerator {
         step: Option<&AotExpr>,
         body: &[AotStmt],
     ) -> AotResult<()> {
+        let evar = escape_rust_ident(var);
         let start_str = self.emit_expr_to_string(start)?;
         let stop_str = self.emit_expr_to_string(stop)?;
 
@@ -132,12 +134,12 @@ impl AotCodeGenerator {
                         if abs_step == 1 {
                             self.write_line(&format!(
                                 "for {} in ({}..={}).rev() {{",
-                                var, stop_str, start_str
+                                evar, stop_str, start_str
                             ));
                         } else {
                             self.write_line(&format!(
                                 "for {} in ({}..={}).rev().step_by({} as usize) {{",
-                                var, stop_str, start_str, abs_step
+                                evar, stop_str, start_str, abs_step
                             ));
                         }
                     } else {
@@ -145,12 +147,12 @@ impl AotCodeGenerator {
                         if *step_val == 1 {
                             self.write_line(&format!(
                                 "for {} in {}..={} {{",
-                                var, start_str, stop_str
+                                evar, start_str, stop_str
                             ));
                         } else {
                             self.write_line(&format!(
                                 "for {} in ({}..={}).step_by({} as usize) {{",
-                                var, start_str, stop_str, step_val
+                                evar, start_str, stop_str, step_val
                             ));
                         }
                     }
@@ -164,20 +166,20 @@ impl AotCodeGenerator {
                     let step_str = self.emit_expr_to_string(operand)?;
                     self.write_line(&format!(
                         "for {} in ({}..={}).rev().step_by({} as usize) {{",
-                        var, stop_str, start_str, step_str
+                        evar, stop_str, start_str, step_str
                     ));
                 } else {
                     // Dynamic step - generate runtime check
                     let step_str = self.emit_expr_to_string(step_expr)?;
                     self.write_line(&format!(
                         "for {} in ({}..={}).step_by({} as usize) {{",
-                        var, start_str, stop_str, step_str
+                        evar, start_str, stop_str, step_str
                     ));
                 }
             }
             None => {
                 // Julia ranges are inclusive
-                self.write_line(&format!("for {} in {}..={} {{", var, start_str, stop_str));
+                self.write_line(&format!("for {} in {}..={} {{", evar, start_str, stop_str));
             }
         }
 
@@ -194,6 +196,7 @@ impl AotCodeGenerator {
     ///
     /// For arrays and collections, generates proper reference iteration.
     pub(super) fn emit_for_each(&mut self, var: &str, iter: &AotExpr, body: &[AotStmt]) -> AotResult<()> {
+        let evar = escape_rust_ident(var);
         let iter_str = self.emit_expr_to_string(iter)?;
 
         // Check if we need to iterate by reference
@@ -208,7 +211,7 @@ impl AotCodeGenerator {
             _ => iter_str,
         };
 
-        self.write_line(&format!("for {} in {} {{", var, iter_pattern));
+        self.write_line(&format!("for {} in {} {{", evar, iter_pattern));
         self.indent();
         for stmt in body {
             self.emit_stmt(stmt)?;
