@@ -2,7 +2,7 @@
 
 ## Overview
 
-**JuliaVM OSS** (v0.6.6) is a minimal, fully static pipeline for executing a Julia subset. It uses a four-stage pipeline (Parser → Lowering → Compiler → VM) that accepts Julia syntax, determines feature support during lowering, compiles Core IR into bytecode, and executes bytecode in a deterministic stack-based VM. No JIT—fully App Store compliant.
+**JuliaVM OSS** (v0.6.7) is a minimal, fully static pipeline for executing a Julia subset. It uses a four-stage pipeline (Parser → Lowering → Compiler → VM) that accepts Julia syntax, determines feature support during lowering, compiles Core IR into bytecode, and executes bytecode in a deterministic stack-based VM. No JIT—fully App Store compliant.
 
 **Pure Rust Implementation**: The entire pipeline is implemented in pure Rust with no C dependencies, making it fully portable across all platforms including iOS, macOS, Linux, WebAssembly, and Android.
 
