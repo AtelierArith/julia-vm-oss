@@ -57,7 +57,8 @@ name = "bundle"
 required-features = ["tempfile"]
 
 [[bin]]
-name = "aot"
+name = "juliar"
+path = "src/bin/aot.rs"
 required-features = ["aot"]
 
 [lints.clippy]
