@@ -10,7 +10,7 @@ impl<'a> IrConverter<'a> {
     /// blocks do **not** introduce a new scope — all variables declared inside are
     /// visible in the enclosing scope.  We therefore flatten them into the surrounding
     /// statement list.
-    fn convert_stmt_expanded(&mut self, stmt: &Stmt) -> AotResult<Vec<AotStmt>> {
+    pub(crate) fn convert_stmt_expanded(&mut self, stmt: &Stmt) -> AotResult<Vec<AotStmt>> {
         match stmt {
             Stmt::Timed { body, .. } => self.convert_block(body),
             Stmt::Expr {

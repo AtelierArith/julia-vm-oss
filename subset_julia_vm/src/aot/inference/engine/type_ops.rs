@@ -1,4 +1,4 @@
-use super::super::types::StaticType;
+use super::super::super::types::StaticType;
 use crate::ir::core::Expr;
 
 use super::TypeInferenceEngine;

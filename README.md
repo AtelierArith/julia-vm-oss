@@ -22,13 +22,6 @@ Compiler (Core IR → Bytecode)
 VM (executes bytecode) → Results or RuntimeError
 ```
 
-**Key Design Principles**
-- **No JIT** (entirely static and App Store–safe)
-- **Parser accepts ALL Julia syntax** (rejection happens at lowering)
-- **Span-aware errors** with helpful hints
-- **Deterministic execution** with seedable PRNG
-- **Clear separation**: Parser → Lowering → Compiler → VM → FFI
-
 ### Layer-by-Layer Breakdown
 
 #### 1. **Parser Layer** (Never Fails)
@@ -68,7 +61,16 @@ VM (executes bytecode) → Results or RuntimeError
 
 The JuliaVM OSS includes an interactive Julia-like REPL for terminal use.
 
-### Installing sjulia CLI
+### Running without Installation
+
+```sh
+cd subset_julia_vm
+
+# Run the REPL
+cargo run --bin sjulia --features repl --release
+```
+
+### Installing `sjulia` CLI
 
 Install the `sjulia` command globally using `cargo install`:
 
@@ -84,17 +86,7 @@ After installation, you can run `sjulia` from anywhere:
 ```sh
 sjulia                    # Start interactive REPL
 sjulia path/to/file.jl    # Execute a Julia file
-sjulia -e "println(1+1)"  # Execute code string
-sjulia --precompile-base out.bin  # Generate Base cache for embedding
-```
-
-### Running without Installation
-
-```sh
-cd subset_julia_vm
-
-# Run the REPL
-cargo run --bin sjulia --features repl --release
+sjulia -e '1+1'  # Execute code string
 ```
 
 ### REPL Features
@@ -118,37 +110,11 @@ julia> α = 3.14
 3.14
 ```
 
-**Commands:**
-- `exit()`, `quit()` - Exit the REPL
-- `reset()` - Clear all variables and definitions
-- `vars()`, `whos()` - Show defined variables
-- `?`, `help()` - Show help
-
 **Keyboard Shortcuts:**
 - `Tab` - Insert 4 spaces, or complete LaTeX (e.g., `\alpha` → `α`)
 - `Up/Down` - Navigate history
 - `Ctrl-C` - Cancel current input
 - `Ctrl-D` - Exit
-
-## Precompiled Base Cache (Fast Startup)
-
-By default, `sjulia` compiles ~1,958 Base functions at startup (~420ms). You can precompile these at build time and embed the bytecode cache to reduce startup to ~20ms.
-
-### Two-Pass Build Workflow
-
-```bash
-# Step 1: Build sjulia normally
-cargo build --release --bin sjulia --features repl
-
-# Step 2: Generate precompiled Base cache (~3 MB)
-./target/release/sjulia --precompile-base target/base_cache.bin
-
-# Step 3: Rebuild with embedded cache
-SJULIA_BASE_CACHE=$(pwd)/target/base_cache.bin \
-  cargo build --release --bin sjulia --features repl
-```
-
-The resulting binary contains the embedded bytecode and skips Base compilation entirely. Default builds (without `SJULIA_BASE_CACHE`) work exactly as before.
 
 ## Building for WebAssembly
 
@@ -156,22 +122,13 @@ See [subset_julia_vm_web/README.md](subset_julia_vm_web/README.md) to learn more
 
 ## Ahead-of-Time (AoT) Compilation
 
-The JuliaVM OSS includes an AoT compiler that compiles Julia code to native Rust code for maximum performance.
+The JuliaVM OSS includes an AoT compiler that compiles Julia code to native Rust code.
 
 ### AoT Compilation Workflow
 
 ```bash
-# Build with AoT feature
-cargo build --release --features aot
-
 # Compile Julia to Rust
-cargo run --release --bin aot --features aot -- path/to/file.jl -o output.rs
-
-# Options:
-#   --minimal-prelude    Use minimal typed prelude (cleaner code)
-#   --emit-comments      Include source comments in generated Rust
-#   --pure-rust          Generate standalone Rust (no runtime dependency)
-
+cargo run --release --bin aot --features aot -- ./examples/mandelbrot.jl -o output.rs
 # Compile the generated Rust
 rustc -O output.rs -o output_binary \
     --extern subset_julia_vm_runtime="target/release/libsubset_julia_vm_runtime.rlib" \

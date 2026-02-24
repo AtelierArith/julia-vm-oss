@@ -1,7 +1,7 @@
 use super::*;
 
 impl<'a> IrConverter<'a> {
-    fn literal_numeric_to_f64(lit: &Literal) -> Option<f64> {
+    pub(crate) fn literal_numeric_to_f64(lit: &Literal) -> Option<f64> {
         match lit {
             Literal::Float(v) => Some(*v),
             Literal::Int(v) => Some(*v as f64),
@@ -9,7 +9,7 @@ impl<'a> IrConverter<'a> {
         }
     }
 
-    fn is_im_unit_literal(expr: &Expr) -> bool {
+    pub(crate) fn is_im_unit_literal(expr: &Expr) -> bool {
         match expr {
             Expr::Literal(Literal::Struct(name, fields), _) => {
                 name.starts_with("Complex{")
@@ -23,7 +23,7 @@ impl<'a> IrConverter<'a> {
 
     /// Fold parser-lowered numeric complex literals:
     /// `a + b*im` -> `Complex(a, b)`.
-    fn builtin_op_to_aot(op: &crate::ir::core::BuiltinOp) -> Option<AotBuiltinOp> {
+    pub(crate) fn builtin_op_to_aot(op: &crate::ir::core::BuiltinOp) -> Option<AotBuiltinOp> {
         use crate::ir::core::BuiltinOp;
         match op {
             // Math/random
@@ -120,7 +120,7 @@ impl<'a> IrConverter<'a> {
 
     /// Convert a type name string to StaticType
     /// Used to resolve convert(Type, value) calls to AotExpr::Convert
-    fn type_name_to_static(&self, name: &str) -> Option<StaticType> {
+    pub(crate) fn type_name_to_static(&self, name: &str) -> Option<StaticType> {
         match name {
             "Int64" | "Int" => Some(StaticType::I64),
             "Int32" => Some(StaticType::I32),
@@ -137,7 +137,7 @@ impl<'a> IrConverter<'a> {
 
     /// Map an operator function name to AotBinOp
     /// Used to unfold multi-argument operator calls like *(a, b, c) to nested binops
-    fn map_operator_to_binop(&self, name: &str) -> Option<AotBinOp> {
+    pub(crate) fn map_operator_to_binop(&self, name: &str) -> Option<AotBinOp> {
         match name {
             "+" => Some(AotBinOp::Add),
             "-" => Some(AotBinOp::Sub),
@@ -156,7 +156,7 @@ impl<'a> IrConverter<'a> {
     }
 
     /// Convert JuliaType to StaticType
-    fn julia_type_to_static(&self, jt: &crate::types::JuliaType) -> StaticType {
+    pub(crate) fn julia_type_to_static(&self, jt: &crate::types::JuliaType) -> StaticType {
         use crate::types::JuliaType as JT;
         match jt {
             JT::Int64 => StaticType::I64,
@@ -174,7 +174,7 @@ impl<'a> IrConverter<'a> {
 
     /// Check if a function name corresponds to an operation handled directly by the AoT compiler
     /// These are operators and conversion functions that don't need user-defined implementations
-    fn is_aot_builtin_function(name: &str) -> bool {
+    pub(crate) fn is_aot_builtin_function(name: &str) -> bool {
         matches!(
             name,
             // Arithmetic operators
