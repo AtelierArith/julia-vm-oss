@@ -64,12 +64,23 @@ impl<R: RngLike> Vm<R> {
 
             Instr::MakeRangeLazy => {
                 // Create lazy Range value (does not materialize to array)
-                // Use pop_f64_or_i64 to handle both integer and float parameters
-                // (fixes issue #354: Range return type inference with Float64 parameters)
+                // Detect if any operand is a float type BEFORE popping
+                // Stack layout (top to bottom): stop, step, start
+                let n = self.stack.len();
+                let is_float = n >= 3
+                    && [&self.stack[n - 1], &self.stack[n - 2], &self.stack[n - 3]]
+                        .iter()
+                        .any(|v| matches!(v, Value::F64(_) | Value::F32(_) | Value::F16(_)));
+
                 let stop = self.pop_f64_or_i64()?;
                 let step = self.pop_f64_or_i64()?;
                 let start = self.pop_f64_or_i64()?;
-                let range = RangeValue { start, step, stop };
+                let range = RangeValue {
+                    start,
+                    step,
+                    stop,
+                    is_float,
+                };
                 self.stack.push(Value::Range(range));
                 Ok(Some(()))
             }

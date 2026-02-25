@@ -162,7 +162,13 @@ pub(super) fn run_file(file_path: &str) {
         Ok(Value::NamedTuple(nt)) => println!("result named_tuple = {:?}", nt.names),
         Ok(Value::Dict(d)) => println!("result dict = {} pairs", d.len()),
         Ok(Value::Range(r)) => {
-            if r.is_unit_range() {
+            if r.is_float {
+                if r.is_unit_range() {
+                    println!("result range = {}:{}", format_range_float(r.start), format_range_float(r.stop));
+                } else {
+                    println!("result range = {}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop));
+                }
+            } else if r.is_unit_range() {
                 println!("result range = {:.0}:{:.0}", r.start, r.stop);
             } else {
                 println!("result range = {:.0}:{:.0}:{:.0}", r.start, r.step, r.stop);

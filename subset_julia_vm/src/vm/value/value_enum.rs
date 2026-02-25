@@ -532,6 +532,7 @@ mod tests {
                 start: 0.0,
                 step: 1.0,
                 stop: 0.0,
+                is_float: false,
             }),
             Value::SliceAll,
             // Struct types

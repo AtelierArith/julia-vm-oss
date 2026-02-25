@@ -20,6 +20,9 @@ pub struct RangeValue {
     pub start: f64,
     pub step: f64,
     pub stop: f64,
+    /// True if any operand was originally a Float64 (or other float type).
+    /// When true, the range produces Float64 values even if all values are integer-like.
+    pub is_float: bool,
 }
 
 impl RangeValue {
@@ -29,12 +32,18 @@ impl RangeValue {
             start,
             step: 1.0,
             stop,
+            is_float: false,
         }
     }
 
     /// Create a step range: start:step:stop
     pub fn step_range(start: f64, step: f64, stop: f64) -> Self {
-        Self { start, step, stop }
+        Self {
+            start,
+            step,
+            stop,
+            is_float: false,
+        }
     }
 
     /// Check if this is a unit range (step = 1)
@@ -45,7 +54,10 @@ impl RangeValue {
     /// Check if this is an integer range (all values are integers)
     /// Returns true if start, step, and stop are all integer values.
     pub fn is_integer_range(&self) -> bool {
-        self.start.fract() == 0.0 && self.step.fract() == 0.0 && self.stop.fract() == 0.0
+        !self.is_float
+            && self.start.fract() == 0.0
+            && self.step.fract() == 0.0
+            && self.stop.fract() == 0.0
     }
 
     /// Calculate the length of the range without allocating.

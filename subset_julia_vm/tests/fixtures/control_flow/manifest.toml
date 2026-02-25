@@ -83,3 +83,9 @@ name = "begin_block_mutation"
 file = "begin_block_mutation.jl"
 expected = true
 description = "begin...end blocks preserve all side effects (mutations, assignments) — Issue #3102"
+
+[[tests]]
+name = "scalar_iteration"
+file = "scalar_iteration.jl"
+expected = 6
+description = "Scalar iteration: for x in 6 yields 6 once (Issue #4)"

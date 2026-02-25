@@ -1180,6 +1180,15 @@ fn format_value(value: &Value) -> String {
     format_value_with_vm(value, None)
 }
 
+/// Format a float value for range display.
+fn format_range_float(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{:.1}", v)
+    } else {
+        format!("{}", v)
+    }
+}
+
 fn format_value_with_vm(
     value: &Value,
     struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
@@ -1267,7 +1276,13 @@ fn format_value_with_vm(
             }
         }
         Value::Range(r) => {
-            if r.is_unit_range() {
+            if r.is_float {
+                if r.is_unit_range() {
+                    format!("{}:{}", format_range_float(r.start), format_range_float(r.stop))
+                } else {
+                    format!("{}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop))
+                }
+            } else if r.is_unit_range() {
                 format!("{}:{}", r.start as i64, r.stop as i64)
             } else {
                 format!("{}:{}:{}", r.start as i64, r.step as i64, r.stop as i64)

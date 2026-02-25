@@ -140,6 +140,15 @@ pub(crate) fn format_value(v: &Value) -> String {
     }
 }
 
+/// Format a float value for range display.
+fn format_range_float(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{:.1}", v)
+    } else {
+        format!("{}", v)
+    }
+}
+
 /// Slow path for less common Value variants.
 #[cold]
 fn format_value_slow(v: &Value) -> String {
@@ -171,7 +180,13 @@ fn format_value_slow(v: &Value) -> String {
         Value::Struct(s) if s.is_complex() => format_complex_struct(s),
         Value::Array(arr) => format_array_value(arr),
         Value::Range(r) => {
-            if r.step == 1.0 {
+            if r.is_float {
+                if r.step == 1.0 {
+                    format!("{}:{}", format_range_float(r.start), format_range_float(r.stop))
+                } else {
+                    format!("{}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop))
+                }
+            } else if r.step == 1.0 {
                 format!("{}:{}", r.start, r.stop)
             } else {
                 format!("{}:{}:{}", r.start, r.step, r.stop)
@@ -558,7 +573,13 @@ pub(crate) fn value_to_string(val: &Value) -> String {
         }
         Value::SliceAll => ":".to_string(),
         Value::Range(r) => {
-            if r.is_unit_range() {
+            if r.is_float {
+                if r.is_unit_range() {
+                    format!("{}:{}", format_range_float(r.start), format_range_float(r.stop))
+                } else {
+                    format!("{}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop))
+                }
+            } else if r.is_unit_range() {
                 format!("{:.0}:{:.0}", r.start, r.stop)
             } else {
                 format!("{:.0}:{:.0}:{:.0}", r.start, r.step, r.stop)

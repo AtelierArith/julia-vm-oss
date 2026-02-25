@@ -315,3 +315,9 @@ name = "broadcast_similar_guard"
 file = "test_similar_broadcasted_guard.jl"
 expected = true
 description = "Regression: similar(::Broadcasted, ::Type) must not be intercepted by builtin (Issue #2702)"
+
+[[tests]]
+name = "scalar_broadcast"
+file = "scalar_broadcast.jl"
+expected = 16.0
+description = "Scalar broadcasting returns scalar, not array (Issue #4)"

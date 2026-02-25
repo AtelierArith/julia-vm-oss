@@ -16,6 +16,15 @@ use crate::pipeline::parse_and_lower;
 use crate::rng::StableRng;
 use crate::vm::{Value, Vm};
 
+/// Format a float value for range display.
+fn format_range_float(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{:.1}", v)
+    } else {
+        format!("{}", v)
+    }
+}
+
 /// Request cancellation of the current VM execution.
 #[no_mangle]
 pub extern "C" fn vm_request_cancel() {
@@ -329,7 +338,13 @@ pub extern "C" fn compile_and_run_with_output(src_ptr: *const c_char, seed: u64)
             output.push_str(&format!("[result] Set({} elements)\n", s.elements.len()))
         }
         Ok(Value::Range(r)) => {
-            if r.is_unit_range() {
+            if r.is_float {
+                if r.is_unit_range() {
+                    output.push_str(&format!("[result] {}:{}\n", format_range_float(r.start), format_range_float(r.stop)));
+                } else {
+                    output.push_str(&format!("[result] {}:{}:{}\n", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop)));
+                }
+            } else if r.is_unit_range() {
                 output.push_str(&format!("[result] {:.0}:{:.0}\n", r.start, r.stop));
             } else {
                 output.push_str(&format!(
