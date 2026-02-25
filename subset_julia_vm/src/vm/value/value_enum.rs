@@ -276,7 +276,9 @@ impl Value {
                 crate::types::JuliaType::Struct(format!("Memory{{{}}}", elem_type_name))
             }
             Value::Range(r) => {
-                if r.is_unit_range() {
+                if r.is_float {
+                    crate::types::JuliaType::Struct("StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}".to_string())
+                } else if r.is_unit_range() {
                     crate::types::JuliaType::UnitRange
                 } else {
                     crate::types::JuliaType::StepRange
