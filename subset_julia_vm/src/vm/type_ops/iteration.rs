@@ -525,6 +525,13 @@ impl<R: RngLike> Vm<R> {
                     }))
                 }
             }
+            // Scalar number iteration (Julia: iterate(x::Number) = (x, nothing))
+            // Numbers iterate exactly once, yielding themselves.
+            Value::I64(_) | Value::F64(_) | Value::F32(_) | Value::Bool(_) => {
+                Ok(Value::Tuple(TupleValue {
+                    elements: vec![coll.clone(), Value::Nothing],
+                }))
+            }
             _ => Err(VmError::TypeError(format!(
                 "iterate: unsupported collection type {:?}",
                 coll
@@ -535,6 +542,16 @@ impl<R: RngLike> Vm<R> {
     /// Subsequent iteration: iterate(collection, state) -> (element, state) or nothing
     /// State is 0-indexed - it represents the next index to fetch
     pub(in crate::vm) fn iterate_next(&self, coll: &Value, state: &Value) -> Result<Value, VmError> {
+        // Scalar number iteration (Julia: iterate(x::Number, ::Nothing) = nothing)
+        // After yielding once, scalar iteration is done.
+        if matches!(
+            coll,
+            Value::I64(_) | Value::F64(_) | Value::F32(_) | Value::Bool(_)
+        ) && matches!(state, Value::Nothing)
+        {
+            return Ok(Value::Nothing);
+        }
+
         // Handle CartesianIndices with Tuple or Bool state
         if let Some(dims) = self.get_cartesian_indices_dims(coll) {
             return self.iterate_next_cartesian_indices(&dims, state);

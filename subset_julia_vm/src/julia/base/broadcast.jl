@@ -149,7 +149,9 @@ function _broadcast_shape(shape_a, shape_b)
     end
     # Convert to tuple
     n = length(result)
-    if n == 1
+    if n == 0
+        return ()
+    elseif n == 1
         return (result[1],)
     elseif n == 2
         return (result[1], result[2])
@@ -1018,6 +1020,12 @@ end
 # copy for Broadcasted: allocate result and fill it
 function copy(bc::Broadcasted)
     ibc = instantiate(bc)
+    # 0-dimensional broadcast (all scalar operands): return scalar result (Issue #4)
+    ax = axes(ibc)
+    if length(ax) == 0
+        args = _getindex(ibc.bc_args, 1)
+        return _broadcast_apply(ibc.f, args)
+    end
     ElType = combine_eltypes(ibc.f, ibc.bc_args)
     dest = similar(ibc, ElType)
     return copyto!(dest, ibc)
