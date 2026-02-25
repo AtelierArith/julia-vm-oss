@@ -48,6 +48,15 @@ fn format_complex_struct_ffi(s: &StructInstance) -> String {
     }
 }
 
+/// Format a float value for range display.
+fn format_range_float(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{:.1}", v)
+    } else {
+        format!("{}", v)
+    }
+}
+
 /// Format a Value for display in REPL output.
 pub fn format_value(value: &Value) -> String {
     match value {
@@ -114,7 +123,13 @@ pub fn format_value(value: &Value) -> String {
             }
         }
         Value::Range(r) => {
-            if r.is_unit_range() {
+            if r.is_float {
+                if r.is_unit_range() {
+                    format!("{}:{}", format_range_float(r.start), format_range_float(r.stop))
+                } else {
+                    format!("{}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop))
+                }
+            } else if r.is_unit_range() {
                 format!("{:.0}:{:.0}", r.start, r.stop)
             } else {
                 format!("{:.0}:{:.0}:{:.0}", r.start, r.step, r.stop)

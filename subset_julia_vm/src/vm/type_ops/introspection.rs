@@ -66,7 +66,9 @@ impl<R: RngLike> Vm<R> {
                 }
             }
             Value::Range(r) => {
-                if r.is_unit_range() {
+                if r.is_float {
+                    "StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}".to_string()
+                } else if r.is_unit_range() {
                     "UnitRange{Int64}".to_string()
                 } else {
                     "StepRange{Int64, Int64}".to_string()
