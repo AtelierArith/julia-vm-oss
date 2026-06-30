@@ -188,10 +188,10 @@ pub fn ceil(x: f64) -> f64 {
     x.ceil()
 }
 
-/// Round to nearest integer
+/// Round to nearest integer, ties to even (Julia's default `RoundNearest`).
 #[inline]
 pub fn round(x: f64) -> f64 {
-    x.round()
+    x.round_ties_even()
 }
 
 /// Truncate towards zero
@@ -343,6 +343,74 @@ pub fn println_values(values: &[&dyn std::fmt::Display]) {
     println!();
 }
 
+// ========== Float display (Julia-faithful) ==========
+
+/// Format an `f64` the way Julia's `print`/`println`/`string` do (Issue #7256).
+///
+/// This mirrors the VM-side formatter (`vm::formatting::numeric::format_float_julia`)
+/// so AoT-compiled output matches both upstream Julia and the interpreter:
+///   * whole numbers below `1e6` keep a `.0` suffix (`3.0`, `100000.0`);
+///   * magnitudes outside `[1e-4, 1e6)` switch to scientific notation
+///     (`1.0e30`, `1.5e20`, `1.0e-7`) instead of Rust's default decimal
+///     expansion (`1000000000000000000000000000000`);
+///   * `Inf`/`-Inf`/`NaN` use Julia's spelling, and `-0.0` keeps its sign.
+///
+/// Julia uses `e` notation (`1.0e30`), never `1e+30`, and an integer mantissa
+/// always carries a `.0` (`1.0e30`, not `1e30`).
+pub fn format_float64_julia(value: f64) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-Inf".to_string()
+        } else {
+            "Inf".to_string()
+        };
+    }
+
+    // Whole numbers below 1e6 use fixed-point form with a `.0` suffix. Larger
+    // whole numbers fall through to the scientific arm below (Julia switches to
+    // scientific at 1e6, so `100000.0` is fixed but `1.0e6` is scientific).
+    if value.fract() == 0.0 && value.abs() < 1e6 {
+        // `-0.0 as i64` is `0`, losing the sign; IEEE 754 and Julia both keep
+        // `-0.0`, so guard before the cast.
+        if value.is_sign_negative() && value == 0.0 {
+            return "-0.0".to_string();
+        }
+        return format!("{}.0", value as i64);
+    }
+
+    // For very small / very large magnitudes, Julia uses scientific notation
+    // rather than the multi-hundred-digit fixed-point form Rust's default
+    // `Display` would produce. Thresholds match Julia's shortest-roundtrip
+    // cutoff: `|x| < 1e-4` (small) or `|x| >= 1e6` (large).
+    let mag = value.abs();
+    if mag != 0.0 && !(1e-4..1e6).contains(&mag) {
+        let raw = format!("{:e}", value);
+        let mut parts = raw.splitn(2, 'e');
+        let mantissa = parts.next().unwrap_or("");
+        let exponent = parts.next().unwrap_or("");
+        return if mantissa.contains('.') {
+            format!("{}e{}", mantissa, exponent)
+        } else {
+            // Integer mantissa: Julia still shows the decimal point (`1.0e30`).
+            format!("{}.0e{}", mantissa, exponent)
+        };
+    }
+
+    // Normal range: Rust's default `Display` already matches Julia.
+    value.to_string()
+}
+
+/// Format an `f32` the way Julia does, delegating to the `f64` path on the
+/// widened value (matches the VM's `format_float32_julia` fixed/scientific
+/// thresholds; Issue #7256).
+#[inline]
+pub fn format_float32_julia(value: f32) -> String {
+    format_float64_julia(value as f64)
+}
+
 // ========== Constants ==========
 
 /// Mathematical constant π
@@ -384,6 +452,12 @@ mod tests {
         assert_eq!(ceil(3.2), 4.0);
         assert_eq!(round(3.5), 4.0);
         assert_eq!(trunc(-3.7), -3.0);
+        // Julia's default RoundNearest is round-half-to-even (banker's), not
+        // half-away-from-zero: round(2.5)==2.0, round(0.5)==0.0, round(4.5)==4.0.
+        assert_eq!(round(2.5), 2.0);
+        assert_eq!(round(0.5), 0.0);
+        assert_eq!(round(4.5), 4.0);
+        assert_eq!(round(-2.5), -2.0);
     }
 
     #[test]
@@ -395,5 +469,70 @@ mod tests {
         assert!(iszero_i64(0));
         assert!(iseven(4));
         assert!(isodd(5));
+    }
+
+    /// Issue #7256: AoT float display must match upstream Julia (1.12.6) and the
+    /// VM, switching to scientific notation for large/small magnitudes rather
+    /// than emitting Rust's default decimal expansion.
+    #[test]
+    fn test_format_float64_julia_matches_upstream() {
+        // The expected strings were captured from `julia -e 'println(v)'` on
+        // Julia 1.12.6 (the parity gold) and confirmed identical to the VM's
+        // `format_float_julia`.
+        let cases: &[(f64, &str)] = &[
+            // Large whole-value floats: scientific, NOT decimal expansion.
+            (1e30, "1.0e30"),
+            (1.5e20, "1.5e20"),
+            (-1.5e20, "-1.5e20"),
+            (1.0e6, "1.0e6"),
+            (1.0e7, "1.0e7"),
+            (1.0e15, "1.0e15"),
+            (1.0e16, "1.0e16"),
+            (1.0e21, "1.0e21"),
+            (6.022e23, "6.022e23"),
+            (1.0e300, "1.0e300"),
+            // Small magnitudes: scientific once |x| < 1e-4.
+            (1.0e-7, "1.0e-7"),
+            (1.0e-5, "1.0e-5"),
+            (1.0e-300, "1.0e-300"),
+            // Fixed-point range: decimal form, with `.0` on whole numbers.
+            (0.0001, "0.0001"),
+            (0.001, "0.001"),
+            (0.1, "0.1"),
+            (0.25, "0.25"),
+            (1.0, "1.0"),
+            (1.5, "1.5"),
+            (100.0, "100.0"),
+            (1000.0, "1000.0"),
+            (100000.0, "100000.0"),
+            (123456.0, "123456.0"),
+            // Just past the 1e6 fixed/scientific switch.
+            (1234567.0, "1.234567e6"),
+            (12345678.0, "1.2345678e7"),
+            // Signed zero and plain zero.
+            (0.0, "0.0"),
+            (-0.0, "-0.0"),
+            // Non-finite values use Julia's spelling.
+            (f64::INFINITY, "Inf"),
+            (f64::NEG_INFINITY, "-Inf"),
+            (f64::NAN, "NaN"),
+        ];
+        for &(value, expected) in cases {
+            assert_eq!(
+                format_float64_julia(value),
+                expected,
+                "format_float64_julia({:?}) should match upstream Julia",
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_float32_julia_delegates_to_f64() {
+        assert_eq!(format_float32_julia(1.5_f32), "1.5");
+        assert_eq!(format_float32_julia(100000.0_f32), "100000.0");
+        assert_eq!(format_float32_julia(1.0e7_f32), "1.0e7");
+        assert_eq!(format_float32_julia(-0.0_f32), "-0.0");
+        assert_eq!(format_float32_julia(f32::INFINITY), "Inf");
     }
 }

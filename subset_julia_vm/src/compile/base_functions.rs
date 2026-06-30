@@ -5,12 +5,528 @@
 //! - Whether a function is a random function
 //! - Whether an operator can be reduced from n-arg to binary
 //! - Mapping function names to builtin operations
-//! - Type expression display helpers
 
 use crate::ir::core::{BuiltinOp, Expr, Literal};
-use crate::types::TypeExpr;
 
 use super::constants::is_math_constant;
+
+/// Classification for public Base names that still have a Rust fallback route.
+///
+/// Public Julia APIs should use method dispatch first whenever upstream Julia
+/// implements the behavior in Julia. Direct/runtime/internal classifications
+/// document the cases where sjulia still intentionally emits a Rust operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BaseRouteKind {
+    /// Public call should consult Julia methods first; Rust is only a primitive
+    /// or cache-compatibility fallback.
+    DispatchFirst,
+    /// Public call is intentionally compiled directly to a Rust builtin.
+    DirectBuiltin,
+    /// Boundary to runtime/OS/host services where Pure Julia is not expected.
+    RuntimeBoundary,
+    /// Internal helper used by sjulia's Pure Julia Base implementation.
+    InternalIntrinsic,
+    /// Constructor or compiler helper with special lowering semantics.
+    CompilerIntrinsic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct BaseFunctionRoute {
+    pub name: &'static str,
+    pub builtin_op: Option<BuiltinOp>,
+    pub kind: BaseRouteKind,
+    /// Upstream Julia source that should be checked before changing the route.
+    pub upstream_ref: &'static str,
+}
+
+impl BaseFunctionRoute {
+    const fn new(
+        name: &'static str,
+        builtin_op: Option<BuiltinOp>,
+        kind: BaseRouteKind,
+        upstream_ref: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            builtin_op,
+            kind,
+            upstream_ref,
+        }
+    }
+
+    pub(super) fn is_dispatch_first(self) -> bool {
+        matches!(self.kind, BaseRouteKind::DispatchFirst)
+    }
+}
+
+const fn route(
+    name: &'static str,
+    builtin_op: BuiltinOp,
+    kind: BaseRouteKind,
+    upstream_ref: &'static str,
+) -> BaseFunctionRoute {
+    BaseFunctionRoute::new(name, Some(builtin_op), kind, upstream_ref)
+}
+
+const fn marker(
+    name: &'static str,
+    kind: BaseRouteKind,
+    upstream_ref: &'static str,
+) -> BaseFunctionRoute {
+    BaseFunctionRoute::new(name, None, kind, upstream_ref)
+}
+
+/// Single registry for public Base names whose Rust builtin route is still
+/// retained at compile time.
+///
+/// When adding a public Base fallback, add it here with a route kind and the
+/// upstream Julia file that owns the semantics. The CI audit rejects direct
+/// string arms in `base_function_to_builtin_op` so this remains the inventory.
+pub(super) const BASE_FUNCTION_ROUTES: &[BaseFunctionRoute] = &[
+    route(
+        "rand",
+        BuiltinOp::Rand,
+        BaseRouteKind::RuntimeBoundary,
+        "julia/stdlib/Random/src/Random.jl",
+    ),
+    route(
+        "sqrt",
+        BuiltinOp::Sqrt,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/math.jl",
+    ),
+    route(
+        "time_ns",
+        BuiltinOp::TimeNs,
+        BaseRouteKind::RuntimeBoundary,
+        "julia/base/c.jl",
+    ),
+    route(
+        "length",
+        BuiltinOp::Length,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractarray.jl",
+    ),
+    route(
+        "size",
+        BuiltinOp::Size,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractarray.jl",
+    ),
+    route(
+        "ndims",
+        BuiltinOp::Ndims,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractarray.jl",
+    ),
+    route(
+        "push!",
+        BuiltinOp::Push,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "pop!",
+        BuiltinOp::Pop,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "pushfirst!",
+        BuiltinOp::PushFirst,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "popfirst!",
+        BuiltinOp::PopFirst,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "insert!",
+        BuiltinOp::Insert,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "deleteat!",
+        BuiltinOp::DeleteAt,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "reshape",
+        BuiltinOp::Reshape,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "zero",
+        BuiltinOp::Zero,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/number.jl",
+    ),
+    route(
+        "lu",
+        BuiltinOp::Lu,
+        BaseRouteKind::DispatchFirst,
+        "julia/stdlib/LinearAlgebra/src/lu.jl",
+    ),
+    route(
+        "det",
+        BuiltinOp::Det,
+        BaseRouteKind::DispatchFirst,
+        "julia/stdlib/LinearAlgebra/src/dense.jl",
+    ),
+    route(
+        "StableRNG",
+        BuiltinOp::StableRNG,
+        BaseRouteKind::RuntimeBoundary,
+        "julia/stdlib/Random/src/RNGs.jl",
+    ),
+    route(
+        "Xoshiro",
+        BuiltinOp::XoshiroRNG,
+        BaseRouteKind::RuntimeBoundary,
+        "julia/stdlib/Random/src/Xoshiro.jl",
+    ),
+    route(
+        "MersenneTwister",
+        BuiltinOp::MersenneTwisterRNG,
+        BaseRouteKind::RuntimeBoundary,
+        "julia/stdlib/Random/src/RNGs.jl",
+    ),
+    route(
+        "randn",
+        BuiltinOp::Randn,
+        BaseRouteKind::RuntimeBoundary,
+        "julia/stdlib/Random/src/normal.jl",
+    ),
+    route(
+        "_tuple_first",
+        BuiltinOp::TupleFirst,
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/tuple.jl",
+    ),
+    route(
+        "_tuple_last",
+        BuiltinOp::TupleLast,
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/tuple.jl",
+    ),
+    // Issue #6731 slice 2: delete!/get!/empty!/merge! on a Dict route through the
+    // pure-Julia Dict{K,V} methods (base/dict.jl) only — no Value::Dict builtin
+    // fallback. Markers (no builtin_op) so the call dispatches to the pure
+    // parametric methods (static and dynamic, incl. the #6584 Any-binding case).
+    marker(
+        "delete!",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/dict.jl",
+    ),
+    marker("get!", BaseRouteKind::DispatchFirst, "julia/base/dict.jl"),
+    marker("empty!", BaseRouteKind::DispatchFirst, "julia/base/dict.jl"),
+    // Issue #6731: keys/values/pairs route through pure-Julia Dict{K,V} methods
+    // (base/dict.jl) only — no Value::Dict builtin fallback. Marker (no
+    // builtin_op) so base_function_to_builtin_op returns None and the call
+    // dispatches to the pure parametric methods (static and dynamic).
+    marker(
+        "keys",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractdict.jl",
+    ),
+    marker(
+        "values",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractdict.jl",
+    ),
+    marker(
+        "pairs",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractdict.jl",
+    ),
+    marker("merge!", BaseRouteKind::DispatchFirst, "julia/base/dict.jl"),
+    route(
+        "Ref",
+        BuiltinOp::Ref,
+        BaseRouteKind::CompilerIntrinsic,
+        "julia/base/refvalue.jl",
+    ),
+    route(
+        "typeof",
+        BuiltinOp::TypeOf,
+        BaseRouteKind::DirectBuiltin,
+        "julia/base/essentials.jl",
+    ),
+    route(
+        "isa",
+        BuiltinOp::Isa,
+        BaseRouteKind::DirectBuiltin,
+        "julia/base/operators.jl",
+    ),
+    route(
+        "eltype",
+        BuiltinOp::Eltype,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractarray.jl",
+    ),
+    route(
+        "keytype",
+        BuiltinOp::Keytype,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractdict.jl",
+    ),
+    route(
+        "valtype",
+        BuiltinOp::Valtype,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractdict.jl",
+    ),
+    route(
+        "sizeof",
+        BuiltinOp::Sizeof,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/essentials.jl",
+    ),
+    marker(
+        "isbits",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "isbitstype",
+        BuiltinOp::Isbitstype,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/runtime_internals.jl",
+    ),
+    route(
+        "_supertype",
+        BuiltinOp::Supertype,
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "_typename",
+        BuiltinOp::Typename,
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "_function_name",
+        BuiltinOp::FunctionName,
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "subtypes",
+        BuiltinOp::Subtypes,
+        BaseRouteKind::DirectBuiltin,
+        "julia/base/reflection.jl",
+    ),
+    marker(
+        "hasfield",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/reflection.jl",
+    ),
+    marker(
+        "ismutable",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "objectid",
+        BuiltinOp::Objectid,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/runtime_internals.jl",
+    ),
+    route(
+        "_methods_by_ftype",
+        BuiltinOp::Methods,
+        BaseRouteKind::InternalIntrinsic,
+        "julia/Compiler/src/methodtable.jl",
+    ),
+    route(
+        "hasmethod",
+        BuiltinOp::HasMethod,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "in",
+        BuiltinOp::In,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/operators.jl",
+    ),
+    marker("∈", BaseRouteKind::DispatchFirst, "julia/base/operators.jl"),
+    marker("∉", BaseRouteKind::DispatchFirst, "julia/base/operators.jl"),
+    marker("∋", BaseRouteKind::DispatchFirst, "julia/base/operators.jl"),
+    marker("∌", BaseRouteKind::DispatchFirst, "julia/base/operators.jl"),
+    route(
+        "iterate",
+        BuiltinOp::Iterate,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/essentials.jl",
+    ),
+    route(
+        "collect",
+        BuiltinOp::Collect,
+        BaseRouteKind::DispatchFirst,
+        "julia/base/array.jl",
+    ),
+    route(
+        "Generator",
+        BuiltinOp::Generator,
+        BaseRouteKind::CompilerIntrinsic,
+        "julia/base/generator.jl",
+    ),
+    route(
+        "gensym",
+        BuiltinOp::Gensym,
+        BaseRouteKind::CompilerIntrinsic,
+        "julia/base/expr.jl",
+    ),
+    route(
+        "macroexpand",
+        BuiltinOp::MacroExpand,
+        BaseRouteKind::CompilerIntrinsic,
+        "julia/base/reflection.jl",
+    ),
+    route(
+        "macroexpand!",
+        BuiltinOp::MacroExpandBang,
+        BaseRouteKind::CompilerIntrinsic,
+        "julia/base/reflection.jl",
+    ),
+    marker(
+        "getindex",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractarray.jl",
+    ),
+    marker(
+        "setindex!",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/abstractarray.jl",
+    ),
+    marker(
+        "ncodeunits",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/strings/basic.jl",
+    ),
+    marker(
+        "codeunit",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/strings/basic.jl",
+    ),
+    marker(
+        "codeunits",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/strings/basic.jl",
+    ),
+    marker(
+        "isvalid",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/strings/basic.jl",
+    ),
+    marker(
+        "string",
+        BaseRouteKind::DirectBuiltin,
+        "julia/base/strings/io.jl",
+    ),
+    marker(
+        "sprintf",
+        // Pure-Julia Printf engine (base/printf.jl, Issue #6746). The Rust
+        // BuiltinId::Sprintf remains only as a no-method fallback.
+        BaseRouteKind::DispatchFirst,
+        "julia/stdlib/Printf/src/Printf.jl",
+    ),
+    marker(
+        "bitstring",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/intfuncs.jl",
+    ),
+    marker(
+        "codepoint",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/char.jl",
+    ),
+    marker(
+        "isnumeric",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/strings/unicode.jl",
+    ),
+    marker(
+        "unescape_string",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/strings/io.jl",
+    ),
+    marker("parse", BaseRouteKind::DispatchFirst, "julia/base/parse.jl"),
+    marker(
+        "tryparse",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/parse.jl",
+    ),
+    marker(
+        "_tryparse_float64",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/parse.jl",
+    ),
+    marker("big", BaseRouteKind::DispatchFirst, "julia/base/gmp.jl"),
+    marker(
+        "convert",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/essentials.jl",
+    ),
+    marker(
+        "promote",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/promotion.jl",
+    ),
+    marker(
+        "signed",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/number.jl",
+    ),
+    marker(
+        "unsigned",
+        BaseRouteKind::DispatchFirst,
+        "julia/base/number.jl",
+    ),
+    marker(
+        "memoryref",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/essentials.jl",
+    ),
+    marker(
+        "memoryrefnew",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/essentials.jl",
+    ),
+    marker(
+        "memoryrefget",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/essentials.jl",
+    ),
+    marker(
+        "memoryrefset!",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/essentials.jl",
+    ),
+    marker(
+        "memoryrefoffset",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/genericmemory.jl",
+    ),
+    marker(
+        "memoryrefparent",
+        BaseRouteKind::InternalIntrinsic,
+        "julia/base/genericmemory.jl",
+    ),
+];
+
+pub(super) fn base_function_route(name: &str) -> Option<&'static BaseFunctionRoute> {
+    let name = name.strip_prefix("Base.").unwrap_or(name);
+    BASE_FUNCTION_ROUTES.iter().find(|route| route.name == name)
+}
 
 /// Extract module path from a nested FieldAccess expression.
 /// For example, Base.MathConstants returns Some("Base.MathConstants")
@@ -36,15 +552,17 @@ pub(super) fn is_base_submodule_function(submodule: &str, function: &str) -> boo
         "IO" => matches!(function, "println" | "print" | "error" | "throw"),
         "Collections" => matches!(
             function,
-            "push!" | "pop!" | "length" | "size" | "zeros" | "ones" | "collect" | "first" | "last" // Note: trues, falses, fill are now Pure Julia (base/array.jl)
+            "push!" | "pop!" | "length" | "size" | "collect" // Note: trues, falses, fill, zeros, ones are now Pure Julia (base/array.jl); first/last are Pure Julia (Issue #3734)
         ),
-        "Random" => matches!(function, "rand" | "randn" | "StableRNG" | "Xoshiro"),
+        // Random is a stdlib root module, not a Base submodule. Upstream rejects
+        // `Base.Random`, so sjulia must not expose `Base.Random.<fn>` as a public
+        // route (Issue #8278).
+        "Random" => false,
         // Note: Complex submodule removed — all functions (complex, real, imag, conj, abs, abs2)
         // are now Pure Julia (base/complex.jl, base/number.jl) — Issue #2645
-        // Note: transpose, adjoint are now Pure Julia
-        // Note: svd, qr, inv, eigen, eigvals, rank, cond are handled via call.rs
-        // directly, not through this path — Issue #2645
-        "LinearAlgebra" => matches!(function, "lu" | "det"),
+        // LinearAlgebra is a stdlib, not a Base submodule. Upstream rejects
+        // `Base.LinearAlgebra`, so sjulia must not expose it as a public route.
+        "LinearAlgebra" => false,
         // Note: map, filter, reduce, foreach, sum are now Pure Julia
         "Iterators" => false, // sum moved to Pure Julia
         "MathConstants" => is_math_constant(function),
@@ -70,10 +588,11 @@ pub(super) fn is_base_submodule_function(submodule: &str, function: &str) -> boo
 /// Check if a function name belongs to Base module.
 /// This includes all built-in functions that are available without explicit import.
 pub(super) fn is_base_function(name: &str) -> bool {
+    let name = name.strip_prefix("Base.").unwrap_or(name);
     matches!(
         name,
         // I/O
-        "println" | "print" | "error" | "throw" |
+        "println" | "print" | "error" | "throw" | "rethrow" |
         "IOBuffer" | "take!" | "takestring!" | "write" |
         "open" | "close" | "isopen" | "eof" | "readline" |
         "tempname" | "tempdir" | "touch" | "rm" |
@@ -82,6 +601,14 @@ pub(super) fn is_base_function(name: &str) -> bool {
         // Math functions
         // Note: sin, cos, tan, asin, acos, atan, exp, log removed — now Pure Julia (base/math.jl)
         "sqrt" | "floor" | "ceil" | "round" |
+        // Low-level bit CPU intrinsics (Issue #6741): the public functions
+        // count_ones / leading_zeros / trailing_zeros / bitreverse / bswap are
+        // pure Julia (base/int.jl) and call these underscored intrinsics, which
+        // must be recognized here so the pure wrappers compile to them. (The
+        // public functions get their method tables from base/int.jl; derived
+        // count_zeros / leading_ones / trailing_ones / bitrotate are pure Julia
+        // too — Issue #6722.)
+        "_ctpop_int" | "_ctlz_int" | "_cttz_int" | "_bitreverse_int" | "_bswap_int" |
         // Integer division intrinsic (called by div() in int.jl)
         "sdiv_int" |
         // Note: gcd, lcm, factorial are now Pure Julia (base/intfuncs.jl)
@@ -94,7 +621,6 @@ pub(super) fn is_base_function(name: &str) -> bool {
         "sleep" |
         // Array creation and manipulation
         // Note: trues, falses, fill are now Pure Julia (base/array.jl)
-        "zeros" | "ones" |
         "length" | "size" | "ndims" |
         "push!" | "pop!" | "pushfirst!" | "popfirst!" |
         "insert!" | "deleteat!" | "collect" |
@@ -110,11 +636,11 @@ pub(super) fn is_base_function(name: &str) -> bool {
         "delete!" | "get!" | "empty!" |
         "keys" | "values" | "pairs" | "merge!" |
         // Tuple operations
-        "first" | "last" |
+        // Note: first, last are now Pure Julia (Issue #3734)
         // Range
         "range" |
         // RNG constructors
-        "StableRNG" | "Xoshiro" |
+        "StableRNG" | "Xoshiro" | "MersenneTwister" |
         // String operations
         "string" | "repr" | "sprintf" |
         // Note: uppercase, lowercase, titlecase are now Pure Julia (base/strings/unicode.jl)
@@ -123,38 +649,68 @@ pub(super) fn is_base_function(name: &str) -> bool {
         // Note: repeat is now Pure Julia (base/strings/basic.jl)
         // Note: split is now Pure Julia (base/strings/util.jl)
         // Note: findfirst, findlast, findnext, findprev are now Pure Julia (base/strings/search.jl)
-        "ncodeunits" | "codeunit" | "Char" | "Int" |
+        "ncodeunits" | "codeunit" | "codeunits" | "isvalid" |
+        "bitstring" | "codepoint" | "isnumeric" | "unescape_string" |
+        "parse" | "tryparse" | "Char" | "Int" |
+        // Float parse intrinsic; public parse/tryparse(Float64) are pure Julia (#6748)
+        "_tryparse_float64" |
         // Utility
         "zero" | "ifelse" | "Ref" | "time_ns" |
         // Type inspection
-        "typeof" | "isa" | "eltype" | "keytype" | "valtype" | "sizeof" | "isbits" | "isbitstype" |
-        "supertype" | "supertypes" | "subtypes" | "typeintersect" | "hasfield" |
+        "typeof" | "isa" | "eltype" | "keytype" | "valtype" | "sizeof" | "isbitstype" |
+        "subtypes" |
+        // isbits, hasfield, ismutable removed - pure Julia (Issue #6738)
         // typejoin removed - now Pure Julia (base/reflection.jl)
         // isconcretetype, isabstracttype, isprimitivetype, isstructtype, ismutabletype removed
         // now Pure Julia (base/reflection.jl)
-        "ismutable" |
         // fieldcount and nameof removed - now Pure Julia (base/reflection.jl)
         // Note: isunordered is now Pure Julia (base/operators.jl, Issue #2715)
         "objectid" |
         // Reflection (method introspection)
-        "methods" | "hasmethod" | "which" |
+        "hasmethod" |
         // Module introspection (Julia 1.11+)
-        "isexported" | "ispublic" |
-        // Set operations (builtin - works for both Sets and Arrays)
-        "in" | "union" | "intersect" | "setdiff" | "symdiff" | "issubset" | "isdisjoint" | "issetequal" |
-        // Set in-place operations (builtin - works for both Sets and Arrays)
-        "union!" | "intersect!" | "setdiff!" | "symdiff!" |
+        "names" | "isexported" | "ispublic" |
+        // Set operations
+        // Note: union/intersect/setdiff/symdiff/issubset/isdisjoint/issetequal and
+        // their mutating variants now Pure Julia (base/set.jl) — Issue #3724
+        "in" | "∈" | "∉" | "∋" | "∌" |
         // Iterator protocol (enables fallback to builtin for arrays/ranges)
         "iterate" |
         // Julia-compliant indexing
         "getindex" | "setindex!" |
+        // MemoryRef primitives; Core builtins mirrored for Memory/Array storage.
+        "memoryref" | "memoryrefnew" | "memoryrefget" | "memoryrefset!" |
+        "memoryrefoffset" | "memoryrefparent" |
         // Meta module internal builtins
         "_meta_parse" | "_meta_parse_at" | "_meta_lower" |
         // Regex internal builtins
-        "_regex_replace" |
-        // Internal intrinsics for Pure Julia migration (Issue #2570, #2582)
-        "_hash" | "_eltype"
+        "_regex_replace" | "_endswith_regex" |
+        // Printf float→string boundary (Issue #6746)
+        "_printf_fmt_float" |
+        // Internal intrinsics for Pure Julia migration (Issue #2570, #2582, #3762, #3772)
+        "_hash" | "_eltype" | "_supertype" | "_typename" | "_function_name" |
+        "_methods_by_ftype" | "_fma" |
+        "_mark_bitvector" | "_mark_bitarray" |
+        // Tuple-type construction backing tuple_type_tail/cons (Issue #5119)
+        "_make_tuple_type" |
+        // _tuple_first/_tuple_last: aliases to BuiltinId::TupleFirst/TupleLast
+        // for Pure Julia code that needs direct field access on `Value::Range`
+        // (Issue #3734 follow-up).
+        "_tuple_first" | "_tuple_last" |
+        // signed / unsigned: Pure Julia methods exist in base/number.jl for
+        // integer and Bool types (Issue #3727). Listed here so dispatch
+        // failure on unsupported argument types (e.g. Float64) falls back to
+        // the Rust BuiltinId::Signed / BuiltinId::Unsigned handler.
+        "signed" | "unsigned"
     )
+}
+
+/// Public Base names whose direct calls must try Julia method dispatch before
+/// Rust fallback routing. These functions have Pure Julia methods or user
+/// extension points, while `base_function_to_builtin_op` remains as the
+/// primitive/cache-compatibility fallback when dispatch finds no match.
+pub(super) fn is_method_dispatch_first_base_function(name: &str) -> bool {
+    base_function_route(name).is_some_and(|route| route.is_dispatch_first())
 }
 
 pub(super) fn is_random_function(name: &str) -> bool {
@@ -171,95 +727,12 @@ pub(super) fn is_reducible_nary_operator(name: &str) -> bool {
 /// Convert Base function name to BuiltinOp for proper type handling.
 /// Returns None for functions that are handled via compile_builtin_call (string-based).
 pub(super) fn base_function_to_builtin_op(name: &str) -> Option<BuiltinOp> {
-    match name {
-        "rand" => Some(BuiltinOp::Rand),
-        "sqrt" => Some(BuiltinOp::Sqrt),
-        "ifelse" => Some(BuiltinOp::IfElse),
-        "time_ns" => Some(BuiltinOp::TimeNs),
-        "zeros" => Some(BuiltinOp::Zeros),
-        "ones" => Some(BuiltinOp::Ones),
-        // Note: trues, falses, fill are now Pure Julia (base/array.jl)
-        "length" => Some(BuiltinOp::Length),
-        // Note: sum is now Pure Julia (base/array.jl)
-        "size" => Some(BuiltinOp::Size),
-        "ndims" => Some(BuiltinOp::Ndims),
-        "push!" => Some(BuiltinOp::Push),
-        "pop!" => Some(BuiltinOp::Pop),
-        "pushfirst!" => Some(BuiltinOp::PushFirst),
-        "popfirst!" => Some(BuiltinOp::PopFirst),
-        "insert!" => Some(BuiltinOp::Insert),
-        "deleteat!" => Some(BuiltinOp::DeleteAt),
-        "zero" => Some(BuiltinOp::Zero),
-        // Note: adjoint and transpose are now Pure Julia (base/array.jl, base/number.jl)
-        // Linear algebra operations (via faer library)
-        // Note: inv is NOT here because it also exists for Rational (Pure Julia)
-        "lu" => Some(BuiltinOp::Lu),
-        "det" => Some(BuiltinOp::Det),
-        "StableRNG" => Some(BuiltinOp::StableRNG),
-        "Xoshiro" => Some(BuiltinOp::XoshiroRNG),
-        "randn" => Some(BuiltinOp::Randn),
-        "first" => Some(BuiltinOp::TupleFirst),
-        "last" => Some(BuiltinOp::TupleLast),
-        // haskey/get/getkey now Pure Julia (Issue #2572)
-        "delete!" => Some(BuiltinOp::DictDelete),
-        "get!" => Some(BuiltinOp::DictGetBang),
-        "empty!" => Some(BuiltinOp::DictEmpty),
-        "keys" => Some(BuiltinOp::DictKeys),
-        "values" => Some(BuiltinOp::DictValues),
-        "pairs" => Some(BuiltinOp::DictPairs),
-        // merge now Pure Julia (Issue #2573)
-        "merge!" => Some(BuiltinOp::DictMergeBang),
-        "Ref" => Some(BuiltinOp::Ref),
-        "typeof" => Some(BuiltinOp::TypeOf),
-        "isa" => Some(BuiltinOp::Isa),
-        "eltype" => Some(BuiltinOp::Eltype),
-        "keytype" => Some(BuiltinOp::Keytype),
-        "valtype" => Some(BuiltinOp::Valtype),
-        "sizeof" => Some(BuiltinOp::Sizeof),
-        "isbits" => Some(BuiltinOp::Isbits),
-        "isbitstype" => Some(BuiltinOp::Isbitstype),
-        "supertype" => Some(BuiltinOp::Supertype),
-        "supertypes" => Some(BuiltinOp::Supertypes),
-        "subtypes" => Some(BuiltinOp::Subtypes),
-        "typeintersect" => Some(BuiltinOp::Typeintersect),
-        // "typejoin" removed - now Pure Julia (base/reflection.jl)
-        // "fieldcount" removed - now Pure Julia (base/reflection.jl)
-        "hasfield" => Some(BuiltinOp::Hasfield),
-        // "isconcretetype", "isabstracttype", "isprimitivetype", "isstructtype", "ismutabletype"
-        // removed - now Pure Julia (base/reflection.jl)
-        "ismutable" => Some(BuiltinOp::Ismutable),
-        // "nameof" removed - now Pure Julia (base/reflection.jl)
-        "objectid" => Some(BuiltinOp::Objectid),
-        // "isunordered" removed — now Pure Julia (base/operators.jl, Issue #2715)
-        // Reflection (method introspection)
-        "methods" => Some(BuiltinOp::Methods),
-        "hasmethod" => Some(BuiltinOp::HasMethod),
-        "which" => Some(BuiltinOp::Which),
-        "in" => Some(BuiltinOp::In),
-        "iterate" => Some(BuiltinOp::Iterate),
-        "collect" => Some(BuiltinOp::Collect),
-        "Generator" => Some(BuiltinOp::Generator),
-        // Metaprogramming
-        "gensym" => Some(BuiltinOp::Gensym),
-        _ => None,
-    }
-}
-
-/// Convert a TypeExpr to a display string (e.g., "Float64", "Point{Float64}", "Array{Point{Float64}}").
-pub(super) fn type_expr_to_string(expr: &TypeExpr) -> String {
-    match expr {
-        TypeExpr::Concrete(jt) => jt.name().to_string(),
-        TypeExpr::TypeVar(name) => name.clone(),
-        TypeExpr::Parameterized { base, params } => {
-            if params.is_empty() {
-                base.clone()
-            } else {
-                let params_str: Vec<String> = params.iter().map(type_expr_to_string).collect();
-                format!("{}{{{}}}", base, params_str.join(", "))
-            }
-        }
-        TypeExpr::RuntimeExpr(expr_str) => expr_str.clone(),
-    }
+    let route = base_function_route(name)?;
+    debug_assert!(
+        !route.upstream_ref.is_empty(),
+        "Base route {name} must document the upstream Julia source"
+    );
+    route.builtin_op
 }
 
 #[cfg(test)]
@@ -290,34 +763,48 @@ mod tests {
         // When adding a new entry to map_builtin_name(), also add it here.
         let map_builtin_variants = [
             BuiltinOp::Rand,
-            BuiltinOp::Sqrt,
-            BuiltinOp::IfElse,
-            BuiltinOp::Zeros,
-            BuiltinOp::Ones,
-            BuiltinOp::Reshape,
-            BuiltinOp::Length,
-            BuiltinOp::Size,
-            BuiltinOp::Push,
-            BuiltinOp::Pop,
-            BuiltinOp::Zero,
+            // Note: BuiltinOp::Sqrt removed from map_builtin_name (Issue #3737).
+            // Still reachable via `base_function_to_builtin_op("sqrt")` as a
+            // fallback when method dispatch finds no Pure Julia method.
+            // Note: BuiltinOp::IfElse moved to dead_but_kept (Issue #3733).
+            // Note: BuiltinOp::Reshape removed from map_builtin_name (Issue #4276).
+            // Still reachable via `base_function_to_builtin_op("reshape")` as a
+            // fallback when method dispatch finds no Pure Julia method.
+            // Note: BuiltinOp::Length / BuiltinOp::Size removed from
+            // map_builtin_name (Issue #3736). Still reachable via
+            // `base_function_to_builtin_op("length"|"size")` as a fallback for
+            // primitive collections (Array, Tuple, String, Dict, Set, Range,
+            // Generator) when method dispatch finds no Pure Julia method.
+            // Note: BuiltinOp::Push, BuiltinOp::Pop removed from map_builtin_name
+            // (Issue #3739). Still reachable via `base_function_to_builtin_op`
+            // as fallback when method dispatch finds no Pure Julia method
+            // (e.g., for `Array` push!/pop!).
+            // Note: BuiltinOp::Zero removed from map_builtin_name (Issue #3737).
+            // Still reachable via `base_function_to_builtin_op("zero")` as a
+            // fallback when method dispatch finds no Pure Julia method.
             BuiltinOp::StableRNG,
             BuiltinOp::XoshiroRNG,
+            BuiltinOp::MersenneTwisterRNG,
             BuiltinOp::Randn,
-            BuiltinOp::TupleFirst,
-            BuiltinOp::TupleLast,
+            // Note: TupleFirst, TupleLast removed from map_builtin_name (Issue #3734) — now Pure Julia
             // HasKey, DictGet, DictMerge, DictKeys, DictValues, DictPairs removed — now Pure Julia (Issue #2572, #2573, #2669)
-            BuiltinOp::DictDelete,
+            // Note: BuiltinOp::DictDelete removed from map_builtin_name (Issue
+            // #3739). Still reachable via `base_function_to_builtin_op("delete!")`
+            // for `Value::Dict` (legacy Rust HashMap) when dispatch finds no
+            // Pure Julia method.
             BuiltinOp::Ref,
             BuiltinOp::TypeOf,
             BuiltinOp::Isa,
-            BuiltinOp::Iterate,
-            BuiltinOp::Collect,
+            // Note: BuiltinOp::Iterate / BuiltinOp::Collect removed from
+            // map_builtin_name (Issue #3735). Still reachable via
+            // `base_function_to_builtin_op("iterate"|"collect")` as a fallback
+            // for primitive containers (Array, Tuple, String, Range) when
+            // method dispatch finds no matching Pure Julia method.
             BuiltinOp::Esc,
             BuiltinOp::Eval,
             BuiltinOp::MacroExpand,
             BuiltinOp::MacroExpandBang,
-            BuiltinOp::IncludeString,
-            BuiltinOp::EvalFile,
+            // Note: BuiltinOp::IncludeString and BuiltinOp::EvalFile moved to dead_but_kept (Issue #3738).
             BuiltinOp::SymbolNew,
             BuiltinOp::ExprNew,
             BuiltinOp::LineNumberNodeNew,
@@ -337,13 +824,12 @@ mod tests {
         let base_fn_inputs = [
             "rand",
             "sqrt",
-            "ifelse",
+            // Note: "ifelse" removed — now Pure Julia (Issue #3733).
             "time_ns",
-            "zeros",
-            "ones",
             "length",
             "size",
             "ndims",
+            "reshape",
             "push!",
             "pop!",
             "pushfirst!",
@@ -355,9 +841,12 @@ mod tests {
             "det",
             "StableRNG",
             "Xoshiro",
+            "MersenneTwister",
             "randn",
-            "first",
-            "last",
+            // Note: "first", "last" removed (Issue #3734) — now Pure Julia
+            // Internal aliases for Range first/last (Issue #3734 follow-up)
+            "_tuple_first",
+            "_tuple_last",
             "delete!",
             "get!",
             "empty!", // Dict mutating ops (Issue #2572)
@@ -372,19 +861,15 @@ mod tests {
             "keytype",
             "valtype",
             "sizeof",
-            "isbits",
             "isbitstype",
-            "supertype",
-            "supertypes",
+            "_supertype",
+            "_typename",
+            "_function_name",
             "subtypes",
-            "typeintersect",
-            "hasfield",
-            "ismutable",
             "objectid",
             "isunordered",
-            "methods",
+            "_methods_by_ftype",
             "hasmethod",
-            "which",
             "in",
             "iterate",
             "collect",
@@ -415,14 +900,25 @@ mod tests {
         // Known dead variants: kept in enum for handler code but no longer
         // produced by any lowering/compilation path (migrated to Pure Julia).
         let dead_but_kept = [
-            BuiltinOp::HasKey,      // now Pure Julia haskey() (Issue #2572)
-            BuiltinOp::DictGet,     // now Pure Julia get() (Issue #2572)
-            BuiltinOp::DictGetkey,  // now Pure Julia getkey() (Issue #2572)
-            BuiltinOp::DictMerge,   // now Pure Julia merge() (Issue #2573)
-            BuiltinOp::DictKeys,    // now Pure Julia keys() for Dict (Issue #2669)
-            BuiltinOp::DictValues,  // now Pure Julia values() for Dict (Issue #2669)
-            BuiltinOp::DictPairs,   // now Pure Julia pairs() for Dict (Issue #2669)
-            BuiltinOp::Isunordered, // now Pure Julia isunordered() (Issue #2715)
+            BuiltinOp::HasKey,        // now Pure Julia haskey() (Issue #2572)
+            BuiltinOp::DictGet,       // now Pure Julia get() (Issue #2572)
+            BuiltinOp::DictGetkey,    // now Pure Julia getkey() (Issue #2572)
+            BuiltinOp::DictMerge,     // now Pure Julia merge() (Issue #2573)
+            BuiltinOp::DictKeys,      // now Pure Julia keys() for Dict (Issue #2669)
+            BuiltinOp::DictValues,    // now Pure Julia values() for Dict (Issue #2669)
+            BuiltinOp::DictPairs,     // now Pure Julia pairs() for Dict (Issue #2669)
+            BuiltinOp::DictDelete,    // now Pure Julia delete!() for Dict (Issue #6731)
+            BuiltinOp::DictGetBang,   // now Pure Julia get!() for Dict (Issue #6731)
+            BuiltinOp::DictEmpty,     // now Pure Julia empty!() for Dict (Issue #6731)
+            BuiltinOp::DictMergeBang, // now Pure Julia merge!() for Dict (Issue #6731)
+            BuiltinOp::Isunordered,   // now Pure Julia isunordered() (Issue #2715)
+            BuiltinOp::IfElse,        // now Pure Julia ifelse() (Issue #3733)
+            BuiltinOp::TupleFirst,    // now Pure Julia first() (Issue #3734)
+            BuiltinOp::TupleLast,     // now Pure Julia last() (Issue #3734)
+            BuiltinOp::Zeros,         // now Pure Julia zeros() allocation dispatch (Issue #4036)
+            BuiltinOp::Ones,          // now Pure Julia ones() allocation dispatch (Issue #4036)
+            BuiltinOp::IncludeString, // now Pure Julia include_string() (Issue #3738)
+            BuiltinOp::EvalFile,      // now Pure Julia evalfile() (Issue #3738)
         ];
         for op in &dead_but_kept {
             reachable.insert(*op);
@@ -451,6 +947,7 @@ mod tests {
             BuiltinOp::Det,
             BuiltinOp::StableRNG,
             BuiltinOp::XoshiroRNG,
+            BuiltinOp::MersenneTwisterRNG,
             BuiltinOp::Randn,
             BuiltinOp::TupleFirst,
             BuiltinOp::TupleLast,
@@ -472,19 +969,15 @@ mod tests {
             BuiltinOp::Keytype,
             BuiltinOp::Valtype,
             BuiltinOp::Sizeof,
-            BuiltinOp::Isbits,
             BuiltinOp::Isbitstype,
             BuiltinOp::Supertype,
-            BuiltinOp::Supertypes,
+            BuiltinOp::Typename,
+            BuiltinOp::FunctionName,
             BuiltinOp::Subtypes,
-            BuiltinOp::Typeintersect,
-            BuiltinOp::Hasfield,
-            BuiltinOp::Ismutable,
             BuiltinOp::Objectid,
             BuiltinOp::Isunordered,
             BuiltinOp::Methods,
             BuiltinOp::HasMethod,
-            BuiltinOp::Which,
             BuiltinOp::In,
             BuiltinOp::Seed,
             BuiltinOp::Iterate,
@@ -528,9 +1021,117 @@ mod tests {
         // Also verify the all_variants list is complete (catches missing entries)
         assert_eq!(
             all_variants.len(),
-            78, // Must match the actual enum variant count
+            75, // Must match the actual enum variant count (Issue #6738: -Isbits/-Hasfield/-Ismutable; Issue #7306: +MersenneTwisterRNG)
             "all_variants list count mismatch — update this test when adding/removing BuiltinOp variants"
         );
+    }
+
+    #[test]
+    fn test_method_dispatch_first_base_functions_keep_builtin_fallbacks() {
+        for name in [
+            "sqrt",
+            "length",
+            "getindex",
+            "keys",
+            "values",
+            "pairs",
+            "push!",
+            "pop!",
+            "pushfirst!",
+            "popfirst!",
+            "insert!",
+            "deleteat!",
+            "ncodeunits",
+            "codeunit",
+            "codeunits",
+            "delete!",
+            "convert",
+            "promote",
+            "signed",
+        ] {
+            assert!(
+                is_method_dispatch_first_base_function(name),
+                "{name} should route through method dispatch before builtin fallback"
+            );
+        }
+
+        for name in ["open", "readline", "Regex", "rand", "time_ns"] {
+            assert!(
+                !is_method_dispatch_first_base_function(name),
+                "{name} is a runtime boundary or direct builtin, not dispatch-first"
+            );
+        }
+    }
+
+    #[test]
+    fn test_base_function_routes_are_classified_and_documented() {
+        let mut names = HashSet::new();
+        for route in BASE_FUNCTION_ROUTES {
+            assert!(
+                names.insert(route.name),
+                "duplicate BASE_FUNCTION_ROUTES entry for {}",
+                route.name
+            );
+            assert!(
+                !route.upstream_ref.is_empty() && route.upstream_ref.starts_with("julia/"),
+                "{} must document a ./julia upstream source reference",
+                route.name
+            );
+        }
+
+        for name in [
+            "length",
+            "collect",
+            "push!",
+            "pushfirst!",
+            "popfirst!",
+            "insert!",
+            "deleteat!",
+            "empty!",
+            "getindex",
+            "setindex!",
+            "ncodeunits",
+            "codeunit",
+            "codeunits",
+            "eltype",
+            "sizeof",
+            "hasfield",
+            "isbits",
+            "isbitstype",
+            "ismutable",
+            "objectid",
+            "hasmethod",
+            "bitstring",
+            "codepoint",
+            "isnumeric",
+            "unescape_string",
+            "parse",
+            "tryparse",
+            "convert",
+            "promote",
+            "in",
+            "sprintf",
+        ] {
+            let route = base_function_route(name);
+            assert!(
+                route.is_some(),
+                "{name} should be classified in BASE_FUNCTION_ROUTES"
+            );
+            if let Some(route) = route {
+                assert_eq!(route.kind, BaseRouteKind::DispatchFirst);
+            }
+        }
+
+        // `string` is intentionally a DirectBuiltin route (Pure Julia migration
+        // of `string` is out of scope for #6746, which migrated sprintf).
+        let string_route = base_function_route("string");
+        assert!(
+            string_route.is_some(),
+            "string should be classified in BASE_FUNCTION_ROUTES"
+        );
+        if let Some(route) = string_route {
+            assert_eq!(route.kind, BaseRouteKind::DirectBuiltin);
+        }
     }
 
     /// Verify that every name in `BuiltinId::from_name()` is accounted for
@@ -555,28 +1156,22 @@ mod tests {
             "trunc",
             "trunc_digits",
             "trunc_sigdigits",
-            "nextfloat",
-            "prevfloat",
-            "count_ones",
-            "count_zeros",
-            "leading_zeros",
-            "leading_ones",
-            "trailing_zeros",
-            "trailing_ones",
-            "bitreverse",
-            "bitrotate",
-            "bswap",
-            "exponent",
-            "significand",
-            "frexp",
-            "issubnormal",
-            "maxintfloat",
-            "fma",
-            "muladd",
+            // nextfloat/prevfloat removed — Pure Julia (base/float.jl, Issue #6740).
+            // Bit CPU intrinsics — public count_ones/leading_zeros/trailing_zeros/
+            // bitreverse/bswap are pure Julia (Issue #6741); count_zeros/
+            // leading_ones/trailing_ones/bitrotate too (Issue #6722).
+            "_ctpop_int",
+            "_ctlz_int",
+            "_cttz_int",
+            "_bitreverse_int",
+            "_bswap_int",
+            // exponent/significand/frexp/issubnormal removed — Pure Julia (base/float.jl, Issue #6740).
+            // Note: maxintfloat, fma, muladd removed — Pure Julia (Issue #3732).
+            // Internal `_fma` intrinsic preserves IEEE fused semantics on Float64.
+            "_fma",
             // Array
-            "zeros",
-            "ones",
             "similar",
+            "_mark_bitvector",
             "reshape",
             "length",
             "size",
@@ -584,6 +1179,12 @@ mod tests {
             "eltype",
             "keytype",
             "valtype",
+            "memoryref",
+            "memoryrefnew",
+            "memoryrefget",
+            "memoryrefset!",
+            "memoryrefoffset",
+            "memoryrefparent",
             "push!",
             "pop!",
             "pushfirst!",
@@ -592,21 +1193,22 @@ mod tests {
             "deleteat!",
             "append!",
             "prepend!",
-            "sort",
-            "findfirst",
-            "findall",
+            // sort: Now Pure Julia (base/sort.jl) — Issue #3725
+            // findfirst/findall: dead BuiltinId variants removed (Issue #6745);
+            // now pure Julia (base/array.jl).
             // HOF
             "any",
             "all",
             "count",
-            "ntuple",
+            // Note: "ntuple" removed from inventory — Pure Julia (base/tuple.jl,
+            // Issue #4973). No longer routed through BuiltinId; the direct-call
+            // fast path lives in compile/expr/builtin_hof.rs.
             "compose",
             // Range
             "range",
             "collect",
             "LinRange",
-            // Complex
-            "complex",
+            // Note: "complex" removed — Pure Julia (base/complex.jl, Issue #3727)
             // String
             "string",
             "String",
@@ -617,10 +1219,11 @@ mod tests {
             "codeunits",
             "occursin",
             "Char",
-            "codepoint",
-            "bitstring",
-            "unescape_string",
-            "isnumeric",
+            // codepoint, bitstring removed - now Pure Julia (Issue #6747)
+            // unescape_string removed - now Pure Julia (Issue #6724)
+            // isnumeric removed - now Pure Julia (Issue #6752)
+            // Float parse intrinsic; public parse/tryparse(Float64) pure (#6748)
+            "_tryparse_float64",
             // I/O
             "print",
             "println",
@@ -636,6 +1239,7 @@ mod tests {
             "homedir",
             // File I/O
             "readlines",
+            "eachline",
             "readline",
             "countlines",
             "isfile",
@@ -669,12 +1273,6 @@ mod tests {
             "typeof",
             "isa",
             "sizeof",
-            "isbits",
-            "isbitstype",
-            "supertype",
-            "hasfield",
-            "ismutable",
-            "objectid",
             "isunordered",
             // Equality
             "isequal",
@@ -684,70 +1282,58 @@ mod tests {
             ">:",
             // Set
             "in",
-            "Set",
-            "union",
-            "intersect",
-            "setdiff",
-            "symdiff",
-            "issubset",
-            "isdisjoint",
-            "issetequal",
-            "union!",
-            "intersect!",
-            "setdiff!",
-            "symdiff!",
+            // Note: union/intersect/setdiff/symdiff/issubset/isdisjoint/issetequal
+            // and mutating variants now Pure Julia (base/set.jl) — Issue #3724
             // Conversion
             "convert",
             "promote",
             "signed",
             "unsigned",
-            "float",
-            "widemul",
+            // Note: "float" / "widemul" removed from from_name() — Pure Julia
+            // (Issue #3727 / #6737).
             "reinterpret",
             // Copy
             "deepcopy",
             // Reflection
             "_fieldnames",
             "_fieldtypes",
+            "_fieldoffset",
+            "_datatype_alignment",
+            "_allocatedinline",
             "_getfield",
             "_isabstracttype",
             "_isconcretetype",
             "_ismutabletype",
+            "_isprimitivetype",
+            "_type_parameters",
+            "_supertype",
+            "_typename",
+            "_function_name",
+            "_methods_by_ftype",
             // Hash/Eltype internal intrinsics (Issue #2570, #2582)
             "_hash",
             "_eltype",
+            // Tuple-type construction intrinsic (Issue #5119)
+            "_make_tuple_type",
             "getfield",
             "setfield!",
-            "methods",
-            "hasmethod",
-            "which",
+            "names",
             "isexported",
             "ispublic",
-            // Dict internal intrinsics (Issue #2572, #2669)
-            "_dict_get",
-            "_dict_set!",
-            "_dict_delete!",
-            "_dict_haskey",
-            "_dict_length",
-            "_dict_empty!",
-            "_dict_keys",
-            "_dict_values",
-            "_dict_pairs",
+            "_isdefined_module_binding",
+            // Dict internal carrier intrinsics removed with Value::Dict (Issue #6731)
             // Set internal intrinsics (Issue #2574)
-            "_set_push!",
-            "_set_delete!",
-            "_set_in",
-            "_set_empty!",
-            "_set_length",
             // Tuple
             "first",
             "last",
-            // Dict (get/haskey/delete!/get!/getkey/empty! now Pure Julia via dict.jl)
-            "Dict",
+            // Internal aliases used by Pure Julia for Value::Range access
+            "_tuple_first",
+            "_tuple_last",
+            // Dict — struct-dispatch trampolines (Issue #6731). Dict/merge route
+            // through pure-Julia methods with no builtin mapping.
             "keys",
             "values",
             "pairs",
-            "merge",
             "merge!",
             // Linear Algebra
             "lu",
@@ -827,6 +1413,9 @@ mod tests {
             "match",
             "eachmatch",
             "_regex_replace",
+            "_endswith_regex",
+            // Printf
+            "_printf_fmt_float",
         ];
 
         // Verify each name actually resolves via from_name
@@ -860,17 +1449,27 @@ mod tests {
             "BigFloat",
             // Note: Char is in is_base_function() — not exempted
             "Dict",
-            "Set",
             "Regex",
             "String",
             "LinRange",
+            // Public array constructors migrated to Pure Julia dispatch but
+            // retained in BuiltinId for compatibility with old bytecode.
+            "zeros",
+            "ones",
             // Internal intrinsics — prefixed with underscore, not callable from Julia
             "_fieldnames",
             "_fieldtypes",
+            "_fieldoffset",
+            "_datatype_alignment",
+            "_allocatedinline",
             "_getfield",
             "_isabstracttype",
             "_isconcretetype",
             "_ismutabletype",
+            "_isprimitivetype",
+            "_type_parameters",
+            // Module-binding probe backing function-form isdefined (Issue #5002/#4958)
+            "_isdefined_module_binding",
             // _hash, _eltype: now in is_base_function (Issue #2570, #2582)
             "_dict_get",
             "_dict_set!",
@@ -881,11 +1480,6 @@ mod tests {
             "_dict_keys",
             "_dict_values",
             "_dict_pairs",
-            "_set_push!",
-            "_set_delete!",
-            "_set_in",
-            "_set_empty!",
-            "_set_length",
             "_bigfloat_precision",
             "_bigfloat_default_precision",
             "_set_bigfloat_default_precision!",
@@ -912,45 +1506,31 @@ mod tests {
             "trunc_sigdigits",
             "convert",
             "promote",
-            "float",
-            "widemul",
+            // Note: "float" / "widemul" removed from inventory — Pure Julia
+            // (Issue #3727 / #6737).
             "reinterpret",
-            "signed",
-            "unsigned",
-            "complex",
+            // Note: "signed" / "unsigned" added to is_base_function (Issue #3727)
+            // so dispatch failure for unsupported argument types falls back to
+            // the Rust BuiltinId handler. They are no longer exempted.
+            // Note: "complex" removed from inventory — Pure Julia (Issue #3727).
             "similar",
             "reshape",
-            "ntuple",
+            // Note: "ntuple" removed — Pure Julia (base/tuple.jl, Issue #4973).
             "compose",
-            "sort",
+            // "sort": Now Pure Julia (base/sort.jl) — Issue #3725
             "append!",
             "prepend!",
-            "findfirst",
-            "findall",
+            // findfirst/findall removed - dead BuiltinId variants gone (Issue #6745)
             "deepcopy",
-            "nextfloat",
-            "prevfloat",
-            "count_ones",
-            "count_zeros",
-            "leading_zeros",
-            "leading_ones",
-            "trailing_zeros",
-            "trailing_ones",
-            "bitreverse",
-            "bitrotate",
-            "bswap",
-            "exponent",
-            "significand",
-            "frexp",
-            "issubnormal",
-            "maxintfloat",
-            "fma",
-            "muladd",
-            "codepoint",
-            "codeunits",
-            "bitstring",
-            "unescape_string",
-            "isnumeric",
+            // nextfloat/prevfloat removed — Pure Julia (base/float.jl, Issue #6740).
+            // Bit ops: the underscored CPU intrinsics _ctpop_int/_ctlz_int/
+            // _cttz_int/_bitreverse_int/_bswap_int are in is_base_function();
+            // the public count_ones/leading_zeros/trailing_zeros/bitreverse/bswap
+            // (and count_zeros/leading_ones/trailing_ones/bitrotate) are pure
+            // Julia (base/int.jl, Issues #6741/#6722) and need no exemption.
+            // exponent/significand/frexp/issubnormal removed — Pure Julia (base/float.jl, Issue #6740).
+            // Note: maxintfloat, fma, muladd removed — Pure Julia (Issue #3732).
+            // _fma is an internal intrinsic registered in is_base_function(), no exemption needed.
             "normpath",
             "abspath",
             "homedir",
@@ -965,6 +1545,7 @@ mod tests {
             // File I/O — compile-time routed, not through is_base_function()
             // Note: readline is in is_base_function() — not exempted
             "readlines",
+            "eachline",
             "countlines",
             "isfile",
             "isdir",
@@ -1011,6 +1592,10 @@ mod tests {
             // Regex
             "match",
             "eachmatch",
+            // first, last — now Pure Julia (Issue #3734); BuiltinId still resolves
+            // for legacy/specialize paths but the public name no longer routes here
+            "first",
+            "last",
             // Linear algebra — routed via is_base_submodule_function("LinearAlgebra"),
             // not through is_base_function()
             "svd",

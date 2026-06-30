@@ -53,6 +53,36 @@ VersionNumber(major::Integer, minor::Integer) = VersionNumber(major, minor, 0)
 # Convenience constructor with default minor = 0 and patch = 0
 VersionNumber(major::Integer) = VersionNumber(major, 0, 0)
 
+function ==(a::VersionNumber, b::VersionNumber)
+    return a.major == b.major && a.minor == b.minor && a.patch == b.patch
+end
+
+function isless(a::VersionNumber, b::VersionNumber)
+    if a.major != b.major
+        return a.major < b.major
+    end
+    if a.minor != b.minor
+        return a.minor < b.minor
+    end
+    return a.patch < b.patch
+end
+
+function <(a::VersionNumber, b::VersionNumber)
+    return isless(a, b)
+end
+
+function <=(a::VersionNumber, b::VersionNumber)
+    return a == b || isless(a, b)
+end
+
+function >(a::VersionNumber, b::VersionNumber)
+    return isless(b, a)
+end
+
+function >=(a::VersionNumber, b::VersionNumber)
+    return a == b || isless(b, a)
+end
+
 # =============================================================================
 # VERSION Constant
 # =============================================================================
@@ -65,13 +95,13 @@ The version of SubsetJuliaVM currently in use.
 # Examples
 ```julia
 julia> VERSION
-v"0.6.6"
+v"0.9.4"
 
 julia> VERSION.major
 0
 
 julia> string(VERSION)
-"0.6.6"
+"0.9.4"
 ```
 """
-const VERSION = VersionNumber(0, 6, 6)
+const VERSION = VersionNumber(0, 9, 4)

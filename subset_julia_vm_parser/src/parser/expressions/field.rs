@@ -18,6 +18,22 @@ impl<'a> Parser<'a> {
             return self.parse_broadcast_call(object);
         }
 
+        // Qualified macro call: Base.@nospecializeinfer function f(...) ... end
+        // Julia permits module-qualified macro names with the `@` after the dot.
+        // Represent the invocation as a normal MacroCall whose identifier span
+        // covers only the `@name` portion; lowering can then treat Base compiler
+        // annotation macros the same as unqualified annotations.
+        if self.check(&Token::At) {
+            let at_token = self.expect(Token::At)?;
+            let macro_name = self.parse_identifier()?;
+            let macro_id_span = self
+                .source_map
+                .span(at_token.span.start, macro_name.span.end);
+            let macro_id =
+                CstNode::with_children(NodeKind::MacroIdentifier, macro_id_span, vec![macro_name]);
+            return self.finish_macro_call(start, macro_id_span.end, macro_id);
+        }
+
         // Check for quoted operator: Base.:+ or Base.:- or Base.:(==) etc.
         if self.check(&Token::Colon) {
             let colon_start = self.current.as_ref().unwrap().span.start;
@@ -28,7 +44,9 @@ impl<'a> Parser<'a> {
                 ParseError::unexpected_eof("operator after ':'", self.current_span())
             })?;
 
-            if token.token.is_operator() {
+            // Bare `:op` / `:isa` / `:in`. `isa`/`in` are keyword tokens but
+            // are valid first-class operator names (Issue #5115).
+            if token.token.is_operator() || token.token.is_operator_keyword() {
                 let op_token = self.advance().unwrap();
                 let op_span = self.source_map.span(colon_start, op_token.span.end);
                 let field = CstNode::leaf(NodeKind::QuoteExpression, op_span, op_token.text);
@@ -62,7 +80,9 @@ impl<'a> Parser<'a> {
                     ParseError::unexpected_eof("operator in :(op)", self.current_span())
                 })?;
 
-                if op_token.token.is_operator() {
+                // `:(op)` / `:(isa)` / `:(in)`. `isa`/`in` are keyword tokens
+                // but are valid first-class operator names (Issue #5115).
+                if op_token.token.is_operator() || op_token.token.is_operator_keyword() {
                     let op = self.advance().unwrap();
                     let rparen = self.expect(Token::RParen)?;
 
@@ -93,6 +113,16 @@ impl<'a> Parser<'a> {
         // Check for string field access: df."column name"
         if self.check(&Token::DoubleQuote) || self.check(&Token::TripleDoubleQuote) {
             let field = self.parse_string_literal()?;
+            let span = self.source_map.span(start, field.span.end);
+            return Ok(CstNode::with_children(
+                NodeKind::FieldExpression,
+                span,
+                vec![object, field],
+            ));
+        }
+
+        if self.check(&Token::Dollar) {
+            let field = self.parse_prefix()?;
             let span = self.source_map.span(start, field.span.end);
             return Ok(CstNode::with_children(
                 NodeKind::FieldExpression,

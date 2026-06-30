@@ -7,9 +7,17 @@ use crate::rng::RngLike;
 
 use super::error::VmError;
 use super::stack_ops::StackOps;
-use super::util::format_value;
-use super::value::{IOKind, IOValue, TupleValue, Value};
+use super::value::{ArrayValue, IOKind, IOValue, TupleValue, Value};
 use super::Vm;
+
+fn read_text_file(path: &str, operation: &str) -> Result<String, VmError> {
+    crate::include::read_include_file(std::path::Path::new(path)).map_err(|e| {
+        VmError::ErrorException(format!(
+            "{operation}: failed to read file '{}': {}",
+            path, e
+        ))
+    })
+}
 
 impl<R: RngLike> Vm<R> {
     /// Execute I/O builtin functions.
@@ -25,32 +33,64 @@ impl<R: RngLike> Vm<R> {
             // =========================================================================
             BuiltinId::Print => {
                 let val = self.stack.pop_value()?;
-                // Resolve StructRef to Struct for proper formatting
-                let resolved = if let Value::StructRef(idx) = &val {
-                    if let Some(s) = self.struct_heap.get(*idx) {
-                        Value::Struct(s.clone())
-                    } else {
-                        val
-                    }
-                } else {
-                    val
-                };
-                let s = format_value(&resolved);
+                // Issue #5234: deep-resolve nested `Value::StructRef` against
+                // the struct heap (not just a top-level deref) so arrays of
+                // heap-allocated structs (`print([1 => 2, 3 => 4])`,
+                // `print([Foo(1), Foo(2)])`) render each element via its show
+                // form instead of leaking `StructRef(heap_idx=N)` from inside
+                // `format_array_element`. A top-level StructRef still resolves
+                // to `Value::Struct`, matching the prior shallow behavior.
+                let resolved =
+                    crate::vm::formatting::resolve_struct_refs_for_format(&val, &self.struct_heap);
+                // Issue #7893: array of structs with a registered `Base.show`
+                // renders each element via that method.
+                // Issue #4741: print uses bare names for Symbols
+                // (`print(:foo)` → "foo"), distinct from show.
+                let s = self
+                    .render_array_via_user_show(&resolved)
+                    .unwrap_or_else(|| crate::vm::formatting::format_value_print(&resolved));
                 self.emit_output(&s, false);
             }
             BuiltinId::Println => {
                 let val = self.stack.pop_value()?;
-                // Resolve StructRef to Struct for proper formatting
-                let resolved = if let Value::StructRef(idx) = &val {
-                    if let Some(s) = self.struct_heap.get(*idx) {
-                        Value::Struct(s.clone())
+                // Issue #4731: `println(io::IO)` writes only a newline to
+                // the IO, matching upstream Julia. Without this dispatch,
+                // sjulia would format the IO value itself (yielding the
+                // Rust debug `IOBuffer(...)` repr) and print that to
+                // stdout. Surfaced by `repr([1,2,3])`: the Pure Julia
+                // repr implementation `io = IOBuffer(); show(io, x);
+                // take!(io)` calls `_show_vector` which calls
+                // `println(io)` to add a trailing newline.
+                if let Value::IO(io_ref) = &val {
+                    let io_kind = io_ref.borrow().kind.clone();
+                    if self.sprint_state.is_some() || io_kind == IOKind::Stdout {
+                        self.emit_output("\n", false);
+                    } else if io_kind == IOKind::Stderr {
+                        self.emit_stderr("\n", false);
+                    } else if io_kind == IOKind::Devnull {
+                        // discard
                     } else {
-                        val
+                        // IOBuffer (or other in-memory IO): append newline
+                        // to its backing buffer in place.
+                        io_ref.borrow_mut().buffer.push('\n');
                     }
-                } else {
-                    val
-                };
-                let s = format_value(&resolved);
+                    // Match the regular Println return-value contract:
+                    // it does not push a result (callers don't expect one).
+                    return Ok(Some(()));
+                }
+                // Issue #5234: deep-resolve nested `Value::StructRef` (see
+                // `BuiltinId::Print` above) so `println([1 => 2, 3 => 4])` and
+                // `println([Foo(1), Foo(2)])` render each element via its show
+                // form instead of leaking `StructRef(heap_idx=N)`. A top-level
+                // StructRef still resolves to `Value::Struct`.
+                let resolved =
+                    crate::vm::formatting::resolve_struct_refs_for_format(&val, &self.struct_heap);
+                // Issue #7893: array of structs with a registered `Base.show`
+                // renders each element via that method.
+                // Issue #4741: println of Symbol prints the bare name.
+                let s = self
+                    .render_array_via_user_show(&resolved)
+                    .unwrap_or_else(|| crate::vm::formatting::format_value_print(&resolved));
                 self.emit_output(&s, true);
             }
 
@@ -60,6 +100,26 @@ impl<R: RngLike> Vm<R> {
             BuiltinId::IOBufferNew => {
                 // IOBuffer() - create new empty IOBuffer
                 self.stack.push(Value::IO(IOValue::buffer_ref()));
+            }
+            BuiltinId::IOBufferFromString => {
+                // IOBuffer(s) - create a readable buffer initialized with `s`
+                // (Issue #5686). `read(io, String)` / `String(take!(io))` return it.
+                let val = self.stack.pop_value()?;
+                let s = match val {
+                    Value::Str(s) => s,
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "IOBuffer: expected a String argument, got {:?}",
+                            val.value_type()
+                        )))
+                    }
+                };
+                let io = IOValue {
+                    kind: IOKind::Buffer,
+                    buffer: s,
+                    file_handle: None,
+                };
+                self.stack.push(Value::IO(io.into_ref()));
             }
             BuiltinId::TakeString => {
                 // take!(io) - extract string from IOBuffer and clear it
@@ -83,8 +143,15 @@ impl<R: RngLike> Vm<R> {
                 let io_val = self.stack.pop_value()?;
                 match io_val {
                     Value::IO(io_ref) => {
-                        // Format the value and append to buffer (in place)
-                        let s = format_value(&val);
+                        // Issue #4741: write uses bare names for Symbols too.
+                        // Issue #4761: resolve heap-allocated StructRefs so
+                        // `write(io, Pair(1, 2))` emits "1 => 2" instead of
+                        // the Rust debug `StructRef(heap_idx=N)` repr.
+                        let resolved = crate::vm::formatting::resolve_struct_refs_for_format(
+                            &val,
+                            &self.struct_heap,
+                        );
+                        let s = crate::vm::formatting::format_value_print(&resolved);
                         io_ref.borrow_mut().buffer.push_str(&s);
                         // Return the same IORef (now mutated)
                         self.stack.push(Value::IO(io_ref));
@@ -117,36 +184,104 @@ impl<R: RngLike> Vm<R> {
                 // Reverse to get correct order: [arg1, arg2, ...]
                 values.reverse();
 
-                // Check if first value is IO
+                // Issue #4761: like `BuiltinId::Print` does for `print(x)`,
+                // dereference any `Value::StructRef` against the heap before
+                // formatting so heap-allocated structs (e.g. `Pair(1, 2)`,
+                // user structs) render via `format_value_print` instead of
+                // leaking the Rust debug `StructRef(heap_idx=N)` repr into
+                // the IOBuffer / stdout / stderr.
+                let resolved_values: Vec<Value> = values
+                    .iter()
+                    .map(|v| {
+                        crate::vm::formatting::resolve_struct_refs_for_format(v, &self.struct_heap)
+                    })
+                    .collect();
+
+                // Issue #4761: dispatch to a user-defined `show(io, ::T)`
+                // method when one is registered for the (single) struct value
+                // being printed. Without this, `print(buf, x)` and
+                // `print(io, x)` skipped the user's `show` method and fell
+                // through to the generic Rust struct-field dump, so a
+                // user-defined `show(io, ::MyType)` was silently ignored on
+                // the IO-print path (the stdout `print(x)` path already
+                // routes through `PrintAnyNoNewline`, which dispatches to
+                // `show`). Only the exact `print(io, x)` shape is dispatched
+                // here — multi-arg `print(io, x, y, ...)` keeps the current
+                // Rust formatting because invoking user `show` for each arg
+                // would require either a compiler-level rewrite or a
+                // sprint-style resumption per arg.
+                if total_args == 2 && matches!(&values[0], Value::IO(_)) {
+                    if let Some(func_index) = self.user_show_method_for(&resolved_values[1]) {
+                        if let Value::IO(io_ref) = &values[0] {
+                            let io_for_call = io_ref.clone();
+                            let val_for_call = resolved_values[1].clone();
+                            // show(io, x) — pass io as first param, x as second.
+                            let args = vec![Value::IO(io_for_call), val_for_call];
+                            self.start_function_call(func_index, args)?;
+                            return Ok(Some(()));
+                        }
+                    }
+                }
+
+                // Check if first value is IO (uses the unresolved value to
+                // preserve the `Value::IO` discriminant).
                 match &values[0] {
                     Value::IO(io_ref) => {
-                        let print_values = &values[1..];
+                        // AUDIT(#4766): `print_values` is a slice of
+                        // `resolved_values`, which was produced by
+                        // `resolve_struct_refs_for_format` above — every
+                        // `format_value_print(val)` in the IO branches below
+                        // therefore operates on a heap-resolved value.
                         let io_kind = io_ref.borrow().kind.clone();
+                        // Pre-render each value to its string up front (Issue #7893):
+                        // arrays whose struct elements have a registered
+                        // `Base.show` render each element via that method, so
+                        // `print(io, [x y; x x])` (the form `show(io, ::Array)` /
+                        // `repr` route to) matches upstream. Done before any IO
+                        // borrow so the re-entrant `show` driver can run.
+                        let rendered: Vec<String> = (1..resolved_values.len())
+                            .map(|i| {
+                                self.render_array_via_user_show(&resolved_values[i])
+                                    .unwrap_or_else(|| {
+                                        crate::vm::formatting::format_value_print(
+                                            &resolved_values[i],
+                                        )
+                                    })
+                            })
+                            .collect();
 
                         // Special case: if we're inside a sprint call, use emit_output
                         // which will redirect to the sprint buffer.
                         if self.sprint_state.is_some() {
-                            for val in print_values {
-                                let s = format_value(val);
-                                self.emit_output(&s, false);
+                            for s in &rendered {
+                                self.emit_output(s, false);
                             }
                             // Return nothing for sprint context
                             self.stack.push(Value::Nothing);
                         } else if io_kind == IOKind::Stdout {
                             // For stdout, just print to stdout (no IOBuffer to update)
-                            for val in print_values {
-                                let s = format_value(val);
-                                self.emit_output(&s, false);
+                            for s in &rendered {
+                                self.emit_output(s, false);
                             }
                             // Return nothing for stdout (like regular print)
+                            self.stack.push(Value::Nothing);
+                        } else if io_kind == IOKind::Stderr {
+                            // Issue #3573: route stderr writes through `emit_stderr`
+                            // so they reach the captured stderr buffer (forwarded
+                            // by the runner to the user's actual stderr on exit).
+                            for s in &rendered {
+                                self.emit_stderr(s, false);
+                            }
+                            self.stack.push(Value::Nothing);
+                        } else if io_kind == IOKind::Devnull {
+                            // /dev/null: discard all output.
                             self.stack.push(Value::Nothing);
                         } else {
                             // For IOBuffer outside sprint context, write to the buffer in place
                             {
                                 let mut io = io_ref.borrow_mut();
-                                for val in print_values {
-                                    let s = format_value(val);
-                                    io.buffer.push_str(&s);
+                                for s in &rendered {
+                                    io.buffer.push_str(s);
                                 }
                             }
                             // Return the same IORef (now mutated)
@@ -154,9 +289,34 @@ impl<R: RngLike> Vm<R> {
                         }
                     }
                     _ => {
-                        // First arg is not IO - print all values to stdout
-                        for val in &values {
-                            let s = format_value(val);
+                        // First arg is not IO - print all values to stdout.
+                        // Issue #7171/#7172: a lone non-IO value with a registered
+                        // `show(io, ::T)` (e.g. `println(factor(360))`, which lowers
+                        // to `IOPrint(value)` + `IOPrintlnNewline`) must dispatch to
+                        // that user `show` — matching the stdout `PrintAnyNoNewline`
+                        // path — instead of the generic field dump below.
+                        if resolved_values.len() == 1 {
+                            if let Some(func_index) = self.user_show_method_for(&resolved_values[0])
+                            {
+                                let stdout = Value::IO(IOValue::stdout_ref());
+                                let args = vec![stdout, resolved_values[0].clone()];
+                                self.start_function_call(func_index, args)?;
+                                return Ok(Some(()));
+                            }
+                            // Issue #7893: a lone array whose struct elements have
+                            // a registered `Base.show` (e.g. `println([x y; x x])`,
+                            // which lowers to `IOPrint(value)` + `IOPrintlnNewline`)
+                            // renders each element via that method.
+                            if let Some(s) = self.render_array_via_user_show(&resolved_values[0]) {
+                                self.emit_output(&s, false);
+                                self.stack.push(Value::Nothing);
+                                return Ok(Some(()));
+                            }
+                        }
+                        // AUDIT(#4766): iterates `resolved_values` (already
+                        // heap-resolved above), so no StructRef can leak.
+                        for val in &resolved_values {
+                            let s = crate::vm::formatting::format_value_print(val);
                             self.emit_output(&s, false);
                         }
                         self.stack.push(Value::Nothing);
@@ -302,44 +462,38 @@ impl<R: RngLike> Vm<R> {
                         )))
                     }
                 };
-                match std::fs::read_to_string(&path) {
+                match read_text_file(&path, "read") {
                     Ok(contents) => self.stack.push(Value::Str(contents)),
-                    Err(e) => {
-                        return Err(VmError::ErrorException(format!(
-                            "read: failed to read file '{}': {}",
-                            path, e
-                        )))
-                    }
+                    Err(e) => return Err(e),
                 }
             }
-            BuiltinId::ReadLines => {
-                // readlines(filename) - read all lines as Vector{String}
+            BuiltinId::ReadLines | BuiltinId::Eachline => {
+                // readlines(filename) / eachline(filename) - read all lines as Vector{String}
+                let fn_name = if matches!(builtin, BuiltinId::Eachline) {
+                    "eachline"
+                } else {
+                    "readlines"
+                };
                 let filename = self.stack.pop_value()?;
                 let path = match filename {
                     Value::Str(s) => s,
                     _ => {
                         return Err(VmError::TypeError(format!(
-                            "readlines: expected String for filename, got {:?}",
-                            filename
+                            "{}: expected String for filename, got {:?}",
+                            fn_name, filename
                         )))
                     }
                 };
-                match std::fs::read_to_string(&path) {
+                match read_text_file(&path, fn_name) {
                     Ok(contents) => {
                         let lines: Vec<Value> = contents
                             .lines()
                             .map(|line| Value::Str(line.to_string()))
                             .collect();
-                        use super::value::{new_array_ref, ArrayValue};
                         let arr = ArrayValue::any_vector(lines);
-                        self.stack.push(Value::Array(new_array_ref(arr)));
+                        self.push_array_value_as_wrapper(arr)?;
                     }
-                    Err(e) => {
-                        return Err(VmError::ErrorException(format!(
-                            "readlines: failed to read file '{}': {}",
-                            path, e
-                        )))
-                    }
+                    Err(e) => return Err(e),
                 }
             }
             BuiltinId::Readline => {
@@ -354,33 +508,12 @@ impl<R: RngLike> Vm<R> {
                         )))
                     }
                 };
-                use std::fs::File;
-                use std::io::{BufRead, BufReader};
-                match File::open(&path) {
-                    Ok(file) => {
-                        let reader = BufReader::new(file);
-                        match reader.lines().next() {
-                            Some(Ok(line)) => {
-                                self.stack.push(Value::Str(line));
-                            }
-                            Some(Err(e)) => {
-                                return Err(VmError::ErrorException(format!(
-                                    "readline: failed to read line from '{}': {}",
-                                    path, e
-                                )))
-                            }
-                            None => {
-                                // Empty file returns empty string
-                                self.stack.push(Value::Str(String::new()));
-                            }
-                        }
+                match read_text_file(&path, "readline") {
+                    Ok(contents) => {
+                        let line = contents.lines().next().unwrap_or_default();
+                        self.stack.push(Value::Str(line.to_string()));
                     }
-                    Err(e) => {
-                        return Err(VmError::ErrorException(format!(
-                            "readline: failed to open file '{}': {}",
-                            path, e
-                        )))
-                    }
+                    Err(e) => return Err(e),
                 }
             }
             BuiltinId::Countlines => {
@@ -395,33 +528,11 @@ impl<R: RngLike> Vm<R> {
                         )))
                     }
                 };
-                use std::fs::File;
-                use std::io::{BufRead, BufReader};
-                match File::open(&path) {
-                    Ok(file) => {
-                        let reader = BufReader::new(file);
-                        let mut count: i64 = 0;
-                        for line_result in reader.lines() {
-                            match line_result {
-                                Ok(_) => count += 1,
-                                Err(e) => {
-                                    return Err(VmError::ErrorException(format!(
-                                        "countlines: error reading '{}': {}",
-                                        path, e
-                                    )))
-                                }
-                            }
-                        }
-                        // Julia counts the last line even if it doesn't end with newline
-                        // BufReader.lines() already handles this correctly
-                        self.stack.push(Value::I64(count));
+                match read_text_file(&path, "countlines") {
+                    Ok(contents) => {
+                        self.stack.push(Value::I64(contents.lines().count() as i64));
                     }
-                    Err(e) => {
-                        return Err(VmError::ErrorException(format!(
-                            "countlines: failed to open file '{}': {}",
-                            path, e
-                        )))
-                    }
+                    Err(e) => return Err(e),
                 }
             }
             BuiltinId::Isfile => {
@@ -436,7 +547,8 @@ impl<R: RngLike> Vm<R> {
                         )))
                     }
                 };
-                let result = std::path::Path::new(&path).is_file();
+                let result = std::path::Path::new(&path).is_file()
+                    || crate::julia::packages::get_package_file(&path).is_some();
                 self.stack.push(Value::Bool(result));
             }
             BuiltinId::Isdir => {
@@ -466,7 +578,8 @@ impl<R: RngLike> Vm<R> {
                         )))
                     }
                 };
-                let result = std::path::Path::new(&path).exists();
+                let result = std::path::Path::new(&path).exists()
+                    || crate::julia::packages::get_package_file(&path).is_some();
                 self.stack.push(Value::Bool(result));
             }
             BuiltinId::Filesize => {
@@ -486,10 +599,14 @@ impl<R: RngLike> Vm<R> {
                         self.stack.push(Value::I64(meta.len() as i64));
                     }
                     Err(e) => {
-                        return Err(VmError::ErrorException(format!(
-                            "filesize: failed to get metadata for '{}': {}",
-                            path, e
-                        )))
+                        if let Some(contents) = crate::julia::packages::get_package_file(&path) {
+                            self.stack.push(Value::I64(contents.len() as i64));
+                        } else {
+                            return Err(VmError::ErrorException(format!(
+                                "filesize: failed to get metadata for '{}': {}",
+                                path, e
+                            )));
+                        }
                     }
                 }
             }
@@ -547,9 +664,8 @@ impl<R: RngLike> Vm<R> {
                                 std::cmp::Ordering::Equal
                             }
                         });
-                        use super::value::{new_array_ref, ArrayValue};
                         let arr = ArrayValue::any_vector(names);
-                        self.stack.push(Value::Array(new_array_ref(arr)));
+                        self.push_array_value_as_wrapper(arr)?;
                     }
                     Err(e) => {
                         return Err(VmError::ErrorException(format!(

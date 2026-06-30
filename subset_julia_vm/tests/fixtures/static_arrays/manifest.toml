@@ -1,0 +1,107 @@
+[[tests]]
+name = "static_arrays_package_load_7457"
+file = "package_load_7457.jl"
+expected = true
+description = "Phase 1 package skeleton: using StaticArrays and StaticArraysCore resolves through @packages (Issue #7457)"
+
+[[tests]]
+name = "static_arrays_core_basics_7458"
+file = "static_arrays_core_basics_7458.jl"
+expected = true
+description = "Phase 2 StaticArraysCore type, size, length, eltype, ndims, Tuple, and tuple utility foundation (Issue #7458)"
+
+[[tests]]
+name = "static_arrays_constructors_7459"
+file = "static_arrays_constructors_7459.jl"
+expected = true
+description = "Phase 3 supported constructors, partial static matrix constructors, @SVector literal macro, Tuple conversion, and basic indexing (Issues #7459, #7734)"
+
+[[tests]]
+name = "static_arrays_matrix_literal_macros_7733"
+file = "static_arrays_matrix_literal_macros_7733.jl"
+expected = true
+description = "Phase 3 matrix literal macros: @SMatrix and matrix-form @SArray expand quoted matrix ASTs into SMatrix constructors now that macro argument quote lowering supports Expr(:vcat, Expr(:row, ...), ...) (Issue #7733)"
+
+[[tests]]
+name = "static_arrays_using_staticarrays_7456"
+file = "using_staticarrays_7456.jl"
+expected = true
+description = "Phase 0 seed baseline now enabled: using StaticArrays and constructing/indexing an SVector (Issues #7456, #7459)"
+
+[[tests]]
+name = "static_arrays_seed_api_baseline_7456"
+file = "seed_api_baseline_7456.jl"
+expected = true
+description = "Phase 0 seed baseline now enabled: SVector, @SMatrix matrix literal, Size, indexing, and shape checks pass after the #7733 matrix macro frontend (Issue #7456)"
+
+[[tests]]
+name = "static_arrays_matvec_arithmetic_7461"
+file = "static_arrays_matvec_arithmetic_7461.jl"
+expected = true
+description = "Phase 5 static array arithmetic: SMatrix*SVector matrix-vector product, the W*x+b affine kernel, scalar*vector (both orders), and vector subtraction all return a static SVector with byte-identical values to upstream StaticArrays (Issue #7461)"
+
+[[tests]]
+name = "static_arrays_abstractarray_subtype_7819"
+file = "static_arrays_abstractarray_subtype_7819.jl"
+expected = true
+description = "Issue #7819 (#7728 retired): StaticArray subtypes AbstractArray{T,N} (upstream spelling), so SVector{3,Int64}(1,2,3) isa AbstractArray{Int64,1} is true (element type and rank preserved through the StaticVector/StaticVecOrMat/StaticArray value-parameter chain), while a mismatched element type stays false. Replaces the AbstractArray{Any,N} workaround."
+
+[[tests]]
+name = "static_arrays_column_major_8084"
+file = "static_arrays_column_major_8084.jl"
+expected = true
+description = "Issue #8084: SMatrix uses column-major storage matching upstream StaticArrays/Julia — flat-tuple construction, getindex(i,j)=data[(j-1)*M+i], Tuple(m), and matrix/vector products all match official Julia"
+
+[[tests]]
+name = "static_arrays_scalar_div_norm_8125"
+file = "static_arrays_scalar_div_norm_8125.jl"
+expected = true
+description = "Issue #8125: scalar division A/c on StaticVector (n=2,3,4 + generic) and StaticMatrix (2×2/3×3/4×4), plus index-based LinearAlgebra.norm/normalize on StaticVector — previously errored (missing / method; generic norm iterated an unsupported StaticArrayInline); values match official Julia"
+
+[[tests]]
+name = "static_arrays_protocol_7460"
+file = "static_arrays_protocol_7460.jl"
+expected = true
+description = "Phase 4 static array protocol (Issue #7460): scalar/shape-aware/linear indexing, iteration (for/reduce/sum/prod/min/max/any/all), map and unary minus, broadcasting (scalar-mixed v.+10, elementwise v.+w, unary fused sin./abs., v.^2, v./2, matrix broadcast) all returning static results, and element-coercing convert(SVector/SMatrix) — values and static-ness match upstream StaticArrays via the VM iterate arm and the Base _STATIC_BROADCAST_HOOK"
+
+[[tests]]
+name = "static_arrays_linalg_7461"
+file = "static_arrays_linalg_7461.jl"
+expected = true
+description = "Phase 5 small static linear algebra (Issue #7461): transpose (2×2/3×3, returns SMatrix), trace, diagonal (returns SVector), determinant (1×1/2×2/3×3 closed forms), inverse (1×1/2×2 with inv(B)*B≈I), plus dot and norm — values match upstream StaticArrays; adjoint is deferred for the real MVP (adjoint==transpose)"
+
+[[tests]]
+name = "static_arrays_nested_parametric_ctor_arg_8090"
+file = "nested_parametric_ctor_arg_8090.jl"
+expected = true
+description = "Issue #8090: a parametric constructor result passed directly (nested, not bound to a local) as an argument — e.g. Wrap(SMatrix{2,2}((1.0,2.0,3.0,4.0))) — must dispatch identically to binding it to a local first. SMatrix{2,2} writes only 2 of 3 declared params, so the truncated static type previously failed to match the full-parameter method Wrap(m::SMatrix{N,N,T}); widening the incomplete static type to Any routes the call to runtime multiple dispatch on the concrete SMatrix{2,2,Float64} value, matching official Julia"
+
+[[tests]]
+name = "static_arrays_override_return_type_8132"
+file = "static_arrays_override_return_type_8132.jl"
+expected = true
+description = "Issue #8132: a package/user override (LinearAlgebra.diag/adjoint on StaticMatrix) returns an SVector whose concrete type differs from the visible generic's Vector{Float64}, so the binding is inferred Vector while holding an SVector at runtime. Typed-codegen paths now fall back gracefully — indexing (IndexLoadTyped), iteration (StaticArray iterate), Tuple(::AbstractArray), and ==/isequal vs native Vector and StaticArray — matching official Julia; the more-specific package method also wins dispatch"
+
+[[tests]]
+name = "static_arrays_collect_eltype_8131"
+file = "static_arrays_collect_eltype_8131.jl"
+expected = true
+description = "Issue #8131: collect(::StaticVector) preserves the element type (Vector{Int64}/Float64/Int32 + empty) instead of widening to Vector{Any}. The eltype builtin now reports the concrete element type of StaticArrayInline/StaticArray carriers, and static arrays are iterable, so the generic _collect path and iterate-based reductions (sum) match official StaticArrays"
+
+[[tests]]
+name = "static_arrays_collect_matrix_shape_8139"
+file = "static_arrays_collect_matrix_shape_8139.jl"
+expected = true
+description = "Issue #8139: collect(::StaticMatrix) preserves the 2-D Matrix shape instead of flattening to a column-major Vector. The generic collect routes through IteratorSize(itr) on a statically-Any value; base now provides a value-based IteratorSize(a::AbstractArray)=HasShape{ndims(a)}() rule (mirroring upstream's type-level IteratorSize(::Type{<:AbstractArray{<:Any,N}})=HasShape{N}(), which sjulia's dispatcher cannot bind N through the StaticArray abstract supertype chain), so square/non-square/Float SMatrix collect to Matrix{T} while SVector still collects to Vector{T} (Issue #8131) and plain Array shapes are unchanged"
+
+[[tests]]
+name = "static_arrays_mixed_broadcast_8161"
+file = "static_arrays_mixed_broadcast_8161.jl"
+expected = true
+description = "Issue #8161: broadcasting a StaticArray against a dynamic array (mixed static/dynamic, e.g. SVector .- Vector, abs.(SVector .- Vector), SMatrix .- Matrix, SVector .+ range) must broadcast element-wise instead of collapsing the dynamic operand to a scalar (which mis-lowered to -(SVector, scalar), a MethodError). The static-broadcast hook now reproduces upstream StaticArrays' BroadcastStyle precedence by classifying the whole fused/nested operand tree: static-with-scalars stays a STATIC SVector/SMatrix result, while static mixed with any dynamic array yields a DYNAMIC result (upstream returns a Sized* array; the subset has no Sized* types and returns a plain Array with identical values/eltype/display). Parity-clean: assertions use AbstractArray{Float64} so they pass under both sjulia and upstream julia"
+
+[[tests]]
+name = "static_arrays_fused_nested_broadcast_8176"
+file = "static_arrays_fused_nested_broadcast_8176.jl"
+expected = true
+description = "Issue #8176: an all-static fused nested broadcast (abs.(SVector .+ SVector), 2.0 .* (SVector .+ SVector), 3-level, SMatrix) returned an out-of-bounds crash instead of the element-wise static result. sjulia fuses .-chains into nested Broadcasted; the inner all-static node has empty axes () (bare static arrays look 0-dimensional), and _broadcastable_shape(::Broadcasted) crashed indexing the empty ax[1] inside instantiate — before copy's static hook ran. The n==0 case now returns the scalar shape (), so copy's hook (Issue #8161 tree classification) fires and produces the static SVector/SMatrix result. Mixed static/dynamic fused-nested broadcasts still return a dynamic Array (Issue #8161 regression). Parity-clean with upstream julia."

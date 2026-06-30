@@ -6,10 +6,13 @@
 #![deny(clippy::expect_used)]
 
 use super::super::*;
-use super::call_dynamic::CallDynamicResult;
 use super::call_dynamic_binary::try_string_char_concat;
 use super::util::{
-    bind_value_to_slot, extract_base_type, is_rust_dict_parametric_mismatch, score_type_match,
+    bind_value_to_slot, is_rust_dict_parametric_mismatch, is_struct_dict_bare_mismatch,
+};
+use super::DispatchAction;
+use crate::inference_core::dispatch_resolver::{
+    resolve_runtime_core_signature_candidates, RuntimeCoreCandidate,
 };
 use crate::rng::RngLike;
 
@@ -20,67 +23,72 @@ impl<R: RngLike> Vm<R> {
     /// Used when user-defined methods shadow builtins completely.
     pub(super) fn execute_binary_no_fallback(
         &mut self,
-        candidates: &[(usize, String, String)],
-    ) -> Result<CallDynamicResult, VmError> {
+        candidates: &[usize],
+    ) -> Result<DispatchAction, VmError> {
         // Runtime dispatch for binary operators WITHOUT builtin fallback.
         // This is used when user-defined methods shadow builtins completely.
         let right = self.stack.pop_value()?;
         let left = self.stack.pop_value()?;
-        
+
         // Get type names for both operands
         let left_type_name = self.get_type_name(&left);
         let right_type_name = self.get_type_name(&right);
-        
+
+        // Issue #6496: the payload carries only candidate function indices;
+        // the expected signatures are derived from `FunctionInfo` and
+        // memoized per function index. Issue #6502 slice 2: matching runs on
+        // the structured `core_signature` projection.
+        self.ensure_binary_candidate_signatures(candidates);
+
         // Scored dispatch: find the most specific match (Issue #2517).
         // Previously used break-on-first-match which could select a less
         // specific method over a more specific one.
-        let left_base = extract_base_type(&left_type_name);
-        let right_base = extract_base_type(&right_type_name);
-        
-        let matched = {
-            let mut best: Option<(&(usize, String, String), u32)> = None;
-            for candidate in candidates {
-                let (_, left_expected, right_expected) = candidate;
-        
-                // Value::Dict (Rust-backed) must not match parametric Dict{K,V}
-                // Pure Julia methods that expect StructRef (Issue #2748).
-                if is_rust_dict_parametric_mismatch(&left, left_expected)
-                    || is_rust_dict_parametric_mismatch(&right, right_expected)
-                {
-                    continue;
-                }
-        
-                let mut left_score =
-                    score_type_match(left_expected, &left_type_name, left_base);
-                if left_score == 0 && self.check_subtype(&left_type_name, left_expected) {
-                    left_score = 1;
-                }
-        
-                let mut right_score =
-                    score_type_match(right_expected, &right_type_name, right_base);
-                if right_score == 0 && self.check_subtype(&right_type_name, right_expected)
-                {
-                    right_score = 1;
-                }
-        
-                if left_score > 0 && right_score > 0 {
-                    let total_score = left_score + right_score;
-                    if best.is_none_or(|b| total_score > b.1) {
-                        best = Some((candidate, total_score));
+        let actual_cores = [
+            crate::vm::dispatch_binding::runtime_actual_core_type(
+                &self.dispatch_julia_type_for_value(&left),
+            ),
+            crate::vm::dispatch_binding::runtime_actual_core_type(
+                &self.dispatch_julia_type_for_value(&right),
+            ),
+        ];
+        let matched = resolve_runtime_core_signature_candidates(
+            &self.struct_hierarchy,
+            candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(pos, &func_index)| {
+                    let sig = self.binary_candidate_core_signature(func_index)?;
+                    let (left_expected, right_expected) =
+                        (sig.rendered[0].as_str(), sig.rendered[1].as_str());
+                    // Value::Dict (Rust-backed) must not match parametric Dict{K,V}
+                    // Pure Julia methods that expect StructRef (Issue #2748).
+                    if is_rust_dict_parametric_mismatch(&left, left_expected)
+                        || is_rust_dict_parametric_mismatch(&right, right_expected)
+                        || is_struct_dict_bare_mismatch(&left, left_expected, &self.struct_heap)
+                        || is_struct_dict_bare_mismatch(&right, right_expected, &self.struct_heap)
+                    {
+                        return None;
                     }
-                }
-            }
-            best.map(|(c, _)| c)
-        };
-        
-        if let Some((func_index, _, _)) = matched {
+
+                    Some(RuntimeCoreCandidate {
+                        idx: pos,
+                        slots: [&sig.slots[0], &sig.slots[1]],
+                        signature: sig.signature.as_ref(),
+                    })
+                }),
+            &actual_cores,
+            |actual, expected| self.check_subtype_core(actual, expected),
+        )
+        .map(|(pos, _)| candidates[pos]);
+
+        if let Some(func_index) = matched {
             // Call the matched method
-            let func = match self.get_function_cloned_or_raise(*func_index)? {
+            let func = match self.get_function_cloned_or_raise(func_index)? {
                 Some(f) => f,
-                None => return Ok(CallDynamicResult::Continue),
+                None => return Ok(DispatchAction::Continue),
             };
-        
-            let mut frame = Frame::new_with_slots(func.local_slot_count, Some(*func_index));
+
+            let mut frame = self.acquire_frame(func.local_slot_count, Some(func_index));
 
             // Bind type parameters from where clauses (Issue #2468).
             // Only clone args when type params exist (common case: no type params).
@@ -96,7 +104,7 @@ impl<R: RngLike> Vm<R> {
             if let Some(&slot) = func.param_slots.get(1) {
                 bind_value_to_slot(&mut frame, slot, right, &mut self.struct_heap);
             }
-        
+
             for kwparam in &func.kwparams {
                 if kwparam.required {
                     return Err(VmError::UndefKeywordError(kwparam.name.clone()));
@@ -108,22 +116,23 @@ impl<R: RngLike> Vm<R> {
                     &mut self.struct_heap,
                 );
             }
-        
+
             self.return_ips.push(self.ip);
-            self.frames.push(frame);
+            self.try_push_call_frame(frame)?;
             self.ip = func.entry;
         } else {
             // Check for String/Char concatenation via * before raising MethodError (Issue #2127)
             if let Some(result) = try_string_char_concat(&left, &right) {
                 self.stack.push(result);
-                return Ok(CallDynamicResult::Handled);
+                return Ok(DispatchAction::Continue);
             }
             // No matching method - raise MethodError (no fallback)
             self.raise(VmError::no_method_matching_op(
-                &left_type_name, &right_type_name,
+                &left_type_name,
+                &right_type_name,
             ))?;
-            return Ok(CallDynamicResult::Continue);
+            return Ok(DispatchAction::Continue);
         }
-        Ok(CallDynamicResult::Handled)
+        Ok(DispatchAction::Continue)
     }
 }

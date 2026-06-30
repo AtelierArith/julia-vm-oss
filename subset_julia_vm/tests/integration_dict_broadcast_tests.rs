@@ -1,4 +1,5 @@
 //! Integration tests: Dict, compound assignment, broadcast calls, Mandelbrot, try/catch, JSON IR
+#![allow(dead_code)]
 
 mod common;
 use common::*;
@@ -12,7 +13,6 @@ use subset_julia_vm::*;
 // Dict Tests - Testing Dict{K,V}() parametric constructor syntax
 // =============================================================================
 
-#[test]
 fn test_dict_empty_constructor() {
     // Test Dict() - empty dict constructor
     let src = r#"
@@ -26,7 +26,6 @@ length(d)
     }
 }
 
-#[test]
 fn test_dict_parametric_constructor_empty() {
     // Test Dict{String, Int}() - empty dict with type parameters
     let src = r#"
@@ -40,7 +39,6 @@ length(d)
     }
 }
 
-#[test]
 fn test_dict_set_and_get() {
     // Test setting and getting dict values
     let src = r#"
@@ -56,7 +54,6 @@ d["apple"] + d["banana"]
     }
 }
 
-#[test]
 fn test_dict_haskey() {
     // Test haskey function
     let src = r#"
@@ -71,7 +68,6 @@ haskey(d, "key1")
     }
 }
 
-#[test]
 fn test_dict_haskey_missing() {
     // Test haskey function for missing key
     let src = r#"
@@ -86,7 +82,6 @@ haskey(d, "nonexistent")
     }
 }
 
-#[test]
 fn test_dict_get_with_default() {
     // Test get function with default value
     let src = r#"
@@ -101,7 +96,6 @@ get(d, "nonexistent", -1)
     }
 }
 
-#[test]
 fn test_dict_get_existing_key() {
     // Test get function for existing key
     let src = r#"
@@ -116,48 +110,31 @@ get(d, "existing", -1)
     }
 }
 
-#[test]
 fn test_dict_pairs() {
-    // Test pairs(dict) returns all (key, value) tuples without assuming order.
+    // Julia's pairs(::AbstractDict) returns the dict itself; iteration yields Pair values.
     let src = r#"
 d = Dict{String, Int}()
 d["apple"] = 10
 d["banana"] = 20
-pairs(d)
+saw_apple = false
+saw_banana = false
+for p in pairs(d)
+    if p.first == "apple" && p.second == 10
+        saw_apple = true
+    end
+    if p.first == "banana" && p.second == 20
+        saw_banana = true
+    end
+end
+length(pairs(d)) == 2 && saw_apple && saw_banana
 "#;
     let result = run_core_pipeline(src, 42).unwrap();
     match result {
-        Value::Tuple(t) => {
-            assert_eq!(t.elements.len(), 2, "Expected 2 pairs in tuple");
-            let mut saw_apple = false;
-            let mut saw_banana = false;
-            for pair in &t.elements {
-                match pair {
-                    Value::Tuple(p) => {
-                        assert_eq!(p.elements.len(), 2, "Expected pair tuple of length 2");
-                        match (&p.elements[0], &p.elements[1]) {
-                            (Value::Str(k), Value::I64(v)) if k == "apple" => {
-                                assert_eq!(*v, 10);
-                                saw_apple = true;
-                            }
-                            (Value::Str(k), Value::I64(v)) if k == "banana" => {
-                                assert_eq!(*v, 20);
-                                saw_banana = true;
-                            }
-                            _ => panic!("Unexpected pair contents: {:?}", p),
-                        }
-                    }
-                    _ => panic!("Expected pair to be a Tuple, got {:?}", pair),
-                }
-            }
-            assert!(saw_apple, "Missing (\"apple\", 10) in pairs(dict)");
-            assert!(saw_banana, "Missing (\"banana\", 20) in pairs(dict)");
-        }
-        _ => panic!("Expected Tuple, got {:?}", result),
+        Value::Bool(v) => assert!(v, "pairs(dict) should iterate both inserted pairs"),
+        _ => panic!("Expected Bool, got {:?}", result),
     }
 }
 
-#[test]
 fn test_time_println_string_literal() {
     // Regression test: @time println("string") was incorrectly parsed as two statements
     // Before fix: "@time println" was parsed as Var, and "Hello, World!" as a separate Str statement
@@ -170,7 +147,6 @@ fn test_time_println_string_literal() {
 
 // ==================== zero(), trues(), falses() functions ====================
 
-#[test]
 fn test_zero_function_float() {
     // Test zero(x) for Float64
     let src = r#"
@@ -184,7 +160,6 @@ zero(x)
     }
 }
 
-#[test]
 fn test_zero_function_int() {
     // Test zero(x) for Int64
     let src = r#"
@@ -199,7 +174,6 @@ zero(x)
     }
 }
 
-#[test]
 fn test_zero_function_complex() {
     // Test zero(z) for Complex
     // Note: Using complex(re, im) constructor since binary ops with Complex aren't fully supported in compile_core
@@ -215,7 +189,6 @@ real(w) + imag(w)
     }
 }
 
-#[test]
 fn test_trues_function() {
     // Test trues(n)
     let src = r#"
@@ -233,7 +206,6 @@ t[1] + t[2] + t[3]
     }
 }
 
-#[test]
 fn test_falses_function() {
     // Test falses(n)
     let src = r#"
@@ -253,7 +225,6 @@ f[1] + f[2] + f[3]
 
 // ==================== Complex binary operations ====================
 
-#[test]
 fn test_complex_binary_add() {
     // Test 1.0 + 2.0im using complex constructor
     let src = r#"
@@ -267,7 +238,6 @@ real(z)
     }
 }
 
-#[test]
 fn test_complex_binary_add_imag() {
     // Test imaginary part of 1.0 + 2.0im
     let src = r#"
@@ -281,7 +251,6 @@ imag(z)
     }
 }
 
-#[test]
 fn test_complex_binary_mul() {
     // Test (0+1i) * (0+1i) = -1
     let src = r#"
@@ -296,7 +265,6 @@ real(z)
     }
 }
 
-#[test]
 fn test_complex_binary_pow() {
     // Test i^2 = -1
     let src = r#"
@@ -311,7 +279,6 @@ real(z)
     }
 }
 
-#[test]
 fn test_complex_neg() {
     // Test -(1+2i) = -1-2i
     let src = r#"
@@ -332,7 +299,6 @@ real(w) + imag(w)
 
 // ==================== Complex array literals ====================
 
-#[test]
 fn test_complex_array_literal() {
     // Test [complex(1,2), complex(3,4)] with direct field access
     let src = r#"
@@ -351,7 +317,6 @@ z.re + z.im
     }
 }
 
-#[test]
 fn test_complex_array_literal_second_element() {
     // Test accessing second element of complex array with direct field access
     let src = r#"
@@ -370,7 +335,6 @@ z.re + z.im
     }
 }
 
-#[test]
 fn test_complex_array_literal_mixed() {
     // Test [1.0, complex(2.0, 3.0)] - mixed real and complex should promote to complex array
     let src = r#"
@@ -390,7 +354,6 @@ real(zs[1]) + imag(zs[1])
 
 // ==================== Broadcast Function Call Tests ====================
 
-#[test]
 fn test_broadcast_sqrt_core_pipeline() {
     // Test sqrt.(x) - element-wise sqrt using tree-sitter lowering
     let src = r#"
@@ -405,7 +368,6 @@ b[1] + b[2] + b[3] + b[4] + b[5]
     }
 }
 
-#[test]
 fn test_broadcast_abs_core_pipeline() {
     // Test abs.(x) - element-wise abs using tree-sitter lowering
     let src = r#"
@@ -420,7 +382,6 @@ b[1] + b[2] + b[3] + b[4]
     }
 }
 
-#[test]
 fn test_broadcast_sin_cos_core_pipeline() {
     // Test sin.(x) and cos.(x)
     let src = r#"
@@ -437,7 +398,6 @@ b[1] + c[1]
     }
 }
 
-#[test]
 fn test_broadcast_exp_log_core_pipeline() {
     // Test exp.(x) and log.(x)
     let src = r#"
@@ -454,7 +414,6 @@ c[1]
     }
 }
 
-#[test]
 fn test_broadcast_ifelse_core_pipeline() {
     // Test ifelse.(cond, then, else) - element-wise ternary
     let src = r#"
@@ -472,7 +431,6 @@ result[1] + result[2] + result[3] + result[4]
     }
 }
 
-#[test]
 fn test_broadcast_ifelse_non_bool_condition_error() {
     // Test that ifelse.() raises MethodError for non-Bool condition
     // In Julia, ifelse requires Bool condition type
@@ -498,7 +456,6 @@ result[1]
 
 // ==================== iOS App Sample: Mandelbrot Broadcast ====================
 
-#[test]
 fn test_mandelbrot_broadcast_ios_sample() {
     // Test the exact Mandelbrot Broadcast sample from iOS app (SubsetJuliaVMApp)
     // This test uses broadcast operations for row-parallel computation
@@ -588,16 +545,23 @@ in_set
     // Julia reference: 28 points in set for 15x8 grid with maxiter=20
     match result {
         Value::I64(in_set) => {
-            assert_eq!(in_set, 28, "Expected 28 points in set (Julia reference), got {}", in_set);
+            assert_eq!(
+                in_set, 28,
+                "Expected 28 points in set (Julia reference), got {}",
+                in_set
+            );
         }
         Value::F64(in_set) => {
-            assert!((in_set - 28.0).abs() < 1.0, "Expected ~28 points in set (Julia reference), got {}", in_set);
+            assert!(
+                (in_set - 28.0).abs() < 1.0,
+                "Expected ~28 points in set (Julia reference), got {}",
+                in_set
+            );
         }
         _ => panic!("Expected numeric result, got {:?}", result),
     }
 }
 
-#[test]
 fn test_try_catch_finally_debug() {
     // Minimal test case
     let src = r#"
@@ -618,7 +582,6 @@ result
     }
 }
 
-#[test]
 fn test_try_catch_finally_no_error_simple() {
     // Same as failing test but without catch block
     let src = r#"
@@ -641,7 +604,6 @@ result
     }
 }
 
-#[test]
 fn test_try_catch_finally_no_error_f64() {
     // Test with F64 to see if it's a type issue
     let src = r#"
@@ -663,7 +625,6 @@ result
     }
 }
 
-#[test]
 fn test_try_catch_finally_type_change() {
     // Test where initial type is I64 but try block assigns F64
     let src = r#"
@@ -686,7 +647,6 @@ result
     }
 }
 
-#[test]
 fn test_try_catch_finally_catch_type_matters() {
     // When catch block also assigns F64, it should work
     let src = r#"
@@ -711,7 +671,6 @@ result
 
 // ==================== Julia-Style Broadcasting Tests ====================
 
-#[test]
 fn test_julia_broadcast_outer_product_3x3() {
     // (1:3)' .* (1:3) → 3×3 matrix (multiplication table)
     // Expected: [[1,2,3], [2,4,6], [3,6,9]] in column-major order
@@ -730,7 +689,6 @@ result[2, 2]
     }
 }
 
-#[test]
 fn test_julia_broadcast_outer_product_corners() {
     // Test corner elements of the multiplication table
     let src = r#"
@@ -755,7 +713,6 @@ a + b + c + d
     }
 }
 
-#[test]
 fn test_julia_broadcast_row_col_add() {
     // Row vector .+ column vector → matrix
     let src = r#"
@@ -776,7 +733,6 @@ result[2, 2]
     }
 }
 
-#[test]
 fn test_julia_broadcast_2d_with_1d() {
     // 2D array [3, 2] .+ 1D array [3] → broadcasts to [3, 2]
     // In Julia, [3] is treated as [3, 1] in 2D context
@@ -804,7 +760,6 @@ result[2, 2]  # 5 + 20 = 25
     }
 }
 
-#[test]
 fn test_julia_broadcast_same_shape_still_works() {
     // Verify same-shape broadcasting still works (fast path)
     let src = r#"
@@ -821,7 +776,6 @@ result[2]  # 2 + 20 = 22
     }
 }
 
-#[test]
 fn test_julia_broadcast_incompatible_shapes_error() {
     // Incompatible shapes should still error
     let src = r#"
@@ -833,7 +787,6 @@ result = a .+ b        # Should error: 3 vs 2 not compatible
     assert!(result.is_err(), "Expected error for incompatible shapes");
 }
 
-#[test]
 fn test_broadcast_op_function_call_syntax() {
     // Test .*() function call syntax (instead of infix a .* b)
     let src = r#"
@@ -851,7 +804,6 @@ result[2, 2]
     }
 }
 
-#[test]
 fn test_broadcast_add_function_call_syntax() {
     // Test .+() function call syntax
     let src = r#"
@@ -869,7 +821,6 @@ result[2]  # 2 + 20 = 22
 
 // ==================== Additional String Interpolation Tests ====================
 
-#[test]
 fn test_string_interpolation_no_interpolation_string() {
     // Test that strings without interpolation still work
     let src = r#"
@@ -881,7 +832,6 @@ println("Hello, World!")
     assert_eq!(output, "Hello, World!\n");
 }
 
-#[test]
 fn test_string_interpolation_full_sample_from_bug_report() {
     // Test the full sample from the user's bug report
     let src = r#"
@@ -905,8 +855,6 @@ x
 
 // ==================== JSON IR Flow Tests (Web Simulation) ====================
 
-
-#[test]
 fn test_base_loads() {
     use subset_julia_vm::base_loader::get_base_program;
 
@@ -945,7 +893,6 @@ fn test_base_loads() {
     );
 }
 
-#[test]
 fn test_merge_base() {
     use std::collections::HashSet;
     use subset_julia_vm::base_loader::get_base_program;
@@ -985,14 +932,18 @@ fn test_merge_base() {
 
         let mut all_structs: Vec<_> = base
             .structs
-            .iter().filter(|&s| !user_struct_names.contains(s.name.as_str())).cloned()
+            .iter()
+            .filter(|&s| !user_struct_names.contains(s.name.as_str()))
+            .cloned()
             .collect();
         all_structs.append(&mut program.structs);
         program.structs = all_structs;
 
         let mut all_functions: Vec<_> = base
             .functions
-            .iter().filter(|&f| !user_func_names.contains(f.name.as_str())).cloned()
+            .iter()
+            .filter(|&f| !user_func_names.contains(f.name.as_str()))
+            .cloned()
             .collect();
         all_functions.append(&mut program.functions);
         program.functions = all_functions;
@@ -1017,7 +968,6 @@ fn test_merge_base() {
     );
 }
 
-#[test]
 fn test_simple_float_plus_complex() {
     // Minimal test: just 0.0 + complex(0.0, 0.0) at top level
     let sp = r#"{"start": 0, "end": 1, "start_line": 0, "end_line": 0, "start_column": 0, "end_column": 1}"#;
@@ -1054,7 +1004,6 @@ fn test_simple_float_plus_complex() {
     );
 }
 
-#[test]
 fn test_float_plus_complex_in_function() {
     // Test: Float64 + Complex inside a function
     let sp = r#"{"start": 0, "end": 1, "start_line": 0, "end_line": 0, "start_column": 0, "end_column": 1}"#;
@@ -1114,7 +1063,6 @@ fn test_float_plus_complex_in_function() {
     );
 }
 
-#[test]
 fn test_complex_plus_typed_param() {
     // Test: Complex + Float64 param - with type annotation, static dispatch works
     let sp = r#"{"start": 0, "end": 1, "start_line": 0, "end_line": 0, "start_column": 0, "end_column": 1}"#;
@@ -1174,7 +1122,6 @@ fn test_complex_plus_typed_param() {
     );
 }
 
-#[test]
 fn test_complex_with_typed_param_from_json() {
     // This test simulates the web flow where IR comes from JavaScript lowering as JSON
     // Tests that Complex arithmetic with typed params works correctly
@@ -1275,7 +1222,6 @@ fn test_complex_with_typed_param_from_json() {
 
 // ==================== sum(arr) Tests ====================
 
-#[test]
 fn test_sum_array() {
     // sum([1, 2, 3, 4, 5]) = 15
     let src = r#"
@@ -1290,7 +1236,6 @@ sum(arr)
     );
 }
 
-#[test]
 fn test_sum_array_floats() {
     // sum([1.5, 2.5, 3.0]) = 7.0
     let src = r#"
@@ -1305,7 +1250,6 @@ sum(arr)
     );
 }
 
-#[test]
 fn test_sum_with_function() {
     // sum(f, arr) - sum of squares
     let src = r#"
@@ -1324,7 +1268,6 @@ sum(square, arr)
     );
 }
 
-#[test]
 fn test_sum_in_expression() {
     // Using sum in a larger expression
     let src = r#"
@@ -1342,7 +1285,6 @@ mean
 
 // ==================== Ref() Tests ====================
 
-#[test]
 fn test_ref_basic() {
     // Basic Ref creation - Ref wraps a value and is used inline
     // Ref(x) protects x from broadcasting, treating it as a scalar
@@ -1351,21 +1293,18 @@ arr = [1.0, 2.0, 3.0]
 arr .+ Ref(100)
 "#;
     let result = run_core_pipeline(src, 0).expect("Failed to run Ref test");
-    match result {
-        Value::Array(arr) => {
-            // [1+100, 2+100, 3+100] = [101, 102, 103]
-            let arr = arr.borrow();
-            assert_eq!(arr.len(), 3);
-            let data = arr.try_data_f64().unwrap();
-            assert!((data[0] - 101.0).abs() < 1e-10);
-            assert!((data[1] - 102.0).abs() < 1e-10);
-            assert!((data[2] - 103.0).abs() < 1e-10);
-        }
-        _ => panic!("Expected Array, got {:?}", result),
-    }
+    // [1+100, 2+100, 3+100] = [101, 102, 103]
+    let arr = subset_julia_vm::vm::value::array_wrapper_value_to_array_value(&result, &[])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("Expected Array, got {:?}", result));
+    assert_eq!(arr.len(), 3);
+    let data = arr.try_data_f64().unwrap();
+    assert!((data[0] - 101.0).abs() < 1e-10);
+    assert!((data[1] - 102.0).abs() < 1e-10);
+    assert!((data[2] - 103.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_ref_broadcast_scalar() {
     // Ref protects value from broadcasting - treated as scalar
     // arr .+ Ref(10) should add 10 to each element
@@ -1383,7 +1322,6 @@ sum(result)
     );
 }
 
-#[test]
 fn test_ref_broadcast_multiply() {
     // Ref in multiplication broadcast
     let src = r#"
@@ -1400,7 +1338,6 @@ sum(result)
     );
 }
 
-#[test]
 fn test_ref_multi_arg_broadcast() {
     // Multi-argument broadcast with Ref: f.(arr, Ref(x))
     let src = r#"
@@ -1422,7 +1359,6 @@ sum(result)
 }
 
 /// Tests for complex array operations including HOF functions with nested calls
-#[test]
 fn test_complex_array_basic_ops() {
     // Test 1: Complex array creation and length
     let src1 = r#"
@@ -1486,7 +1422,6 @@ sum(result)
     );
 }
 
-#[test]
 fn test_ref_multi_arg_broadcast_complex() {
     // First test: simple broadcast over complex array without Ref
     let src1 = r#"
@@ -1551,7 +1486,6 @@ sum(result)
     );
 }
 
-#[test]
 fn test_2d_broadcast_shape_preservation() {
     // Test that broadcasting over a 2D matrix preserves shape
     // Step 1: Verify xs' creates row vector
@@ -1625,7 +1559,6 @@ length(result)
     );
 }
 
-#[test]
 fn test_range_with_length_output() {
     // Test range with keyword length argument
     // Note: Julia's range(start, stop; length=N) requires Integer for length
@@ -1641,7 +1574,6 @@ length(xs)
     }
 }
 
-#[test]
 fn test_range_with_length_in_function() {
     // Test range with length parameter passed to function
     // Note: Julia's range(start, stop; length=N) requires Integer for length
@@ -1659,7 +1591,6 @@ length(xs)
     }
 }
 
-#[test]
 fn test_range_positional_in_function() {
     // Test using positional range(start, stop, length) to verify core logic works
     // Note: Julia's range(start, stop, length::Integer) requires Int64 for positional length arg
@@ -1677,7 +1608,6 @@ length(xs)
     }
 }
 
-#[test]
 fn test_kwarg_from_function_param() {
     // Simple test: pass a value through kwarg
     // Note: Use Int64 to avoid any type conversion issues
@@ -1696,7 +1626,6 @@ simple(; val=42)
     }
 }
 
-#[test]
 fn test_2d_broadcast_mandelbrot() {
     // Test minimal function call with range
     // Note: Julia's range requires Integer for length argument
@@ -1720,7 +1649,6 @@ test_grid(5, 3)
     );
 }
 
-#[test]
 fn test_sleep_basic_float() {
     let src = r#"
 sleep(0.001)
@@ -1733,7 +1661,6 @@ sleep(0.001)
     );
 }
 
-#[test]
 fn test_sleep_integer() {
     let src = r#"
 sleep(0)
@@ -1746,7 +1673,6 @@ sleep(0)
     );
 }
 
-#[test]
 fn test_sleep_zero() {
     let src = r#"
 sleep(0)
@@ -1756,7 +1682,6 @@ sleep(0)
     assert!((result - 42.0).abs() < 1e-10, "Should handle sleep(0)");
 }
 
-#[test]
 fn test_sleep_returns_nothing() {
     let src = r#"
 result = sleep(0.0)
@@ -1771,7 +1696,6 @@ result = sleep(0.0)
     );
 }
 
-#[test]
 fn test_sleep_negative_error() {
     let src = "sleep(-1)";
     let result = run_core_pipeline(src, 0);
@@ -1784,7 +1708,6 @@ fn test_sleep_negative_error() {
     );
 }
 
-#[test]
 fn test_sleep_infinity_error() {
     // Note: Division by zero is caught before sleep() can see Inf
     // This is acceptable behavior - the important thing is that invalid values are rejected
@@ -1802,7 +1725,6 @@ sleep(inf)
     // Either "Division by zero" or "finite" error is acceptable
 }
 
-#[test]
 fn test_sleep_nan_error() {
     // Note: Division by zero is caught before sleep() can see NaN
     // This is acceptable behavior - the important thing is that invalid values are rejected
@@ -1820,7 +1742,6 @@ sleep(nan_val)
     // Either "Division by zero" or "finite" error is acceptable
 }
 
-#[test]
 fn test_sleep_in_loop() {
     let src = r#"
 for i in 1:3
@@ -1834,7 +1755,6 @@ end
 
 // ==================== Rational Number Operator (//) ====================
 
-#[test]
 fn test_base_min_function() {
     // Test that a simple base function like min() works
     let src = r#"
@@ -1848,7 +1768,6 @@ min(3, 5)
     );
 }
 
-#[test]
 fn test_rational_struct_direct() {
     // Test creating Rational struct directly from prelude
     let src = r#"
@@ -1863,7 +1782,6 @@ r.num
     );
 }
 
-#[test]
 fn test_rational_operator_basic() {
     // Test that // operator is lowered to rational() call
     // We define our own simple rational to verify the lowering works
@@ -1888,7 +1806,6 @@ r.num
     );
 }
 
-#[test]
 fn test_rational_operator_denominator() {
     // Test that // operator correctly passes denominator
     let src = r#"
@@ -1912,7 +1829,6 @@ r.den
     );
 }
 
-#[test]
 fn test_rational_operator_with_expressions() {
     // Test that // operator works with expressions
     let src = r#"
@@ -1938,7 +1854,6 @@ r.num + r.den
     );
 }
 
-#[test]
 fn test_rational_operator_negative() {
     // Test that // operator works with negative numbers
     let src = r#"
@@ -1966,7 +1881,6 @@ r.num
 // These tests verify that prelude functions that reassign their parameters work correctly.
 // This was a bug where parameter reassignment (e.g., a = abs(a)) caused type mismatch.
 
-#[test]
 fn test_prelude_gcd_basic() {
     // Test prelude gcd function which reassigns its parameters: a = abs(a), b = abs(b)
     let src = "gcd(12, 8)";
@@ -1987,7 +1901,6 @@ fn test_prelude_gcd_basic() {
     }
 }
 
-#[test]
 fn test_prelude_gcd_negative() {
     // Test gcd with negative numbers (should use abs internally)
     let src = "gcd(-12, 8)";
@@ -2008,7 +1921,6 @@ fn test_prelude_gcd_negative() {
     }
 }
 
-#[test]
 fn test_prelude_lcm_uses_gcd() {
     // Test lcm which internally calls gcd (with parameter reassignment)
     let src = "lcm(4, 6)";
@@ -2024,7 +1936,6 @@ fn test_prelude_lcm_uses_gcd() {
     }
 }
 
-#[test]
 fn test_prelude_powermod() {
     // Test powermod which reassigns base parameter: base = base % m
     let src = "powermod(2, 10, 1000)";
@@ -2047,42 +1958,36 @@ fn test_prelude_powermod() {
 
 // ==================== typeof tests ====================
 
-#[test]
 fn test_typeof_int64() {
     let src = r#"println(typeof(42))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output.trim(), "Int64");
 }
 
-#[test]
 fn test_typeof_float64() {
     let src = r#"println(typeof(3.14))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output.trim(), "Float64");
 }
 
-#[test]
 fn test_typeof_string() {
     let src = r#"println(typeof("hello"))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output.trim(), "String");
 }
 
-#[test]
 fn test_typeof_nothing() {
     let src = r#"println(typeof(nothing))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output.trim(), "Nothing");
 }
 
-#[test]
 fn test_typeof_vector() {
     let src = r#"println(typeof([1.0, 2.0, 3.0]))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output.trim(), "Vector{Float64}");
 }
 
-#[test]
 fn test_typeof_matrix() {
     let src = r#"println(typeof(zeros(2, 3)))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
@@ -2090,7 +1995,6 @@ fn test_typeof_matrix() {
 }
 
 // Range literals are now lazy (issue #520), returning UnitRange or StepRange types.
-#[test]
 fn test_typeof_range_as_lazy() {
     // Range literals now create lazy Range values
     let src = r#"
@@ -2098,11 +2002,10 @@ r = 1:10
 println(typeof(r))
 "#;
     let (_, output) = compile_and_run_program_direct(src, 0);
-    // Range literals with integer bounds produce UnitRange
-    assert_eq!(output.trim(), "UnitRange");
+    // Range literals with integer bounds produce UnitRange{Int64} (Issue #3550).
+    assert_eq!(output.trim(), "UnitRange{Int64}");
 }
 
-#[test]
 fn test_typeof_step_range_as_lazy() {
     // StepRange literals now create lazy Range values
     let src = r#"
@@ -2110,19 +2013,20 @@ r = 1:2:10
 println(typeof(r))
 "#;
     let (_, output) = compile_and_run_program_direct(src, 0);
-    // StepRange literals with step produce StepRange
-    assert_eq!(output.trim(), "StepRange");
+    // StepRange literals with step produce StepRange{Int64, Int64} (Issue #3550).
+    assert_eq!(output.trim(), "StepRange{Int64, Int64}");
 }
 
-#[test]
 fn test_typeof_complex() {
-    // Complex{Float64} is the correct type for 1.0 + 2.0im
+    // `1.0 + 2.0im` is a `Complex{Float64}`, which upstream Julia (1.x) DISPLAYS
+    // through its `ComplexF64` type alias — `println(typeof(1.0 + 2.0im))` prints
+    // `ComplexF64`, not `Complex{Float64}`. The runtime adopted the same alias
+    // display (Issue #5775), so the prior expectation was stale (Issue #5854).
     let src = r#"println(typeof(1.0 + 2.0im))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
-    assert_eq!(output.trim(), "Complex{Float64}");
+    assert_eq!(output.trim(), "ComplexF64");
 }
 
-#[test]
 fn test_typeof_tuple() {
     let src = r#"println(typeof((1, 2.0, "a")))"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
@@ -2133,7 +2037,6 @@ fn test_typeof_tuple() {
 // @test macro tests - require `using Test`
 // ===========================================================================
 
-#[test]
 fn test_test_macro_without_using_test() {
     // @test without `using Test` should fail at lowering phase
     let src = r#"
@@ -2153,7 +2056,6 @@ fn test_test_macro_without_using_test() {
     );
 }
 
-#[test]
 fn test_testset_macro_without_using_test() {
     // @testset without `using Test` should fail at lowering phase
     let src = r#"
@@ -2175,7 +2077,6 @@ end
     );
 }
 
-#[test]
 fn test_test_macro_with_using_test() {
     // @test with `using Test` should work
     let src = r#"
@@ -2190,7 +2091,6 @@ using Test
     );
 }
 
-#[test]
 fn test_testset_macro_with_using_test() {
     // @testset with `using Test` should work
     let src = r#"
@@ -2210,7 +2110,6 @@ end
 
 // ==================== Iterator Protocol Tests ====================
 
-#[test]
 fn test_iterate_array_first() {
     // iterate(array) should return (first_element, state)
     let src = r#"
@@ -2226,7 +2125,6 @@ result[1]  # first element
     }
 }
 
-#[test]
 fn test_iterate_array_next() {
     // iterate(array, state) should return next element
     let src = r#"
@@ -2243,7 +2141,6 @@ second[1]  # second element
     }
 }
 
-#[test]
 fn test_iterate_empty_array() {
     // iterate on empty array should return nothing
     // Check by using println(typeof(...)) to get the type name
@@ -2255,7 +2152,6 @@ println(typeof(iterate(arr)))
     assert_eq!(output.trim(), "Nothing");
 }
 
-#[test]
 fn test_iterate_range() {
     // iterate on range
     let src = r#"
@@ -2273,7 +2169,6 @@ first[1]  # should be 1
     }
 }
 
-#[test]
 fn test_collect_range() {
     // collect(range) should return an array
     let src = r#"
@@ -2289,7 +2184,6 @@ length(arr)
     }
 }
 
-#[test]
 fn test_collect_range_step() {
     // collect step range
     let src = r#"
@@ -2309,17 +2203,18 @@ arr[3]  # should be 5 (1, 3, 5, 7, 9)
 // Generator tests
 // ==================================================================================
 
-#[test]
 fn test_generator_typeof() {
-    // typeof(Generator) currently returns "Base.Generator"
+    // Julia prints parametric Generator runtime types.
     let src = r#"
 square(x) = x * x
 g = Generator(square, 1:5)
 println(typeof(g))
 "#;
     let (_, output) = compile_and_run_program_direct(src, 0);
-    // TODO: Implement proper Generator type, for now it returns Any
-    assert_eq!(output.trim(), "Base.Generator");
+    assert_eq!(
+        output.trim(),
+        "Base.Generator{UnitRange{Int64}, typeof(square)}"
+    );
 }
 
 // TODO: Generator iteration is not yet implemented
@@ -2342,3 +2237,148 @@ println(typeof(g))
 //     }
 // }
 
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_dict_empty_constructor();
+    test_dict_parametric_constructor_empty();
+    test_dict_set_and_get();
+    test_dict_haskey();
+    test_dict_haskey_missing();
+    test_dict_get_with_default();
+    test_dict_get_existing_key();
+    test_dict_pairs();
+    test_time_println_string_literal();
+    test_zero_function_float();
+    test_zero_function_int();
+    test_zero_function_complex();
+    test_trues_function();
+    test_falses_function();
+    test_complex_binary_add();
+    test_complex_binary_add_imag();
+}
+
+#[test]
+fn chunk_001() {
+    test_complex_binary_mul();
+    test_complex_binary_pow();
+    test_complex_neg();
+    test_complex_array_literal();
+    test_complex_array_literal_second_element();
+    test_complex_array_literal_mixed();
+    test_broadcast_sqrt_core_pipeline();
+    test_broadcast_abs_core_pipeline();
+    test_broadcast_sin_cos_core_pipeline();
+    test_broadcast_exp_log_core_pipeline();
+    test_broadcast_ifelse_core_pipeline();
+    test_broadcast_ifelse_non_bool_condition_error();
+    test_mandelbrot_broadcast_ios_sample();
+    test_try_catch_finally_debug();
+    test_try_catch_finally_no_error_simple();
+    test_try_catch_finally_no_error_f64();
+}
+
+#[test]
+fn chunk_002() {
+    test_try_catch_finally_type_change();
+    test_try_catch_finally_catch_type_matters();
+    test_julia_broadcast_outer_product_3x3();
+    test_julia_broadcast_outer_product_corners();
+    test_julia_broadcast_row_col_add();
+    test_julia_broadcast_2d_with_1d();
+    test_julia_broadcast_same_shape_still_works();
+    test_julia_broadcast_incompatible_shapes_error();
+    test_broadcast_op_function_call_syntax();
+    test_broadcast_add_function_call_syntax();
+    test_string_interpolation_no_interpolation_string();
+    test_string_interpolation_full_sample_from_bug_report();
+    test_base_loads();
+    test_merge_base();
+    test_simple_float_plus_complex();
+    test_float_plus_complex_in_function();
+}
+
+#[test]
+fn chunk_003() {
+    test_complex_plus_typed_param();
+    test_complex_with_typed_param_from_json();
+    test_sum_array();
+    test_sum_array_floats();
+    test_sum_with_function();
+    test_sum_in_expression();
+    test_ref_basic();
+    test_ref_broadcast_scalar();
+    test_ref_broadcast_multiply();
+    test_ref_multi_arg_broadcast();
+    test_complex_array_basic_ops();
+    test_ref_multi_arg_broadcast_complex();
+    test_2d_broadcast_shape_preservation();
+    test_range_with_length_output();
+    test_range_with_length_in_function();
+    test_range_positional_in_function();
+}
+
+#[test]
+fn chunk_004() {
+    test_kwarg_from_function_param();
+    test_2d_broadcast_mandelbrot();
+    test_sleep_basic_float();
+    test_sleep_integer();
+    test_sleep_zero();
+    test_sleep_returns_nothing();
+    test_sleep_negative_error();
+    test_sleep_infinity_error();
+    test_sleep_nan_error();
+    test_sleep_in_loop();
+    test_base_min_function();
+    test_rational_struct_direct();
+    test_rational_operator_basic();
+    test_rational_operator_denominator();
+    test_rational_operator_with_expressions();
+    test_rational_operator_negative();
+}
+
+#[test]
+fn chunk_005() {
+    test_prelude_gcd_basic();
+    test_prelude_gcd_negative();
+    test_prelude_lcm_uses_gcd();
+    test_prelude_powermod();
+}
+
+#[test]
+fn chunk_007() {
+    test_typeof_int64();
+    test_typeof_float64();
+    test_typeof_string();
+    test_typeof_nothing();
+}
+
+#[test]
+fn chunk_008() {
+    test_typeof_vector();
+    test_typeof_matrix();
+    test_typeof_range_as_lazy();
+    test_typeof_step_range_as_lazy();
+}
+
+#[test]
+fn chunk_009() {
+    test_typeof_complex();
+    test_typeof_tuple();
+    test_test_macro_without_using_test();
+    test_testset_macro_without_using_test();
+}
+
+#[test]
+fn chunk_006() {
+    test_test_macro_with_using_test();
+    test_testset_macro_with_using_test();
+    test_iterate_array_first();
+    test_iterate_array_next();
+    test_iterate_empty_array();
+    test_iterate_range();
+    test_collect_range();
+    test_collect_range_step();
+    test_generator_typeof();
+}

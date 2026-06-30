@@ -1,0 +1,46 @@
+# Type preservation matrix fixtures for Issue #3699.
+#
+# Each .jl crosses one wide primitive type ({Int128, UInt128, Float16}) with
+# all of {+, -, *, /, ÷, %} (or {==, <, <=, >, >=}) under three operand-pair
+# shapes (same-type, mixed-with-Int64, mixed-with-Float64) and two binding
+# shapes (inline-from-constructor and variable-bound).
+#
+# The split between *_arith_matrix and *_cmp_matrix keeps each file under
+# ~50 assertions so individual failures point precisely at one cell of the
+# grid. Names are category-prefixed per Issue #3135.
+
+[[tests]]
+name = "type_preservation_int128_arith_matrix"
+file = "type_preservation_int128_arith_matrix.jl"
+expected = true
+description = "Int128 × {+,-,*,/,÷,%} × {same/Int64/Float64} × {inline/variable} matrix (Issue #3699)"
+
+[[tests]]
+name = "type_preservation_int128_cmp_matrix"
+file = "type_preservation_int128_cmp_matrix.jl"
+expected = true
+description = "Int128 × {==,<,<=,>,>=} × {same/Int64/Float64} × {inline/variable} matrix (Issue #3699)"
+
+[[tests]]
+name = "type_preservation_uint128_arith_matrix"
+file = "type_preservation_uint128_arith_matrix.jl"
+expected = true
+description = "UInt128 × {+,-,*,/,÷,%} × {same/Int64/Float64} × {inline/variable} matrix (Issue #3699)"
+
+[[tests]]
+name = "type_preservation_uint128_cmp_matrix"
+file = "type_preservation_uint128_cmp_matrix.jl"
+expected = true
+description = "UInt128 × {==,<,<=,>,>=} matrix incl. full-width (>i64::MAX) comparisons (Issue #3699)"
+
+[[tests]]
+name = "type_preservation_float16_arith_matrix"
+file = "type_preservation_float16_arith_matrix.jl"
+expected = true
+description = "Float16 × {+,-,*,/,÷,%} × {same/Int64/Float64} × {inline/variable} matrix (Issue #3699)"
+
+[[tests]]
+name = "type_preservation_float16_cmp_matrix"
+file = "type_preservation_float16_cmp_matrix.jl"
+expected = true
+description = "Float16 × {==,<,<=,>,>=} × {same/Int64/Float64} × {inline/variable} matrix (Issue #3699)"

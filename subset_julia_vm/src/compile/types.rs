@@ -26,6 +26,10 @@ pub fn parse_single_type_expr(s: &str) -> Option<TypeExpr> {
         return None;
     }
 
+    if matches!(s, "Union{}" | "Bottom") {
+        return Some(TypeExpr::Concrete(JuliaType::Bottom));
+    }
+
     // Check for runtime expressions (function calls like Symbol(s))
     // These contain parentheses but not curly braces at the top level
     if let Some(open_paren) = s.find('(') {
@@ -56,28 +60,79 @@ pub fn parse_single_type_expr(s: &str) -> Option<TypeExpr> {
         // Simple type: Float64, Int64, T, etc.
         match JuliaType::from_name(s) {
             Some(jt) => Some(TypeExpr::Concrete(jt)),
-            None => Some(TypeExpr::TypeVar(s.to_string())),
+            None if is_static_type_arg_atom(s) => Some(TypeExpr::TypeVar(s.to_string())),
+            None => Some(TypeExpr::RuntimeExpr(s.to_string())),
         }
     }
+}
+
+fn is_static_type_arg_atom(s: &str) -> bool {
+    if matches!(s, "true" | "false") || s.starts_with(':') {
+        return true;
+    }
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    !s.is_empty()
+        && s.chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 /// Parse comma-separated type arguments, respecting nested braces.
 pub fn parse_type_args_recursive(s: &str) -> Option<Vec<TypeExpr>> {
     let mut args = Vec::new();
     let mut current = String::new();
-    let mut depth = 0;
+    let mut brace_depth = 0;
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
 
     for c in s.chars() {
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == q {
+                quote = None;
+            }
+            current.push(c);
+            continue;
+        }
+
         match c {
+            '\'' | '"' => {
+                quote = Some(c);
+                current.push(c);
+            }
             '{' => {
-                depth += 1;
+                brace_depth += 1;
                 current.push(c);
             }
             '}' => {
-                depth -= 1;
+                brace_depth -= 1;
                 current.push(c);
             }
-            ',' if depth == 0 => {
+            '(' => {
+                paren_depth += 1;
+                current.push(c);
+            }
+            ')' => {
+                paren_depth -= 1;
+                current.push(c);
+            }
+            '[' => {
+                bracket_depth += 1;
+                current.push(c);
+            }
+            ']' => {
+                bracket_depth -= 1;
+                current.push(c);
+            }
+            ',' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
                 let trimmed = current.trim();
                 if !trimmed.is_empty() {
                     args.push(parse_single_type_expr(trimmed)?);
@@ -220,6 +275,12 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_single_type_expr_value_param_arithmetic_runtime_expr() {
+        let result = parse_single_type_expr("N-1");
+        assert_eq!(result, Some(TypeExpr::RuntimeExpr("N-1".to_string())));
+    }
+
+    #[test]
     fn test_parse_single_type_expr_unclosed_brace_returns_none() {
         // "Point{" has no closing brace → None
         let result = parse_single_type_expr("Point{");
@@ -239,6 +300,12 @@ mod tests {
     fn test_parse_type_args_recursive_empty_returns_empty_vec() {
         let result = parse_type_args_recursive("");
         assert_eq!(result, Some(vec![]));
+    }
+
+    #[test]
+    fn test_parse_type_args_recursive_empty_union_is_bottom() {
+        let result = parse_type_args_recursive("Union{}");
+        assert_eq!(result, Some(vec![TypeExpr::Concrete(JuliaType::Bottom)]));
     }
 
     #[test]
@@ -278,6 +345,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_parse_type_args_recursive_tuple_value_param_does_not_split_inner_comma() {
+        let result = parse_type_args_recursive("(1, 2), Int64");
+        assert_eq!(
+            result,
+            Some(vec![
+                TypeExpr::RuntimeExpr("(1, 2)".to_string()),
+                TypeExpr::Concrete(JuliaType::Int64),
+            ])
+        );
+    }
+
     // ── parse_parametric_call ────────────────────────────────────────────────
 
     #[test]
@@ -285,7 +364,10 @@ mod tests {
         let result = parse_parametric_call("Point{Float64}");
         assert_eq!(
             result,
-            Some(("Point".to_string(), vec![TypeExpr::Concrete(JuliaType::Float64)]))
+            Some((
+                "Point".to_string(),
+                vec![TypeExpr::Concrete(JuliaType::Float64)]
+            ))
         );
     }
 
@@ -333,7 +415,10 @@ mod tests {
         let result = parse_parametric_call("Generic{T}");
         assert_eq!(
             result,
-            Some(("Generic".to_string(), vec![TypeExpr::TypeVar("T".to_string())]))
+            Some((
+                "Generic".to_string(),
+                vec![TypeExpr::TypeVar("T".to_string())]
+            ))
         );
     }
 }

@@ -32,3 +32,15 @@ name = "type_stability_narrowing_e2e"
 file = "type_narrowing_e2e.jl"
 expected = true
 description = "End-to-end type narrowing: compound &&/||, negation, nested, early return (Issue #1750)"
+
+[[tests]]
+name = "type_stability_diagnostic_parity_4291"
+file = "diagnostic_parity_4291.jl"
+expected = true
+description = "Type-stability diagnostic parity source cases for arrays, tuples, generators, closures, and dispatch (Issue #4291)"
+
+[[tests]]
+name = "type_stability_tuple_element_sharpening"
+file = "tuple_element_sharpening.jl"
+expected = true
+description = "Tuple/NamedTuple element-type sharpening at constant index, destructuring, and first/last (Issue #5183)"

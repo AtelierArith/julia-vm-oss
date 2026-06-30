@@ -3,11 +3,13 @@
 # =============================================================================
 # Based on Julia's base/strings/search.jl
 
-# occursin: check if needle appears in haystack
-# Based on Julia's base/strings/search.jl
+# occursin: check if needle appears in haystack.
+# Uses byte-level (`ncodeunits`) loop because the comparison underneath uses
+# byte-level `codeunit`. Mixing `length` (char count) with `codeunit` produced
+# false positives for non-ASCII needles sharing a leading UTF-8 byte (#3604).
 function occursin(needle, haystack)
-    nlen = length(needle)
-    hlen = length(haystack)
+    nlen = ncodeunits(needle)
+    hlen = ncodeunits(haystack)
     # Empty needle always matches
     if nlen == 0
         return true
@@ -37,6 +39,34 @@ function occursin(needle, haystack)
     return false
 end
 
+# occursin: Char needle (Issue #3570)
+# Julia Base: occursin(c::AbstractChar, s::AbstractString) = any(==(c), s)
+# We avoid `length(::Char)` (raised by the generic occursin above) by walking
+# the haystack code-point by code-point and comparing to the needle Char.
+function occursin(needle::Char, haystack::String)
+    n = ncodeunits(haystack)
+    i = 1
+    while i <= n
+        if isvalid(haystack, i)
+            if haystack[i] == needle
+                return true
+            end
+        end
+        i = i + 1
+    end
+    return false
+end
+
+# occursin: Regex needle (Issue #5705)
+# Julia Base: occursin(r::Regex, s::AbstractString; offset=0) tests whether the
+# pattern matches anywhere in `s`. We dispatch on the `::Regex` needle (now that a
+# `::Regex`-typed parameter used with `match` compiles, Issue #5678) so the generic
+# byte-walking method — which calls `ncodeunits(needle)` and rejects a Regex — is
+# not reached.
+function occursin(needle::Regex, haystack)
+    return match(needle, haystack) !== nothing
+end
+
 # occursin: curried form (Issue #2100)
 # Julia Base: occursin(haystack) returns needle -> occursin(needle, haystack)
 function occursin(haystack::String)
@@ -62,10 +92,23 @@ function contains(haystack, needle)
     return occursin(needle, haystack)
 end
 
-# startswith: check if string starts with prefix
+# startswith: check if string starts with prefix.
+# Use byte-level `ncodeunits` since the comparison loop uses `codeunit`.
+# Previously mixed char-count `length` with byte-indexed `codeunit`, producing
+# false positives like `startswith("ê", "é") == true` because both 'é' and 'ê'
+# are 2-byte UTF-8 chars sharing the leading 0xC3 byte. (#3602)
 function startswith(s, prefix)
-    slen = length(s)
-    plen = length(prefix)
+    # `startswith(s, re::Regex)`: true iff the regex matches at the START of `s`.
+    # The leftmost match (what `match` returns) begins at index 1 exactly when the
+    # regex matches anchored at the start, matching upstream (Issue #5676). Handled
+    # via `isa` inside the untyped method because a `::Regex`-typed parameter used
+    # with `match` currently fails to compile.
+    if isa(prefix, Regex)
+        m = match(prefix, s)
+        return m !== nothing && m.offset == 1
+    end
+    slen = ncodeunits(s)
+    plen = ncodeunits(prefix)
     if plen > slen
         return false
     end
@@ -82,6 +125,17 @@ function startswith(s, prefix)
     return true
 end
 
+# endswith: Regex suffix (Issue #5676)
+# Julia Base anchors the regex at the END of `s` (PCRE ENDANCHORED); a leftmost
+# `match` cannot decide this (e.g. `endswith("hello", r".")` is true even though the
+# leftmost match of `.` is at index 1). We delegate to the internal builtin
+# `_endswith_regex`, which rebuilds the pattern with a trailing `$` anchor and tests
+# it. A `::Regex`-typed suffix compiles since Issue #5678; the method dispatches
+# ahead of the generic `endswith`, which would call `ncodeunits(suffix)`.
+function endswith(s, suffix::Regex)
+    return _endswith_regex(s, suffix)
+end
+
 # startswith: curried form (Issue #2100)
 # Julia Base: startswith(prefix) returns s -> startswith(s, prefix)
 function startswith(prefix::String)
@@ -91,10 +145,12 @@ function startswith(prefix::String)
     return _startswith_curried
 end
 
-# endswith: check if string ends with suffix
+# endswith: check if string ends with suffix.
+# Use byte-level `ncodeunits` so the offset and per-byte comparison agree.
+# Previously mixed char-count `length` with byte-indexed `codeunit`. (#3603)
 function endswith(s, suffix)
-    slen = length(s)
-    suflen = length(suffix)
+    slen = ncodeunits(s)
+    suflen = ncodeunits(suffix)
     if suflen > slen
         return false
     end
@@ -144,6 +200,12 @@ function findnext(c::Char, s::String, i::Int64)
 end
 
 # --- findnext: String pattern ---
+# Julia's findnext on String returns a UnitRange of *string indices* (byte
+# positions where each character starts). The start of the range is the byte
+# index of the first matched character; the end is the byte index of the *start*
+# of the last matched character — NOT the last byte of the match. For ASCII
+# patterns these coincide, but for multi-byte patterns they don't, e.g.
+# `findfirst("é", "éa")` should return `1:1`, not `1:2`. (Issue #3605)
 function findnext(pattern::String, s::String, i::Int64)
     n = ncodeunits(s)
     m = ncodeunits(pattern)
@@ -151,6 +213,10 @@ function findnext(pattern::String, s::String, i::Int64)
         # Empty pattern matches at position i (returns empty range)
         return i:i-1
     end
+    # Byte offset within the pattern of the start of its last character.
+    # `thisind(pattern, m)` walks back over UTF-8 continuation bytes so the
+    # range end aligns with a character boundary in the haystack.
+    last_char_offset = thisind(pattern, m) - 1
     while i + m - 1 <= n
         # Compare bytes
         found = true
@@ -163,7 +229,7 @@ function findnext(pattern::String, s::String, i::Int64)
             j = j + 1
         end
         if found
-            return i:i+m-1
+            return i:i+last_char_offset
         end
         i = i + 1
     end
@@ -190,6 +256,8 @@ function findprev(c::Char, s::String, i::Int64)
 end
 
 # --- findprev: String pattern ---
+# As with `findnext`, the returned UnitRange end is the byte index of the start
+# of the last matched character, not the last byte of the match. (Issue #3605)
 function findprev(pattern::String, s::String, i::Int64)
     n = ncodeunits(s)
     m = ncodeunits(pattern)
@@ -199,6 +267,8 @@ function findprev(pattern::String, s::String, i::Int64)
     if i > n
         i = n
     end
+    # Byte offset within the pattern of the start of its last character.
+    last_char_offset = thisind(pattern, m) - 1
     # Start position is where pattern could end at position i
     start = i - m + 1
     if start < 1
@@ -215,7 +285,7 @@ function findprev(pattern::String, s::String, i::Int64)
             j = j + 1
         end
         if found
-            return start:start+m-1
+            return start:start+last_char_offset
         end
         start = start - 1
     end
@@ -238,4 +308,140 @@ end
 
 function findlast(pattern::String, s::String)
     return findprev(pattern, s, ncodeunits(s))
+end
+
+# =============================================================================
+# findall / count for String and Char patterns (Issue #3726)
+# =============================================================================
+# Both walk the string with the existing `findnext` overloads, advancing past
+# the previous match each iteration. They mirror official Julia semantics:
+#
+#   - findall(pattern::String, s::String) → Vector{UnitRange{Int64}}
+#   - findall(c::Char, s::String)         → Vector{Int64}
+#   - count(pattern::String, s::String)   → Int
+#   - count(c::Char, s::String)           → Int
+#
+# Empty-pattern semantics for String patterns mirror official Julia:
+#   findall("", s) → length(s)+1 empty UnitRanges at every char boundary
+#   count("", s)  → length(s)+1
+# These are the sole implementations: the former Rust builtins `StringFindAll`
+# and `StringCount` were removed (Issue #6724).
+
+# --- findall: Char pattern → Vector{Int64} of byte positions ---
+function findall(c::Char, s::String)
+    result = Int64[]
+    n = ncodeunits(s)
+    i = 1
+    while i <= n
+        idx = findnext(c, s, i)
+        if idx === nothing
+            break
+        end
+        push!(result, idx)
+        i = nextind(s, idx)
+    end
+    return result
+end
+
+# --- findall: String pattern → Vector{UnitRange{Int64}} ---
+function findall(pattern::String, s::String)
+    result = Vector{UnitRange{Int64}}()
+    n = ncodeunits(s)
+    m = ncodeunits(pattern)
+    if m == 0
+        # Empty pattern: emit empty range at every character boundary,
+        # matching official Julia (length(s)+1 ranges).
+        i = 1
+        while i <= n + 1
+            push!(result, i:i-1)
+            if i > n
+                break
+            end
+            i = nextind(s, i)
+        end
+        return result
+    end
+    i = 1
+    while i <= n
+        rng = findnext(pattern, s, i)
+        if rng === nothing
+            break
+        end
+        push!(result, rng)
+        # Advance past the matched bytes (non-overlapping). The match covered
+        # exactly `m` codeunits starting at `first(rng)`.
+        i = first(rng) + m
+    end
+    return result
+end
+
+# --- count: Char pattern → Int ---
+function count(c::Char, s::String)
+    n_matches = 0
+    n = ncodeunits(s)
+    i = 1
+    while i <= n
+        idx = findnext(c, s, i)
+        if idx === nothing
+            break
+        end
+        n_matches += 1
+        i = nextind(s, idx)
+    end
+    return n_matches
+end
+
+# --- count: String pattern → Int ---
+function count(pattern::String, s::String)
+    n = ncodeunits(s)
+    m = ncodeunits(pattern)
+    if m == 0
+        # Empty pattern: count(\"\", s) == length(s) + 1, matching official Julia.
+        return length(s) + 1
+    end
+    n_matches = 0
+    i = 1
+    while i <= n
+        rng = findnext(pattern, s, i)
+        if rng === nothing
+            break
+        end
+        n_matches += 1
+        i = first(rng) + m
+    end
+    return n_matches
+end
+
+# =============================================================================
+# findall / count for Regex patterns (Issue #6749)
+# =============================================================================
+# Public regex search wrappers, built in pure Julia on top of `eachmatch` (the
+# Rust regex-crate boundary). `occursin(::Regex, s)` already routes through
+# `match` (above); these complete the public search API. Both mirror official
+# Julia (base/regex.jl) for the default (non-overlapping) case:
+#
+#   - count(r::Regex, s)   → Int (number of non-overlapping matches)
+#   - findall(r::Regex, s) → Vector{UnitRange{Int64}} of byte ranges
+#
+# A match's byte range is `m.offset : m.offset + ncodeunits(m.match) - 1`, so an
+# empty match yields an empty range (offset:offset-1), matching upstream.
+
+# --- count: Regex pattern → Int ---
+function count(pat::Regex, s::AbstractString)
+    n_matches = 0
+    for _ in eachmatch(pat, s)
+        n_matches += 1
+    end
+    return n_matches
+end
+
+# --- findall: Regex pattern → Vector{UnitRange{Int64}} ---
+function findall(pat::Regex, s::AbstractString)
+    result = Vector{UnitRange{Int64}}()
+    for m in eachmatch(pat, s)
+        start = m.offset
+        stop = start + ncodeunits(m.match) - 1
+        push!(result, start:stop)
+    end
+    return result
 end

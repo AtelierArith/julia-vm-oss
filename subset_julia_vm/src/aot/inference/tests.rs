@@ -1,6 +1,12 @@
 use super::*;
+use crate::aot::ir::AotBinOp;
+use crate::aot::specialization::CodeInstanceKey;
 use crate::aot::types::StaticType;
-use crate::ir::core::{BinaryOp, Block, Expr, Function, Literal, UnaryOp};
+use crate::ir::core::{
+    BinaryOp, Block, Expr, Function, Literal, Program, Stmt, StructDef, StructField, TypedParam,
+    UnaryOp,
+};
+use crate::types::{JuliaType, TypeExpr};
 
 #[test]
 fn test_inference_result_new() {
@@ -55,6 +61,68 @@ fn test_struct_type_info() {
 }
 
 #[test]
+fn test_analyze_struct_type_expr_uses_static_projection_issue_5916() {
+    let engine = TypeInferenceEngine::new();
+    let span = test_span();
+    let struct_def = StructDef {
+        name: "AotTypeExprProbe5916".to_string(),
+        is_mutable: false,
+        type_params: vec![],
+        parent_type: None,
+        fields: vec![
+            StructField {
+                name: "matrix".to_string(),
+                type_expr: Some(TypeExpr::Parameterized {
+                    base: "Array".to_string(),
+                    params: vec![
+                        TypeExpr::Concrete(JuliaType::Int64),
+                        TypeExpr::TypeVar("2".to_string()),
+                    ],
+                }),
+                span,
+            },
+            StructField {
+                name: "pair".to_string(),
+                type_expr: Some(TypeExpr::Parameterized {
+                    base: "Tuple".to_string(),
+                    params: vec![
+                        TypeExpr::Concrete(JuliaType::Int64),
+                        TypeExpr::Concrete(JuliaType::String),
+                    ],
+                }),
+                span,
+            },
+            StructField {
+                name: "abstract_value".to_string(),
+                type_expr: Some(TypeExpr::Concrete(JuliaType::Real)),
+                span,
+            },
+        ],
+        inner_constructors: vec![],
+        span,
+    };
+
+    let info = engine
+        .analyze_struct(&struct_def)
+        .expect("analyze struct fields");
+    assert_eq!(
+        info.get_field_type("matrix"),
+        Some(&StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(2),
+        })
+    );
+    assert_eq!(
+        info.get_field_type("pair"),
+        Some(&StaticType::Tuple(vec![StaticType::I64, StaticType::Str]))
+    );
+    assert_eq!(
+        info.get_field_type("abstract_value"),
+        Some(&StaticType::Any)
+    );
+}
+
+#[test]
 fn test_typed_program() {
     let mut program = TypedProgram::new();
 
@@ -93,14 +161,14 @@ fn test_join_types() {
     let joined = engine.join_types(&StaticType::I64, &StaticType::F64);
     assert_eq!(joined, StaticType::F64);
 
-    // Any is treated as unknown - use the other type
+    // Any is the top element (absorbing): join(Any, T) = Any (Issue #3461)
     assert_eq!(
         engine.join_types(&StaticType::Any, &StaticType::I64),
-        StaticType::I64
+        StaticType::Any
     );
     assert_eq!(
         engine.join_types(&StaticType::I64, &StaticType::Any),
-        StaticType::I64
+        StaticType::Any
     );
 
     // Non-numeric types create a union
@@ -124,6 +192,45 @@ fn test_meet_types() {
 }
 
 #[test]
+fn test_issue_3912_meet_types_routes_through_core_typeintersect() {
+    let engine = TypeInferenceEngine::new();
+
+    // typeintersect(Union{Int64, Float64}, Int64) == Int64 in upstream Julia.
+    // Previously AoT over-widened this to `Any`.
+    assert_eq!(
+        engine.meet_types(
+            &StaticType::Union {
+                variants: vec![StaticType::I64, StaticType::F64],
+            },
+            &StaticType::I64,
+        ),
+        StaticType::I64
+    );
+
+    // typeintersect(Int64, Float64) == Union{} (Bottom) in upstream Julia.
+    // The shared core proves disjointness; AoT projects Bottom to the empty
+    // union instead of silently widening to a misleading backend type.
+    assert_eq!(
+        engine.meet_types(&StaticType::I64, &StaticType::F64),
+        StaticType::Union { variants: vec![] }
+    );
+
+    // typeintersect(Tuple{Int64, Float64}, Tuple{Int64, Float64}) == itself.
+    let tuple = StaticType::Tuple(vec![StaticType::I64, StaticType::F64]);
+    assert_eq!(engine.meet_types(&tuple, &tuple), tuple.clone());
+
+    // `Any` stays absorbing-as-identity on meet: meet(Any, T) == T.
+    assert_eq!(
+        engine.meet_types(&StaticType::Any, &StaticType::Str),
+        StaticType::Str
+    );
+    assert_eq!(
+        engine.meet_types(&StaticType::Str, &StaticType::Any),
+        StaticType::Str
+    );
+}
+
+#[test]
 fn test_literal_type() {
     let engine = TypeInferenceEngine::new();
 
@@ -143,6 +250,35 @@ fn test_literal_type() {
             type_id: 0,
             name: "Complex".to_string()
         }
+    );
+}
+
+#[test]
+fn test_issue_7761_datatype_literal_infers_any() {
+    // Regression for Issue #7761: `literal_type` must cover `Literal::DataType`
+    // (produced by macro expansion). Without the arm, the `--features aot` crate
+    // fails to build with E0004 (non-exhaustive patterns). The DataType literal
+    // maps to `StaticType::Any`, mirroring the `Module`/`Symbol`/`Expr` arms.
+    let engine = TypeInferenceEngine::new();
+
+    assert_eq!(
+        engine.literal_type(&Literal::DataType("Int64".to_string())),
+        StaticType::Any
+    );
+    assert_eq!(
+        engine.literal_type(&Literal::Module("Base".to_string())),
+        StaticType::Any
+    );
+}
+
+#[test]
+fn test_issue_3715_literals_preserve_wide_primitive_static_types() {
+    let engine = TypeInferenceEngine::new();
+
+    assert_eq!(engine.literal_type(&Literal::Int128(42)), StaticType::I128);
+    assert_eq!(
+        engine.literal_type(&Literal::Float16(half::f16::from_f32(1.5))),
+        StaticType::F16
     );
 }
 
@@ -180,6 +316,44 @@ fn test_binop_result_type() {
 }
 
 #[test]
+fn float32_type_preservation_issue_6941() {
+    let engine = TypeInferenceEngine::new();
+
+    assert_eq!(
+        engine.numeric_promote(&StaticType::F32, &StaticType::F32),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.numeric_promote(&StaticType::F32, &StaticType::I64),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.numeric_promote(&StaticType::I64, &StaticType::F32),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.numeric_promote(&StaticType::F32, &StaticType::F64),
+        StaticType::F64
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::F32, &StaticType::I64),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Div, &StaticType::F32, &StaticType::F32),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Mul, &StaticType::F32, &StaticType::F64),
+        StaticType::F64
+    );
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Add, &StaticType::F32, &StaticType::I64),
+        StaticType::F32
+    );
+}
+
+#[test]
 fn test_call_result_type() {
     let engine = TypeInferenceEngine::new();
 
@@ -188,6 +362,7 @@ fn test_call_result_type() {
         engine.call_result_type("sqrt", &[StaticType::F64]),
         StaticType::F64
     );
+    assert_eq!(engine.call_result_type("time_ns", &[]), StaticType::I64);
 
     // Type constructor
     assert_eq!(
@@ -205,6 +380,11 @@ fn test_element_type() {
         ndims: Some(1),
     };
     assert_eq!(engine.element_type(&arr), StaticType::I64);
+
+    let set = StaticType::Set {
+        element: Box::new(StaticType::I64),
+    };
+    assert_eq!(engine.element_type(&set), StaticType::I64);
 
     assert_eq!(engine.element_type(&StaticType::Str), StaticType::Char);
 }
@@ -321,13 +501,10 @@ fn test_infer_expr_ternary() {
     };
     let ty = engine.infer_expr_type(&expr);
     // Either Union or the join of I64 and F64
-    match ty {
-        StaticType::Union { variants } => {
-            assert!(variants.contains(&StaticType::I64));
-            assert!(variants.contains(&StaticType::F64));
-        }
-        _ => {} // Other join strategies are acceptable
-    }
+    if let StaticType::Union { variants } = ty {
+        assert!(variants.contains(&StaticType::I64));
+        assert!(variants.contains(&StaticType::F64));
+    } // Other join strategies are acceptable
 }
 
 #[test]
@@ -380,6 +557,25 @@ fn test_infer_expr_range() {
 }
 
 #[test]
+fn range_inference_uses_step_type_issue_6969() {
+    let engine = TypeInferenceEngine::new();
+    let expr = Expr::Range {
+        start: Box::new(Expr::Literal(Literal::Int(1), test_span())),
+        stop: Box::new(Expr::Literal(Literal::Int(2), test_span())),
+        step: Some(Box::new(Expr::Literal(Literal::Float32(0.5), test_span()))),
+        span: test_span(),
+    };
+
+    let ty = engine.infer_expr_type(&expr);
+    assert_eq!(
+        ty,
+        StaticType::Range {
+            element: Box::new(StaticType::F32)
+        }
+    );
+}
+
+#[test]
 fn test_infer_expr_index() {
     // Test: arr[1] where arr is Array{I64} → I64
     let mut engine = TypeInferenceEngine::new();
@@ -412,6 +608,64 @@ fn test_infer_expr_call_builtin() {
         span: test_span(),
     };
     assert_eq!(engine.infer_expr_type(&expr), StaticType::F64);
+}
+
+#[test]
+fn typeof_infers_datatype_issue_6973() {
+    let engine = TypeInferenceEngine::new();
+    let expr = Expr::Call {
+        function: "typeof".to_string(),
+        args: vec![Expr::Literal(Literal::Int(1), test_span())],
+        kwargs: vec![],
+        splat_mask: vec![],
+        kwargs_splat_mask: vec![],
+        span: test_span(),
+    };
+    assert_eq!(engine.infer_expr_type(&expr), StaticType::DataType);
+}
+
+#[test]
+fn zeros_ones_type_argument_sets_element_type_issue_7069() {
+    let engine = TypeInferenceEngine::new();
+
+    let zeros_expr = Expr::Call {
+        function: "zeros".to_string(),
+        args: vec![
+            Expr::Var("Int64".to_string(), test_span()),
+            Expr::Literal(Literal::Int(3), test_span()),
+        ],
+        kwargs: vec![],
+        splat_mask: vec![],
+        kwargs_splat_mask: vec![],
+        span: test_span(),
+    };
+    assert_eq!(
+        engine.infer_expr_type(&zeros_expr),
+        StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(1)
+        }
+    );
+
+    let ones_expr = Expr::Call {
+        function: "ones".to_string(),
+        args: vec![
+            Expr::Var("Bool".to_string(), test_span()),
+            Expr::Literal(Literal::Int(2), test_span()),
+            Expr::Literal(Literal::Int(3), test_span()),
+        ],
+        kwargs: vec![],
+        splat_mask: vec![],
+        kwargs_splat_mask: vec![],
+        span: test_span(),
+    };
+    assert_eq!(
+        engine.infer_expr_type(&ones_expr),
+        StaticType::Array {
+            element: Box::new(StaticType::Bool),
+            ndims: Some(2)
+        }
+    );
 }
 
 #[test]
@@ -602,14 +856,31 @@ fn test_unify_types() {
         StaticType::F64
     );
 
-    // With Any
+    // Non-numeric structural joins go through CoreType, so equal-length tuples
+    // join element-wise instead of falling back to a union of whole tuple types.
+    assert_eq!(
+        engine.unify_types(
+            &StaticType::Tuple(vec![StaticType::I64, StaticType::Str]),
+            &StaticType::Tuple(vec![StaticType::F64, StaticType::Char])
+        ),
+        StaticType::Tuple(vec![
+            StaticType::Union {
+                variants: vec![StaticType::I64, StaticType::F64]
+            },
+            StaticType::Union {
+                variants: vec![StaticType::Str, StaticType::Char]
+            },
+        ])
+    );
+
+    // Any is absorbing: unify(Any, T) = Any (Issue #3461)
     assert_eq!(
         engine.unify_types(&StaticType::Any, &StaticType::I64),
-        StaticType::I64
+        StaticType::Any
     );
     assert_eq!(
         engine.unify_types(&StaticType::I64, &StaticType::Any),
-        StaticType::I64
+        StaticType::Any
     );
 }
 
@@ -668,6 +939,41 @@ fn test_numeric_promote_unsigned() {
 }
 
 #[test]
+fn test_issue_3715_shared_primitive_numeric_adapter_preserves_wide_types() {
+    let engine = TypeInferenceEngine::new();
+
+    assert_eq!(engine.type_name_to_static("Int128"), StaticType::I128);
+    assert_eq!(engine.type_name_to_static("UInt128"), StaticType::U128);
+    assert_eq!(engine.type_name_to_static("Float16"), StaticType::F16);
+
+    assert_eq!(
+        StaticType::from_primitive_numeric(crate::inference_core::PrimitiveNumeric::Int128),
+        StaticType::I128
+    );
+    assert_eq!(
+        StaticType::from_primitive_numeric(crate::inference_core::PrimitiveNumeric::UInt128),
+        StaticType::U128
+    );
+    assert_eq!(
+        StaticType::from_primitive_numeric(crate::inference_core::PrimitiveNumeric::Float16),
+        StaticType::F16
+    );
+
+    assert_eq!(
+        engine.numeric_promote(&StaticType::I64, &StaticType::I128),
+        StaticType::I128
+    );
+    assert_eq!(
+        engine.numeric_promote(&StaticType::U64, &StaticType::U128),
+        StaticType::U128
+    );
+    assert_eq!(
+        engine.numeric_promote(&StaticType::F16, &StaticType::I64),
+        StaticType::F16
+    );
+}
+
+#[test]
 fn test_binop_result_type_with_bool() {
     let engine = TypeInferenceEngine::new();
     use crate::ir::core::BinaryOp;
@@ -684,6 +990,26 @@ fn test_binop_result_type_with_bool() {
     assert_eq!(
         engine.binop_result_type(&BinaryOp::Mul, &StaticType::Bool, &StaticType::F64),
         StaticType::F64
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::IntDiv, &StaticType::Bool, &StaticType::Bool),
+        StaticType::Bool
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Mod, &StaticType::Bool, &StaticType::Bool),
+        StaticType::Bool
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::Bool, &StaticType::Bool),
+        StaticType::Bool
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::Bool, &StaticType::I64),
+        StaticType::Bool
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::Bool, &StaticType::U8),
+        StaticType::Bool
     );
 
     // Comparisons still return Bool
@@ -767,6 +1093,214 @@ fn test_infer_return_type_implicit_with_local_vars() {
     // Infer return type: should be F64, not Any
     let return_type = engine.infer_return_type(&block, &[], &[]);
     assert_eq!(return_type, StaticType::F64);
+}
+
+fn empty_program(functions: Vec<Function>, main: Block) -> Program {
+    Program {
+        abstract_types: vec![],
+        primitive_types: vec![],
+        type_aliases: vec![],
+        structs: vec![],
+        functions,
+        base_function_count: 0,
+        modules: vec![],
+        usings: vec![],
+        macros: vec![],
+        enums: vec![],
+        main,
+    }
+}
+
+fn union_return_function_issue_6939() -> Function {
+    Function {
+        name: "choose".to_string(),
+        params: vec![TypedParam::new(
+            "flag".to_string(),
+            Some(JuliaType::Bool),
+            test_span(),
+        )],
+        kwparams: vec![],
+        type_params: vec![],
+        return_type: None,
+        body: Block {
+            stmts: vec![Stmt::If {
+                condition: Expr::Var("flag".to_string(), test_span()),
+                then_branch: Block {
+                    stmts: vec![Stmt::Return {
+                        value: Some(Expr::Literal(Literal::Int(1), test_span())),
+                        span: test_span(),
+                    }],
+                    span: test_span(),
+                },
+                else_branch: Some(Block {
+                    stmts: vec![Stmt::Return {
+                        value: Some(Expr::Literal(
+                            Literal::Str("fallback".to_string()),
+                            test_span(),
+                        )),
+                        span: test_span(),
+                    }],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }],
+            span: test_span(),
+        },
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span: test_span(),
+    }
+}
+
+#[test]
+fn union_return_inference_preserves_variants_issue_6939() {
+    let engine = TypeInferenceEngine::new();
+    let func = union_return_function_issue_6939();
+    let return_ty =
+        engine.infer_return_type(&func.body, &["flag".to_string()], &[StaticType::Bool]);
+
+    assert_eq!(
+        return_ty,
+        StaticType::Union {
+            variants: vec![StaticType::I64, StaticType::Str],
+        }
+    );
+
+    let sig = FunctionSignature::new(
+        "choose".to_string(),
+        vec!["flag".to_string()],
+        vec![StaticType::Bool],
+        return_ty,
+    );
+    assert_eq!(sig.inference_level, 3);
+    assert!(!sig.is_fully_static());
+}
+
+#[test]
+fn union_return_static_call_has_no_dynamic_fallback_issue_6939() {
+    let program = empty_program(
+        vec![union_return_function_issue_6939()],
+        Block {
+            stmts: vec![Stmt::Expr {
+                expr: Expr::Call {
+                    function: "choose".to_string(),
+                    args: vec![Expr::Literal(Literal::Bool(true), test_span())],
+                    kwargs: vec![],
+                    splat_mask: vec![false],
+                    kwargs_splat_mask: vec![],
+                    span: test_span(),
+                },
+                span: test_span(),
+            }],
+            span: test_span(),
+        },
+    );
+
+    let result = crate::aot::compile_program(program, &crate::aot::CompileConfig::default())
+        .expect("compile union-return program");
+
+    assert_eq!(result.output.stats.dynamic_fallbacks, 0);
+    assert!(result.output.dynamic_op_descriptions.is_empty());
+    assert!(result.output.warnings.is_empty());
+    assert!(
+        result
+            .output
+            .rust_code
+            .contains("pub fn choose(flag: bool) -> Value"),
+        "{}",
+        result.output.rust_code
+    );
+    assert!(result
+        .output
+        .rust_code
+        .contains("return Value::from(1i64);"));
+    assert!(result
+        .output
+        .rust_code
+        .contains("return Value::from(\"fallback\".to_string());"));
+}
+
+#[test]
+fn abstract_return_static_call_has_no_dynamic_fallback_issue_6939() {
+    let func = Function {
+        name: "abstract_real".to_string(),
+        params: vec![],
+        kwparams: vec![],
+        type_params: vec![],
+        return_type: Some(JuliaType::Real),
+        body: Block {
+            stmts: vec![Stmt::Return {
+                value: Some(Expr::Literal(Literal::Int(42), test_span())),
+                span: test_span(),
+            }],
+            span: test_span(),
+        },
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span: test_span(),
+    };
+
+    let mut engine = TypeInferenceEngine::new();
+    let typed = engine
+        .analyze_program(&empty_program(
+            vec![func.clone()],
+            Block {
+                stmts: vec![Stmt::Expr {
+                    expr: Expr::Call {
+                        function: "abstract_real".to_string(),
+                        args: vec![],
+                        kwargs: vec![],
+                        splat_mask: vec![],
+                        kwargs_splat_mask: vec![],
+                        span: test_span(),
+                    },
+                    span: test_span(),
+                }],
+                span: test_span(),
+            },
+        ))
+        .expect("analyze abstract-return program");
+    let typed_func = typed
+        .get_functions("abstract_real")
+        .and_then(|funcs| funcs.first())
+        .expect("abstract_real typed function");
+    assert_eq!(typed_func.signature.return_type, StaticType::Any);
+    assert_eq!(typed_func.signature.inference_level, 4);
+
+    let program = empty_program(
+        vec![func],
+        Block {
+            stmts: vec![Stmt::Expr {
+                expr: Expr::Call {
+                    function: "abstract_real".to_string(),
+                    args: vec![],
+                    kwargs: vec![],
+                    splat_mask: vec![],
+                    kwargs_splat_mask: vec![],
+                    span: test_span(),
+                },
+                span: test_span(),
+            }],
+            span: test_span(),
+        },
+    );
+    let result = crate::aot::compile_program(program, &crate::aot::CompileConfig::default())
+        .expect("compile abstract-return program");
+
+    assert_eq!(result.output.stats.dynamic_fallbacks, 0);
+    assert!(result.output.dynamic_op_descriptions.is_empty());
+    assert!(
+        result
+            .output
+            .rust_code
+            .contains("pub fn abstract_real() -> Value"),
+        "{}",
+        result.output.rust_code
+    );
+    assert!(result
+        .output
+        .rust_code
+        .contains("return Value::from(42i64);"));
 }
 
 // ========== Issue #1189: TypedEmptyArray Type Inference ==========
@@ -880,13 +1414,13 @@ fn test_call_site_array_specialization_single_type() {
     let mut engine = TypeInferenceEngine::new();
 
     // Simulate call site collection: array_sum called with Vec<i64>
-    engine.call_sites.insert(
-        "array_sum".to_string(),
-        vec![vec![StaticType::Array {
+    engine.specializations.enqueue(CodeInstanceKey::new(
+        "array_sum",
+        vec![StaticType::Array {
             element: Box::new(StaticType::I64),
             ndims: Some(1),
-        }]],
-    );
+        }],
+    ));
 
     // Create a function with untyped parameter
     let func = Function {
@@ -906,6 +1440,7 @@ fn test_call_site_array_specialization_single_type() {
             span: test_span(),
         },
         is_base_extension: false,
+        is_runtime_eval: false,
         span: test_span(),
     };
 
@@ -923,25 +1458,58 @@ fn test_call_site_array_specialization_single_type() {
 }
 
 #[test]
+fn explicit_any_parameter_is_not_call_site_specialized_issue_7071() {
+    let mut engine = TypeInferenceEngine::new();
+    engine
+        .specializations
+        .enqueue(CodeInstanceKey::new("fallback", vec![StaticType::I64]));
+
+    let func = Function {
+        name: "fallback".to_string(),
+        params: vec![crate::ir::core::TypedParam {
+            name: "x".to_string(),
+            type_annotation: Some(JuliaType::Any),
+            is_varargs: false,
+            vararg_count: None,
+            span: test_span(),
+        }],
+        kwparams: vec![],
+        type_params: vec![],
+        return_type: None,
+        body: Block {
+            stmts: vec![],
+            span: test_span(),
+        },
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span: test_span(),
+    };
+
+    let signature = engine.infer_function_signature(&func);
+    assert_eq!(signature.param_types, vec![StaticType::Any]);
+}
+
+#[test]
 fn test_call_site_array_specialization_multiple_numeric_types() {
     // When a function is called with Vec<i64> and Vec<f64>,
     // the element type should be promoted to F64
     let mut engine = TypeInferenceEngine::new();
 
     // Simulate call site collection: process_array called with Vec<i64> and Vec<f64>
-    engine.call_sites.insert(
-        "process_array".to_string(),
-        vec![
-            vec![StaticType::Array {
-                element: Box::new(StaticType::I64),
-                ndims: Some(1),
-            }],
-            vec![StaticType::Array {
-                element: Box::new(StaticType::F64),
-                ndims: Some(1),
-            }],
-        ],
-    );
+    engine.specializations.enqueue(CodeInstanceKey::new(
+        "process_array",
+        vec![StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(1),
+        }],
+    ));
+    engine.specializations.enqueue(CodeInstanceKey::new(
+        "process_array",
+        vec![StaticType::Array {
+            element: Box::new(StaticType::F64),
+            ndims: Some(1),
+        }],
+    ));
 
     // Create a function with untyped parameter
     let func = Function {
@@ -961,6 +1529,7 @@ fn test_call_site_array_specialization_multiple_numeric_types() {
             span: test_span(),
         },
         is_base_extension: false,
+        is_runtime_eval: false,
         span: test_span(),
     };
 
@@ -984,18 +1553,132 @@ fn test_type_name_to_static_all_types() {
 
     // Test all supported type names
     assert_eq!(engine.type_name_to_static("Int"), StaticType::I64);
-    assert_eq!(engine.type_name_to_static("Int64"), StaticType::I64);
+    assert_eq!(engine.type_name_to_static("Int8"), StaticType::I8);
+    assert_eq!(engine.type_name_to_static("Int16"), StaticType::I16);
     assert_eq!(engine.type_name_to_static("Int32"), StaticType::I32);
-    assert_eq!(engine.type_name_to_static("Float64"), StaticType::F64);
+    assert_eq!(engine.type_name_to_static("Int64"), StaticType::I64);
+    assert_eq!(engine.type_name_to_static("Int128"), StaticType::I128);
+    assert_eq!(engine.type_name_to_static("UInt8"), StaticType::U8);
+    assert_eq!(engine.type_name_to_static("UInt16"), StaticType::U16);
+    assert_eq!(engine.type_name_to_static("UInt32"), StaticType::U32);
+    assert_eq!(engine.type_name_to_static("UInt64"), StaticType::U64);
+    assert_eq!(engine.type_name_to_static("UInt128"), StaticType::U128);
+    assert_eq!(engine.type_name_to_static("Float16"), StaticType::F16);
     assert_eq!(engine.type_name_to_static("Float32"), StaticType::F32);
+    assert_eq!(engine.type_name_to_static("Float64"), StaticType::F64);
     assert_eq!(engine.type_name_to_static("Bool"), StaticType::Bool);
     assert_eq!(engine.type_name_to_static("String"), StaticType::Str);
     assert_eq!(engine.type_name_to_static("Char"), StaticType::Char);
     assert_eq!(engine.type_name_to_static("Any"), StaticType::Any);
     assert_eq!(engine.type_name_to_static("Nothing"), StaticType::Nothing);
+    assert_eq!(engine.type_name_to_static("Missing"), StaticType::Missing);
+    assert_eq!(
+        engine.type_name_to_static("Vector{Int64}"),
+        StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(1),
+        }
+    );
+    assert_eq!(
+        engine.type_name_to_static("Matrix{Float64}"),
+        StaticType::Array {
+            element: Box::new(StaticType::F64),
+            ndims: Some(2),
+        }
+    );
+    assert_eq!(
+        engine.type_name_to_static("Matrix"),
+        StaticType::Array {
+            element: Box::new(StaticType::Any),
+            ndims: Some(2),
+        }
+    );
+    assert_eq!(
+        engine.type_name_to_static("Array{Int64, 2}"),
+        StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(2),
+        }
+    );
 
     // Unknown types should map to Any
     assert_eq!(engine.type_name_to_static("Unknown"), StaticType::Any);
+}
+
+#[test]
+fn convert_call_inference_uses_type_name_not_constructor_function_issue_7495() {
+    let mut engine = TypeInferenceEngine::new();
+    engine.env.insert("x".to_string(), StaticType::F64);
+    let span = crate::span::Span::new(0, 0, 1, 1, 1, 1);
+
+    let convert_int = Expr::Call {
+        function: "convert".to_string(),
+        args: vec![
+            Expr::Var("Int64".to_string(), span),
+            Expr::Var("x".to_string(), span),
+        ],
+        kwargs: vec![],
+        splat_mask: vec![false, false],
+        kwargs_splat_mask: vec![],
+        span,
+    };
+    assert_eq!(engine.infer_expr_type(&convert_int), StaticType::I64);
+
+    let convert_any = Expr::Call {
+        function: "convert".to_string(),
+        args: vec![
+            Expr::Var("Any".to_string(), span),
+            Expr::Var("x".to_string(), span),
+        ],
+        kwargs: vec![],
+        splat_mask: vec![false, false],
+        kwargs_splat_mask: vec![],
+        span,
+    };
+    assert_eq!(engine.infer_expr_type(&convert_any), StaticType::F64);
+}
+
+#[test]
+fn operator_call_inference_types_collatz_condition_issue_7504() {
+    let mut engine = TypeInferenceEngine::new();
+    engine.env.insert("n".to_string(), StaticType::I64);
+    let span = crate::span::Span::new(0, 0, 1, 1, 1, 1);
+
+    let modulo = Expr::Call {
+        function: "%".to_string(),
+        args: vec![
+            Expr::Var("n".to_string(), span),
+            Expr::Literal(Literal::Int(2), span),
+        ],
+        kwargs: vec![],
+        splat_mask: vec![false, false],
+        kwargs_splat_mask: vec![],
+        span,
+    };
+    assert_eq!(engine.infer_expr_type(&modulo), StaticType::I64);
+
+    let condition = Expr::Call {
+        function: "==".to_string(),
+        args: vec![modulo, Expr::Literal(Literal::Int(0), span)],
+        kwargs: vec![],
+        splat_mask: vec![false, false],
+        kwargs_splat_mask: vec![],
+        span,
+    };
+    assert_eq!(engine.infer_expr_type(&condition), StaticType::Bool);
+
+    let int_div = Expr::Call {
+        function: "div".to_string(),
+        args: vec![
+            Expr::Var("n".to_string(), span),
+            Expr::Literal(Literal::Int(2), span),
+        ],
+        kwargs: vec![],
+        splat_mask: vec![false, false],
+        kwargs_splat_mask: vec![],
+        span,
+    };
+    assert_eq!(engine.infer_expr_type(&int_div), StaticType::I64);
 }
 
 #[test]
@@ -1030,7 +1713,6 @@ end
     let outcome = parser.parse(src).expect("parse");
     let mut lowering = crate::lowering::Lowering::new(src);
     let program = lowering.lower(outcome).expect("lower");
-
     let mut engine = TypeInferenceEngine::new();
     let typed = engine.analyze_program(&program).expect("analyze");
     let sig = &typed
@@ -1047,6 +1729,356 @@ end
             name: "Complex".to_string()
         },
         "call sites: {:?}",
-        engine.call_sites.get("mandelbrot_escape")
+        engine
+            .specializations
+            .observed_args_for("mandelbrot_escape")
     );
+}
+
+#[test]
+fn test_code_instance_dependencies_record_nested_calls() {
+    let src = r#"
+function inner(x)
+    x + 1
+end
+
+function caller(y)
+    inner(y)
+end
+
+caller(41)
+"#;
+
+    let mut parser = crate::parser::Parser::new().expect("parser");
+    let outcome = parser.parse(src).expect("parse");
+    let mut lowering = crate::lowering::Lowering::new(src);
+    let program = lowering.lower(outcome).expect("lower");
+
+    let mut engine = TypeInferenceEngine::new();
+    engine.analyze_program(&program).expect("analyze");
+
+    let caller = CodeInstanceKey::new("caller", vec![StaticType::I64]);
+    let inner = CodeInstanceKey::new("inner", vec![StaticType::I64]);
+    let caller_instance = engine
+        .specializations
+        .get(&caller)
+        .expect("caller specialization");
+
+    assert!(
+        caller_instance.dependencies.contains(&inner),
+        "dependencies: {:?}",
+        caller_instance.dependencies
+    );
+
+    let inner_instance = engine
+        .specializations
+        .get(&inner)
+        .expect("inner specialization");
+    assert!(inner_instance.source.is_some());
+    assert_eq!(inner_instance.return_type, Some(StaticType::I64));
+}
+
+// Issue #3462 — Float32 preservation and Bool widening
+#[test]
+fn test_div_float32_preservation() {
+    let engine = TypeInferenceEngine::new();
+    use crate::ir::core::BinaryOp;
+
+    // Float32 / Float32 -> Float32 (Issue #3462)
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Div, &StaticType::F32, &StaticType::F32),
+        StaticType::F32
+    );
+    // Float64 / Float64 -> Float64
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Div, &StaticType::F64, &StaticType::F64),
+        StaticType::F64
+    );
+    // Int / Int -> Float64
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Div, &StaticType::I64, &StaticType::I64),
+        StaticType::F64
+    );
+    // Float32 / Int -> Float32
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Div, &StaticType::F32, &StaticType::I64),
+        StaticType::F32
+    );
+    // Float64 dominates Float32
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Div, &StaticType::F32, &StaticType::F64),
+        StaticType::F64
+    );
+}
+
+#[test]
+fn test_pow_float32_preservation() {
+    let engine = TypeInferenceEngine::new();
+    use crate::ir::core::BinaryOp;
+
+    // Float32 ^ Int -> Float32 (Issue #3462)
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::F32, &StaticType::I64),
+        StaticType::F32
+    );
+    // Float32 ^ Float32 -> Float32
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::F32, &StaticType::F32),
+        StaticType::F32
+    );
+    // Float32 ^ Float64 -> Float64
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::F32, &StaticType::F64),
+        StaticType::F64
+    );
+    // Int ^ Int -> Int (same type)
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Pow, &StaticType::I64, &StaticType::I64),
+        StaticType::I64
+    );
+}
+
+#[test]
+fn test_sqrt_float32_preservation() {
+    let engine = TypeInferenceEngine::new();
+
+    // sqrt(Float32) -> Float32 (Issue #3462)
+    assert_eq!(
+        engine.call_result_type("sqrt", &[StaticType::F32]),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.call_result_type("sqrt", &[StaticType::F64]),
+        StaticType::F64
+    );
+    assert_eq!(
+        engine.call_result_type("sqrt", &[StaticType::I64]),
+        StaticType::F64
+    );
+}
+
+// Issue #3463 — size() tuple arity from ndims
+#[test]
+fn test_size_tuple_arity() {
+    let src = r#"
+function size_1d(A::Vector{Float64})
+    size(A)
+end
+function size_2d(A::Matrix{Float64})
+    size(A)
+end
+"#;
+    let mut parser = crate::parser::Parser::new().expect("parser");
+    let outcome = parser.parse(src).expect("parse");
+    let mut lowering = crate::lowering::Lowering::new(src);
+    let program = lowering.lower(outcome).expect("lower");
+    let mut engine = TypeInferenceEngine::new();
+    let typed = engine.analyze_program(&program).expect("analyze");
+
+    let ret_1d = typed
+        .get_functions("size_1d")
+        .and_then(|fns| fns.first().map(|f| f.signature.return_type.clone()))
+        .expect("size_1d return type");
+    assert_eq!(
+        ret_1d,
+        StaticType::Tuple(vec![StaticType::I64]),
+        "1D array size should be Tuple{{Int64}}"
+    );
+
+    let ret_2d = typed
+        .get_functions("size_2d")
+        .and_then(|fns| fns.first().map(|f| f.signature.return_type.clone()))
+        .expect("size_2d return type");
+    assert_eq!(
+        ret_2d,
+        StaticType::Tuple(vec![StaticType::I64, StaticType::I64]),
+        "2D array size should be Tuple{{Int64, Int64}}"
+    );
+}
+
+// Issue #3465 — String * non-String should not infer String
+#[test]
+fn test_string_mul_non_string_does_not_infer_str() {
+    let engine = TypeInferenceEngine::new();
+    use crate::ir::core::BinaryOp;
+
+    // String * String -> String (valid)
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Mul, &StaticType::Str, &StaticType::Str),
+        StaticType::Str
+    );
+    // String * Int should NOT return Str (Issue #3465)
+    assert_ne!(
+        engine.binop_result_type(&BinaryOp::Mul, &StaticType::Str, &StaticType::I64),
+        StaticType::Str
+    );
+    // Int * String should NOT return Str
+    assert_ne!(
+        engine.binop_result_type(&BinaryOp::Mul, &StaticType::I64, &StaticType::Str),
+        StaticType::Str
+    );
+}
+
+// Issue #3466 — Complex{Float32} abs2 returns Float32
+#[test]
+fn test_abs2_complex_float32_returns_f32() {
+    let engine = TypeInferenceEngine::new();
+
+    let complexf32 = StaticType::Struct {
+        type_id: 0,
+        name: "Complex{Float32}".to_string(),
+    };
+    let complexf64 = StaticType::Struct {
+        type_id: 0,
+        name: "Complex{Float64}".to_string(),
+    };
+    let complex = StaticType::Struct {
+        type_id: 0,
+        name: "Complex".to_string(),
+    };
+
+    assert_eq!(
+        engine.call_result_type("abs2", &[complexf32]),
+        StaticType::F32
+    );
+    assert_eq!(
+        engine.call_result_type("abs2", &[complexf64]),
+        StaticType::F64
+    );
+    assert_eq!(engine.call_result_type("abs2", &[complex]), StaticType::F64);
+}
+
+// Issue #3464 — broadcast result type inference
+#[test]
+fn test_broadcast_general_vector_vector() {
+    let engine = TypeInferenceEngine::new();
+
+    // Vector{Int64} .+ Vector{Int64} -> Vector{Int64}
+    assert_eq!(
+        engine.call_result_type("sqrt", &[StaticType::F32]),
+        StaticType::F32,
+        "sqrt(F32) should return F32"
+    );
+}
+
+// Issue #3541 — Array{Any} signatures should match typed arrays.
+#[test]
+fn test_call_result_type_array_any_matches_typed_array_3541() {
+    let engine = TypeInferenceEngine::new();
+    let arr_i64 = StaticType::Array {
+        element: Box::new(StaticType::I64),
+        ndims: Some(1),
+    };
+    let arr_f64 = StaticType::Array {
+        element: Box::new(StaticType::F64),
+        ndims: Some(1),
+    };
+    // `length` is registered with Array{Any, ndims:None}; it should still match.
+    assert_eq!(
+        engine.call_result_type("length", std::slice::from_ref(&arr_i64)),
+        StaticType::I64,
+        "length(Array{{Int64}}) should return I64 via Array{{Any}} wildcard"
+    );
+    assert_eq!(
+        engine.call_result_type("length", std::slice::from_ref(&arr_f64)),
+        StaticType::I64,
+        "length(Array{{Float64}}) should return I64 via Array{{Any}} wildcard"
+    );
+
+    // size and pop! similarly.
+    let size_ty = engine.call_result_type("size", std::slice::from_ref(&arr_i64));
+    assert!(matches!(size_ty, StaticType::Tuple(_)));
+
+    let pop_ty = engine.call_result_type("pop!", std::slice::from_ref(&arr_i64));
+    // pop! on Array{Any} returns Any; that is the conservative behavior expected.
+    assert_eq!(pop_ty, StaticType::Any);
+}
+
+// ========== Issue #3542: AoT return inference for final assignment ==========
+
+#[test]
+fn test_issue_3542_final_assignment_returns_assigned_value() {
+    // function f()
+    //     x = 42
+    // end
+    // The function's return value is the assignment value, i.e., I64.
+    use crate::ir::core::{Block, Stmt};
+
+    let engine = TypeInferenceEngine::new();
+
+    let assign = Stmt::Assign {
+        var: "x".to_string(),
+        value: Expr::Literal(Literal::Int(42), test_span()),
+        span: test_span(),
+    };
+
+    let block = Block {
+        stmts: vec![assign],
+        span: test_span(),
+    };
+
+    let return_type = engine.infer_return_type(&block, &[], &[]);
+    assert_eq!(return_type, StaticType::I64);
+}
+
+#[test]
+fn test_issue_3542_final_assignment_with_string() {
+    // function f()
+    //     y = "hello"
+    // end
+    // Return type should be Str, not Nothing.
+    use crate::ir::core::{Block, Stmt};
+
+    let engine = TypeInferenceEngine::new();
+
+    let assign = Stmt::Assign {
+        var: "y".to_string(),
+        value: Expr::Literal(Literal::Str("hello".to_string()), test_span()),
+        span: test_span(),
+    };
+
+    let block = Block {
+        stmts: vec![assign],
+        span: test_span(),
+    };
+
+    let return_type = engine.infer_return_type(&block, &[], &[]);
+    assert_eq!(return_type, StaticType::Str);
+}
+
+#[test]
+fn test_issue_3542_final_assignment_after_other_stmts() {
+    // function f()
+    //     a = 1
+    //     b = 2
+    //     z = 3.0
+    // end
+    // Return type should be F64 (the last assignment's value).
+    use crate::ir::core::{Block, Stmt};
+
+    let engine = TypeInferenceEngine::new();
+
+    let block = Block {
+        stmts: vec![
+            Stmt::Assign {
+                var: "a".to_string(),
+                value: Expr::Literal(Literal::Int(1), test_span()),
+                span: test_span(),
+            },
+            Stmt::Assign {
+                var: "b".to_string(),
+                value: Expr::Literal(Literal::Int(2), test_span()),
+                span: test_span(),
+            },
+            Stmt::Assign {
+                var: "z".to_string(),
+                value: Expr::Literal(Literal::Float(3.0), test_span()),
+                span: test_span(),
+            },
+        ],
+        span: test_span(),
+    };
+
+    let return_type = engine.infer_return_type(&block, &[], &[]);
+    assert_eq!(return_type, StaticType::F64);
 }

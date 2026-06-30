@@ -1,7 +1,8 @@
 use super::escape_rust_ident;
 use super::AotCodeGenerator;
 use crate::aot::ir::{AotExpr, AotStmt, AotUnaryOp, CompoundAssignOp};
-use crate::aot::AotResult;
+use crate::aot::types::StaticType;
+use crate::aot::{AotError, AotResult};
 
 impl AotCodeGenerator {
     // ========== Control Flow Generation ==========
@@ -17,7 +18,7 @@ impl AotCodeGenerator {
         then_branch: &[AotStmt],
         else_branch: &Option<Vec<AotStmt>>,
     ) -> AotResult<()> {
-        let cond_str = self.emit_expr_to_string(condition)?;
+        let cond_str = self.emit_condition_expr(condition)?;
         self.write_line(&format!("if {} {{", cond_str));
         self.indent();
         for stmt in then_branch {
@@ -35,7 +36,7 @@ impl AotCodeGenerator {
                 } = &else_stmts[0]
                 {
                     // Generate "} else if" instead of "} else { if"
-                    let else_cond_str = self.emit_expr_to_string(else_cond)?;
+                    let else_cond_str = self.emit_condition_expr(else_cond)?;
                     self.write_line(&format!("}} else if {} {{", else_cond_str));
                     self.indent();
                     for stmt in else_then {
@@ -75,7 +76,7 @@ impl AotCodeGenerator {
                 else_branch: else_else,
             } = &else_stmts[0]
             {
-                let else_cond_str = self.emit_expr_to_string(else_cond)?;
+                let else_cond_str = self.emit_condition_expr(else_cond)?;
                 self.write_line(&format!("}} else if {} {{", else_cond_str));
                 self.indent();
                 for stmt in else_then {
@@ -121,6 +122,30 @@ impl AotCodeGenerator {
         body: &[AotStmt],
     ) -> AotResult<()> {
         let evar = escape_rust_ident(var);
+        if matches!(start.get_type(), StaticType::Char)
+            || matches!(stop.get_type(), StaticType::Char)
+        {
+            if step.is_some() {
+                return Err(AotError::CodegenError(
+                    "AoT for-range codegen supports unit-step Char ranges only (Issue #7039)"
+                        .to_string(),
+                ));
+            }
+            let start_str = self.emit_expr_to_string(start)?;
+            let stop_str = self.emit_expr_to_string(stop)?;
+            self.write_line(&format!(
+                "for {} in SjuliaCharRange::new({}, {}) {{",
+                evar, start_str, stop_str
+            ));
+            self.indent();
+            for stmt in body {
+                self.emit_stmt(stmt)?;
+            }
+            self.dedent();
+            self.write_line("}");
+            return Ok(());
+        }
+
         let start_str = self.emit_expr_to_string(start)?;
         let stop_str = self.emit_expr_to_string(stop)?;
 
@@ -195,18 +220,36 @@ impl AotCodeGenerator {
     /// Generate for-each loop over iterator
     ///
     /// For arrays and collections, generates proper reference iteration.
-    pub(super) fn emit_for_each(&mut self, var: &str, iter: &AotExpr, body: &[AotStmt]) -> AotResult<()> {
+    pub(super) fn emit_for_each(
+        &mut self,
+        var: &str,
+        iter: &AotExpr,
+        body: &[AotStmt],
+    ) -> AotResult<()> {
         let evar = escape_rust_ident(var);
         let iter_str = self.emit_expr_to_string(iter)?;
 
         // Check if we need to iterate by reference
         let iter_pattern = match iter {
-            // For variables that are arrays/vectors, iterate by reference
+            // For arrays/vectors, clone elements so the Rust loop binding matches
+            // the AoT iterator element type used in loop-body expressions.
             AotExpr::Var { ty, .. } if ty.is_array() => {
-                format!("&{}", iter_str)
+                format!("{}.iter().cloned()", iter_str)
+            }
+            AotExpr::Var { ty, .. } if ty.is_set() => {
+                format!("{}.iter().cloned()", iter_str)
+            }
+            AotExpr::Var { ty, .. } if ty.is_dict() => {
+                format!(
+                    "{}.iter().map(|(_sjulia_k, _sjulia_v)| (_sjulia_k.clone(), _sjulia_v.clone()))",
+                    iter_str
+                )
             }
             // For array literals, iterate directly
             AotExpr::ArrayLit { .. } => iter_str,
+            AotExpr::SetFromIter { .. } => format!("({}).into_iter()", iter_str),
+            AotExpr::Var { ty, .. } if ty.is_range() => format!("{}.clone().into_iter()", iter_str),
+            AotExpr::Range { .. } => format!("({}).into_iter()", iter_str),
             // Default: use the expression as-is
             _ => iter_str,
         };
@@ -222,9 +265,18 @@ impl AotCodeGenerator {
     }
 
     /// Generate while loop
-    pub(super) fn emit_while_loop(&mut self, condition: &AotExpr, body: &[AotStmt]) -> AotResult<()> {
-        let cond_str = self.emit_expr_to_string(condition)?;
-        self.write_line(&format!("while {} {{", cond_str));
+    #[allow(dead_code)] // retained codegen helper: while-loop emission API
+    pub(super) fn emit_while_loop(
+        &mut self,
+        condition: &AotExpr,
+        body: &[AotStmt],
+    ) -> AotResult<()> {
+        if matches!(condition, AotExpr::LitBool(true)) {
+            self.write_line("loop {");
+        } else {
+            let cond_str = self.emit_condition_expr(condition)?;
+            self.write_line(&format!("while {} {{", cond_str));
+        }
         self.indent();
         for stmt in body {
             self.emit_stmt(stmt)?;
@@ -232,6 +284,18 @@ impl AotCodeGenerator {
         self.dedent();
         self.write_line("}");
         Ok(())
+    }
+
+    pub(super) fn emit_condition_expr(&self, condition: &AotExpr) -> AotResult<String> {
+        let condition_ty = condition.get_type();
+        if condition_ty != StaticType::Bool {
+            return Err(AotError::CodegenError(format!(
+                "AoT control-flow condition requires Bool, got {}; Julia does not treat \
+                 non-Bool values as truthy/falsy (Issue #6980)",
+                condition_ty
+            )));
+        }
+        self.emit_expr_to_string(condition)
     }
 
     // ========== Variable and Assignment Generation ==========
@@ -248,6 +312,18 @@ impl AotCodeGenerator {
     ) -> AotResult<()> {
         let target_str = self.emit_expr_to_string(target)?;
         let value_str = self.emit_expr_to_string(value)?;
+
+        if let AotExpr::Var { ty, .. } = target {
+            if Self::uses_wrapping_integer_arithmetic(ty) {
+                if let Some(method) = Self::wrapping_integer_method(op.to_binop()) {
+                    self.write_line(&format!(
+                        "{} = {}.{}({});",
+                        target_str, target_str, method, value_str
+                    ));
+                    return Ok(());
+                }
+            }
+        }
 
         if op.needs_special_handling() {
             // Power assignment: x ^= 2 → x = x.pow(2)

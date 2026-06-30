@@ -14,16 +14,20 @@
 #![allow(clippy::cast_sign_loss)]
 
 mod eval;
-mod helpers;
+pub(in crate::vm) mod helpers;
 mod ir_conversion;
 mod parse;
 
 use crate::builtins::BuiltinId;
 use crate::rng::RngLike;
+use crate::vm::value::is_native_array_value;
 
 use super::error::VmError;
 use super::stack_ops::StackOps;
-use super::value::{ExprValue, SymbolValue, Value};
+use super::value::{
+    array_wrapper_value_to_array_value, native_array_value_ref, ArrayValue, ExprValue, SymbolValue,
+    Value,
+};
 use super::Vm;
 
 use helpers::{
@@ -40,22 +44,60 @@ impl<R: RngLike> Vm<R> {
     ) -> Result<Option<()>, VmError> {
         match builtin {
             BuiltinId::SymbolNew => {
-                // Symbol("name") - create a Symbol from string
-                let val = self.stack.pop_value()?;
-                match val {
-                    Value::Str(s) => {
-                        self.stack.push(Value::Symbol(SymbolValue::new(s)));
+                // Symbol(a, b, ...) - concatenate string forms of all
+                // arguments and form a single Symbol. Mirrors upstream
+                // Julia's `Base.Symbol(args...) = Symbol(string(args...))`
+                // (Issue #4780). The 1-arg fast path stays in
+                // `vm/exec/call.rs` for the common `Symbol("name")`
+                // case.
+                if argc == 1 {
+                    let val = self.stack.pop_value()?;
+                    match val {
+                        Value::Str(s) => {
+                            self.stack.push(Value::Symbol(SymbolValue::new(s)));
+                        }
+                        Value::Symbol(s) => {
+                            // Symbol(sym) returns the symbol unchanged
+                            self.stack.push(Value::Symbol(s));
+                        }
+                        _ => {
+                            // Single non-String/Symbol arg: stringify via
+                            // the print-form helper. Issue #5038: resolve
+                            // `Value::StructRef` against the struct heap
+                            // first so `Symbol(::struct)` / `Symbol(::Pair)`
+                            // render via their show form (e.g. "1 => 2")
+                            // instead of leaking the Rust debug
+                            // `StructRef(heap_idx=N)` repr into the symbol
+                            // name.
+                            let resolved = crate::vm::formatting::resolve_struct_refs_for_format(
+                                &val,
+                                &self.struct_heap,
+                            );
+                            let s = crate::vm::formatting::format_value_print(&resolved);
+                            self.stack.push(Value::Symbol(SymbolValue::new(s)));
+                        }
                     }
-                    Value::Symbol(s) => {
-                        // Symbol(sym) returns the symbol unchanged
-                        self.stack.push(Value::Symbol(s));
+                } else {
+                    // Pop argc values, format each via the print-form
+                    // helper, concatenate, then form the Symbol.
+                    let mut parts = Vec::with_capacity(argc);
+                    for _ in 0..argc {
+                        parts.push(self.stack.pop_value()?);
                     }
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "Symbol: expected String or Symbol, got {:?}",
-                            val.value_type()
-                        )));
+                    parts.reverse();
+                    let mut joined = String::new();
+                    for v in &parts {
+                        // Issue #5038: resolve heap-allocated StructRefs
+                        // before formatting so e.g.
+                        // `Symbol("a_", Pair(1, 2), "_b")` does not leak the
+                        // Rust debug `StructRef(heap_idx=N)` repr.
+                        let resolved = crate::vm::formatting::resolve_struct_refs_for_format(
+                            v,
+                            &self.struct_heap,
+                        );
+                        joined.push_str(&crate::vm::formatting::format_value_print(&resolved));
                     }
+                    self.stack.push(Value::Symbol(SymbolValue::new(joined)));
                 }
             }
 
@@ -143,16 +185,53 @@ impl<R: RngLike> Vm<R> {
                                 // Clone elements from the tuple
                                 final_args.extend(tuple.elements.iter().cloned());
                             }
-                            Value::Array(arr) => {
+                            // Native Array splat — routed through the
+                            // file-local `native_array_value_ref` helper while
+                            // the runtime migrates to Memory-first storage and
+                            // Pure Julia `Array{T,N}` wrappers (Issue #3908).
+                            // The `other =>` arm below preserves
+                            // exhaustiveness.
+                            ref arg_ref if is_native_array_value(arg_ref) => {
+                                let Some(arr) = native_array_value_ref(arg_ref) else {
+                                    return Err(VmError::TypeError(
+                                        "splat: expected Array".to_string(),
+                                    ));
+                                };
                                 // Convert array elements to Values
                                 let borrowed = arr.borrow();
-                                for i in 0..borrowed.len() {
-                                    if let Some(val) = borrowed.data.get_value(i) {
+                                for i in 0..borrowed.element_count() {
+                                    if let Ok(val) = borrowed.get_linear(i) {
                                         final_args.push(val);
                                     }
                                 }
                             }
+                            Value::Generator(generator) => {
+                                let collected =
+                                    self.collect_iterator(&Value::Generator(generator))?;
+                                let Some(arr) = array_wrapper_value_to_array_value(
+                                    &collected,
+                                    &self.struct_heap,
+                                )?
+                                else {
+                                    return Err(VmError::TypeError(format!(
+                                        "Cannot splat eager generator materialized as {:?}",
+                                        collected.value_type()
+                                    )));
+                                };
+                                for i in 0..arr.element_count() {
+                                    final_args.push(arr.get_linear(i)?);
+                                }
+                            }
                             other => {
+                                if let Some(arr) =
+                                    array_wrapper_value_to_array_value(&other, &self.struct_heap)?
+                                {
+                                    for i in 0..arr.element_count() {
+                                        final_args.push(arr.get_linear(i)?);
+                                    }
+                                    continue;
+                                }
+
                                 // If not iterable, error
                                 return Err(VmError::TypeError(format!(
                                     "Cannot splat value of type {:?}",
@@ -307,15 +386,17 @@ impl<R: RngLike> Vm<R> {
             }
 
             BuiltinId::Esc => {
-                // esc(expr) - escape expression for macro hygiene
-                // Hygiene is handled during lowering/quote processing.
-                // At runtime, esc returns its argument unchanged.
+                // esc(expr) - wrap in Expr(:escape, expr), matching upstream Julia.
+                // Macro expansion lowering consumes this marker to suppress module
+                // hygiene for caller-scope subtrees (Issue #7631).
                 if argc != 1 {
                     return Err(VmError::TypeError(
                         "esc requires exactly 1 argument".to_string(),
                     ));
                 }
-                // Argument is already on the stack; keep it as the return value.
+                let arg = self.stack.pop().ok_or(VmError::StackUnderflow)?;
+                self.stack
+                    .push(Value::Expr(ExprValue::from_head("escape", vec![arg])));
             }
 
             BuiltinId::Eval => {
@@ -327,6 +408,17 @@ impl<R: RngLike> Vm<R> {
                 }
                 let val = self.stack.pop_value()?;
                 let result = self.eval_expr_value(&val)?;
+                self.stack.push(result);
+            }
+
+            BuiltinId::GeneratedEval => {
+                if argc != 1 {
+                    return Err(VmError::TypeError(
+                        "_generated_eval requires exactly 1 argument".to_string(),
+                    ));
+                }
+                let val = self.stack.pop_value()?;
+                let result = self.eval_generated_expr_value(&val)?;
                 self.stack.push(result);
             }
 
@@ -476,7 +568,7 @@ impl<R: RngLike> Vm<R> {
                         if head_matches {
                             // If n is specified, also check args length
                             match n {
-                                Some(expected_n) => expr.args.len() == expected_n,
+                                Some(expected_n) => expr.nargs() == expected_n,
                                 None => true,
                             }
                         } else {
@@ -645,6 +737,7 @@ impl<R: RngLike> Vm<R> {
                     self.emit_output(&format!("  Test Passed: {}", msg_str), true);
                 } else {
                     self.test_fail_count += 1;
+                    self.any_test_failed = true; // Issue #8191: drives non-zero CLI exit.
                     self.emit_output(&format!("  Test Failed: {}", msg_str), true);
                 }
                 self.stack.push(Value::Nothing);
@@ -679,6 +772,7 @@ impl<R: RngLike> Vm<R> {
                 if passed_bool {
                     // Test unexpectedly passed - this is an error!
                     self.test_fail_count += 1;
+                    self.any_test_failed = true; // Issue #8191: drives non-zero CLI exit.
                     self.emit_output(
                         &format!("  Test Error (unexpectedly passed): {}", msg_str),
                         true,
@@ -777,7 +871,7 @@ impl<R: RngLike> Vm<R> {
                     }
                 };
                 match RegexValue::new(&pattern, &flags) {
-                    Ok(regex) => self.stack.push(Value::Regex(regex)),
+                    Ok(regex) => self.stack.push(Value::Regex(Box::new(regex))),
                     Err(e) => return Err(VmError::TypeError(format!("Invalid regex: {}", e))),
                 }
             }
@@ -835,6 +929,35 @@ impl<R: RngLike> Vm<R> {
                     }
                 };
                 self.stack.push(Value::Bool(regex.is_match(&string)));
+            }
+
+            BuiltinId::EndsWithRegex => {
+                // _endswith_regex(string, regex) - true iff `regex` matches ending at
+                // the end of `string` (emulates PCRE ENDANCHORED). Internal helper for
+                // the pure-Julia `endswith(s, ::Regex)` method (Issue #5676).
+                if argc != 2 {
+                    return Err(VmError::TypeError(
+                        "_endswith_regex requires 2 arguments: _endswith_regex(string, regex)"
+                            .to_string(),
+                    ));
+                }
+                let regex = match self.stack.pop_value()? {
+                    Value::Regex(r) => r,
+                    _ => {
+                        return Err(VmError::TypeError(
+                            "Second argument to endswith must be a Regex".to_string(),
+                        ))
+                    }
+                };
+                let string = match self.stack.pop_value()? {
+                    Value::Str(s) => s,
+                    _ => {
+                        return Err(VmError::TypeError(
+                            "First argument to endswith must be a String".to_string(),
+                        ))
+                    }
+                };
+                self.stack.push(Value::Bool(regex.ends_with_match(&string)));
             }
 
             BuiltinId::RegexReplace => {
@@ -911,24 +1034,14 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 };
-                let parts: Vec<Value> = regex
+                let parts: Vec<String> = regex
                     .split(&string)
                     .into_iter()
-                    .map(|s| Value::Str(s.to_string()))
+                    .map(|s| s.to_string())
                     .collect();
-                use crate::vm::value::{ArrayData, ArrayValue};
                 let len = parts.len();
-                let arr = ArrayValue::new(
-                    ArrayData::String(
-                        parts
-                            .into_iter()
-                            .filter_map(|v| if let Value::Str(s) = v { Some(s) } else { None })
-                            .collect(),
-                    ),
-                    vec![len],
-                );
-                self.stack
-                    .push(Value::Array(crate::vm::value::new_array_ref(arr)));
+                let arr = ArrayValue::memory_first_from_strings(parts, vec![len]);
+                self.push_array_value_as_wrapper(arr)?;
             }
 
             BuiltinId::RegexEachmatch => {
@@ -959,11 +1072,8 @@ impl<R: RngLike> Vm<R> {
                     .into_iter()
                     .map(|m| Value::RegexMatch(Box::new(m)))
                     .collect();
-                use crate::vm::value::{ArrayData, ArrayValue};
-                let len = matches.len();
-                let arr = ArrayValue::new(ArrayData::Any(matches), vec![len]);
-                self.stack
-                    .push(Value::Array(crate::vm::value::new_array_ref(arr)));
+                let arr = ArrayValue::any_vector(matches);
+                self.push_array_value_as_wrapper(arr)?;
             }
 
             _ => return Ok(None),

@@ -19,6 +19,12 @@ expected = true
 description = "@generated with where clause uses fallback"
 
 [[tests]]
+name = "generated_full_syntax_type_params_4284"
+file = "full_syntax_type_params_4284.jl"
+expected = true
+description = "Full @generated function syntax can return bound type/value parameters (Issue #4284)"
+
+[[tests]]
 name = "generated_val_basic"
 file = "val_basic.jl"
 expected = true
@@ -49,6 +55,12 @@ expected = true
 description = "Val{:symbol} symbol specialization with @generated"
 
 [[tests]]
+name = "generated_val_symbol_local_any_carrier_5081"
+file = "val_symbol_local_any_carrier_5081.jl"
+expected = true
+description = "Val{:symbol} type parameter locals continue to round-trip and reassign correctly after consolidating the legacy locals_val_symbol map into the Any carrier (Issue #5081)"
+
+[[tests]]
 name = "generated_phase3_ternary"
 file = "phase3_ternary.jl"
 expected = true
@@ -65,3 +77,177 @@ name = "generated_phase3_begin_block"
 file = "phase3_begin_block.jl"
 expected = true
 description = "Phase 3: begin/end block unquoting"
+
+[[tests]]
+name = "generated_unquote_dollar_param"
+file = "unquote_dollar_param.jl"
+expected = true
+description = "@generated unquote path supports `$ident` interpolation of bound Val{N} params (Issue #5934)"
+
+[[tests]]
+name = "generated_paren_unquote_expr_5936"
+file = "paren_unquote_expr_5936.jl"
+expected = true
+description = "@generated unquote path supports `$(expr)` interpolation for parenthesized bound-parameter expressions in short/full generated definitions (Issue #5936)"
+
+[[tests]]
+name = "generated_unquote_default_args_6206"
+file = "unquote_default_args_6206.jl"
+expected = true
+description = "@generated syntactic-unquote methods with optional positional defaults keep runtime args instead of generated-time type objects (Issues #6206/#5074)"
+
+[[tests]]
+name = "generated_vararg_interpolation_6208"
+file = "vararg_interpolation_6208.jl"
+expected = true
+description = "@generated syntactic-unquote vararg `$args` interpolation observes the generated-time concrete type tuple (Issues #6208/#5074)"
+
+[[tests]]
+name = "generated_return_expr_eval_5936"
+file = "return_expr_eval_5936.jl"
+expected = true
+description = "@generated fallback compatibility evaluates an explicitly returned staged Expr instead of returning the Expr object (Issue #5936)"
+
+[[tests]]
+name = "generated_implicit_return_expr_eval_5936"
+file = "implicit_return_expr_eval_5936.jl"
+expected = true
+description = "@generated fallback compatibility evaluates a staged Expr returned as the final body expression (Issue #5936)"
+
+[[tests]]
+name = "generated_expr_head_eval_5936"
+file = "expr_head_eval_5936.jl"
+expected = true
+description = "@generated fallback returned-Expr eval composes with tuple/vector/if/curly/string/ref Expr heads (Issue #5936)"
+
+[[tests]]
+name = "generated_return_head_6183"
+file = "return_head_6183.jl"
+expected = true
+description = "@generated fallback returned-Expr eval supports Expr(:return, ...) payloads (Issues #6183/#5936)"
+
+[[tests]]
+name = "generated_let_head_6185"
+file = "let_head_6185.jl"
+expected = true
+description = "@generated fallback returned-Expr eval supports Expr(:let, ...) scoped bindings (Issues #6185/#5936)"
+
+[[tests]]
+name = "generated_globalref_call_6187"
+file = "globalref_call_6187.jl"
+expected = true
+description = "@generated fallback returned-Expr eval supports GlobalRef callees in Expr(:call, ...) (Issues #6187/#5936)"
+
+[[tests]]
+name = "generated_copyast_head_6190"
+file = "copyast_head_6190.jl"
+expected = true
+description = "@generated fallback returned-Expr eval supports Expr(:copyast, QuoteNode(...)) as AST data (Issues #6190/#5936)"
+
+[[tests]]
+name = "generated_comparison_chain_6192"
+file = "comparison_chain_6192.jl"
+expected = true
+description = "@generated fallback returned-Expr eval evaluates full Expr(:comparison, ...) chains (Issues #6192/#5936)"
+
+[[tests]]
+name = "generated_elseif_head_6194"
+file = "elseif_head_6194.jl"
+expected = true
+description = "@generated fallback returned-Expr eval supports Expr(:elseif, ...) conditionals (Issues #6194/#5936)"
+
+[[tests]]
+name = "generated_keyword_expr_6196"
+file = "keyword_expr_6196.jl"
+expected = true
+description = "@generated fallback returned-Expr eval supports Expr(:parameters, Expr(:kw, ...)) keyword calls (Issues #6196/#5936)"
+
+[[tests]]
+name = "generated_block_logical_quote_5936"
+file = "block_logical_quote_5936.jl"
+expected = true
+description = "@generated fallback returned-Expr eval covers Expr(:block), Expr(:(=)), Expr(:&&), Expr(:||), and Expr(:quote) heads (Issue #5936)"
+
+[[tests]]
+name = "generated_staged_loop_expr_5936"
+file = "staged_loop_expr_5936.jl"
+expected = true
+description = "@generated body can build an Expr in a loop and return it for runtime evaluation (Issue #5936)"
+
+[[tests]]
+name = "generated_signature_cache_5936"
+file = "signature_cache_5936.jl"
+expected = true
+description = "@generated fallback compatibility caches returned staged Expr values by concrete argument signature (Issue #5936)"
+
+[[tests]]
+name = "generated_body_arg_types_5936"
+file = "body_arg_types_5936.jl"
+expected = true
+description = "@generated body arguments observe concrete argument types, including Type{T} and vararg type tuples (Issue #5936)"
+
+[[tests]]
+name = "generated_array_static_params_6210"
+file = "array_static_params_6210.jl"
+expected = true
+description = "@generated bodies bind Array{T,N} static parameters before evaluating the generated body (Issues #6210/#5074)"
+
+[[tests]]
+name = "generated_empty_vararg_unbound_type_param_6212"
+file = "empty_vararg_unbound_type_param_6212.jl"
+expected = true
+description = "Empty xs::T... calls leave T unbound when T is read, while value-only empty varargs still return () (Issues #6212/#5074)"
+
+[[tests]]
+name = "generated_direct_body_type_args_6214"
+file = "direct_body_type_args_6214.jl"
+expected = true
+description = "Direct generated body expressions observe generated-time argument types and are not IR-inlined as runtime calls (Issues #6214/#5074)"
+
+[[tests]]
+name = "generated_mixed_interpolation_runtime_args_6204"
+file = "mixed_interpolation_runtime_args_6204.jl"
+expected = true
+description = "@generated returned code keeps `$arg` type interpolation distinct from bare runtime argument refs (Issues #6204/#5074)"
+
+[[tests]]
+name = "generated_splat_call_5936"
+file = "splat_call_5936.jl"
+expected = true
+description = "@generated calls through f(args...) share body type binding and returned-Expr signature cache behavior with direct calls (Issue #5936)"
+
+[[tests]]
+name = "generated_alias_splat_6163"
+file = "alias_splat_6163.jl"
+expected = true
+description = "@generated calls through a function alias with args... bind generated body arguments as concrete types (Issues #6163/#5936)"
+
+[[tests]]
+name = "generated_alias_call_6166"
+file = "alias_call_6166.jl"
+expected = true
+description = "@generated calls through a function alias bind generated body arguments as concrete types (Issues #6166/#5936)"
+
+[[tests]]
+name = "generated_keyword_calls_6171"
+file = "keyword_calls_6171.jl"
+expected = true
+description = "@generated keyword calls bind generated body positional/keyword arguments as concrete types and evaluate returned Exprs in the runtime frame (Issues #6171/#5936)"
+
+[[tests]]
+name = "generated_quoted_expr_6172"
+file = "quoted_expr_6172.jl"
+expected = true
+description = "@generated quoted Expr payloads selected by generated-time control flow are evaluated against runtime arguments (Issues #6172/#5936)"
+
+[[tests]]
+name = "generated_map_call_6170"
+file = "map_call_6170.jl"
+expected = true
+description = "@generated functions called through map bind generated body arguments as concrete element types (Issues #6170/#5936)"
+
+[[tests]]
+name = "generated_stage_type_args_ntuple_7722"
+file = "stage_type_args_ntuple_7722.jl"
+expected = true
+description = "@generated stage bodies can return argument type bindings directly and build ntuple-style unrolled tuple Exprs without runtime-value specialization (Issues #7722/#5074)"

@@ -9,7 +9,7 @@ use crate::vm::{Instr, ValueType};
 
 use crate::compile::{err, CResult, CoreCompiler};
 
-use super::{same_small_int_type, small_int_back_conversion};
+use super::{same_small_int_type, small_int_back_conversion, typed_instr_for_intrinsic};
 
 impl CoreCompiler<'_> {
     /// Compile a binary operation using builtin operators only.
@@ -227,7 +227,11 @@ impl CoreCompiler<'_> {
 
         match intrinsic_opt {
             Some(intrinsic) => {
-                self.emit(Instr::CallIntrinsic(intrinsic));
+                if let Some(instr) = typed_instr_for_intrinsic(intrinsic) {
+                    self.emit(instr);
+                } else {
+                    self.emit(Instr::CallIntrinsic(intrinsic));
+                }
             }
             None => {
                 if matches!(op, BinaryOp::Pow) {

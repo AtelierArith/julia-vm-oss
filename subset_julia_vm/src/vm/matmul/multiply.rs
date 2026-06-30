@@ -5,15 +5,9 @@ use super::complex::Complex64;
 use super::helpers::{as_f64_data, extract_complex_data, is_complex_array};
 
 #[inline]
-fn decode_matrix_dims(shape: &[usize], as_lhs: bool) -> Option<(usize, usize)> {
+fn decode_matrix_dims(shape: &[usize], _as_lhs: bool) -> Option<(usize, usize)> {
     match shape.len() {
-        1 => {
-            if as_lhs {
-                Some((1, shape[0]))
-            } else {
-                Some((shape[0], 1))
-            }
-        }
+        1 => Some((shape[0], 1)),
         2 => Some((shape[0], shape[1])),
         _ => None,
     }
@@ -23,7 +17,7 @@ fn decode_matrix_dims(shape: &[usize], as_lhs: bool) -> Option<(usize, usize)> {
 fn result_shape(a_rank: usize, b_rank: usize, a_rows: usize, b_cols: usize) -> Vec<usize> {
     match (a_rank, b_rank) {
         (1, 1) => vec![1],
-        (1, 2) => vec![b_cols],
+        (1, 2) => vec![a_rows, b_cols],
         (2, 1) => vec![a_rows],
         (2, 2) => vec![a_rows, b_cols],
         _ => vec![],
@@ -66,7 +60,7 @@ pub(crate) fn matmul(a: &ArrayValue, b: &ArrayValue) -> Result<ArrayValue, VmErr
             let mut sum = 0.0;
             for k in 0..a_cols {
                 let a_idx = if a.shape.len() == 1 {
-                    k
+                    i
                 } else {
                     i + k * a_rows
                 };
@@ -91,7 +85,7 @@ pub(crate) fn matmul(a: &ArrayValue, b: &ArrayValue) -> Result<ArrayValue, VmErr
         )));
     }
 
-    Ok(ArrayValue::from_f64(out, out_shape))
+    Ok(ArrayValue::memory_first_from_f64(out, out_shape))
 }
 
 /// Complex matrix multiplication: A * B.
@@ -127,7 +121,7 @@ pub(crate) fn matmul_complex(
             let mut sum = Complex64::new(0.0, 0.0);
             for k in 0..a_cols {
                 let a_idx = if a.shape.len() == 1 {
-                    k
+                    i
                 } else {
                     i + k * a_rows
                 };
@@ -163,8 +157,8 @@ mod tests {
 
     #[test]
     fn test_decode_matrix_dims_1d_lhs() {
-        // 1-D as LHS: treated as row vector (1, n)
-        assert_eq!(decode_matrix_dims(&[5], true), Some((1, 5)));
+        // 1-D as LHS follows LinearAlgebra's reshape(a, length(a), 1) path.
+        assert_eq!(decode_matrix_dims(&[5], true), Some((5, 1)));
     }
 
     #[test]
@@ -198,8 +192,8 @@ mod tests {
 
     #[test]
     fn test_result_shape_row_vector_matrix() {
-        // row vector * matrix → row vector (b_cols)
-        assert_eq!(result_shape(1, 2, 1, 6), vec![6]);
+        // vector * matrix follows reshape(vector, length(vector), 1) * matrix.
+        assert_eq!(result_shape(1, 2, 5, 6), vec![5, 6]);
     }
 
     #[test]

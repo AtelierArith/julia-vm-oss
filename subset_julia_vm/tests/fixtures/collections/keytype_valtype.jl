@@ -34,8 +34,12 @@ using Test
 
     # Test valtype for Array (should match eltype)
     vt_arr = valtype(arr)
-    # eltype should work, but valtype might return Any in simplified implementation
-    if vt_arr == Any || typeof(arr[1]) == vt_arr
+    if vt_arr == Int64
+        result = result + 1
+    end
+
+    complex_arr = zeros(Complex{Float64}, 2)
+    if valtype(complex_arr) == Complex{Float64}
         result = result + 1
     end
 
@@ -46,7 +50,7 @@ using Test
         result = result + 1
     end
 
-    @test (result) == 5.0
+    @test (result) == 6.0
 end
 
 true  # Test passed

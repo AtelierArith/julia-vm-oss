@@ -1,0 +1,48 @@
+# Vendored copy of astro-float-num 0.3.6 (MIT, stencillogic/astro-float) with a
+# LOCAL PATCH: the Ziv precision-refinement loops in src/ops/pow.rs and
+# src/ops/log.rs are bounded so transcendental ops (exp/ln/pow) no longer hang
+# on table-maker's-dilemma inputs such as `BigFloat(4)^0.5` (Issue #6794).
+# Wired in via the workspace `[patch.crates-io]`. Dev-dependencies and tests
+# from upstream (rug / gmp-mpfr-sys) are dropped — they are not built for a
+# dependent and require system libraries.
+#
+# ADDITIONAL PATCH (Issue #6921): silenced 5 compile warnings on rustc 1.83+ —
+# removed a dead `i += 1` in src/mantissa/mantissa.rs (unused_assignments) and
+# added explicit `<'_>` to elided return lifetimes in src/mantissa/{fft,sqrt,
+# toom3}.rs and src/parser.rs (mismatched_lifetime_syntaxes).
+[package]
+edition = "2021"
+name = "astro-float-num"
+version = "0.3.6"
+authors = ["stencillogic <stencillogic@gmail.com>"]
+description = "Multiple precision floating point numbers implemented purely in Rust (vendored, patched for Issue #6794)."
+license = "MIT"
+repository = "https://github.com/stencillogic/astro-float"
+
+[lib]
+name = "astro_float_num"
+path = "src/lib.rs"
+
+[dependencies.itertools]
+version = "0.10.3"
+features = []
+default-features = false
+
+[dependencies.lazy_static]
+version = "1.4.0"
+features = []
+default-features = false
+
+[dependencies.rand]
+version = "0.8.5"
+optional = true
+
+[dependencies.serde]
+version = "1.0.147"
+optional = true
+
+[features]
+default = ["std", "random", "serde"]
+random = ["dep:rand"]
+serde = ["dep:serde"]
+std = []

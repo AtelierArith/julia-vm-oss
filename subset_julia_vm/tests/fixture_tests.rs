@@ -16,7 +16,13 @@
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
-use subset_julia_vm::{compile_and_run_value, vm::Value};
+use subset_julia_vm::{
+    cancel,
+    compile::{cache::clear_cache, compile_with_cache},
+    pipeline::{parse_and_lower_with_base_dir, PipelineError},
+    rng::StableRng,
+    vm::{Value, Vm},
+};
 
 /// Root manifest structure (contains global config and optionally tests)
 #[derive(Debug, Deserialize)]
@@ -177,14 +183,30 @@ fn load_manifest() -> Manifest {
 }
 
 fn run_test_case(test: &TestCase, epsilon: f64) {
+    clear_cache();
+    cancel::reset();
+
     let fixtures_dir = get_fixtures_dir();
     let file_path = fixtures_dir.join(&test.file);
 
     let source = fs::read_to_string(&file_path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", test.file, e));
 
-    let result = compile_and_run_value(&source, 0)
-        .unwrap_or_else(|e| panic!("Test '{}' failed with error: {}", test.name, e));
+    let base_dir = file_path.parent().map(PathBuf::from);
+    let program = parse_and_lower_with_base_dir(&source, base_dir).unwrap_or_else(|e| {
+        let message = match e {
+            PipelineError::Parse(e) => format!("parse error: {}", e),
+            PipelineError::Lower(e) => format!("lower error: {:?}", e),
+            PipelineError::Load(e) => format!("load error: {}", e),
+        };
+        panic!("Test '{}' failed with error: {}", test.name, message);
+    });
+    let compiled = compile_with_cache(&program)
+        .unwrap_or_else(|e| panic!("Test '{}' failed with compile error: {:?}", test.name, e));
+    let mut vm = Vm::new_program(compiled, StableRng::new(0));
+    let result = vm
+        .run()
+        .unwrap_or_else(|e| panic!("Test '{}' failed with runtime error: {}", test.name, e));
 
     assert!(
         test.expected.matches(&result, epsilon),
@@ -206,26 +228,37 @@ fn run_test_case(test: &TestCase, epsilon: f64) {
 /// and future standard-library growth.  See Issue #2766.
 const FIXTURE_TEST_STACK_SIZE: usize = 16 * 1024 * 1024;
 
-/// Run a single fixture test by name (used by generated tests)
-fn run_fixture_test(name: &str) {
-    let name = name.to_string();
+fn run_test_cases_by_name(manifest: &Manifest, names: &[&str]) {
+    for name in names {
+        let test = manifest
+            .tests
+            .iter()
+            .find(|t| t.name == *name)
+            .unwrap_or_else(|| panic!("Test case '{}' not found in manifest", name));
+
+        // Skip tests marked with skip = true
+        if test.skip {
+            eprintln!("Skipping test '{}': marked as skip in manifest", name);
+            continue;
+        }
+
+        run_test_case(test, manifest.config.epsilon);
+    }
+}
+
+/// Run all fixture tests in a category (used by generated tests).
+///
+/// nextest executes each Rust test in its own process. Grouping fixture cases by
+/// category keeps targeted `array::`/`hof::` workflows while letting all cases in
+/// that category reuse the same thread-local Base cache.
+fn run_fixture_category(names: &[&str]) {
+    let names: Vec<String> = names.iter().map(|name| (*name).to_string()).collect();
     let result = std::thread::Builder::new()
         .stack_size(FIXTURE_TEST_STACK_SIZE)
         .spawn(move || {
             let manifest = load_manifest();
-            let test = manifest
-                .tests
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("Test case '{}' not found in manifest", name));
-
-            // Skip tests marked with skip = true
-            if test.skip {
-                eprintln!("Skipping test '{}': marked as skip in manifest", name);
-                return;
-            }
-
-            run_test_case(test, manifest.config.epsilon);
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            run_test_cases_by_name(&manifest, &names);
         })
         .expect("Failed to spawn fixture test thread")
         .join();
@@ -235,7 +268,6 @@ fn run_fixture_test(name: &str) {
         std::panic::resume_unwind(e);
     }
 }
-
 
 // Include auto-generated test modules from build.rs
 include!(concat!(env!("OUT_DIR"), "/fixture_tests_generated.rs"));

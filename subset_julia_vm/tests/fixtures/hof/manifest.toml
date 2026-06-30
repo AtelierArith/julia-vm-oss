@@ -7,10 +7,88 @@ expected = true
 description = "mapfoldl - map then left-fold (Issue #351)"
 
 [[tests]]
+name = "hof_filter_parity_specialization_5094"
+file = "filter_parity_specialization_5094.jl"
+expected = true
+description = "filter(iseven/isodd, ::Vector{T}) uses concrete integer typed helper paths and preserves result eltype (Issue #5094)"
+
+[[tests]]
+name = "hof_filter_bool_predicate_specialization_5094"
+file = "filter_bool_predicate_specialization_5094.jl"
+expected = true
+description = "filter(iszero/isone/signbit, ::Vector{T}) uses concrete typed helper paths and preserves result eltype (Issue #5094)"
+
+[[tests]]
+name = "hof_reduce_minmax_specialization_5094"
+file = "reduce_minmax_specialization_5094.jl"
+expected = true
+description = "reduce(min/max, ::Vector{T}) uses concrete typed helper paths and preserves result type (Issue #5094)"
+
+[[tests]]
+name = "hof_foldl_minmax_specialization_5094"
+file = "foldl_minmax_specialization_5094.jl"
+expected = true
+description = "foldl(min/max, ::Vector{T}) uses concrete typed helper paths and preserves result type (Issue #5094)"
+
+[[tests]]
+name = "hof_foldr_minmax_specialization_5094"
+file = "foldr_minmax_specialization_5094.jl"
+expected = true
+description = "foldr(min/max, ::Vector{T}) uses concrete typed helper paths and preserves result type (Issue #5094)"
+
+[[tests]]
+name = "hof_mapfoldl_minmax_specialization_5094"
+file = "mapfoldl_minmax_specialization_5094.jl"
+expected = true
+description = "mapfoldl(identity, min/max, ::Vector{T}) uses concrete typed helper paths and preserves result type (Issue #5094)"
+
+[[tests]]
+name = "hof_mapfoldr_minmax_specialization_5094"
+file = "mapfoldr_minmax_specialization_5094.jl"
+expected = true
+description = "mapfoldr(identity, min/max, ::Vector{T}) uses concrete typed helper paths and preserves result type (Issue #5094)"
+
+[[tests]]
+name = "hof_mapreduce_minmax_specialization_5094"
+file = "mapreduce_minmax_specialization_5094.jl"
+expected = true
+description = "mapreduce(identity, min/max, ::Vector{T}) uses concrete typed helper paths and preserves result type (Issue #5094)"
+
+[[tests]]
+name = "hof_binary_map_specialization_5094"
+file = "binary_map_specialization_5094.jl"
+expected = true
+description = "map(+/-/*/min/max and /, ::Vector{T}, ::Vector{T}) uses binary HOF call-site inference and typed helper paths (Issue #5094)"
+
+[[tests]]
+name = "hof_nary_map_specialization_5094"
+file = "nary_map_specialization_5094.jl"
+expected = true
+description = "map(+/*/min/max, ::Vector{T}, ::Vector{T}, ::Vector{T}...) uses n-ary HOF call-site inference and typed helper paths (Issue #5094)"
+
+[[tests]]
+name = "hof_predicate_reducer_specialization_5094"
+file = "predicate_reducer_specialization_5094.jl"
+expected = true
+description = "any/all/count/findall(iszero/isone/signbit/iseven/isodd, ::Vector{Int32}) use concrete typed predicate reducer helper paths (Issue #5094)"
+
+[[tests]]
+name = "hof_function_negation_5672"
+file = "function_negation_5672.jl"
+expected = true
+description = "Predicate function negation !f composes ! with callable predicates for map/filter (Issue #5672)"
+
+[[tests]]
 name = "hof_mapfoldr"
 file = "test_mapfoldr.jl"
 expected = true
 description = "mapfoldr - map then right-fold (Issue #351)"
+
+[[tests]]
+name = "hof_memory_first_results"
+file = "memory_first_results.jl"
+expected = true
+description = "HOF result builders preserve behavior across Memory-first VM fallback paths (Issue #3962)"
 
 [[tests]]
 name = "hof_map_inplace"
@@ -103,6 +181,60 @@ expected = true
 description = "map(f, A, B) - map with multiple array arguments (Issue #2019)"
 
 [[tests]]
+name = "hof_map_binary_any_user_method_4019"
+file = "map_binary_any_user_method_4019.jl"
+expected = true
+description = "Binary map(f, A, B) with Any-typed array args dispatches to a user Vector method before generic Base fallback (Issue #4019)"
+
+[[tests]]
+name = "hof_map_any_unary_base_extension_6550"
+file = "map_any_unary_base_extension_6550.jl"
+expected = true
+description = "Unary map(f, ::Vector{Any}) with a user extension of a Base function keeps the callable path unary instead of routing through a binary operator helper (Issue #6550)"
+
+[[tests]]
+name = "hof_map_binary_type_preservation_4610"
+file = "map_binary_type_preservation_4610.jl"
+expected = true
+description = "Binary map(f, A, B) preserves representative typed result allocations, including empty integer division results, instead of Vector{Any}/input-eltype fallback (Issues #4019, #4610, #4659)"
+
+[[tests]]
+name = "hof_map_vararg_type_preservation_4611"
+file = "map_vararg_type_preservation_4611.jl"
+expected = true
+description = "Vararg map(f, A, B, C, ...) preserves representative typed result allocations and small-integer addition semantics through a Pure Julia Array fallback (Issues #4019, #4611, #4612, #4613)"
+
+[[tests]]
+name = "hof_mapreduce_identity_plus_type_preservation_4619"
+file = "mapreduce_identity_plus_type_preservation_4619.jl"
+expected = true
+description = "mapreduce/mapfoldl(identity, +, ::Vector{T}) preserves upstream typed reduction identities and result types (Issues #4019, #4619)"
+
+[[tests]]
+name = "hof_mapfoldr_identity_plus_type_preservation_4620"
+file = "mapfoldr_identity_plus_type_preservation_4620.jl"
+expected = true
+description = "mapfoldr(identity, +, ::Vector{T}) preserves upstream typed reduction identities and result types (Issues #4019, #4620)"
+
+[[tests]]
+name = "hof_reduce_fold_plus_type_preservation_4622"
+file = "reduce_fold_plus_type_preservation_4622.jl"
+expected = true
+description = "reduce/foldl/foldr(+, ::Vector{T}) preserve upstream typed reduction identities and result types (Issues #4019, #4622)"
+
+[[tests]]
+name = "hof_reduction_mul_type_preservation_4623"
+file = "reduction_mul_type_preservation_4623.jl"
+expected = true
+description = "Scalar Bool multiplication and reduce/fold/mapfold `*` typed reduction paths preserve upstream multiplicative identities and result types (Issues #4019, #4623, #4624)"
+
+[[tests]]
+name = "hof_reduction_minus_type_preservation_4625"
+file = "reduction_minus_type_preservation_4625.jl"
+expected = true
+description = "reduce/fold/mapfold `-` typed reduction paths preserve upstream subtractive order and small integer result types (Issues #4019, #4625)"
+
+[[tests]]
 name = "hof_any_all_bool_return"
 file = "any_all_bool_return.jl"
 expected = true
@@ -161,3 +293,87 @@ name = "hof_issue_1587_regression"
 file = "issue_1587_regression.jl"
 expected = true
 description = "Regression: arrow function map(_ -> Complex(0.0, 0.0), 1:m) was UnsupportedExpression (Issue #1587)"
+
+[[tests]]
+name = "hof_same_name_dispatch"
+file = "hof_same_name_dispatch.jl"
+expected = true
+description = "map!/filter!/mapreduce/mapfoldl/mapfoldr dispatch to Pure Julia methods (Issue #3731)"
+
+[[tests]]
+name = "hof_predicate_reducers_pure_dispatch"
+file = "hof_predicate_reducers_pure_dispatch.jl"
+expected = true
+description = "any/all/count/findall/findfirst/findlast/sum predicate-HOF forms dispatch to Pure Julia (Issue #3728)"
+
+[[tests]]
+name = "hof_fix1_fix2_partial_5127"
+file = "hof_fix1_fix2_partial_5127.jl"
+expected = true
+description = "Base.Fix1/Base.Fix2 partial-application types and curried predicates in map/filter/findall (Issue #5127)"
+
+[[tests]]
+name = "hof_nested_in_lambda_5229"
+file = "hof_nested_in_lambda_5229.jl"
+expected = true
+description = "HOF (map/filter/sum) nested inside another HOF's lambda no longer leaks StructRef; broadcast/generator-iterate state are per-call stacks (Issue #5229)"
+
+[[tests]]
+name = "hof_lambda_dict_return_5231"
+file = "hof_lambda_dict_return_5231.jl"
+expected = true
+description = "map/filter lambda returning a Dict/Set/Tuple/NamedTuple is collected correctly; typed return handlers route through the HOF/generator continuation instead of hitting ReturnArray (Issue #5231)"
+
+[[tests]]
+name = "hof_map_reduce_range_type_inference_5094"
+file = "map_reduce_range_type_inference_5094.jl"
+expected = true
+description = "HOF map/filter/reduce infer concrete result types for integer range inputs and inline lambdas (Issue #5094)"
+
+[[tests]]
+name = "hof_unary_map_specialization_5094"
+file = "unary_map_specialization_5094.jl"
+expected = true
+description = "Unary map(abs/abs2/map(-)) over concrete primitive vectors uses Pure Julia callee/element-type specializations while preserving upstream values and eltypes (Issue #5094)"
+
+[[tests]]
+name = "hof_unary_minus_narrow_int_5462"
+file = "unary_minus_narrow_int_5462.jl"
+expected = true
+description = "Unary minus callable dispatch works for narrow signed and unsigned integers in HOF map and direct calls (Issue #5462)"
+
+[[tests]]
+name = "hof_isequal_curried_predicate_5662"
+file = "hof_isequal_curried_predicate_5662.jl"
+expected = true
+description = "isequal(x) single-argument curried predicate form (y -> isequal(y, x)) works across HOFs: map/filter/findfirst/findall/count(isequal(k), v) and direct isequal(3)(3). Adds the 1-arg method in base/operators.jl (as a closure, like sjulia's curried operators #5127) and gates the isequal->Bool return-type inference (compile/expr/infer/julia_type.rs) on the 2-arg form so filter does not infer the predicate as Bool. Two-arg isequal (incl. NaN/missing) unchanged; upstream has no isless(x) curried form so isless(2) still errors. Issue #5662"
+
+[[tests]]
+name = "hof_count_tuple_5681"
+file = "hof_count_tuple_5681.jl"
+expected = true
+description = "count(f, t::Tuple) counts elements satisfying f by iteration (count(iseven, (1,2,3,4))==2), including the empty tuple (0). Adds count(f::Function, t::Tuple) in base/reduce.jl; Array/range count unchanged. Partial fix of #5681 (filter/cumsum on tuples remain, blocked on a Tuple-from-collection constructor). Issue #5681"
+
+[[tests]]
+name = "hof_map_registry_inference_6604"
+file = "hof_map_registry_inference_6604.jl"
+expected = true
+description = "map call-site lambda return-type inference stays precise after migrating the `map` rule onto the tfuncs registry path. The registry rule tfuncs::hof_ops::map_call_result receives the function-argument expression through the new TFuncContext::arg_exprs / HofLambdaAnalyzer seam and calls back into CoreCompiler to infer the lambda's mapped element type, so map(x -> x*2.0, Int[]) is Vector{Float64}, map(Float64, Int[]) is Vector{Float64}, map(abs, Int[]) preserves Vector{Int64}, and predicate lambdas yield Vector{Bool}. Qualified Base.map shares the path (Issue #6604)"
+
+[[tests]]
+name = "hof_remaining_registry_inference_6604"
+file = "hof_remaining_registry_inference_6604.jl"
+expected = true
+description = "Return-type inference for the remaining HOFs after migrating them onto the tfuncs registry path via the HofLambdaAnalyzer seam: binary/n-ary broadcast & map, filter (element preserved), reduce/foldl/foldr, and mapreduce/mapfoldl/mapfoldr. The registry rules tfuncs::hof_ops::{nary_map,filter,reduce,mapreduce}_call_result drive lambda/operator inference through CoreCompiler, including the reduce-specific operator coverage (^) absent from the binary-map rule, so e.g. broadcast((x,y)->x+y*1.0, …) is Vector{Float64}, reduce(+, Int[]) is Int64, foldl(^, Int[]) is Int64, and mapreduce(x->x*1.0, +, Int[]) is Float64 (Issue #6604)"
+
+[[tests]]
+name = "hof_reducer_legacy_instr_removal_6733"
+file = "reducer_legacy_instr_removal_6733.jl"
+expected = true
+description = "Legacy reducer HOF VM instructions removed (Issue #6733): FindAllFunc/FindFirstFunc/FindLastFunc/MapReduceFunc(WithInit)/MapFoldrFunc(WithInit)/MapFuncInPlace/FilterFuncInPlace/SumFunc/AnyFunc/AllFunc/CountFunc deleted from the Instr enum + exec/effects. any/all/count/sum/mapreduce/findall/findfirst/map!/filter! resolve through normal method dispatch to pure-Julia definitions (already dispatch-first via Issues #3728/#3731); range/LinRange/first/last and tuple destructuring (live TupleFirst codegen) keep working. Short-circuit semantics for any/all preserved. CACHE_VERSION 57→58. Verified vs julia 1.12."
+
+[[tests]]
+name = "hof_value_mode_nested_wrapper_result_6807"
+file = "value_mode_nested_wrapper_result_6807.jl"
+expected = true
+description = "Value-mode HOF result builder emits the Array{T,N} wrapper and keeps nested array-wrapper elements (no native conversion); nested map results display bare and stay indexable/mutable (Issue #6807)"

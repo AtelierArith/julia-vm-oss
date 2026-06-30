@@ -6,6 +6,7 @@
 use crate::compile::promotion::promote_type;
 use crate::ir::core::{BinaryOp, Expr};
 use crate::types::JuliaType;
+use crate::vm::value::is_complex_type_name;
 use crate::vm::{Instr, ValueType};
 
 use crate::compile::{julia_type_to_value_type, CResult, CoreCompiler, MethodSig};
@@ -56,7 +57,12 @@ impl CoreCompiler<'_> {
         // Abstract numeric types (Number, Real, Integer, etc.) must NOT be converted
         // because the Julia method handles promotion at runtime. For example,
         // +(x::Number, y::Number) receives the original typed values and calls promote().
-        let left_param_ty = &method.params[0].1;
+        // The declared pair is sourced from the canonical core_signature
+        // projection when available (Issue #6495, stage 6b-ii) — equal to the
+        // legacy `params` spelling by the #6336 round-trip; this is a cold
+        // (single matched method) path, so the reconstruction is fine.
+        let left_param_cow = method.projected_param_julia_type(0);
+        let left_param_ty: &JuliaType = &left_param_cow;
         if matches!(
             left_param_ty,
             JuliaType::Any
@@ -74,7 +80,8 @@ impl CoreCompiler<'_> {
             self.compile_expr_as(left, vt)?;
         }
         // Compile right operand
-        let right_param_ty = &method.params[1].1;
+        let right_param_cow = method.projected_param_julia_type(1);
+        let right_param_ty: &JuliaType = &right_param_cow;
         if matches!(
             right_param_ty,
             JuliaType::Any
@@ -106,8 +113,16 @@ impl CoreCompiler<'_> {
             // Comparison operators always return Bool (Julia semantics)
             Ok(ValueType::Bool)
         } else {
-            let left_is_complex = matches!(left_param_ty, JuliaType::Struct(name) if name == "Complex" || name.starts_with("Complex{"));
-            let right_is_complex = matches!(right_param_ty, JuliaType::Struct(name) if name == "Complex" || name.starts_with("Complex{"));
+            let left_is_diagonal = is_diagonal_type(left_param_ty);
+            let right_is_diagonal = is_diagonal_type(right_param_ty);
+            if matches!(op, BinaryOp::Mul) && (left_is_diagonal ^ right_is_diagonal) {
+                return Ok(ValueType::Array);
+            }
+
+            let left_is_complex =
+                matches!(left_param_ty, JuliaType::Struct(name) if is_complex_type_name(name));
+            let right_is_complex =
+                matches!(right_param_ty, JuliaType::Struct(name) if is_complex_type_name(name));
             if (left_is_complex || right_is_complex)
                 && !self.is_struct_type_of(method.return_type.clone(), "Complex")
             {
@@ -130,6 +145,10 @@ impl CoreCompiler<'_> {
             }
         }
     }
+}
+
+fn is_diagonal_type(ty: &JuliaType) -> bool {
+    matches!(ty, JuliaType::Struct(name) if name == "Diagonal" || name.ends_with(".Diagonal") || name.starts_with("Diagonal{") || name.contains(".Diagonal{"))
 }
 
 #[cfg(test)]
@@ -178,7 +197,10 @@ mod tests {
     #[test]
     fn test_promote_complex_operands_float64_and_complex_bool() {
         // Float64 + Complex{Bool} → Complex{Float64}
-        let result = promote_complex_operands(&JuliaType::Float64, &JuliaType::Struct("Complex{Bool}".to_string()));
+        let result = promote_complex_operands(
+            &JuliaType::Float64,
+            &JuliaType::Struct("Complex{Bool}".to_string()),
+        );
         assert_eq!(result, "Complex{Float64}");
     }
 

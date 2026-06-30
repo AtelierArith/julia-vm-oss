@@ -13,6 +13,12 @@ expected = true
 description = "Splat in array construction and multi-argument splat"
 
 [[tests]]
+name = "splat_array_literal_7255"
+file = "splat_array_literal_7255.jl"
+expected = true
+description = "Array-literal positional splat: untyped [a, xs..., b] and typed T[a, xs..., b] spread the splatted iterable's elements (Issue #7255)"
+
+[[tests]]
 name = "splat_tuple"
 file = "splat_tuple.jl"
 expected = true
@@ -23,3 +29,27 @@ name = "splat_nested"
 file = "splat_nested.jl"
 expected = true
 description = "Nested splat: splatting into functions that themselves use splat"
+
+[[tests]]
+name = "splat_module_qualified_positional_4123"
+file = "module_qualified_positional_splat_4123.jl"
+expected = true
+description = "Module-qualified positional splat calls preserve args... for user modules and Base-qualified functions (Issue #4123)"
+
+[[tests]]
+name = "splat_operator_function_5144"
+file = "operator_splat_5144.jl"
+expected = true
+description = "Operator-function calls with splat / multi-arg parentheses: +(xs...), *(xs...), +(0, xs...), +(1, 2, 3) (Issue #5144)"
+
+[[tests]]
+name = "splat_operator_statement_position_5337"
+file = "operator_statement_position_5337.jl"
+expected = true
+description = "Line-leading operator-function call in statement position (+(t...), *(t...), -(t...), +(1,2)) parses as an expression statement and runs (Issue #5337)"
+
+[[tests]]
+name = "splat_tuple_literal_7741"
+file = "splat_tuple_literal_7741.jl"
+expected = true
+description = "Tuple-literal positional splat: `(A, B, xs...)` splices the splatted iterable's elements into the tuple instead of nesting it, including inside a constructor body (Issue #7741)"

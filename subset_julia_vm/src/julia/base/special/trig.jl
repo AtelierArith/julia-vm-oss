@@ -86,6 +86,14 @@ function sin(x::Float64)
     end
 end
 
+function sin(x::Float32)
+    return Float32(sin(Float64(x)))
+end
+
+function sin(x::Float16)
+    return Float16(sin(Float64(x)))
+end
+
 # =============================================================================
 # cos(x::Float64)
 # =============================================================================
@@ -112,6 +120,14 @@ function cos(x::Float64)
     else
         return _sin_kernel(r)
     end
+end
+
+function cos(x::Float32)
+    return Float32(cos(Float64(x)))
+end
+
+function cos(x::Float16)
+    return Float16(cos(Float64(x)))
 end
 
 # =============================================================================
@@ -276,3 +292,14 @@ asin(x::Int64) = asin(Float64(x))
 acos(x::Int64) = acos(Float64(x))
 atan(x::Int64) = atan(Float64(x))
 atan(y::Int64, x::Int64) = atan(Float64(y), Float64(x))
+
+# Rational conversion (Issue #5356): without these, `sin(::Rational)` etc. are
+# lenient-dispatched to the `::Float64` methods and the Rational lands in a
+# Float64 slot (LoadSlotF64 InternalError). `float(::Rational)` is Float64, so
+# these reduce to the Float64 methods with no recursion.
+sin(x::Rational) = sin(float(x))
+cos(x::Rational) = cos(float(x))
+tan(x::Rational) = tan(float(x))
+asin(x::Rational) = asin(float(x))
+acos(x::Rational) = acos(float(x))
+atan(x::Rational) = atan(float(x))

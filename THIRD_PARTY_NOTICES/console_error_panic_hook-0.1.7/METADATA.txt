@@ -1,0 +1,5 @@
+crate: console_error_panic_hook
+version: 0.1.7
+license: Apache-2.0/MIT
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/rustwasm/console_error_panic_hook

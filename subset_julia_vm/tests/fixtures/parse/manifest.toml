@@ -1,6 +1,18 @@
 # Test manifest for parse category
 
 [[tests]]
+name = "parse_bool_5766"
+file = "parse_bool_5766.jl"
+expected = true
+description = "parse(Bool, s)/tryparse(Bool, s): true/false (whitespace-stripped) or integer 0/1 (Issue #5766)"
+
+[[tests]]
+name = "parse_operator_import_list_6544"
+file = "operator_import_list_6544.jl"
+expected = true
+description = "Operator import lists accept comparison operators followed by additional names, matching upstream Julia (Issue #6544)"
+
+[[tests]]
 name = "parse_basic"
 file = "parse_basic.jl"
 expected = true
@@ -11,3 +23,27 @@ name = "parse_float_bool"
 file = "parse_float_bool.jl"
 expected = true
 description = "parse/tryparse for Float64 and Int with bases (Issue #3123)"
+
+[[tests]]
+name = "parse_multiline_trailing_comma_4776"
+file = "multiline_trailing_comma_4776.jl"
+expected = true
+description = "Multi-line tuple/array/call literals with trailing comma — `(1,\\n 2,\\n 3,\\n)`, `[\\n 1,\\n 2,\\n]`, `f(\\n a,\\n b,\\n)` — parse correctly. Also covers the no-trailing-comma multi-line shape that the same fix unblocked (Issue #4776)"
+
+[[tests]]
+name = "parse_outer_as_identifier_8099"
+file = "outer_as_identifier_8099.jl"
+expected = true
+description = "`outer` is a contextual keyword only inside `for outer x in ...`; everywhere else (long/short function definition named `outer`, variable, parameter, struct field, function value, and the `for outer in itr` loop-variable case) it parses as an ordinary identifier (Issue #8099)"
+
+[[tests]]
+name = "parse_type_as_identifiers_8108"
+file = "type_as_identifiers_8108.jl"
+expected = true
+description = "`type` and `as` are contextual keywords (`type` only after abstract/primitive, `as` only in import/using aliasing); everywhere else (long/short function definition named `type`/`as`, variable, parameter, struct field, function value) they parse as ordinary identifiers. Also confirms `abstract type`/`primitive type` and `using ... as ...` parse/lower unchanged (Issue #8108)"
+
+[[tests]]
+name = "parse_bang_not_equal_8194"
+file = "bang_not_equal_8194.jl"
+expected = true
+description = "Identifier directly followed by != with no space (a!=b) lexes as a != b, not a! = b; trailing-! names (push!, in!) and unary ! preserved (Issue #8194)"

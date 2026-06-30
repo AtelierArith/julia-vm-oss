@@ -1,0 +1,8 @@
+package: SpecialFunctions
+version: 2.5.0
+local_uuid: 276daf66-3868-5448-9aa4-cd1469388bab
+registry_uuid: 276daf66-3868-5448-9aa4-cd146d93841b
+repository: https://github.com/JuliaMath/SpecialFunctions.jl
+license: MIT
+license_source: LICENSE at ref v2.5.0
+note: local Project.toml UUID differs from Julia General registry.

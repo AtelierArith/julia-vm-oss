@@ -14,6 +14,8 @@ use std::rc::Rc;
 use super::super::error::VmError;
 use super::array_data::ArrayData;
 use super::array_element::ArrayElementType;
+use super::array_value::push_into_array_data;
+use super::ArrayValue;
 use super::Value;
 
 /// Flat typed memory buffer (Julia's Memory{T}).
@@ -66,6 +68,8 @@ impl MemoryValue {
             ArrayElementType::Bool => ArrayData::Bool(vec![false; length]),
             ArrayElementType::String => ArrayData::String(vec![std::string::String::new(); length]),
             ArrayElementType::Char => ArrayData::Char(vec!['\0'; length]),
+            ArrayElementType::Symbol => ArrayData::Any(vec![Value::Nothing; length]),
+            ArrayElementType::Nothing => ArrayData::Any(vec![Value::Nothing; length]),
             _ => ArrayData::Any(vec![Value::Nothing; length]),
         };
         Self {
@@ -73,6 +77,56 @@ impl MemoryValue {
             element_type: elem_type.clone(),
             length,
         }
+    }
+
+    /// Create an empty, growable Memory buffer with backing `capacity` for the
+    /// given element type. The logical length starts at zero and grows through
+    /// [`MemoryValue::push`]. Used as the literal/comprehension build buffer
+    /// after the de-variant off the native-array carrier (Issue #6807); mirrors
+    /// `ArrayValue::memory_first_with_capacity`'s storage selection.
+    pub fn with_capacity(element_type: ArrayElementType, capacity: usize) -> Self {
+        let data = ArrayValue::capacity_data_for(&element_type, capacity);
+        Self {
+            data,
+            element_type,
+            length: 0,
+        }
+    }
+
+    /// Append a value to the end, growing the buffer. Handles the special
+    /// interleaved (Complex) / array-of-structs (Tuple, isbits struct) layouts
+    /// via the shared [`push_into_array_data`] routine so the build buffer grows
+    /// with semantics identical to `ArrayValue::push` (Issue #6807).
+    pub fn push(&mut self, value: Value) -> Result<(), VmError> {
+        self.length = push_into_array_data(&mut self.data, Some(&self.element_type), value)?;
+        Ok(())
+    }
+
+    /// Append an `f64` value to the end (untyped F64 build buffer).
+    pub fn push_f64(&mut self, value: f64) -> Result<(), VmError> {
+        self.push(Value::F64(value))
+    }
+
+    /// Reserve backing capacity for at least `additional` more logical elements.
+    /// Pure capacity hint: the logical length is unchanged. The raw count is
+    /// scaled by the per-element storage multiplier so interleaved Complex
+    /// storage (2 raw slots/element) and AoS Tuple/struct storage (one raw slot
+    /// per field) reserve the right amount (mirrors `ArrayValue::reserve`).
+    pub fn reserve(&mut self, additional: usize) {
+        let raw_multiplier = match &self.element_type {
+            ArrayElementType::ComplexF32 | ArrayElementType::ComplexF64 => 2,
+            ArrayElementType::TupleOf(field_types) => field_types.len().max(1),
+            ArrayElementType::StructInlineOf(_, field_count) => (*field_count).max(1),
+            _ => 1,
+        };
+        self.data.reserve(additional.saturating_mul(raw_multiplier));
+    }
+
+    /// Whether this buffer stores heap-backed struct references (so a `Struct`
+    /// value must be interned into the struct heap before being pushed).
+    pub fn is_struct_ref_array(&self) -> bool {
+        matches!(self.data, ArrayData::StructRefs(_))
+            || matches!(self.element_type, ArrayElementType::StructOf(_))
     }
 
     /// Get the element type.
@@ -136,9 +190,126 @@ impl MemoryValue {
         }
     }
 
+    /// Compare flat Memory contents using Julia's `isequal` scalar behavior.
+    pub fn isequal_contents(&self, other: &Self) -> bool {
+        if self.length != other.length {
+            return false;
+        }
+
+        for i in 0..self.length {
+            let left = self.data.get_value(i);
+            let right = other.data.get_value(i);
+            if !memory_values_isequal(left, right) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Get the Julia type name for this Memory (e.g., "Memory{Float64}").
     pub fn julia_type_name(&self) -> String {
         format!("Memory{{{}}}", self.element_type.julia_type_name())
+    }
+}
+
+/// Runtime value for Julia's `MemoryRef{T}`.
+///
+/// Julia stores arrays as a `MemoryRef` plus dimensions. The reference points at
+/// a 1-based element offset inside its parent `Memory`; wrapping from that
+/// point can address the remaining tail of the parent memory.
+#[derive(Debug, Clone)]
+pub struct MemoryRefValue {
+    /// Parent `Memory{T}` storage.
+    pub memory: MemoryRef,
+    /// Zero-based element offset into `memory`.
+    pub offset: usize,
+}
+
+impl MemoryRefValue {
+    /// Create a `MemoryRef` at Julia's 1-based `index` into `memory`.
+    pub fn new(memory: MemoryRef, index: usize) -> Result<Self, VmError> {
+        let len = memory.borrow().len();
+        if index < 1 || index > len + 1 {
+            return Err(VmError::IndexOutOfBounds {
+                indices: vec![index as i64],
+                shape: vec![len],
+            });
+        }
+        Ok(Self {
+            memory,
+            offset: index - 1,
+        })
+    }
+
+    /// Create a `MemoryRef` at the first element.
+    pub fn first(memory: MemoryRef) -> Self {
+        Self { memory, offset: 0 }
+    }
+
+    /// Get the parent `Memory{T}`.
+    pub fn parent(&self) -> MemoryRef {
+        self.memory.clone()
+    }
+
+    /// Julia's 1-based memory index for this reference.
+    pub fn memory_index(&self) -> usize {
+        self.offset + 1
+    }
+
+    /// Number of elements addressable from this reference through its parent tail.
+    pub fn len(&self) -> usize {
+        self.memory.borrow().len().saturating_sub(self.offset)
+    }
+
+    /// Check if no elements are addressable from this reference.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get the element type.
+    pub fn element_type(&self) -> ArrayElementType {
+        self.memory.borrow().element_type().clone()
+    }
+
+    /// Get element at 1-indexed position relative to this reference.
+    pub fn get(&self, index: usize) -> Result<Value, VmError> {
+        if index < 1 || index > self.len() {
+            return Err(VmError::IndexOutOfBounds {
+                indices: vec![index as i64],
+                shape: vec![self.len()],
+            });
+        }
+        self.memory.borrow().get(self.offset + index)
+    }
+
+    /// Set element at 1-indexed position relative to this reference.
+    pub fn set(&self, index: usize, value: Value) -> Result<(), VmError> {
+        if index < 1 || index > self.len() {
+            return Err(VmError::IndexOutOfBounds {
+                indices: vec![index as i64],
+                shape: vec![self.len()],
+            });
+        }
+        self.memory.borrow_mut().set(self.offset + index, value)
+    }
+
+    /// Get the Julia type name for this MemoryRef (e.g., "MemoryRef{Float64}").
+    pub fn julia_type_name(&self) -> String {
+        format!("MemoryRef{{{}}}", self.element_type().julia_type_name())
+    }
+}
+
+fn memory_values_isequal(left: Option<Value>, right: Option<Value>) -> bool {
+    match (left, right) {
+        (Some(Value::I64(x)), Some(Value::I64(y))) => x == y,
+        (Some(Value::F64(x)), Some(Value::F64(y))) => {
+            x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan())
+        }
+        (Some(Value::I64(x)), Some(Value::F64(y))) | (Some(Value::F64(y)), Some(Value::I64(x))) => {
+            (x as f64) == y
+        }
+        (Some(x), Some(y)) => format!("{:?}", x) == format!("{:?}", y),
+        _ => false,
     }
 }
 
@@ -212,6 +383,20 @@ mod tests {
     }
 
     #[test]
+    fn test_memory_isequal_contents() {
+        let mut left = MemoryValue::undef_typed(&ArrayElementType::F64, 2);
+        let mut right = MemoryValue::undef_typed(&ArrayElementType::F64, 2);
+        left.set(1, Value::F64(f64::NAN)).unwrap();
+        right.set(1, Value::F64(f64::NAN)).unwrap();
+        left.set(2, Value::F64(2.5)).unwrap();
+        right.set(2, Value::F64(2.5)).unwrap();
+
+        assert!(left.isequal_contents(&right));
+        right.set(2, Value::F64(3.5)).unwrap();
+        assert!(!left.isequal_contents(&right));
+    }
+
+    #[test]
     fn test_memory_empty() {
         let mem = MemoryValue::undef_typed(&ArrayElementType::F64, 0);
         assert!(mem.is_empty());
@@ -236,6 +421,33 @@ mod tests {
         assert_eq!(mem.julia_type_name(), "Memory{Int64}");
         let mem = MemoryValue::undef_typed(&ArrayElementType::Bool, 1);
         assert_eq!(mem.julia_type_name(), "Memory{Bool}");
+    }
+
+    #[test]
+    fn test_memory_ref_get_set_uses_parent_offset() {
+        let mem = new_memory_ref(MemoryValue::new(
+            ArrayData::I64(vec![10, 20, 30, 40]),
+            ArrayElementType::I64,
+            4,
+        ));
+        let memref = MemoryRefValue::new(mem.clone(), 3).unwrap();
+
+        assert_eq!(memref.memory_index(), 3);
+        assert_eq!(memref.len(), 2);
+        assert!(matches!(memref.get(1).unwrap(), Value::I64(30)));
+        memref.set(2, Value::I64(99)).unwrap();
+        assert!(matches!(mem.borrow().get(4).unwrap(), Value::I64(99)));
+    }
+
+    #[test]
+    fn test_memory_ref_bounds_and_type_name() {
+        let mem = new_memory_ref(MemoryValue::undef_typed(&ArrayElementType::F64, 2));
+        let memref = MemoryRefValue::new(mem.clone(), 2).unwrap();
+
+        assert_eq!(memref.julia_type_name(), "MemoryRef{Float64}");
+        assert!(memref.get(0).is_err());
+        assert!(memref.get(2).is_err());
+        assert!(MemoryRefValue::new(mem, 4).is_err());
     }
 
     #[test]

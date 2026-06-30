@@ -42,6 +42,10 @@ function test_tuple_equality()
         return 8
     end
 
+    if !([(1, 2), (3, 4)] == [(1, 2), (3, 4)])
+        return 9
+    end
+
     # All tests passed
     100.0
 end

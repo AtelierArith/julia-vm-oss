@@ -1,6 +1,12 @@
 # Test manifest for linalg category
 
 [[tests]]
+name = "linalg_matmul_field_tail_position_7175"
+file = "matmul_field_tail_position_7175.jl"
+expected = true
+description = "Issue #7175: struct-field Matrix * Vector in tail position is matmul, not element-wise"
+
+[[tests]]
 name = "linalg_tr_basic"
 file = "tr_basic.jl"
 expected = true
@@ -49,10 +55,34 @@ expected = true
 description = "backslash: solve Ax=b linear system (Issue #628)"
 
 [[tests]]
+name = "linalg_ldiv_dispatch_first_4020"
+file = "ldiv_dispatch_first_4020.jl"
+expected = true
+description = "backslash user methods win before VM LinearAlgebra fallback without breaking scalar fallback (Issues #4020, #4353)"
+
+[[tests]]
+name = "linalg_division_operator_calls_7467"
+file = "division_operator_calls_7467.jl"
+expected = true
+description = "LinearAlgebra matrix division operators support function-call and infix forms (Issue #7467)"
+
+[[tests]]
 name = "linalg_lu_basic"
 file = "lu_basic.jl"
 expected = true
 description = "lu: LU decomposition with partial pivoting (Issue #590)"
+
+[[tests]]
+name = "linalg_factorization_result_types_7463"
+file = "factorization_result_types_7463.jl"
+expected = true
+description = "LinearAlgebra factorizations return Factorization objects with public fields and LU/Cholesky issuccess support (Issue #7463)"
+
+[[tests]]
+name = "linalg_factorization_inplace_values_7464"
+file = "factorization_inplace_values_7464.jl"
+expected = true
+description = "LinearAlgebra in-place and values-only factorization APIs (Issue #7464)"
 
 [[tests]]
 name = "linalg_svd_basic"
@@ -73,6 +103,30 @@ expected = true
 description = "eigvals: Eigenvalue decomposition (Issue #641)"
 
 [[tests]]
+name = "linalg_symtridiagonal_partial_constructor_8393"
+file = "symtridiagonal_partial_constructor_8393.jl"
+expected = true
+description = "LinearAlgebra.SymTridiagonal{T}(dv, ev) is a valid partial parametric constructor that fixes T and infers the vector parameter from fields (Issue #8393)"
+
+[[tests]]
+name = "linalg_symtridiagonal_matrix_eigvals_range_8391"
+file = "symtridiagonal_matrix_eigvals_range_8391.jl"
+expected = true
+description = "Matrix(::SymTridiagonal) materializes a dense Matrix before eigvals(::SymTridiagonal, range) calls the linalg builtin (Issue #8391)"
+
+[[tests]]
+name = "linalg_symtridiagonal_matrix_eigvals_8401"
+file = "symtridiagonal_matrix_eigvals_8401.jl"
+expected = true
+description = "LinearAlgebra: Matrix(SymTridiagonal) materializes dense matrices and eigvals range paths terminate (Issue #8401)"
+
+[[tests]]
+name = "linalg_symtridiagonal_typed_matrix_constructor_8395"
+file = "symtridiagonal_typed_matrix_constructor_8395.jl"
+expected = true
+description = "LinearAlgebra: Matrix{T}(::SymTridiagonal) materializes a dense Matrix with converted elements (Issue #8395)"
+
+[[tests]]
 name = "linalg_eigen_basic"
 file = "eigen_basic.jl"
 expected = true
@@ -89,6 +143,36 @@ name = "linalg_rank_basic"
 file = "rank_basic.jl"
 expected = true
 description = "rank: Matrix rank computation (Issue #645)"
+
+[[tests]]
+name = "linalg_rank_pure_julia_4020"
+file = "rank_pure_julia_4020.jl"
+expected = true
+description = "rank: Pure Julia wrapper dispatch and vector/scalar rank behavior (Issue #4020)"
+
+[[tests]]
+name = "linalg_det_lu_dispatch_first_4020"
+file = "det_lu_dispatch_first_4020.jl"
+expected = true
+description = "det/lu user methods win before Rust LinearAlgebra fallback (Issue #4020)"
+
+[[tests]]
+name = "linalg_det_lu_module_dispatch_first_4020"
+file = "det_lu_module_dispatch_first_4020.jl"
+expected = true
+description = "LinearAlgebra.det/lu user methods win before module builtin fallback (Issue #4020)"
+
+[[tests]]
+name = "linalg_det_lu_matrix_bound_dispatch_4020"
+file = "det_lu_matrix_bound_dispatch_4020.jl"
+expected = true
+description = "LinearAlgebra det/lu respect Matrix{<:Integer} bounded alias dispatch (Issue #4020)"
+
+[[tests]]
+name = "linalg_direct_builtin_dispatch_first_4020"
+file = "direct_builtin_dispatch_first_4020.jl"
+expected = true
+description = "LinearAlgebra direct builtin routes respect imported user methods (Issue #4020)"
 
 [[tests]]
 name = "linalg_cond_basic"
@@ -109,10 +193,52 @@ expected = 7.0
 description = "Diagonal: size/getindex sanity check (Issue #851)"
 
 [[tests]]
+name = "linalg_size_diagonal_dim_4314"
+file = "size_diagonal_dim_4314.jl"
+expected = true
+description = "size(::Diagonal, dim) uses Pure Julia method dispatch (Issue #4314)"
+
+[[tests]]
+name = "linalg_hasmethod_diagonal_svd_6124"
+file = "hasmethod_diagonal_svd_6124.jl"
+expected = true
+description = "hasmethod sees Matrix * Diagonal methods for SVD reconstruction (Issue #6124)"
+
+[[tests]]
 name = "linalg_matmul_basic"
 file = "matmul_basic.jl"
 expected = true
 description = "matrix multiplication: A * B"
+
+[[tests]]
+name = "linalg_matmul_memory_first_3908"
+file = "matmul_memory_first_3908.jl"
+expected = true
+description = "matrix and scalar-vector multiplication results stay Julia-visible after Memory-first materialization (Issue #3908)"
+
+[[tests]]
+name = "linalg_matmul_dispatch_first_4020"
+file = "matmul_dispatch_first_4020.jl"
+expected = true
+description = "matrix multiplication uses concrete dispatch before MatMul fallback (Issue #4020)"
+
+[[tests]]
+name = "linalg_matmul_vector_dispatch_first_4020"
+file = "matmul_vector_dispatch_first_4020.jl"
+expected = true
+description = "matrix-vector multiplication uses concrete dispatch before MatMul fallback (Issue #4020)"
+
+[[tests]]
+name = "linalg_matmul_vector_matrix_dispatch_first_4020"
+file = "matmul_vector_matrix_dispatch_first_4020.jl"
+expected = true
+description = "vector-matrix multiplication uses LinearAlgebra dispatch before MatMul fallback (Issue #4020)"
+
+[[tests]]
+name = "linalg_matmul_matrix_matrix_abstract_dispatch_4020"
+file = "matmul_matrix_matrix_abstract_dispatch_4020.jl"
+expected = true
+description = "matrix-matrix multiplication does not match AbstractVector dispatch (Issue #4020)"
 
 [[tests]]
 name = "linalg_matmul_svd_reconstruct"
@@ -187,6 +313,48 @@ expected = true
 description = "triu, tril, diagm, opnorm (Issue #1932)"
 
 [[tests]]
+name = "linalg_diagonal_copy_transpose_helpers_7466"
+file = "diagonal_copy_transpose_helpers_7466.jl"
+expected = true
+description = "LinearAlgebra diagonal view/copy and mutating transpose helpers (Issue #7466)"
+
+[[tests]]
+name = "linalg_givens_rotate_reflect_7469"
+file = "givens_rotate_reflect_7469.jl"
+expected = true
+description = "LinearAlgebra Givens rotations and rotate!/reflect! helpers (Issue #7469)"
+
+[[tests]]
+name = "linalg_blas_lapack_modules_7468"
+file = "blas_lapack_modules_7468.jl"
+expected = true
+description = "LinearAlgebra BLAS/LAPACK module subset availability (Issue #7468)"
+
+[[tests]]
+name = "linalg_structured_uniform_scaling_7462"
+file = "structured_uniform_scaling_7462.jl"
+expected = true
+description = "LinearAlgebra structured matrix wrappers and UniformScaling I (Issue #7462)"
+
+[[tests]]
+name = "linalg_decomposition_families_7465"
+file = "decomposition_families_7465.jl"
+expected = true
+description = "LinearAlgebra decomposition family result objects and small dense subset (Issue #7465)"
+
+[[tests]]
+name = "linalg_matrix_equations_lowrank_7470"
+file = "matrix_equations_lowrank_7470.jl"
+expected = true
+description = "LinearAlgebra matrix equations, Skeel condition, and low-rank Cholesky updates (Issue #7470)"
+
+[[tests]]
+name = "linalg_sylvester_array_unary_minus_7577"
+file = "sylvester_array_unary_minus_7577.jl"
+expected = true
+description = "LinearAlgebra sylvester uses array unary minus for the negated vectorized RHS now that array -A dispatch is supported (Issue #7577)"
+
+[[tests]]
 name = "linalg_nullspace_logdet_adjoint"
 file = "nullspace_logdet_adjoint.jl"
 expected = true
@@ -217,7 +385,43 @@ expected = true
 description = "mul!, ldiv!, rdiv! in-place operations (Issue #1956)"
 
 [[tests]]
+name = "linalg_matrix_literal_direct_dispatch_4020"
+file = "matrix_literal_direct_dispatch_4020.jl"
+expected = true
+description = "Matrix literal dispatch selects user LinearAlgebra methods before fallback (Issue #4020)"
+
+[[tests]]
 name = "linalg_kron_bang"
 file = "kron_bang.jl"
 expected = true
 description = "kron! in-place Kronecker product (Issue #1960)"
+
+[[tests]]
+name = "linalg_decomposition_wrapper_producers_6807"
+file = "decomposition_wrapper_producers_6807.jl"
+expected = true
+description = "lu/inv/ldiv/qr/svd/eigen results are usable Array wrappers reused downstream (Issue #6807)"
+
+[[tests]]
+name = "linalg_norm_iter_sinc_6846"
+file = "norm_iter_sinc_6846.jl"
+expected = true
+description = "norm direct-iteration loops + sinc(::Float64) fast path stay upstream-faithful (Issue #6846)"
+
+[[tests]]
+name = "linalg_in_user_module_7245"
+file = "linalg_in_user_module_7245.jl"
+expected = true
+description = "det/diag/inv usable from a user module literally named D (Issue #7245)"
+
+[[tests]]
+name = "linalg_in_user_module_cholesky_7245"
+file = "linalg_in_user_module_cholesky_7245.jl"
+expected = true
+description = "cholesky usable from a user module literally named D1 (Issue #7245)"
+
+[[tests]]
+name = "linalg_matrix_decompositions_ios_7772"
+file = "matrix_decompositions_ios_7772.jl"
+expected = true
+description = "iOS matrix-decompositions sample: \\, eigen, svd forwarders reach the builtin instead of overflowing (Issue #7772)"

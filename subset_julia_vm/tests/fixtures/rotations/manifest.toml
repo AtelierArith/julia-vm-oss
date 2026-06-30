@@ -1,0 +1,47 @@
+[[tests]]
+name = "rotations_using_rotations_quaternions_7472"
+file = "using_rotations_quaternions_7472.jl"
+expected = true
+description = "Phase 1 (Issue #7472): bundled Rotations + Quaternions packages resolve through the @packages loader; basic Quaternion accessors and RotMatrix identity work"
+
+[[tests]]
+name = "rotations_rotations_2d_basics_7473"
+file = "rotations_2d_basics_7473.jl"
+expected = true
+description = "Phase 2 (Issue #7473): 2-D RotMatrix and Angle2d — construction (incl. typed Float32 and flat column-major tuple), getindex, vector rotation, inverse, composition (*, /, \\), rotation_angle, one, isrotation; values match upstream Rotations 1.7.1"
+
+[[tests]]
+name = "rotations_rotations_3d_axis_7474"
+file = "rotations_3d_axis_7474.jl"
+expected = true
+description = "Phase 3 (Issue #7474): single-axis 3-D rotations RotX/RotY/RotZ — construction (incl. typed Float32), column-major Tuple, vector rotation, rotation_angle/rotation_axis, inverse, same-axis composition, size/getindex; values match upstream Rotations 1.7.1"
+
+[[tests]]
+name = "rotations_rotations_angleaxis_7474"
+file = "rotations_angleaxis_7474.jl"
+expected = true
+description = "Phase 3 (Issue #7474): AngleAxis axis-angle rotation — outer constructor renormalises the axis, Rodrigues column-major Tuple, vector rotation (manual tuple matvec avoiding boxed-SMatrix dispatch #8090), rotation_angle/rotation_axis, Rotations.params, inverse round-trip, AngleAxis-about-Z equals RotZ, length preservation, size; values match upstream Rotations 1.7.1"
+
+[[tests]]
+name = "rotations_rotations_param3_7474"
+file = "rotations_param3_7474.jl"
+expected = true
+description = "Phase 3 (Issue #7474): the three-parameter parametrisations RotationVec, RodriguesParam and MRP — each realises its rotation matrix through a unit quaternion (matching upstream); checks Tuple, vector rotation, rotation_angle/rotation_axis, Rotations.params, inverse round-trip, identity and size against the equivalent RotZ rotation; values match upstream Rotations 1.7.1"
+
+[[tests]]
+name = "rotations_rotations_quatrotation_7475"
+file = "rotations_quatrotation_7475.jl"
+expected = true
+description = "Phase 4 (Issue #7475): QuatRotation unit-quaternion rotation — construction with renormalisation, column-major Tuple, vector rotation, Rotations.params (w,x,y,z), rotation_angle/rotation_axis, inverse round-trip, quaternion composition (q*q == RotZ(2θ)), identity, size, and slerp halfway interpolation; values match upstream Rotations 1.7.1"
+
+[[tests]]
+name = "rotations_rotations_rotation_between_7475"
+file = "rotations_rotation_between_7475.jl"
+expected = true
+description = "Phase 4 (Issue #7475): rotation_between(u,v) — shortest-geodesic rotation aligning u with v; returns Angle2d for 2-D inputs and QuatRotation for 3-D, mapping û onto v̂, preserving length, handling axis-aligned and identical-vector cases; values match upstream Rotations 1.7.1"
+
+[[tests]]
+name = "rotations_rotations_generators_7476"
+file = "rotations_generators_7476.jl"
+expected = true
+description = "Phase 5 (Issue #7476): rotation generators — Angle2dGenerator/RotationVecGenerator skew-symmetric matrices (column-major Tuple, indexing, same-type +/-/scalar*/negation/transpose, params), plus Rotations.skew and isrotationgenerator; values match upstream Rotations 1.7.1"

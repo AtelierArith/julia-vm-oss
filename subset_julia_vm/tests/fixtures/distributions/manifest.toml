@@ -1,0 +1,143 @@
+[[tests]]
+name = "distributions_normal"
+file = "distributions_normal.jl"
+expected = true
+description = "Distributions: Normal pdf/cdf/quantile/mean/var/entropy reference values (Issue #7178)"
+
+[[tests]]
+name = "distributions_uniform_exponential"
+file = "distributions_uniform_exponential.jl"
+expected = true
+description = "Distributions: Uniform and Exponential reference values and support (Issue #7178)"
+
+[[tests]]
+name = "distributions_gamma_beta"
+file = "distributions_gamma_beta.jl"
+expected = true
+description = "Distributions: Gamma and Beta pdf/cdf/quantile/mode reference values (Issue #7178)"
+
+[[tests]]
+name = "distributions_cauchy_lognormal_weibull"
+file = "distributions_cauchy_lognormal_weibull.jl"
+expected = true
+description = "Distributions: Cauchy, LogNormal, Weibull reference values (Issue #7178)"
+
+[[tests]]
+name = "distributions_sampling"
+file = "distributions_sampling.jl"
+expected = true
+description = "Distributions: seeded global-RNG sampling empirical-mean sanity for continuous distributions (Issue #7178)"
+
+[[tests]]
+name = "distributions_discrete"
+file = "distributions_discrete.jl"
+expected = true
+description = "Distributions: Bernoulli, Binomial, Poisson, Geometric, DiscreteUniform, Categorical pmf/cdf/quantile/mean/var reference values (Issues #7178, #7260)"
+
+[[tests]]
+name = "distributions_discrete_sampling"
+file = "distributions_discrete_sampling.jl"
+expected = true
+description = "Distributions: seeded global-RNG sampling empirical-mean sanity for discrete distributions (Issue #7178)"
+
+[[tests]]
+name = "distributions_discrete_expansion_7330"
+file = "distributions_discrete_expansion_7330.jl"
+expected = true
+description = "Distributions: NegativeBinomial, Hypergeometric, and BetaBinomial API/sampling sanity (Issue #7330)"
+
+[[tests]]
+name = "distributions_discrete_expansion_7331"
+file = "distributions_discrete_expansion_7331.jl"
+expected = true
+description = "Distributions: Skellam, Dirac, and PoissonBinomial API/sampling sanity (Issue #7331)"
+
+[[tests]]
+name = "distributions_parity_7332"
+file = "distributions_parity_7332.jl"
+expected = true
+description = "Distributions: Test.jl parity rollup across milestone 31 distributions and APIs (Issue #7332)"
+
+[[tests]]
+name = "distributions_sampler_api_7323"
+file = "distributions_sampler_api_7323.jl"
+expected = true
+description = "Distributions: explicit-RNG rand(rng,d), rand(d,dims), rand(rng,d,dims), rand!, and sampler support for bundled distributions (Issue #7323)"
+
+[[tests]]
+name = "distributions_common_api_7324"
+file = "distributions_common_api_7324.jl"
+expected = true
+description = "Distributions: common univariate API for modes/skewness/kurtosis/mgf/cf/bounds/tail quantiles/loglikelihood/kldivergence (Issue #7324)"
+
+[[tests]]
+name = "distributions_truncated_7325"
+file = "distributions_truncated_7325.jl"
+expected = true
+description = "Distributions: truncated(d, lo, hi), keyword bounds, derived density/CDF/quantile/mean/support, and truncated sampling (Issue #7325)"
+
+[[tests]]
+name = "distributions_mvnormal"
+file = "distributions_mvnormal.jl"
+expected = true
+description = "Distributions: MvNormal mean/cov/var/logpdf/pdf/insupport reference values (Issue #7178)"
+
+[[tests]]
+name = "distributions_mvnormal_sampling"
+file = "distributions_mvnormal_sampling.jl"
+expected = true
+description = "Distributions: seeded global-RNG and explicit-RNG MvNormal sampling sanity (Issues #7178, #7756)"
+
+[[tests]]
+name = "distributions_fit"
+file = "distributions_fit.jl"
+expected = true
+description = "Distributions: MLE fit/fit_mle for Normal, Bernoulli, Exponential, Poisson, Geometric, Uniform, MvNormal (Issue #7178)"
+
+[[tests]]
+name = "distributions_fit_suffstats_7326"
+file = "distributions_fit_suffstats_7326.jl"
+expected = true
+description = "Distributions: suffstats-backed fit/fit_mle for major continuous and discrete univariate distributions (Issue #7326)"
+
+[[tests]]
+name = "distributions_fit_mle_datatype_return_8414"
+file = "distributions_fit_mle_datatype_return_8414.jl"
+expected = true
+description = "Distributions: fit_mle(Binomial, n, data) call-site inference keeps the Binomial result instead of narrowing the assignment to nothing (Issue #8414)"
+
+[[tests]]
+name = "distributions_test_dists_7327"
+file = "distributions_test_dists_7327.jl"
+expected = true
+description = "Distributions: TDist, Chisq, and FDist pdf/cdf/quantile/moments/sampling sanity (Issue #7327)"
+
+[[tests]]
+name = "distributions_continuous_expansion_7328"
+file = "distributions_continuous_expansion_7328.jl"
+expected = true
+description = "Distributions: Laplace, Logistic, Rayleigh, Pareto, Gumbel, Frechet, and Levy API/sampling sanity (Issue #7328)"
+
+[[tests]]
+name = "distributions_continuous_expansion_7329"
+file = "distributions_continuous_expansion_7329.jl"
+expected = true
+description = "Distributions: Chi, Erlang, InverseGamma, InverseGaussian, Arcsine, TriangularDist, SymTriangularDist, Cosine, Semicircle, and Kumaraswamy API/sampling sanity (Issue #7329)"
+
+[[tests]]
+name = "distributions_median_dispatch"
+file = "distributions_median_dispatch.jl"
+expected = true
+description = "Distributions: median(d::Distribution) and the abstract d::Distribution method family dispatch to the typed methods extending imported Statistics generics, not the untyped fallback (Issue #7265)"
+
+[[tests]]
+name = "distributions_categorical_parametric"
+file = "distributions_categorical_parametric.jl"
+expected = true
+description = "Distributions: typed methods (var/mean/mode/quantile/ncategories) on the upstream-faithful parametric Categorical{T<:Real} struct beat the untyped Statistics generic (Issue #7263)"
+
+[[tests]]
+name = "distributions_normal_integer_args_7284"
+file = "distributions_normal_integer_args_7284.jl"
+expected = true
+description = "Distributions: Normal(2, 3) with integer args promotes to Normal{Float64}; inline mean/var/std and direct field access no longer fail with 'expected I64, got Float64' from a Normal{Int64} mis-inference (Issue #7284)"

@@ -28,21 +28,25 @@ function mandelbrot_grid(width, height, maxiter)
     mandelbrot_escape.(C, Ref(maxiter))
 end
 
-# ASCII visualization
-@time grid = mandelbrot_grid(50, 25, 50)
-println("Mandelbrot Set (50x25):")
-for row in 1:25
-    for col in 1:50
-        n = grid[row, col]
-        if n == 50
-            print("#")
-        elseif n > 25
-            print("+")
-        elseif n > 10
-            print(".")
-        else
-            print(" ")
+function main()
+    # ASCII visualization
+    @time grid = mandelbrot_grid(50, 25, 50)
+    println("Mandelbrot Set (50x25):")
+    for row in 1:25
+        for col in 1:50
+            n = grid[row, col]
+            if n == 50
+                print("#")
+            elseif n > 25
+                print("+")
+            elseif n > 10
+                print(".")
+            else
+                print(" ")
+            end
         end
+        println("")
     end
-    println("")
 end
+
+main()

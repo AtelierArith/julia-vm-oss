@@ -4,6 +4,7 @@
 //! during macro expansion. Also includes hygiene helpers for variable collection.
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
+use crate::expr_heads::ExprHead;
 use crate::ir::core::{BinaryOp, BuiltinOp, Expr, Literal};
 use crate::lowering::{LambdaContext, LowerResult};
 use crate::parser::cst::{CstWalker, Node};
@@ -14,6 +15,40 @@ use super::code_generation::{expr_to_block, quote_constructor_to_code_with_hygie
 use super::HygieneContext;
 
 // Helper functions for handling different expression heads
+
+fn lower_quote_splice_arg<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    // MacroTools @q/@match templates pass interpolation nodes back through quote
+    // expansion. Strip the interpolation shell before lowering the value that
+    // should be spliced (Issue #7541).
+    match walker.kind(&node) {
+        crate::parser::cst::NodeKind::UnaryExpression if walker.text(&node).starts_with('$') => {
+            let children = walker.named_children(&node);
+            if let Some(inner) = children.last().copied() {
+                return lower_quote_splice_arg(walker, inner, lambda_ctx);
+            }
+            lower_expr_with_ctx(walker, node, lambda_ctx)
+        }
+        crate::parser::cst::NodeKind::ParenthesizedExpression => {
+            let children = walker.named_children(&node);
+            if let Some(inner) = children.first().copied() {
+                return lower_quote_splice_arg(walker, inner, lambda_ctx);
+            }
+            lower_expr_with_ctx(walker, node, lambda_ctx)
+        }
+        crate::parser::cst::NodeKind::SplatExpression => {
+            let children = walker.named_children(&node);
+            if let Some(inner) = children.first().copied() {
+                return lower_expr_with_ctx(walker, inner, lambda_ctx);
+            }
+            lower_expr_with_ctx(walker, node, lambda_ctx)
+        }
+        _ => lower_expr_with_ctx(walker, node, lambda_ctx),
+    }
+}
 
 pub(super) fn handle_call_expr<'a>(
     builtin_args: &[Expr],
@@ -61,7 +96,7 @@ pub(super) fn handle_call_expr<'a>(
                 if let Some(idx) = params.iter().position(|p| p == param_name) {
                     // Expand all arguments from this index onwards (varargs)
                     for arg_node in &args[idx..] {
-                        let expanded = lower_expr_with_ctx(walker, *arg_node, lambda_ctx)?;
+                        let expanded = lower_quote_splice_arg(walker, *arg_node, lambda_ctx)?;
                         call_args.push(expanded);
                     }
                     continue;
@@ -129,6 +164,26 @@ pub(super) fn handle_call_expr<'a>(
     // Check if it's a range expression (:)
     if func_symbol == ":" {
         if call_args.len() == 2 {
+            // The parser nests a step range `a:b:c` as `(a:b):c`, so a quoted /
+            // `esc`-ed step range arrives here as a 2-arg colon whose first operand
+            // is itself a 2-arg `Expr::Range`. Flatten it to `start:step:stop`,
+            // mirroring `lower_range_expr` (collection.rs); otherwise re-lowering
+            // builds `Range : stop` and the VM fails with "expected numeric value,
+            // got Range" (Issue #7020, surfaced by `@animate`/`@gif`, Issue #6355).
+            if let Expr::Range {
+                start: inner_start,
+                stop: inner_stop,
+                step: None,
+                ..
+            } = &call_args[0]
+            {
+                return Ok(Expr::Range {
+                    start: inner_start.clone(),
+                    stop: Box::new(call_args[1].clone()),
+                    step: Some(inner_stop.clone()),
+                    span,
+                });
+            }
             // Simple range: start:end
             return Ok(Expr::Range {
                 start: Box::new(call_args[0].clone()),
@@ -187,23 +242,57 @@ pub(super) fn handle_block_expr<'a>(
         {
             if inner_args.len() >= 2 {
                 if let Ok(head) = extract_symbol_from_constructor(&inner_args[0]) {
-                    match head.as_str() {
-                        "=" => {
-                            if inner_args.len() >= 3 {
-                                let orig_var_name =
-                                    extract_symbol_from_constructor(&inner_args[1])?;
-                                // Apply hygiene renaming to the variable name
-                                let var_name = hygiene.resolve(&orig_var_name);
-                                let value = quote_constructor_to_code_with_hygiene(
-                                    &inner_args[2],
-                                    params,
-                                    args,
+                    match ExprHead::from_name(&head) {
+                        Some(ExprHead::Assign) if inner_args.len() >= 3 => {
+                            let var_name = assignment_target_name(
+                                &inner_args[1],
+                                params,
+                                args,
+                                walker,
+                                hygiene,
+                            )?;
+                            let value = quote_constructor_to_code_with_hygiene(
+                                &inner_args[2],
+                                params,
+                                args,
+                                span,
+                                walker,
+                                lambda_ctx,
+                                hygiene,
+                                has_varargs,
+                            )?;
+                            stmts.push(crate::ir::core::Stmt::Assign {
+                                var: var_name,
+                                value,
+                                span,
+                            });
+                            continue;
+                        }
+                        Some(ExprHead::Const) if inner_args.len() >= 2 => {
+                            if let Some((var_name, value)) = const_assignment_parts(
+                                &inner_args[1],
+                                params,
+                                args,
+                                span,
+                                walker,
+                                lambda_ctx,
+                                hygiene,
+                                has_varargs,
+                            )? {
+                                stmts.push(crate::ir::core::Stmt::Expr {
+                                    expr: Expr::Call {
+                                        function: "#__sjulia_declare_const__".to_string(),
+                                        args: vec![Expr::Literal(
+                                            Literal::Str(var_name.clone()),
+                                            span,
+                                        )],
+                                        kwargs: Vec::new(),
+                                        splat_mask: vec![false],
+                                        kwargs_splat_mask: Vec::new(),
+                                        span,
+                                    },
                                     span,
-                                    walker,
-                                    lambda_ctx,
-                                    hygiene,
-                                    has_varargs,
-                                )?;
+                                });
                                 stmts.push(crate::ir::core::Stmt::Assign {
                                     var: var_name,
                                     value,
@@ -212,7 +301,7 @@ pub(super) fn handle_block_expr<'a>(
                                 continue;
                             }
                         }
-                        "local" => {
+                        Some(ExprHead::Local) => {
                             if inner_args.len() >= 2 {
                                 let local_inner = &inner_args[1];
                                 if let Expr::Builtin {
@@ -226,13 +315,16 @@ pub(super) fn handle_block_expr<'a>(
                                             extract_symbol_from_constructor(&local_assign_args[0])
                                         {
                                             // Check for Expr(:(=), :var, value) pattern
-                                            if local_head == "=" {
-                                                let orig_var_name =
-                                                    extract_symbol_from_constructor(
-                                                        &local_assign_args[1],
-                                                    )?;
-                                                // Apply hygiene renaming
-                                                let var_name = hygiene.resolve(&orig_var_name);
+                                            if ExprHead::from_name(&local_head)
+                                                == Some(ExprHead::Assign)
+                                            {
+                                                let var_name = assignment_target_name(
+                                                    &local_assign_args[1],
+                                                    params,
+                                                    args,
+                                                    walker,
+                                                    hygiene,
+                                                )?;
                                                 let value = quote_constructor_to_code_with_hygiene(
                                                     &local_assign_args[2],
                                                     params,
@@ -257,13 +349,13 @@ pub(super) fn handle_block_expr<'a>(
                                                     &local_assign_args[1],
                                                 ) {
                                                     if op == "=" {
-                                                        let orig_var_name =
-                                                            extract_symbol_from_constructor(
-                                                                &local_assign_args[2],
-                                                            )?;
-                                                        // Apply hygiene renaming
-                                                        let var_name =
-                                                            hygiene.resolve(&orig_var_name);
+                                                        let var_name = assignment_target_name(
+                                                            &local_assign_args[2],
+                                                            params,
+                                                            args,
+                                                            walker,
+                                                            hygiene,
+                                                        )?;
                                                         let value =
                                                             quote_constructor_to_code_with_hygiene(
                                                                 &local_assign_args[3],
@@ -315,6 +407,27 @@ pub(super) fn handle_block_expr<'a>(
         stmts.push(crate::ir::core::Stmt::Expr { expr, span });
     }
 
+    // If the block's tail statement is a `try` (lowered by `handle_try_expr` to a
+    // `LetBlock` wrapping a single bare `Stmt::Try`), rewrite it into a
+    // value-producing try so a `try/catch[/else/finally]` at the tail of a
+    // macro-expansion block yields the executed branch's value rather than
+    // `nothing`. This is what `@lock`'s `try … finally unlock(…) end` tail needs
+    // in value position (Issue #7806). Non-tail trys keep the bare-statement form
+    // so statement-position expansions (e.g. `@test_throws`) are unaffected.
+    if let Some(crate::ir::core::Stmt::Expr {
+        expr: tail_expr,
+        span: tail_span,
+    }) = stmts.last()
+    {
+        if let Some(value_try) = try_letblock_into_value_expr(tail_expr, *tail_span) {
+            let last_idx = stmts.len() - 1;
+            stmts[last_idx] = crate::ir::core::Stmt::Expr {
+                expr: value_try,
+                span: *tail_span,
+            };
+        }
+    }
+
     if stmts.is_empty() {
         // Empty block evaluates to nothing
         Ok(Expr::Literal(Literal::Nothing, span))
@@ -346,6 +459,94 @@ pub(super) fn handle_block_expr<'a>(
             span,
         })
     }
+}
+
+struct QuoteAssignment<'a> {
+    target: &'a Expr,
+    value: &'a Expr,
+}
+
+fn assignment_constructor_parts(expr: &Expr) -> LowerResult<Option<QuoteAssignment<'_>>> {
+    let Expr::Builtin {
+        name: BuiltinOp::ExprNew,
+        args,
+        ..
+    } = expr
+    else {
+        return Ok(None);
+    };
+    if args.len() < 3 {
+        return Ok(None);
+    }
+    let head = extract_symbol_from_constructor(&args[0])?;
+    if head == "=" {
+        return Ok(Some(QuoteAssignment {
+            target: &args[1],
+            value: &args[2],
+        }));
+    }
+    if head == "call" && args.len() >= 4 {
+        let op = extract_symbol_from_constructor(&args[1])?;
+        if op == "=" {
+            return Ok(Some(QuoteAssignment {
+                target: &args[2],
+                value: &args[3],
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn const_assignment_parts<'a>(
+    expr: &Expr,
+    params: &[String],
+    args: &[Node<'a>],
+    span: crate::span::Span,
+    walker: &CstWalker<'a>,
+    lambda_ctx: &LambdaContext,
+    hygiene: &HygieneContext,
+    has_varargs: bool,
+) -> LowerResult<Option<(String, Expr)>> {
+    let Some(assignment) = assignment_constructor_parts(expr)? else {
+        return Ok(None);
+    };
+    let var_name = assignment_target_name(assignment.target, params, args, walker, hygiene)?;
+    let value = quote_constructor_to_code_with_hygiene(
+        assignment.value,
+        params,
+        args,
+        span,
+        walker,
+        lambda_ctx,
+        hygiene,
+        has_varargs,
+    )?;
+    Ok(Some((var_name, value)))
+}
+
+fn assignment_target_name<'a>(
+    expr: &Expr,
+    params: &[String],
+    args: &[Node<'a>],
+    walker: &CstWalker<'a>,
+    hygiene: &HygieneContext,
+) -> LowerResult<String> {
+    let mut name = match expr {
+        Expr::Var(name, _) => {
+            if let Some(idx) = params.iter().position(|param| param == name) {
+                walker.text(&args[idx]).trim_start_matches(':').to_string()
+            } else {
+                name.clone()
+            }
+        }
+        _ => extract_symbol_from_constructor(expr)?,
+    };
+    if let Some(param_name) = name.strip_prefix('$') {
+        if let Some(idx) = params.iter().position(|param| param == param_name) {
+            name = walker.text(&args[idx]).trim_start_matches(':').to_string();
+        }
+    }
+    Ok(hygiene.resolve(&name))
 }
 
 pub(super) fn handle_macrocall_expr<'a>(
@@ -506,7 +707,7 @@ pub(super) fn handle_tuple_expr<'a>(
                     if let Some(idx) = params.iter().position(|p| p == param_name) {
                         // Expand all arguments from this index onwards (varargs)
                         for arg_node in &args[idx..] {
-                            let expanded = lower_expr_with_ctx(walker, *arg_node, lambda_ctx)?;
+                            let expanded = lower_quote_splice_arg(walker, *arg_node, lambda_ctx)?;
                             elements.push(expanded);
                         }
                         continue;
@@ -530,6 +731,25 @@ pub(super) fn handle_tuple_expr<'a>(
     }
 }
 
+/// If `expr` is the `LetBlock { [Stmt::Try] }` shape that `handle_try_expr`
+/// produces, convert it into the equivalent *value-producing* try expression so
+/// a `try` at the tail of a macro-expansion block yields the executed branch's
+/// value (Issue #7806). Returns `None` for any other expression shape (leaving
+/// non-try tails and statement-position trys untouched).
+fn try_letblock_into_value_expr(expr: &Expr, span: crate::span::Span) -> Option<Expr> {
+    if let Expr::LetBlock { bindings, body, .. } = expr {
+        if bindings.is_empty() && body.stmts.len() == 1 {
+            if let crate::ir::core::Stmt::Try { .. } = &body.stmts[0] {
+                return crate::lowering::expr::try_stmt_into_value_expr(
+                    body.stmts[0].clone(),
+                    span,
+                );
+            }
+        }
+    }
+    None
+}
+
 pub(super) fn handle_try_expr<'a>(
     builtin_args: &[Expr],
     params: &[String],
@@ -540,13 +760,21 @@ pub(super) fn handle_try_expr<'a>(
     hygiene: &HygieneContext,
     has_varargs: bool,
 ) -> LowerResult<Expr> {
-    // Expr(:try, try_block, catch_var_or_false, catch_block_or_false[, finally_block])
-    // Convert to Stmt::Try wrapped in LetBlock
-
-    if builtin_args.len() < 4 {
+    // Expr(:try, try_block, catch_var_or_false, catch_block_or_false,
+    //      [finally_block_or_false[, else_block]])
+    // Convert to a value-producing Stmt::Try (LetBlock).
+    //
+    // Upstream Julia stores the `:try` head with the `finally`/`else` slots
+    // optional, so the catch-only form (no `finally`) is the valid 3-arg shape
+    // `[try_block, catch_var_or_false, catch_block_or_false]` — with the head
+    // symbol in `builtin_args[0]` this is `builtin_args.len() == 4`. The previous
+    // `< 4` guard already accepted that, but the catch-only shape can also arrive
+    // with the `catch_block` omitted; accept `>= 3` (head + try_block + catch_var)
+    // since the `builtin_args[3..]` reads below are length-guarded (Issue #7832).
+    if builtin_args.len() < 3 {
         return Err(UnsupportedFeature::new(
             UnsupportedFeatureKind::UnsupportedExpression(
-                "try expression requires at least 4 arguments (head, try_block, catch_var, catch_block)"
+                "try expression requires at least 3 arguments (head, try_block, catch_var)"
                     .to_string(),
             ),
             span,
@@ -567,33 +795,36 @@ pub(super) fn handle_try_expr<'a>(
     let try_block = expr_to_block(try_block_expr, span);
 
     // Parse catch variable (builtin_args[2]) - can be false or a symbol
-    let catch_var = if let Expr::Literal(Literal::Bool(false), _) = &builtin_args[2] {
-        None
-    } else if let Ok(var_name) = extract_symbol_from_constructor(&builtin_args[2]) {
-        Some(hygiene.resolve(&var_name))
-    } else {
-        None
+    let catch_var = match builtin_args.get(2) {
+        Some(Expr::Literal(Literal::Bool(false), _)) | None => None,
+        Some(other) => extract_symbol_from_constructor(other)
+            .ok()
+            .map(|var_name| hygiene.resolve(&var_name)),
     };
 
-    // Parse catch block (builtin_args[3]) - can be false or a block
-    let catch_block = if let Expr::Literal(Literal::Bool(false), _) = &builtin_args[3] {
-        None
-    } else {
-        let catch_block_expr = quote_constructor_to_code_with_hygiene(
-            &builtin_args[3],
-            params,
-            args,
-            span,
-            walker,
-            lambda_ctx,
-            hygiene,
-            has_varargs,
-        )?;
-        Some(expr_to_block(catch_block_expr, span))
+    // Parse catch block (builtin_args[3]) - can be false or a block, and is
+    // absent entirely for the catch-only 3-arg shape (Issue #7832).
+    let catch_block = match builtin_args.get(3) {
+        Some(Expr::Literal(Literal::Bool(false), _)) | None => None,
+        Some(catch_constructor) => {
+            let catch_block_expr = quote_constructor_to_code_with_hygiene(
+                catch_constructor,
+                params,
+                args,
+                span,
+                walker,
+                lambda_ctx,
+                hygiene,
+                has_varargs,
+            )?;
+            Some(expr_to_block(catch_block_expr, span))
+        }
     };
 
-    // Parse finally block (builtin_args[4]) if present
-    let finally_block = if builtin_args.len() > 4 {
+    // Parse finally block (builtin_args[4]) if present and not false.
+    let finally_block = if builtin_args.len() > 4
+        && !matches!(&builtin_args[4], Expr::Literal(Literal::Bool(false), _))
+    {
         let finally_block_expr = quote_constructor_to_code_with_hygiene(
             &builtin_args[4],
             params,
@@ -609,12 +840,34 @@ pub(super) fn handle_try_expr<'a>(
         None
     };
 
-    // Create Stmt::Try and wrap in LetBlock
+    // Parse else block (builtin_args[5]) if present.
+    let else_block = if builtin_args.len() > 5 {
+        let else_block_expr = quote_constructor_to_code_with_hygiene(
+            &builtin_args[5],
+            params,
+            args,
+            span,
+            walker,
+            lambda_ctx,
+            hygiene,
+            has_varargs,
+        )?;
+        Some(expr_to_block(else_block_expr, span))
+    } else {
+        None
+    };
+
+    // Create Stmt::Try and wrap in a LetBlock. The bare statement form is used
+    // for statement-position trys (e.g. the `@test_throws` expansion's
+    // `try …; catch …; end` whose value is discarded); the surrounding block's
+    // tail-value handling (`handle_block_expr`) routes a try that is the block's
+    // last expression through `try_stmt_into_value_expr` so value-position trys
+    // (e.g. `@lock`, Issue #7806) still yield the executed branch's value.
     let try_stmt = crate::ir::core::Stmt::Try {
         try_block,
         catch_var,
         catch_block,
-        else_block: None,
+        else_block,
         finally_block,
         span,
     };
@@ -948,62 +1201,64 @@ pub(in crate::lowering::expr) fn collect_introduced_vars(
             args: builtin_args,
             ..
         } => {
-            if builtin_args.len() >= 2 {
-                if let Ok(head) = extract_symbol_from_constructor(&builtin_args[0]) {
-                    match head.as_str() {
-                        "call" => {
-                            // Check if this is esc(...) call
-                            if builtin_args.len() >= 3 {
-                                if let Ok(func) = extract_symbol_from_constructor(&builtin_args[1])
-                                {
-                                    if func == "esc" {
-                                        // Inside esc() - recurse with in_esc=true
-                                        for arg in &builtin_args[2..] {
-                                            collect_introduced_vars(arg, hygiene, true);
-                                        }
-                                        return;
-                                    }
+            // Note: use early-return rather than a `if builtin_args.len() >= 2` guard on the
+            // match arm: the next arm `Expr::Builtin { args, .. }` would otherwise silently
+            // match and recurse on len-0/1 ExprNew, which is a behavior change. (#3626)
+            if builtin_args.len() < 2 {
+                return;
+            }
+            let Ok(head) = extract_symbol_from_constructor(&builtin_args[0]) else {
+                return;
+            };
+            match ExprHead::from_name(&head) {
+                Some(ExprHead::Call) => {
+                    // Check if this is esc(...) call
+                    if builtin_args.len() >= 3 {
+                        if let Ok(func) = extract_symbol_from_constructor(&builtin_args[1]) {
+                            if func == "esc" {
+                                // Inside esc() - recurse with in_esc=true
+                                for arg in &builtin_args[2..] {
+                                    collect_introduced_vars(arg, hygiene, true);
                                 }
-                            }
-                            // Regular call - recurse into arguments
-                            for arg in &builtin_args[2..] {
-                                collect_introduced_vars(arg, hygiene, in_esc);
+                                return;
                             }
                         }
-                        "local" => {
-                            // local declaration - collect variable names (unless in esc)
-                            if !in_esc {
-                                for inner in &builtin_args[1..] {
-                                    collect_local_var_name(inner, hygiene);
-                                }
-                            }
+                    }
+                    // Regular call - recurse into arguments
+                    for arg in &builtin_args[2..] {
+                        collect_introduced_vars(arg, hygiene, in_esc);
+                    }
+                }
+                Some(ExprHead::Local) => {
+                    // local declaration - collect variable names (unless in esc)
+                    if !in_esc {
+                        for inner in &builtin_args[1..] {
+                            collect_local_var_name(inner, hygiene);
                         }
-                        "=" => {
-                            // Assignment - collect the target variable (unless in esc)
-                            if !in_esc && builtin_args.len() >= 3 {
-                                if let Ok(var_name) =
-                                    extract_symbol_from_constructor(&builtin_args[1])
-                                {
-                                    hygiene.register_local(&var_name);
-                                }
-                            }
-                            // Recurse into value
-                            if builtin_args.len() >= 3 {
-                                collect_introduced_vars(&builtin_args[2], hygiene, in_esc);
-                            }
+                    }
+                }
+                Some(ExprHead::Assign) => {
+                    // Assignment - collect the target variable (unless in esc)
+                    if !in_esc && builtin_args.len() >= 3 {
+                        if let Ok(var_name) = extract_symbol_from_constructor(&builtin_args[1]) {
+                            hygiene.register_local(&var_name);
                         }
-                        "block" => {
-                            // Block - recurse into all statements
-                            for stmt in &builtin_args[1..] {
-                                collect_introduced_vars(stmt, hygiene, in_esc);
-                            }
-                        }
-                        _ => {
-                            // Other expression heads - recurse into arguments
-                            for arg in &builtin_args[1..] {
-                                collect_introduced_vars(arg, hygiene, in_esc);
-                            }
-                        }
+                    }
+                    // Recurse into value
+                    if builtin_args.len() >= 3 {
+                        collect_introduced_vars(&builtin_args[2], hygiene, in_esc);
+                    }
+                }
+                Some(ExprHead::Block) => {
+                    // Block - recurse into all statements
+                    for stmt in &builtin_args[1..] {
+                        collect_introduced_vars(stmt, hygiene, in_esc);
+                    }
+                }
+                _ => {
+                    // Other expression heads - recurse into arguments
+                    for arg in &builtin_args[1..] {
+                        collect_introduced_vars(arg, hygiene, in_esc);
                     }
                 }
             }
@@ -1037,22 +1292,18 @@ fn collect_local_var_name(inner: &Expr, hygiene: &mut HygieneContext) {
             name: BuiltinOp::ExprNew,
             args: inner_args,
             ..
-        } => {
-            if inner_args.len() >= 2 {
-                if let Ok(head) = extract_symbol_from_constructor(&inner_args[0]) {
-                    if head == "=" && inner_args.len() >= 3 {
-                        if let Ok(var_name) = extract_symbol_from_constructor(&inner_args[1]) {
-                            hygiene.register_local(&var_name);
-                        }
-                    } else if head == "call" && inner_args.len() >= 4 {
-                        // Expr(:call, :(=), :var, value) pattern
-                        if let Ok(op) = extract_symbol_from_constructor(&inner_args[1]) {
-                            if op == "=" {
-                                if let Ok(var_name) =
-                                    extract_symbol_from_constructor(&inner_args[2])
-                                {
-                                    hygiene.register_local(&var_name);
-                                }
+        } if inner_args.len() >= 2 => {
+            if let Ok(head) = extract_symbol_from_constructor(&inner_args[0]) {
+                if head == "=" && inner_args.len() >= 3 {
+                    if let Ok(var_name) = extract_symbol_from_constructor(&inner_args[1]) {
+                        hygiene.register_local(&var_name);
+                    }
+                } else if head == "call" && inner_args.len() >= 4 {
+                    // Expr(:call, :(=), :var, value) pattern
+                    if let Ok(op) = extract_symbol_from_constructor(&inner_args[1]) {
+                        if op == "=" {
+                            if let Ok(var_name) = extract_symbol_from_constructor(&inner_args[2]) {
+                                hygiene.register_local(&var_name);
                             }
                         }
                     }

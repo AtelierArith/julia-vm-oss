@@ -1,0 +1,23 @@
+[[tests]]
+name = "special_functions_gamma"
+file = "special_functions_gamma.jl"
+expected = true
+description = "SpecialFunctions: gamma and loggamma reference values"
+
+[[tests]]
+name = "special_functions_beta_inc"
+file = "special_functions_beta_inc.jl"
+expected = true
+description = "SpecialFunctions: incomplete beta reference values"
+
+[[tests]]
+name = "special_functions_zeta"
+file = "special_functions_zeta.jl"
+expected = true
+description = "SpecialFunctions: Riemann zeta reference values"
+
+[[tests]]
+name = "special_functions_zeta_hurwitz"
+file = "special_functions_zeta_hurwitz.jl"
+expected = true
+description = "SpecialFunctions: Hurwitz zeta(s,z) and Dirichlet eta(s) reference values"

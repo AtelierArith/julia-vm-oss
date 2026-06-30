@@ -294,6 +294,41 @@ fn test_dispatch_operator_method_definition() {
 }
 
 #[test]
+fn test_dispatch_operator_call_statement_not_definition() {
+    // Issue #5337: A line-leading operator call WITHOUT a trailing `=` is an
+    // ordinary expression statement, NOT an operator method definition. Only
+    // dispatch to parse_operator_method_definition() when an actual `=` follows
+    // the balanced parameter list.
+
+    // Splat call: `+(t...)` -> unary-prefix call expression, not a definition.
+    let node = parse_first("+(t...)");
+    assert_ne!(node.kind, NodeKind::ShortFunctionDefinition);
+
+    // Plain multi-arg call: `+(1, 2)` / `*(2, 3, 4)` -> expression statement.
+    let node = parse_first("+(1, 2)");
+    assert_ne!(node.kind, NodeKind::ShortFunctionDefinition);
+
+    let node = parse_first("*(2, 3, 4)");
+    assert_ne!(node.kind, NodeKind::ShortFunctionDefinition);
+
+    let node = parse_first("-(t...)");
+    assert_ne!(node.kind, NodeKind::ShortFunctionDefinition);
+
+    // Definitions still dispatch correctly, including with a return-type
+    // annotation before the `=` (the `=` is at bracket depth 0).
+    let node = parse_first("+(x, y) = x");
+    assert_eq!(node.kind, NodeKind::ShortFunctionDefinition);
+
+    let node = parse_first("+(x, y)::Int = x");
+    assert_eq!(node.kind, NodeKind::ShortFunctionDefinition);
+
+    // A `=` inside the parameter list (default arg) must NOT be mistaken for the
+    // definition's assignment: `+(x, y)` followed by a call is an expression.
+    let node = parse_first("*(2, 3, 4)\n");
+    assert_ne!(node.kind, NodeKind::ShortFunctionDefinition);
+}
+
+#[test]
 fn test_dispatch_dotted_operator_broadcast() {
     // Dotted operator + peek_next() == Token::LParen -> parse_expression() -> BroadcastCallExpression
     // These are broadcast function calls, NOT operator method definitions.

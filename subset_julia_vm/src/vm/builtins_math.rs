@@ -8,8 +8,11 @@ use crate::builtins::BuiltinId;
 use crate::rng::RngLike;
 
 use super::error::VmError;
+use super::intrinsics_exec::{
+    apply_unary_float_op_with_heap, apply_unary_rounding_op_with_heap, value_to_f64_with_heap,
+};
 use super::stack_ops::StackOps;
-use super::value::{TupleValue, Value};
+use super::value::{RustBigFloat, Value};
 use super::Vm;
 
 /// Safely narrow i64 to i32 by clamping to i32 range.
@@ -17,6 +20,9 @@ use super::Vm;
 fn saturating_i64_to_i32(n: i64) -> i32 {
     n.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
+
+// Note: next_float_f16 / prev_float_f16 / step_f64 / step_f32 / step_f16 removed —
+// nextfloat/prevfloat (1- and 2-arg) are now Pure Julia (base/float.jl, Issue #6740).
 
 /// Safely convert f64 to i32 by clamping to i32 range.
 /// Returns 0 for NaN (matches Rust's saturating float-to-int behavior).
@@ -33,6 +39,9 @@ fn saturating_f64_to_i32(x: f64) -> i32 {
 }
 
 impl<R: RngLike> Vm<R> {
+    // Note: step_next_prev_float_n removed — two-argument nextfloat(x, n)/
+    // prevfloat(x, n) are now Pure Julia (base/float.jl, Issue #6740).
+
     /// Execute math builtin functions.
     /// Returns `Ok(Some(()))` if handled, `Ok(None)` if not a math builtin.
     pub(super) fn execute_builtin_math(
@@ -43,18 +52,45 @@ impl<R: RngLike> Vm<R> {
         match builtin {
             // Note: Trigonometric (Sin, Cos, Tan, Asin, Acos, Atan) removed — now Pure Julia (base/math.jl)
             // Note: Exponential/Logarithmic (Exp, Log) removed — now Pure Julia (base/math.jl)
+            BuiltinId::Sqrt => {
+                let value = self.stack.pop_value()?;
+                let x = value_to_f64_with_heap(&value, &self.struct_heap)?;
+                if x < 0.0 {
+                    self.raise(VmError::DomainError(format!(
+                        "sqrt was called with a negative real argument ({}) but will only return a complex result if called with a complex argument. Try sqrt(Complex(x)).",
+                        x
+                    )))?;
+                    return Ok(Some(()));
+                }
+                self.stack.push(apply_unary_float_op_with_heap(
+                    value,
+                    &self.struct_heap,
+                    f64::sqrt,
+                )?);
+            }
 
             // Rounding
             BuiltinId::Round => {
-                let x = self.pop_f64_or_i64()?;
-                self.stack.push(Value::F64(x.round()));
+                // Julia's default `RoundNearest` is round-half-to-even (banker's
+                // rounding): round(2.5) == 2.0, round(3.5) == 4.0. Rust's
+                // `f64::round` rounds half away from zero, so use
+                // `round_ties_even` to match upstream (round(0.5)==0.0).
+                let value = self.stack.pop_value()?;
+                self.stack.push(apply_unary_rounding_op_with_heap(
+                    value,
+                    &self.struct_heap,
+                    f64::round_ties_even,
+                    RustBigFloat::round_nearest_even,
+                )?);
             }
             BuiltinId::RoundDigits => {
-                // round(x, digits=N) - round to N decimal places (Issue #2051)
+                // round(x, digits=N) - round to N decimal places (Issue #2051).
+                // Uses round-half-to-even per Julia's default RoundNearest.
                 let n = self.stack.pop_i64()?;
                 let x = self.pop_f64_or_i64()?;
                 let factor = 10f64.powi(saturating_i64_to_i32(n));
-                self.stack.push(Value::F64((x * factor).round() / factor));
+                self.stack
+                    .push(Value::F64((x * factor).round_ties_even() / factor));
             }
             BuiltinId::RoundSigDigits => {
                 // round(x, sigdigits=N) - round to N significant digits (Issue #2051)
@@ -65,7 +101,8 @@ impl<R: RngLike> Vm<R> {
                 } else {
                     let d = saturating_f64_to_i32(x.abs().log10().floor() + 1.0);
                     let factor = 10f64.powi(saturating_i64_to_i32(n) - d);
-                    self.stack.push(Value::F64((x * factor).round() / factor));
+                    self.stack
+                        .push(Value::F64((x * factor).round_ties_even() / factor));
                 }
             }
             BuiltinId::FloorDigits => {
@@ -107,8 +144,13 @@ impl<R: RngLike> Vm<R> {
                 }
             }
             BuiltinId::Trunc => {
-                let x = self.pop_f64_or_i64()?;
-                self.stack.push(Value::F64(x.trunc()));
+                let value = self.stack.pop_value()?;
+                self.stack.push(apply_unary_rounding_op_with_heap(
+                    value,
+                    &self.struct_heap,
+                    f64::trunc,
+                    RustBigFloat::trunc,
+                )?);
             }
             BuiltinId::TruncDigits => {
                 // trunc(x, digits=N) - trunc to N decimal places (Issue #2059)
@@ -129,178 +171,141 @@ impl<R: RngLike> Vm<R> {
                     self.stack.push(Value::F64((x * factor).trunc() / factor));
                 }
             }
-            BuiltinId::NextFloat => {
-                let x = self.pop_f64_or_i64()?;
-                let result = if x.is_nan() || x == f64::INFINITY {
-                    x
-                } else if x == f64::NEG_INFINITY {
-                    f64::MIN
-                } else if x == 0.0 {
-                    // Both +0.0 and -0.0 go to smallest positive
-                    f64::from_bits(1)
-                } else if x > 0.0 {
-                    f64::from_bits(x.to_bits() + 1)
-                } else {
-                    // x < 0: decrement bits (moves toward zero)
-                    f64::from_bits(x.to_bits() - 1)
-                };
-                self.stack.push(Value::F64(result));
-            }
-            BuiltinId::PrevFloat => {
-                let x = self.pop_f64_or_i64()?;
-                let result = if x.is_nan() || x == f64::NEG_INFINITY {
-                    x
-                } else if x == f64::INFINITY {
-                    f64::MAX
-                } else if x == 0.0 {
-                    // Both +0.0 and -0.0 go to smallest negative
-                    -f64::from_bits(1)
-                } else if x > 0.0 {
-                    f64::from_bits(x.to_bits() - 1)
-                } else {
-                    // x < 0: increment bits (moves away from zero)
-                    f64::from_bits(x.to_bits() + 1)
-                };
-                self.stack.push(Value::F64(result));
-            }
+            // Note: NextFloat/PrevFloat (1-arg) and NextFloatN/PrevFloatN (2-arg)
+            // removed — nextfloat/prevfloat are now Pure Julia (base/float.jl, Issue #6740).
 
-            // Bit operations (work on integers)
+            // Bit operations (work on integers). Issue #4785: must
+            // dispatch on element type so the bit width is preserved.
+            // Previously all popped via pop_i64 which zero-/sign-
+            // extends narrower types to 64 bits, inflating zero counts.
             BuiltinId::CountOnes => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(i64::from(x.count_ones())));
-            }
-            BuiltinId::CountZeros => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(i64::from(x.count_zeros())));
+                let v = self.stack.pop_value()?;
+                let n = match v {
+                    Value::I8(x) => i64::from(x.count_ones()),
+                    Value::I16(x) => i64::from(x.count_ones()),
+                    Value::I32(x) => i64::from(x.count_ones()),
+                    Value::I64(x) => i64::from(x.count_ones()),
+                    Value::I128(x) => i64::from(x.count_ones()),
+                    Value::U8(x) => i64::from(x.count_ones()),
+                    Value::U16(x) => i64::from(x.count_ones()),
+                    Value::U32(x) => i64::from(x.count_ones()),
+                    Value::U64(x) => i64::from(x.count_ones()),
+                    Value::U128(x) => i64::from(x.count_ones()),
+                    Value::Bool(b) => i64::from(b),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "count_ones: expected integer, got {:?}",
+                            v.value_type()
+                        )))
+                    }
+                };
+                self.stack.push(Value::I64(n));
             }
             BuiltinId::LeadingZeros => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(i64::from(x.leading_zeros())));
-            }
-            BuiltinId::TrailingOnes => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(i64::from(x.trailing_ones())));
+                let v = self.stack.pop_value()?;
+                let n = match v {
+                    Value::I8(x) => i64::from(x.leading_zeros()),
+                    Value::I16(x) => i64::from(x.leading_zeros()),
+                    Value::I32(x) => i64::from(x.leading_zeros()),
+                    Value::I64(x) => i64::from(x.leading_zeros()),
+                    Value::I128(x) => i64::from(x.leading_zeros()),
+                    Value::U8(x) => i64::from(x.leading_zeros()),
+                    Value::U16(x) => i64::from(x.leading_zeros()),
+                    Value::U32(x) => i64::from(x.leading_zeros()),
+                    Value::U64(x) => i64::from(x.leading_zeros()),
+                    Value::U128(x) => i64::from(x.leading_zeros()),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "leading_zeros: expected integer, got {:?}",
+                            v.value_type()
+                        )))
+                    }
+                };
+                self.stack.push(Value::I64(n));
             }
             BuiltinId::Bitreverse => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(x.reverse_bits()));
-            }
-            BuiltinId::LeadingOnes => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(i64::from(x.leading_ones())));
+                let v = self.stack.pop_value()?;
+                let result = match v {
+                    Value::I8(x) => Value::I8(x.reverse_bits()),
+                    Value::I16(x) => Value::I16(x.reverse_bits()),
+                    Value::I32(x) => Value::I32(x.reverse_bits()),
+                    Value::I64(x) => Value::I64(x.reverse_bits()),
+                    Value::I128(x) => Value::I128(x.reverse_bits()),
+                    Value::U8(x) => Value::U8(x.reverse_bits()),
+                    Value::U16(x) => Value::U16(x.reverse_bits()),
+                    Value::U32(x) => Value::U32(x.reverse_bits()),
+                    Value::U64(x) => Value::U64(x.reverse_bits()),
+                    Value::U128(x) => Value::U128(x.reverse_bits()),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "bitreverse: expected integer, got {:?}",
+                            v.value_type()
+                        )))
+                    }
+                };
+                self.stack.push(result);
             }
             BuiltinId::TrailingZeros => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(i64::from(x.trailing_zeros())));
-            }
-            BuiltinId::Bitrotate => {
-                // bitrotate(x, k) - rotate bits left by k (or right if k < 0)
-                let k = self.stack.pop_i64()?;
-                let x = self.stack.pop_i64()?;
-                // Julia's bitrotate for Int64: rotation amount = k mod 64 (mathematical modulo).
-                // rem_euclid always returns 0..63, safe to cast to u32.
-                // This avoids: (1) truncation in `k as u32`, (2) overflow in `-k` for i64::MIN.
-                let result = x.rotate_left(k.rem_euclid(64) as u32);
-                self.stack.push(Value::I64(result));
+                let v = self.stack.pop_value()?;
+                let n = match v {
+                    Value::I8(x) => i64::from(x.trailing_zeros()),
+                    Value::I16(x) => i64::from(x.trailing_zeros()),
+                    Value::I32(x) => i64::from(x.trailing_zeros()),
+                    Value::I64(x) => i64::from(x.trailing_zeros()),
+                    Value::I128(x) => i64::from(x.trailing_zeros()),
+                    Value::U8(x) => i64::from(x.trailing_zeros()),
+                    Value::U16(x) => i64::from(x.trailing_zeros()),
+                    Value::U32(x) => i64::from(x.trailing_zeros()),
+                    Value::U64(x) => i64::from(x.trailing_zeros()),
+                    Value::U128(x) => i64::from(x.trailing_zeros()),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "trailing_zeros: expected integer, got {:?}",
+                            v.value_type()
+                        )))
+                    }
+                };
+                self.stack.push(Value::I64(n));
             }
             BuiltinId::Bswap => {
-                let x = self.stack.pop_i64()?;
-                self.stack.push(Value::I64(x.swap_bytes()));
+                // Issue #4787: swap bytes within the original integer
+                // type's width and preserve the element type (UInt8
+                // -> UInt8, UInt16 -> UInt16, ...). Was coercing all
+                // narrower types to I64 via pop_i64 and swapping 8
+                // bytes regardless. Mirrors the bit-op fix from #4785.
+                let v = self.stack.pop_value()?;
+                let result = match v {
+                    Value::I8(x) => Value::I8(x.swap_bytes()),
+                    Value::I16(x) => Value::I16(x.swap_bytes()),
+                    Value::I32(x) => Value::I32(x.swap_bytes()),
+                    Value::I64(x) => Value::I64(x.swap_bytes()),
+                    Value::I128(x) => Value::I128(x.swap_bytes()),
+                    Value::U8(x) => Value::U8(x.swap_bytes()),
+                    Value::U16(x) => Value::U16(x.swap_bytes()),
+                    Value::U32(x) => Value::U32(x.swap_bytes()),
+                    Value::U64(x) => Value::U64(x.swap_bytes()),
+                    Value::U128(x) => Value::U128(x.swap_bytes()),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "bswap: expected integer, got {:?}",
+                            v.value_type()
+                        )))
+                    }
+                };
+                self.stack.push(result);
             }
 
-            // Float decomposition (IEEE 754)
-            BuiltinId::Exponent => {
-                // exponent(x) returns the exponent of x as an integer
-                // For normalized numbers: floor(log2(abs(x)))
-                // Special cases: 0 -> error in Julia, we return 0; Inf/NaN -> error
-                let x = self.pop_f64_or_i64()?;
-                if x == 0.0 {
-                    // Julia throws DomainError for 0, we return a sentinel
-                    self.stack.push(Value::I64(i64::MIN));
-                } else if x.is_infinite() || x.is_nan() {
-                    self.stack.push(Value::I64(i64::MAX));
-                } else {
-                    // Extract exponent from IEEE 754 representation
-                    let bits = x.abs().to_bits();
-                    // (bits >> 52) & 0x7FF is at most 2047, always fits in i64
-                    let biased_exp = ((bits >> 52) & 0x7FF) as i64;
-                    let exp = biased_exp - 1023; // Remove bias
-                    self.stack.push(Value::I64(exp));
-                }
-            }
-            BuiltinId::Significand => {
-                // significand(x) returns the significand (mantissa) in [1, 2) for normalized
-                let x = self.pop_f64_or_i64()?;
-                if x == 0.0 || x.is_infinite() || x.is_nan() {
-                    self.stack.push(Value::F64(x));
-                } else {
-                    // Set exponent to 0 (biased 1023) to get value in [1, 2)
-                    let bits = x.to_bits();
-                    let sign_bit = bits & (1u64 << 63);
-                    let mantissa = bits & 0x000F_FFFF_FFFF_FFFF;
-                    let new_bits = sign_bit | (1023u64 << 52) | mantissa;
-                    self.stack.push(Value::F64(f64::from_bits(new_bits)));
-                }
-            }
-            BuiltinId::Frexp => {
-                // frexp(x) returns (significand, exponent) where x = significand * 2^exponent
-                // significand is in [0.5, 1.0) for normalized numbers
-                let x = self.pop_f64_or_i64()?;
-                if x == 0.0 {
-                    // Return (0.0, 0)
-                    self.stack.push(Value::Tuple(TupleValue::new(vec![
-                        Value::F64(0.0),
-                        Value::I64(0),
-                    ])));
-                } else if x.is_infinite() || x.is_nan() {
-                    self.stack.push(Value::Tuple(TupleValue::new(vec![
-                        Value::F64(x),
-                        Value::I64(0),
-                    ])));
-                } else {
-                    let bits = x.abs().to_bits();
-                    // (bits >> 52) & 0x7FF is at most 2047, always fits in i64
-                    let biased_exp = ((bits >> 52) & 0x7FF) as i64;
-                    let exp = biased_exp - 1022; // Adjust for [0.5, 1.0) range
-                                                 // Set exponent to -1 (biased 1022) to get value in [0.5, 1.0)
-                    let sign_bit = x.to_bits() & (1u64 << 63);
-                    let mantissa = bits & 0x000F_FFFF_FFFF_FFFF;
-                    let new_bits = sign_bit | (1022u64 << 52) | mantissa;
-                    let sig = f64::from_bits(new_bits);
-                    self.stack.push(Value::Tuple(TupleValue::new(vec![
-                        Value::F64(sig),
-                        Value::I64(exp),
-                    ])));
-                }
-            }
+            // Note: Float decomposition (Exponent/Significand/Frexp) and inspection
+            // (Issubnormal) removed — now Pure Julia (base/float.jl, Issue #6740).
+            // Note: Maxintfloat removed — Pure Julia (base/floatfuncs.jl, Issue #3732).
+            // Note: Muladd removed — Pure Julia (base/math.jl, Issue #3732).
 
-            // Float inspection
-            BuiltinId::Issubnormal => {
-                let x = self.pop_f64_or_i64()?;
-                // Subnormal: exponent bits are all 0, mantissa is non-zero
-                let bits = x.to_bits();
-                let exp_bits = (bits >> 52) & 0x7FF;
-                let mantissa = bits & 0x000F_FFFF_FFFF_FFFF;
-                let is_subnormal = exp_bits == 0 && mantissa != 0;
-                self.stack.push(Value::Bool(is_subnormal));
-            }
-            BuiltinId::Maxintfloat => {
-                // maxintfloat(Float64) = 2^53 (largest integer exactly representable)
-                // 2^53 = 9007199254740992.0
-                self.stack.push(Value::F64(9007199254740992.0));
-            }
-
-            // Fused multiply-add
+            // Internal IEEE fused multiply-add primitive (Issue #3732).
+            // Pure Julia `fma(x::Float64, y::Float64, z::Float64)` calls `_fma`
+            // to preserve single-rounded fused semantics; non-Float64 forms use
+            // the plain `x*y + z` Pure Julia path.
             BuiltinId::Fma => {
-                // fma(x, y, z) = x*y + z with single rounding
-                let z = self.pop_f64_or_i64()?;
-                let y = self.pop_f64_or_i64()?;
-                let x = self.pop_f64_or_i64()?;
-                self.stack.push(Value::F64(x.mul_add(y, z)));
-            }
-            BuiltinId::Muladd => {
-                // muladd(x, y, z) = x*y + z (may use fma if available)
-                // In Rust, mul_add uses fma when available
+                // _fma(x, y, z) = fma(x, y, z) with single rounding
                 let z = self.pop_f64_or_i64()?;
                 let y = self.pop_f64_or_i64()?;
                 let x = self.pop_f64_or_i64()?;

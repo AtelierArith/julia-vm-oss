@@ -61,6 +61,9 @@ impl<'a> Parser<'a> {
         let mut left_elements = vec![first];
         while self.check(&Token::Comma) {
             self.advance();
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
             // Parse next element (stopping at comma and assignment)
             left_elements.push(self.parse_expression_with_precedence(Precedence::Conditional)?);
         }
@@ -104,6 +107,9 @@ impl<'a> Parser<'a> {
         let mut elements = vec![first];
         while self.check(&Token::Comma) {
             self.advance();
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
             elements.push(self.parse_expression_with_precedence(Precedence::Conditional)?);
         }
 
@@ -166,6 +172,24 @@ impl<'a> Parser<'a> {
     /// Parse a single variable declaration item: x or x = expr or x::T or x::T = expr
     /// Also supports compound assignments: x += expr, x -= expr, etc.
     pub(crate) fn parse_var_declaration_item(&mut self) -> ParseResult<CstNode> {
+        // Short-form function definition as a `local`/`global` declaration item:
+        // `local f(args) = body`, `local f(args) where {T} = body` (Issue #8065).
+        // A `(` immediately following the declared name is a call signature, so the
+        // item is a function definition, not a bare variable. Parse it with the
+        // general expression parser so it yields the same `Assignment` (with a
+        // `CallExpression`/`WhereExpression` target) a top-level `f(args) = body`
+        // produces — a structure the local/global lowering and the quote
+        // constructor already understand. Without this the parser stopped after
+        // the bare name and mis-parsed the `(...) = body` remainder as a separate
+        // statement.
+        if matches!(
+            self.current.as_ref().map(|t| &t.token),
+            Some(Token::Identifier)
+        ) && matches!(self.peek_next(), Some(Token::LParen))
+        {
+            return self.parse_expression();
+        }
+
         let ident = self.parse_identifier()?;
         let ident_start = ident.span.start;
 

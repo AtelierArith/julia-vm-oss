@@ -1,0 +1,47 @@
+[[tests]]
+name = "milestone55_unicode_superscript_identifier_after_infix_8298"
+file = "unicode_superscript_identifier_after_infix_8298.jl"
+expected = true
+description = "Unicode superscript characters can appear in identifiers after an infix operator (Issue #8298)"
+
+[[tests]]
+name = "milestone55_views_macro_assignment_8300"
+file = "views_macro_assignment_8300.jl"
+expected = true
+description = "@views lowers assignment expressions instead of reporting an unknown macro (Issue #8300)"
+
+[[tests]]
+name = "milestone55_pure_macro_noop_8301"
+file = "pure_macro_noop_8301.jl"
+expected = true
+description = "Base.@pure lowers as a compatibility no-op for method definitions (Issue #8301)"
+
+[[tests]]
+name = "milestone55_field_broadcast_assignment_8303"
+file = "field_broadcast_assignment_8303.jl"
+expected = true
+description = "Broadcast assignment and broadcast compound assignment work when the destination is an object field (Issue #8303)"
+
+[[tests]]
+name = "milestone55_multiline_return_tuple_8304"
+file = "multiline_return_tuple_8304.jl"
+expected = true
+description = "A return tuple can continue on the next line after a comma without parentheses (Issue #8304)"
+
+[[tests]]
+name = "milestone55_dot_macro_assignment_8305"
+file = "dot_macro_assignment_8305.jl"
+expected = true
+description = "@. lowers broadcast assignment expressions instead of reporting an unknown macro (Issue #8305)"
+
+[[tests]]
+name = "milestone55_matrix_constructor_8307"
+file = "matrix_constructor_8307.jl"
+expected = true
+description = "Matrix(x) is available as the public matrix conversion constructor (Issue #8307)"
+
+[[tests]]
+name = "milestone55_imported_parametric_inner_constructor_8313"
+file = "imported_parametric_inner_constructor_8313.jl"
+expected = true
+description = "An exported parametric inner constructor imported with using is callable by bare name (Issue #8313)"

@@ -15,3 +15,75 @@ name = "lock_basic"
 file = "lock_basic.jl"
 expected = true
 description = "Test basic lock types and functions: ReentrantLock, lock, unlock, trylock, islocked"
+
+[[tests]]
+name = "task_macros"
+file = "task_macros.jl"
+expected = true
+description = "Test task macros: @task, @async, @sync"
+
+[[tests]]
+name = "concurrency_sync_stmt_assign_local"
+file = "sync_stmt_assign_local.jl"
+expected = true
+description = "Statement-position @sync preserves assignments to surrounding locals (Issue #7768)"
+
+[[tests]]
+name = "concurrency_sync_expr_returns_value"
+file = "sync_expr_returns_value.jl"
+expected = true
+description = "Expression-position @sync yields its body's last-expression value, not nothing (Issue #7813)"
+
+[[tests]]
+name = "channel_bind"
+file = "channel_bind.jl"
+expected = true
+description = "Test bind: channel auto-close when task completes or fails"
+
+[[tests]]
+name = "channel_producer"
+file = "channel_producer.jl"
+expected = true
+description = "Test Channel do-block producer constructor and empty!"
+
+[[tests]]
+name = "channel_typed"
+file = "channel_typed.jl"
+expected = true
+description = "Test Channel{T} parametric typed channels (Issue #3450)"
+
+[[tests]]
+name = "channel_blocking"
+file = "channel_blocking.jl"
+expected = true
+description = "Test cooperative blocking put!/take!/fetch via pending_puts queue (Issue #3451)"
+
+[[tests]]
+name = "concurrency_channel_bugfixes"
+file = "channel_bugfixes.jl"
+expected = true
+description = "Bug fixes: length counts pending_puts (#3454), producer exceptions propagate (#3455), isfull unbuffered (#3456)"
+
+[[tests]]
+name = "concurrency_lock_macro"
+file = "lock_macro.jl"
+expected = true
+description = "Test @lock macro: acquires/releases lock, returns body values, releases on exception (Issues #3499, #7806)"
+
+[[tests]]
+name = "concurrency_timedwait_basic"
+file = "timedwait_basic.jl"
+expected = true
+description = "timedwait polls predicate, returns :ok / :timed_out (Issue #3501)"
+
+[[tests]]
+name = "concurrency_asyncmap_basic"
+file = "asyncmap_basic.jl"
+expected = true
+description = "asyncmap: async/parallel map (Issue #3500) — ntasks, multiple collections, batch_size, validation"
+
+[[tests]]
+name = "concurrency_sync_stmt_for_async"
+file = "sync_stmt_for_async.jl"
+expected = true
+description = "Statement-position @sync over a for-loop spawning @async collects + awaits every task (Issue #7831)"

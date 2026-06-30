@@ -71,7 +71,7 @@ pub(super) fn is_id_char(c: char) -> bool {
 /// - Returns `true` for other keywords like "if", "for", "function" (Julia allows these)
 /// - First character must be a letter, underscore, or Unicode letter
 /// - Remaining characters can be letters, digits, underscores, `!`, or Unicode letters
-pub(super) fn is_valid_identifier(s: &str) -> bool {
+pub(in crate::vm) fn is_valid_identifier(s: &str) -> bool {
     if s.is_empty() {
         return false;
     }
@@ -130,8 +130,14 @@ mod tests {
 
     #[test]
     fn test_is_id_start_char_ascii_letters() {
-        assert!(is_id_start_char('a'), "lowercase letter should be valid start");
-        assert!(is_id_start_char('Z'), "uppercase letter should be valid start");
+        assert!(
+            is_id_start_char('a'),
+            "lowercase letter should be valid start"
+        );
+        assert!(
+            is_id_start_char('Z'),
+            "uppercase letter should be valid start"
+        );
     }
 
     #[test]
@@ -177,8 +183,14 @@ mod tests {
     fn test_is_valid_identifier_simple_names() {
         assert!(is_valid_identifier("x"), "single letter is valid");
         assert!(is_valid_identifier("foo"), "simple name is valid");
-        assert!(is_valid_identifier("foo_bar"), "underscore-separated is valid");
-        assert!(is_valid_identifier("_private"), "leading underscore is valid");
+        assert!(
+            is_valid_identifier("foo_bar"),
+            "underscore-separated is valid"
+        );
+        assert!(
+            is_valid_identifier("_private"),
+            "leading underscore is valid"
+        );
     }
 
     #[test]
@@ -201,16 +213,31 @@ mod tests {
     #[test]
     fn test_is_valid_identifier_boolean_literals_rejected() {
         // Julia's Meta.isidentifier rejects "true" and "false" (only these two)
-        assert!(!is_valid_identifier("true"), "\"true\" is not a valid identifier");
-        assert!(!is_valid_identifier("false"), "\"false\" is not a valid identifier");
+        assert!(
+            !is_valid_identifier("true"),
+            "\"true\" is not a valid identifier"
+        );
+        assert!(
+            !is_valid_identifier("false"),
+            "\"false\" is not a valid identifier"
+        );
     }
 
     #[test]
     fn test_is_valid_identifier_other_keywords_accepted() {
         // Julia keywords (other than booleans) ARE valid identifiers per Meta.isidentifier
-        assert!(is_valid_identifier("if"), "\"if\" is valid per Julia semantics");
-        assert!(is_valid_identifier("for"), "\"for\" is valid per Julia semantics");
-        assert!(is_valid_identifier("function"), "\"function\" is valid per Julia semantics");
+        assert!(
+            is_valid_identifier("if"),
+            "\"if\" is valid per Julia semantics"
+        );
+        assert!(
+            is_valid_identifier("for"),
+            "\"for\" is valid per Julia semantics"
+        );
+        assert!(
+            is_valid_identifier("function"),
+            "\"function\" is valid per Julia semantics"
+        );
     }
 
     // ── is_operator / is_unary_operator / is_binary_operator / is_postfix_operator ─
@@ -238,8 +265,14 @@ mod tests {
 
     #[test]
     fn test_is_binary_operator_non_operators() {
-        assert!(!is_binary_operator(""), "empty string is not a binary operator");
-        assert!(!is_binary_operator("foo"), "identifier is not a binary operator");
+        assert!(
+            !is_binary_operator(""),
+            "empty string is not a binary operator"
+        );
+        assert!(
+            !is_binary_operator("foo"),
+            "identifier is not a binary operator"
+        );
     }
 
     #[test]
@@ -249,7 +282,10 @@ mod tests {
 
     #[test]
     fn test_is_postfix_operator_empty_returns_false() {
-        assert!(!is_postfix_operator(""), "empty string is not a postfix operator");
+        assert!(
+            !is_postfix_operator(""),
+            "empty string is not a postfix operator"
+        );
     }
 
     #[test]

@@ -23,6 +23,40 @@ impl CoreCompiler<'_> {
             return err(format!("operator {} requires at least 2 arguments", op));
         }
 
+        // Issue #5205: when the operator maps to a known BinaryOp, build the
+        // left-folded nested Expr::BinaryOp tree and compile it through
+        // compile_binary_op. That path tracks operand types statically, so
+        // narrow-integer chains such as `a + b + c` (Int8) keep their precise
+        // result type at each step (Int8 + Int8 -> Int8) and use wrapping
+        // (modular) arithmetic, matching upstream Julia. The previous lowering
+        // emitted bare CallDynamicBinaryBoth reductions with no compile-time
+        // type info, so an Int8 intermediate widened to Int64 and then routed
+        // back through the range-checked convert (Issue #5192), throwing
+        // InexactError instead of wrapping. Parenthesized `(a + b) + c` already
+        // reached compile_binary_op, which is why only the flattened chain
+        // regressed.
+        if let Some(binary_op) = function_name_to_binary_op(op) {
+            let span = args[0].span();
+            let mut folded = Expr::BinaryOp {
+                op: binary_op,
+                left: Box::new(args[0].clone()),
+                right: Box::new(args[1].clone()),
+                span,
+            };
+            for arg in args.iter().skip(2) {
+                let next_span = arg.span();
+                folded = Expr::BinaryOp {
+                    op: binary_op,
+                    left: Box::new(folded),
+                    right: Box::new(arg.clone()),
+                    span: next_span,
+                };
+            }
+            return self.compile_expr(&folded);
+        }
+
+        // Fallback for operators without a BinaryOp mapping: left-fold via the
+        // dynamic binary-op call path.
         // Left-fold: +(a, b, c, d) -> +(+(+(a, b), c), d)
         // First, compile args[0] and args[1] as a binary call
         self.compile_expr(&args[0])?;
@@ -116,16 +150,13 @@ impl CoreCompiler<'_> {
                 _ => return err(format!("unsupported nary operator: {}", op)),
             };
 
-            // Build candidates from method table
-            let candidates: Vec<(usize, String, String)> = table
+            // Build candidates from method table (Issue #6496: index-only
+            // payload; the runtime derives the type names from FunctionInfo)
+            let candidates: Vec<usize> = table
                 .methods
                 .iter()
-                .filter(|m| m.params.len() == 2)
-                .map(|m| {
-                    let left_ty = m.params[0].1.to_string();
-                    let right_ty = m.params[1].1.to_string();
-                    (m.global_index, left_ty, right_ty)
-                })
+                .filter(|m| m.param_count() == 2)
+                .map(|m| m.global_index)
                 .collect();
 
             self.emit(Instr::CallDynamicBinaryBoth(intrinsic, candidates));

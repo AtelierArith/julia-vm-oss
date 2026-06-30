@@ -90,3 +90,31 @@ Rounds to nearest integer, with ties rounded toward positive infinity
 (Java/JavaScript [`round`](@ref) behaviour).
 """
 const RoundNearestTiesUp = RoundingMode(:NearestTiesUp)
+
+# Rounding an integer is the identity regardless of the mode.
+round(x::Integer, m::RoundingMode) = x
+
+# round(x, mode): round `x` using the given RoundingMode (Issues #5762, #6742).
+# `RoundUp` is an alias for `ceil`, `RoundDown` for `floor`, `RoundToZero` for
+# `trunc`, `RoundFromZero` rounds away from zero, and the nearest-tie variants
+# break ties as named. `RoundNearest` (the default) is round-half-to-even.
+function round(x::Real, m::RoundingMode)
+    if m.mode == :Up
+        return ceil(x)
+    elseif m.mode == :Down
+        return floor(x)
+    elseif m.mode == :ToZero
+        return trunc(x)
+    elseif m.mode == :FromZero
+        # away from zero (toward ±Inf) regardless of the fractional part
+        return x < 0 ? floor(x) : ceil(x)
+    elseif m.mode == :NearestTiesUp
+        # nearest integer, ties rounded toward +Inf
+        return floor(x + oftype(x, 0.5))
+    elseif m.mode == :NearestTiesAway
+        # nearest integer, ties rounded away from zero
+        return x < 0 ? ceil(x - oftype(x, 0.5)) : floor(x + oftype(x, 0.5))
+    else
+        return round(x)  # :Nearest — round half to even
+    end
+end

@@ -80,7 +80,8 @@ function length(bc::Broadcasted)
     n = length(ax)
     result = 1
     for i in 1:n
-        result = result * length(ax[i])
+        d = length(ax[i])
+        result = result * d
     end
     return result
 end
@@ -168,19 +169,37 @@ end
 function _broadcastable_shape(x)
     if isa(x, Array)
         return size(x)
+    elseif isa(x, SubArray)
+        # A view participates in broadcast as the array it aliases (Issue #5137).
+        return size(x)
     elseif isa(x, Tuple)
         return (length(x),)
     elseif isa(x, Broadcasted)
         ax = axes(x)
         n = length(ax)
-        if n == 1
-            return (length(ax[1]),)
+        if n == 0
+            # 0-dimensional nested broadcast: every operand of `x` is itself a
+            # scalar (e.g. a fused `abs.(v .+ w)` whose inner `v .+ w` has only
+            # static-array / scalar operands, which the generic shape system sees
+            # as 0-dimensional). Return the scalar shape instead of indexing the
+            # empty `ax` (`ax[1]` was an out-of-bounds crash — Issue #8176). The
+            # outer `copy(::Broadcasted)` static hook then claims the broadcast.
+            return ()
+        elseif n == 1
+            d1 = length(ax[1])
+            return (d1,)
         elseif n == 2
-            return (length(ax[1]), length(ax[2]))
+            d1 = length(ax[1])
+            d2 = length(ax[2])
+            return (d1, d2)
         elseif n == 3
-            return (length(ax[1]), length(ax[2]), length(ax[3]))
+            d1 = length(ax[1])
+            d2 = length(ax[2])
+            d3 = length(ax[3])
+            return (d1, d2, d3)
         else
-            return (length(ax[1]),)
+            d1 = length(ax[1])
+            return (d1,)
         end
     elseif _is_broadcastable_range(x)
         # UnitRange/StepRange/LinRange/StepRangeLen: 1D broadcastable collection (Issue #2686)
@@ -194,6 +213,10 @@ function _broadcastable_shape(x)
     end
 end
 
+function _broadcastable_shape(x::SubArray{T,N,P,I,L}) where {T,N,P,I,L}
+    return size(x)
+end
+
 # combine_axes: compute combined axes from broadcast arguments
 function _broadcast_combine_axes(args)
     n = length(args)
@@ -202,7 +225,8 @@ function _broadcast_combine_axes(args)
     end
     shape = _broadcastable_shape(args[1])
     for i in 2:n
-        shape = _broadcast_shape(shape, _broadcastable_shape(args[i]))
+        next_shape = _broadcastable_shape(args[i])
+        shape = _broadcast_shape(shape, next_shape)
     end
     # Convert shape to axes (tuple of ranges)
     nd = length(shape)
@@ -264,6 +288,10 @@ end
 # Based on Julia's base/broadcast.jl L665-666
 function extrude(x)
     if isa(x, Array)
+        keeps, defaults = newindexer(x)
+        return Extruded(x, keeps, defaults)
+    elseif isa(x, SubArray)
+        # A view broadcasts like the array it aliases (Issue #5137).
         keeps, defaults = newindexer(x)
         return Extruded(x, keeps, defaults)
     elseif _is_broadcastable_range(x)
@@ -460,6 +488,37 @@ function _broadcast_getindex(A::Array, I)
     end
 end
 
+# A SubArray view indexes like a plain Array (it supports `size` plus linear and
+# Cartesian access). This handles the non-preprocessed path — e.g. the generic
+# `copyto!(dest, src)` used for a BitVector destination from a comparison
+# broadcast like `view(v, a:b) .> 2`, which calls `getindex(bc, i)` on the raw
+# (un-Extruded) view rather than going through the Extruded loop (Issue #5137).
+function _broadcast_getindex(A::SubArray{T,N,P,I,L}, idx) where {T,N,P,I,L}
+    if isa(idx, CartesianIndex)
+        ii = idx.I
+        s = size(A)
+        ndim_a = length(s)
+        ndim_i = length(ii)
+        linear_idx = 1
+        stride = 1
+        for d in 1:max(ndim_a, ndim_i)
+            dim_size = d <= ndim_a ? s[d] : 1
+            i_d = d <= ndim_i ? ii[d] : 1
+            actual_idx = dim_size == 1 ? 1 : i_d
+            linear_idx = linear_idx + (actual_idx - 1) * stride
+            stride = stride * dim_size
+        end
+        return A[linear_idx]
+    else
+        s = size(A)
+        if length(s) == 1 && s[1] == 1
+            return A[1]
+        else
+            return A[idx]
+        end
+    end
+end
+
 # _broadcast_getindex for Extruded - use newindex to compute the actual index
 function _broadcast_getindex(b::Extruded, I)
     actual_idx = newindex(I, b.keeps, b.defaults)
@@ -519,6 +578,12 @@ function _getindex_one(arg, I)
     if isa(arg, Array)
         return _broadcast_getindex(arg, I)
     end
+    if isa(arg, SubArray)
+        # A view indexes like an Array; route to its _broadcast_getindex so the
+        # non-Extruded path (e.g. a BitVector comparison destination) reads the
+        # aliased elements instead of treating the whole view as a scalar (#5137).
+        return _broadcast_getindex(arg, I)
+    end
     if isa(arg, Tuple)
         return _broadcast_getindex(arg, I)
     end
@@ -550,16 +615,30 @@ function _getindex(args, I)
     if n == 0
         return ()
     elseif n == 1
-        return (_getindex_one(args[1], I),)
+        a1 = _getindex_one(args[1], I)
+        return (a1,)
     elseif n == 2
-        return (_getindex_one(args[1], I), _getindex_one(args[2], I))
+        a1 = _getindex_one(args[1], I)
+        a2 = _getindex_one(args[2], I)
+        return (a1, a2)
     elseif n == 3
-        return (_getindex_one(args[1], I), _getindex_one(args[2], I), _getindex_one(args[3], I))
+        a1 = _getindex_one(args[1], I)
+        a2 = _getindex_one(args[2], I)
+        a3 = _getindex_one(args[3], I)
+        return (a1, a2, a3)
     elseif n == 4
-        return (_getindex_one(args[1], I), _getindex_one(args[2], I), _getindex_one(args[3], I), _getindex_one(args[4], I))
+        a1 = _getindex_one(args[1], I)
+        a2 = _getindex_one(args[2], I)
+        a3 = _getindex_one(args[3], I)
+        a4 = _getindex_one(args[4], I)
+        return (a1, a2, a3, a4)
     else
         # Fallback: handle first 4 args
-        return (_getindex_one(args[1], I), _getindex_one(args[2], I), _getindex_one(args[3], I), _getindex_one(args[4], I))
+        a1 = _getindex_one(args[1], I)
+        a2 = _getindex_one(args[2], I)
+        a3 = _getindex_one(args[3], I)
+        a4 = _getindex_one(args[4], I)
+        return (a1, a2, a3, a4)
     end
 end
 
@@ -649,15 +728,29 @@ function _getindex_2d(args, i, j)
     if n == 0
         return ()
     elseif n == 1
-        return (_getindex_one_2d(args[1], i, j),)
+        a1 = _getindex_one_2d(args[1], i, j)
+        return (a1,)
     elseif n == 2
-        return (_getindex_one_2d(args[1], i, j), _getindex_one_2d(args[2], i, j))
+        a1 = _getindex_one_2d(args[1], i, j)
+        a2 = _getindex_one_2d(args[2], i, j)
+        return (a1, a2)
     elseif n == 3
-        return (_getindex_one_2d(args[1], i, j), _getindex_one_2d(args[2], i, j), _getindex_one_2d(args[3], i, j))
+        a1 = _getindex_one_2d(args[1], i, j)
+        a2 = _getindex_one_2d(args[2], i, j)
+        a3 = _getindex_one_2d(args[3], i, j)
+        return (a1, a2, a3)
     elseif n == 4
-        return (_getindex_one_2d(args[1], i, j), _getindex_one_2d(args[2], i, j), _getindex_one_2d(args[3], i, j), _getindex_one_2d(args[4], i, j))
+        a1 = _getindex_one_2d(args[1], i, j)
+        a2 = _getindex_one_2d(args[2], i, j)
+        a3 = _getindex_one_2d(args[3], i, j)
+        a4 = _getindex_one_2d(args[4], i, j)
+        return (a1, a2, a3, a4)
     else
-        return (_getindex_one_2d(args[1], i, j), _getindex_one_2d(args[2], i, j), _getindex_one_2d(args[3], i, j), _getindex_one_2d(args[4], i, j))
+        a1 = _getindex_one_2d(args[1], i, j)
+        a2 = _getindex_one_2d(args[2], i, j)
+        a3 = _getindex_one_2d(args[3], i, j)
+        a4 = _getindex_one_2d(args[4], i, j)
+        return (a1, a2, a3, a4)
     end
 end
 
@@ -750,13 +843,23 @@ function _getindex_3d(args, i, j, k)
     if n == 0
         return ()
     elseif n == 1
-        return (_getindex_one_3d(args[1], i, j, k),)
+        a1 = _getindex_one_3d(args[1], i, j, k)
+        return (a1,)
     elseif n == 2
-        return (_getindex_one_3d(args[1], i, j, k), _getindex_one_3d(args[2], i, j, k))
+        a1 = _getindex_one_3d(args[1], i, j, k)
+        a2 = _getindex_one_3d(args[2], i, j, k)
+        return (a1, a2)
     elseif n == 3
-        return (_getindex_one_3d(args[1], i, j, k), _getindex_one_3d(args[2], i, j, k), _getindex_one_3d(args[3], i, j, k))
+        a1 = _getindex_one_3d(args[1], i, j, k)
+        a2 = _getindex_one_3d(args[2], i, j, k)
+        a3 = _getindex_one_3d(args[3], i, j, k)
+        return (a1, a2, a3)
     else
-        return (_getindex_one_3d(args[1], i, j, k), _getindex_one_3d(args[2], i, j, k), _getindex_one_3d(args[3], i, j, k), _getindex_one_3d(args[4], i, j, k))
+        a1 = _getindex_one_3d(args[1], i, j, k)
+        a2 = _getindex_one_3d(args[2], i, j, k)
+        a3 = _getindex_one_3d(args[3], i, j, k)
+        a4 = _getindex_one_3d(args[4], i, j, k)
+        return (a1, a2, a3, a4)
     end
 end
 
@@ -830,6 +933,10 @@ function instantiate(bc::Broadcasted)
 end
 
 # instantiate for non-Broadcasted values: pass through
+# INTENTIONAL_NOOP (Issue #4703): upstream `instantiate(x) = x`
+# (julia/base/broadcast.jl:297) is the generic pass-through fallback for
+# any non-Broadcasted value; the typed `instantiate(bc::Broadcasted)`
+# above does the real work. A `return x` body is correct, not a stub.
 function instantiate(x)
     return x
 end
@@ -851,16 +958,50 @@ function combine_eltypes(f, args)
     if n == 0
         return Any
     end
+    arithmetic_name = string(f)
+    if arithmetic_name == "+" || arithmetic_name == "function +" ||
+       arithmetic_name == "-" || arithmetic_name == "function -" ||
+       arithmetic_name == "*" || arithmetic_name == "function *"
+        arithmetic_type = _same_broadcast_arithmetic_eltype(args)
+        if arithmetic_type !== nothing
+            return arithmetic_type
+        end
+    elseif arithmetic_name == "/" || arithmetic_name == "function /"
+        float_type = _same_broadcast_float_eltype(args)
+        if float_type !== nothing
+            return float_type
+        end
+    end
     # Get a representative element from each arg
     sample_args = _get_sample_elements(args)
     # Apply the function to sample values and check the result type
     result = _broadcast_apply(f, sample_args)
-    if isa(result, Int64)
+    if isa(result, Int8)
+        return Int8
+    elseif isa(result, Int16)
+        return Int16
+    elseif isa(result, Int32)
+        return Int32
+    elseif isa(result, Int64)
         return Int64
+    elseif isa(result, UInt8)
+        return UInt8
+    elseif isa(result, UInt16)
+        return UInt16
+    elseif isa(result, UInt32)
+        return UInt32
+    elseif isa(result, UInt64)
+        return UInt64
+    elseif isa(result, Float32)
+        return Float32
     elseif isa(result, Float64)
         return Float64
     elseif isa(result, Bool)
         return Bool
+    elseif isa(result, String)
+        return String
+    elseif isa(result, Char)
+        return Char
     elseif isa(result, Complex)
         # Complex results need proper complex-typed arrays (Issue #2688)
         return Complex{Float64}
@@ -869,19 +1010,82 @@ function combine_eltypes(f, args)
     end
 end
 
+function _broadcast_arg_eltype(arg)
+    if isa(arg, Array)
+        return eltype(arg)
+    elseif isa(arg, SubArray)
+        # A view contributes its element type, not the SubArray wrapper type,
+        # so a broadcast like `view(v, a:b) .+ 1` infers the arithmetic eltype
+        # and avoids a scalar `+(::SubArray, ::Int)` apply (Issue #5137).
+        return eltype(arg)
+    elseif isa(arg, Ref)
+        return typeof(getindex(arg))
+    elseif isa(arg, Broadcasted)
+        return combine_eltypes(arg.f, arg.bc_args)
+    else
+        return typeof(arg)
+    end
+end
+
+function _same_broadcast_eltype(args)
+    n = length(args)
+    if n == 0
+        return nothing
+    end
+    first_type = _broadcast_arg_eltype(args[1])
+    for i in 2:n
+        if _broadcast_arg_eltype(args[i]) != first_type
+            return nothing
+        end
+    end
+    return first_type
+end
+
+function _same_broadcast_arithmetic_eltype(args)
+    T = _same_broadcast_eltype(args)
+    if T == Int8 || T == Int16 || T == Int32 || T == UInt8 ||
+       T == UInt16 || T == UInt32 || T == UInt64 || T == Float32 ||
+       T == Float64
+        return T
+    end
+    return nothing
+end
+
+function _same_broadcast_float_eltype(args)
+    T = _same_broadcast_eltype(args)
+    if T == Float32 || T == Float64
+        return T
+    end
+    return nothing
+end
+
 # Helper: get a sample element from each argument
 function _get_sample_elements(args)
     n = length(args)
     if n == 0
         return ()
     elseif n == 1
-        return (_get_first_element(args[1]),)
+        a1 = _get_first_element(args[1])
+        return (a1,)
     elseif n == 2
-        return (_get_first_element(args[1]), _get_first_element(args[2]))
+        a1 = _get_first_element(args[1])
+        a2 = _get_first_element(args[2])
+        return (a1, a2)
     elseif n == 3
-        return (_get_first_element(args[1]), _get_first_element(args[2]), _get_first_element(args[3]))
+        a1 = _get_first_element(args[1])
+        a2 = _get_first_element(args[2])
+        a3 = _get_first_element(args[3])
+        return (a1, a2, a3)
+    elseif n == 4
+        a1 = _get_first_element(args[1])
+        a2 = _get_first_element(args[2])
+        a3 = _get_first_element(args[3])
+        a4 = _get_first_element(args[4])
+        return (a1, a2, a3, a4)
     else
-        return (_get_first_element(args[1]), _get_first_element(args[2]))
+        a1 = _get_first_element(args[1])
+        a2 = _get_first_element(args[2])
+        return (a1, a2)
     end
 end
 
@@ -892,6 +1096,14 @@ function _get_first_element(x)
             return x[1]
         else
             return 0  # Fallback
+        end
+    elseif isa(x, SubArray)
+        # A view's representative element drives broadcast eltype inference, so
+        # `view(v, a:b) .+ 1` samples `v[1]` rather than the whole view (#5137).
+        if length(x) > 0
+            return x[1]
+        else
+            return 0
         end
     elseif isa(x, Tuple)
         if length(x) > 0
@@ -920,30 +1132,93 @@ end
 # Note: Vector{ElType}(undef, n) with a runtime ElType variable creates Vector{Any}
 # because the compiler can't resolve runtime type variables at compile time.
 # Instead, we use explicit compile-time type literals for each known type.
-function similar(bc::Broadcasted, ElType::Type)
+function _broadcasted_similar(bc::Broadcasted, ElType)
     ax = axes(bc)
     nd = length(ax)
+    tname = string(ElType)
+    if tname == "Bool"
+        dims = ()
+        for axis in ax
+            dims = tuple(dims..., length(axis))
+        end
+        return _mark_bitarray(_array_undef_from_dims(Bool, dims))
+    end
+    if nd == 2
+        d1 = length(ax[1])
+        d2 = length(ax[2])
+        if tname == "Float64"
+            return Array{Float64}(undef, d1, d2)
+        elseif tname == "Float32"
+            return Array{Float32}(undef, d1, d2)
+        elseif tname == "Int8"
+            return Array{Int8}(undef, d1, d2)
+        elseif tname == "Int16"
+            return Array{Int16}(undef, d1, d2)
+        elseif tname == "Int32"
+            return Array{Int32}(undef, d1, d2)
+        elseif tname == "Int64"
+            return Array{Int64}(undef, d1, d2)
+        elseif tname == "UInt8"
+            return Array{UInt8}(undef, d1, d2)
+        elseif tname == "UInt16"
+            return Array{UInt16}(undef, d1, d2)
+        elseif tname == "UInt32"
+            return Array{UInt32}(undef, d1, d2)
+        elseif tname == "UInt64"
+            return Array{UInt64}(undef, d1, d2)
+        elseif tname == "String"
+            return Array{String}(undef, d1, d2)
+        elseif tname == "Char"
+            return Array{Char}(undef, d1, d2)
+        elseif length(tname) >= 7 && tname[1:7] == "Complex"
+            return Array{Complex{Float64}}(undef, d1, d2)
+        else
+            return Array{Any}(undef, d1, d2)
+        end
+    end
+
     # Calculate total element count
     if nd == 0
         n = 1
     elseif nd == 1
-        n = length(ax[1])
+        d1 = length(ax[1])
+        n = d1
     elseif nd == 2
-        n = length(ax[1]) * length(ax[2])
+        d1 = length(ax[1])
+        d2 = length(ax[2])
+        n = d1 * d2
     else
         n = 1
         for i in 1:nd
-            n = n * length(ax[i])
+            d = length(ax[i])
+            n = n * d
         end
     end
     # Create typed array using compile-time type literals
-    tname = string(ElType)
     if tname == "Float64"
         arr = Vector{Float64}(undef, n)
+    elseif tname == "Float32"
+        arr = Vector{Float32}(undef, n)
+    elseif tname == "Int8"
+        arr = Vector{Int8}(undef, n)
+    elseif tname == "Int16"
+        arr = Vector{Int16}(undef, n)
+    elseif tname == "Int32"
+        arr = Vector{Int32}(undef, n)
     elseif tname == "Int64"
         arr = Vector{Int64}(undef, n)
-    elseif tname == "Bool"
-        arr = Vector{Bool}(undef, n)
+    elseif tname == "UInt8"
+        arr = Vector{UInt8}(undef, n)
+    elseif tname == "UInt16"
+        arr = Vector{UInt16}(undef, n)
+    elseif tname == "UInt32"
+        arr = Vector{UInt32}(undef, n)
+    elseif tname == "UInt64"
+        arr = Vector{UInt64}(undef, n)
+    elseif tname == "String"
+        arr = Vector{String}(undef, n)
+    elseif tname == "Char"
+        arr = Vector{Char}(undef, n)
     elseif length(tname) >= 7 && tname[1:7] == "Complex"
         arr = Vector{Complex{Float64}}(undef, n)
     else
@@ -951,9 +1226,19 @@ function similar(bc::Broadcasted, ElType::Type)
     end
     # Reshape for 2D
     if nd == 2
-        return reshape(arr, length(ax[1]), length(ax[2]))
+        d1 = length(ax[1])
+        d2 = length(ax[2])
+        return reshape(arr, d1, d2)
     end
     return arr
+end
+
+function similar(bc::Broadcasted, ElType::Type)
+    return _broadcasted_similar(bc, ElType)
+end
+
+function similar(bc::Broadcasted, ElType)
+    return _broadcasted_similar(bc, ElType)
 end
 
 # =============================================================================
@@ -966,9 +1251,61 @@ end
 # 2. Wrapping arrays in Extruded for efficient index mapping
 
 # broadcast_unalias: check if dest and src are the same object
+function _broadcast_array_copy(src::Array)
+    n = length(src)
+    T = eltype(src)
+    tname = string(T)
+    if tname == "Float64"
+        result = Vector{Float64}(undef, n)
+    elseif tname == "Float32"
+        result = Vector{Float32}(undef, n)
+    elseif tname == "Int8"
+        result = Vector{Int8}(undef, n)
+    elseif tname == "Int16"
+        result = Vector{Int16}(undef, n)
+    elseif tname == "Int32"
+        result = Vector{Int32}(undef, n)
+    elseif tname == "Int64"
+        result = Vector{Int64}(undef, n)
+    elseif tname == "UInt8"
+        result = Vector{UInt8}(undef, n)
+    elseif tname == "UInt16"
+        result = Vector{UInt16}(undef, n)
+    elseif tname == "UInt32"
+        result = Vector{UInt32}(undef, n)
+    elseif tname == "UInt64"
+        result = Vector{UInt64}(undef, n)
+    elseif tname == "Bool"
+        result = Vector{Bool}(undef, n)
+    elseif tname == "String"
+        result = Vector{String}(undef, n)
+    elseif tname == "Char"
+        result = Vector{Char}(undef, n)
+    elseif length(tname) >= 7 && tname[1:7] == "Complex"
+        result = Vector{Complex{Float64}}(undef, n)
+    else
+        result = Vector{Any}(undef, n)
+    end
+    for i in 1:n
+        value = src[i]
+        result[i] = value
+    end
+    s = size(src)
+    nd = length(s)
+    if nd == 2
+        return reshape(result, s[1], s[2])
+    elseif nd == 3
+        return reshape(result, s[1], s[2], s[3])
+    end
+    return result
+end
+
 function broadcast_unalias(dest, src)
     if dest === src
         # Same object: make a copy to avoid aliasing
+        if isa(src, Array)
+            return _broadcast_array_copy(src)
+        end
         return copy(src)
     else
         return src
@@ -997,15 +1334,27 @@ function _preprocess_args(dest, args)
     if n == 0
         return ()
     elseif n == 1
-        return (preprocess(dest, args[1]),)
+        a1 = preprocess(dest, args[1])
+        return (a1,)
     elseif n == 2
-        return (preprocess(dest, args[1]), preprocess(dest, args[2]))
+        a1 = preprocess(dest, args[1])
+        a2 = preprocess(dest, args[2])
+        return (a1, a2)
     elseif n == 3
-        return (preprocess(dest, args[1]), preprocess(dest, args[2]), preprocess(dest, args[3]))
+        a1 = preprocess(dest, args[1])
+        a2 = preprocess(dest, args[2])
+        a3 = preprocess(dest, args[3])
+        return (a1, a2, a3)
     elseif n == 4
-        return (preprocess(dest, args[1]), preprocess(dest, args[2]), preprocess(dest, args[3]), preprocess(dest, args[4]))
+        a1 = preprocess(dest, args[1])
+        a2 = preprocess(dest, args[2])
+        a3 = preprocess(dest, args[3])
+        a4 = preprocess(dest, args[4])
+        return (a1, a2, a3, a4)
     else
-        return (preprocess(dest, args[1]), preprocess(dest, args[2]))
+        a1 = preprocess(dest, args[1])
+        a2 = preprocess(dest, args[2])
+        return (a1, a2)
     end
 end
 
@@ -1018,7 +1367,50 @@ end
 # copyto! fills an existing array from a Broadcasted.
 
 # copy for Broadcasted: allocate result and fill it
+# Extension hook (Issue #7460): a StaticArrays-style package installs a
+# `(f, args) -> value-or-nothing` callback here so that `copy(::Broadcasted)` can
+# return a value of the package's own fixed-shape type (e.g. SVector/SMatrix)
+# before the generic pipeline runs. It is stored in a `Ref` rather than as an
+# overridable method on purpose: a base-internal *named* call devirtualises to
+# the default and never sees a package's override, whereas reading the callback
+# out of this Ref yields a true runtime function value that dispatches into the
+# package. `nothing` (the default) means "no package loaded" — ordinary
+# broadcasts are unaffected.
+const _STATIC_BROADCAST_HOOK = Ref{Any}(nothing)
+
+# Cross-module accessors (a package can call `Base._set_static_broadcast_hook!`
+# but cannot read the raw const global). The getter is a normal same-module call
+# inside `copy`; it always returns the Ref's *current* content, so devirtualising
+# it is harmless — the package-installed value flows through unchanged.
+_set_static_broadcast_hook!(f) = (_STATIC_BROADCAST_HOOK[] = f; nothing)
+_get_static_broadcast_hook() = _STATIC_BROADCAST_HOOK[]
+
+# Cross-module `Broadcasted` introspection for the static-array hook
+# (StaticArrays/src/broadcast.jl, Issue #8161). sjulia fuses a `.`-call chain
+# (`abs.(v .- w)`) into a *tree* of nested `Broadcasted` nodes, so a package's
+# hook must be able to detect and walk that tree without naming the Base type or
+# reaching into its fields cross-module. `_materialize_broadcasted` re-runs the
+# generic pipeline on a freshly built `Broadcasted` (a same-module call so
+# `copy(::Broadcasted)` resolves cleanly) — used for the dynamic-result path of a
+# mixed static/dynamic broadcast.
+_is_broadcasted(x) = isa(x, Broadcasted)
+_broadcasted_f(bc) = bc.f
+_broadcasted_args(bc) = bc.bc_args
+_make_broadcasted(f, args) = Broadcasted(f, args)
+_materialize_broadcasted(f, args) = copy(Broadcasted(f, args))
+
 function copy(bc::Broadcasted)
+    # Static-array fast path (Issue #7460): a loaded StaticArrays-style package
+    # can claim the broadcast and return a static result. Runs before the generic
+    # pipeline so a static operand is not mis-treated as a 0-dimensional scalar
+    # (which would collapse `v .+ 10` to the invalid `+(v, 10)`).
+    hook = _get_static_broadcast_hook()
+    if hook !== nothing
+        static_result = hook(bc.f, bc.bc_args)
+        if static_result !== nothing
+            return static_result
+        end
+    end
     ibc = instantiate(bc)
     # 0-dimensional broadcast (all scalar operands): return scalar result (Issue #4)
     ax = axes(ibc)
@@ -1099,8 +1491,10 @@ function _copyto_fastpath_same_shape_binary!(dest::Array, bc::Broadcasted)
     # Generic same-shape binary path (covers Int64 and other typed arrays).
     # This still performs dynamic function application, but skips expensive
     # broadcast index/extrusion machinery.
+    f = bc.f
     for i in 1:n
-        dest[i] = _broadcast_apply(bc.f, (a[i], b[i]))
+        value = _broadcast_apply(f, (a[i], b[i]))
+        dest[i] = value
     end
     return true
 end
@@ -1125,6 +1519,13 @@ function _copyto_fastpath_array_scalar!(dest::Array, bc::Broadcasted)
 
     left = args[1]
     right = args[2]
+
+    # A SubArray view is array-like but not a native `Array`, so the scalar
+    # fast path would mis-classify it as the scalar operand; defer to the
+    # generic Extruded loop, which indexes the view correctly (Issue #5137).
+    if isa(left, SubArray) || isa(right, SubArray)
+        return false
+    end
 
     arr = nothing
     scalar = nothing
@@ -1171,13 +1572,16 @@ function _copyto_fastpath_array_scalar!(dest::Array, bc::Broadcasted)
         end
     end
 
+    f = bc.f
     if scalar_left
         for i in 1:n
-            dest[i] = bc.f(scalar, arr[i])
+            value = f(scalar, arr[i])
+            dest[i] = value
         end
     else
         for i in 1:n
-            dest[i] = bc.f(arr[i], scalar)
+            value = f(arr[i], scalar)
+            dest[i] = value
         end
     end
     return true
@@ -1231,6 +1635,12 @@ function _copyto_fastpath_2d_binary!(dest::Array, bc::Broadcasted)
     a = args[1]
     b = args[2]
 
+    # A SubArray view is not a native `Array`; defer to the generic Extruded
+    # loop so the view is indexed correctly rather than mis-classified (#5137).
+    if isa(a, SubArray) || isa(b, SubArray)
+        return false
+    end
+
     # Preserve aliasing semantics for direct and nested Broadcasted args.
     if _fastpath_arg_refs_dest_array(a, dest) || _fastpath_arg_refs_dest_array(b, dest)
         return false
@@ -1242,10 +1652,15 @@ function _copyto_fastpath_2d_binary!(dest::Array, bc::Broadcasted)
         return false
     end
 
+    f = bc.f
+    linear = 1
     for j in 1:cols
         for i in 1:rows
-            linear = i + (j - 1) * rows
-            dest[linear] = bc.f(_getindex_one_2d(a, i, j), _getindex_one_2d(b, i, j))
+            a_value = _getindex_one_2d(a, i, j)
+            b_value = _getindex_one_2d(b, i, j)
+            value = f(a_value, b_value)
+            dest[linear] = value
+            linear = linear + 1
         end
     end
     return true
@@ -1279,7 +1694,8 @@ function copyto!(dest::Array, bc::Broadcasted)
     if nd <= 1
         # 1D: use linear indices directly (fast path)
         for i in 1:n
-            dest[i] = _broadcast_getindex(bc_preprocessed, i)
+            value = _broadcast_getindex(bc_preprocessed, i)
+            dest[i] = value
         end
     else
         # Multi-dimensional: convert linear index to CartesianIndex (Issue #2689)
@@ -1287,7 +1703,8 @@ function copyto!(dest::Array, bc::Broadcasted)
         # allowing proper broadcast dimension mapping (e.g., [3] .+ zeros(3,2)).
         for i in 1:n
             ci = _linear_to_cartesian(i, s)
-            dest[i] = _broadcast_getindex(bc_preprocessed, ci)
+            value = _broadcast_getindex(bc_preprocessed, ci)
+            dest[i] = value
         end
     end
     return dest
@@ -1331,27 +1748,28 @@ function materialize(bc::Broadcasted)
 end
 
 # materialize for non-Broadcasted: pass through
+# INTENTIONAL_NOOP (Issue #4703): upstream `materialize(x) = x`
+# (julia/base/broadcast.jl:900) is the generic pass-through fallback for
+# any non-Broadcasted value; the typed `materialize(bc::Broadcasted)`
+# above does the real work. A `return x` body is correct, not a stub.
 function materialize(x)
     return x
 end
 
 # materialize!: in-place materialization
 function materialize!(dest, bc::Broadcasted)
-    ibc = instantiate(Broadcasted(bc.style, bc.f, bc.bc_args, axes(dest)))
+    style = bc.style
+    f = bc.f
+    args = bc.bc_args
+    dest_axes = axes(dest)
+    target = Broadcasted(style, f, args, dest_axes)
+    ibc = instantiate(target)
     return copyto!(dest, ibc)
 end
 
 # materialize! for non-Broadcasted source: treat as identity broadcast
 function materialize!(dest, x)
-    n = length(dest)
-    for i in 1:n
-        if isa(x, Array)
-            dest[i] = x[i]
-        else
-            dest[i] = x
-        end
-    end
-    return dest
+    return materialize!(dest, Broadcasted(identity, (x,)))
 end
 
 # =============================================================================
@@ -2105,13 +2523,322 @@ end
 # broadcast: eager entry point — materialize a lazy Broadcasted wrapper
 # Based on Julia's base/broadcast.jl L836-886 (Issue #2548, #2549)
 function broadcast(f, A)
-    return materialize(broadcasted(f, A))
+    bc = broadcasted(f, A)
+    return materialize(bc)
 end
+broadcast(::typeof(identity), A::Vector{Int64}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{Int8}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{Int16}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{Int32}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{UInt8}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{UInt16}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{UInt32}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{UInt64}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{Float64}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{Float32}) = map(identity, A)
+broadcast(::typeof(identity), A::Vector{Bool}) = _mark_bitvector(map(identity, A))
+broadcast(::typeof(abs), A::Vector{Int64}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{Int8}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{Int16}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{Int32}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{UInt8}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{UInt16}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{UInt32}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{UInt64}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{Float64}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{Float32}) = map(abs, A)
+broadcast(::typeof(abs), A::Vector{Bool}) = _mark_bitvector(map(abs, A))
+broadcast(::typeof(abs2), A::Vector{Int64}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{Int8}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{Int16}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{Int32}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{UInt8}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{UInt16}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{UInt32}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{UInt64}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{Float64}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{Float32}) = map(abs2, A)
+broadcast(::typeof(abs2), A::Vector{Bool}) = _mark_bitvector(map(abs2, A))
+broadcast(::typeof(-), A::Vector{Int64}) = map(-, A)
+broadcast(::typeof(-), A::Vector{Int8}) = map(-, A)
+broadcast(::typeof(-), A::Vector{Int16}) = map(-, A)
+broadcast(::typeof(-), A::Vector{Int32}) = map(-, A)
+broadcast(::typeof(-), A::Vector{UInt8}) = map(-, A)
+broadcast(::typeof(-), A::Vector{UInt16}) = map(-, A)
+broadcast(::typeof(-), A::Vector{UInt32}) = map(-, A)
+broadcast(::typeof(-), A::Vector{UInt64}) = map(-, A)
+broadcast(::typeof(-), A::Vector{Float64}) = map(-, A)
+broadcast(::typeof(-), A::Vector{Float32}) = map(-, A)
+_broadcast_bool_unary(f, A) = _mark_bitvector(_map_unary_into!(_array_undef_from_dims(Bool, (length(A),)), f, A))
+broadcast(::typeof(iszero), A::Vector{Int64}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{Int8}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{Int16}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{Int32}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{UInt8}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{UInt16}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{UInt32}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{UInt64}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{Float64}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{Float32}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(iszero), A::Vector{Bool}) = _broadcast_bool_unary(iszero, A)
+broadcast(::typeof(isone), A::Vector{Int64}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{Int8}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{Int16}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{Int32}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{UInt8}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{UInt16}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{UInt32}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{UInt64}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{Float64}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{Float32}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(isone), A::Vector{Bool}) = _broadcast_bool_unary(isone, A)
+broadcast(::typeof(signbit), A::Vector{Int64}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{Int8}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{Int16}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{Int32}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{UInt8}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{UInt16}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{UInt32}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{UInt64}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{Float64}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{Float32}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(signbit), A::Vector{Bool}) = _broadcast_bool_unary(signbit, A)
+broadcast(::typeof(iseven), A::Vector{Int64}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{Int8}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{Int16}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{Int32}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{UInt8}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{UInt16}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{UInt32}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(iseven), A::Vector{UInt64}) = _broadcast_bool_unary(iseven, A)
+broadcast(::typeof(isodd), A::Vector{Int64}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{Int8}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{Int16}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{Int32}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{UInt8}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{UInt16}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{UInt32}) = _broadcast_bool_unary(isodd, A)
+broadcast(::typeof(isodd), A::Vector{UInt64}) = _broadcast_bool_unary(isodd, A)
 function broadcast(f, A, B)
-    return materialize(broadcasted(f, A, B))
+    bc = broadcasted(f, A, B)
+    return materialize(bc)
 end
+function _broadcast_same_length_binary_map(f, A, B)
+    if length(A) == length(B)
+        return map(f, A, B)
+    end
+    bc = broadcasted(f, A, B)
+    return materialize(bc)
+end
+function _broadcast_same_length_ternary_map(f, A, B, C)
+    if length(A) == length(B) && length(A) == length(C)
+        return map(f, A, B, C)
+    end
+    bc = broadcasted(f, A, B, C)
+    return materialize(bc)
+end
+function _broadcast_same_length_quaternary_map(f, A, B, C, D)
+    if length(A) == length(B) && length(A) == length(C) && length(A) == length(D)
+        return map(f, A, B, C, D)
+    end
+    bc = broadcasted(f, A, B, C, D)
+    return materialize(bc)
+end
+function _broadcast_vector_vararg_length(A, B, C, As)
+    n = _bcs1(length(A), length(B))
+    n = _bcs1(n, length(C))
+    for j in 1:length(As)
+        n = _bcs1(n, length(As[j]))
+    end
+    return n
+end
+function _broadcast_vector_arg(A, i)
+    if length(A) == 1
+        return A[1]
+    end
+    return A[i]
+end
+function _broadcast_vector_vararg_plus_into!(result, A, B, C, As)
+    n = length(result)
+    for i in 1:n
+        value = _broadcast_vector_arg(A, i) + _broadcast_vector_arg(B, i)
+        value = value + _broadcast_vector_arg(C, i)
+        for j in 1:length(As)
+            value = value + _broadcast_vector_arg(As[j], i)
+        end
+        result[i] = value
+    end
+    return result
+end
+function _broadcast_vector_vararg_plus_similar(A, B, C, As)
+    n = _broadcast_vector_vararg_length(A, B, C, As)
+    return _broadcast_vector_vararg_plus_into!(similar(A, n), A, B, C, As)
+end
+function _broadcast_vector_vararg_mul_into!(result, A, B, C, As)
+    n = length(result)
+    for i in 1:n
+        value = _broadcast_vector_arg(A, i) * _broadcast_vector_arg(B, i)
+        value = value * _broadcast_vector_arg(C, i)
+        for j in 1:length(As)
+            value = value * _broadcast_vector_arg(As[j], i)
+        end
+        result[i] = value
+    end
+    return result
+end
+function _broadcast_vector_vararg_mul_similar(A, B, C, As)
+    n = _broadcast_vector_vararg_length(A, B, C, As)
+    return _broadcast_vector_vararg_mul_into!(similar(A, n), A, B, C, As)
+end
+function _broadcast_vector_vararg_min_into!(result, A, B, C, As)
+    n = length(result)
+    for i in 1:n
+        value = min(_broadcast_vector_arg(A, i), _broadcast_vector_arg(B, i))
+        value = min(value, _broadcast_vector_arg(C, i))
+        for j in 1:length(As)
+            value = min(value, _broadcast_vector_arg(As[j], i))
+        end
+        result[i] = value
+    end
+    return result
+end
+function _broadcast_vector_vararg_min_similar(A, B, C, As)
+    n = _broadcast_vector_vararg_length(A, B, C, As)
+    return _broadcast_vector_vararg_min_into!(similar(A, n), A, B, C, As)
+end
+function _broadcast_vector_vararg_max_into!(result, A, B, C, As)
+    n = length(result)
+    for i in 1:n
+        value = max(_broadcast_vector_arg(A, i), _broadcast_vector_arg(B, i))
+        value = max(value, _broadcast_vector_arg(C, i))
+        for j in 1:length(As)
+            value = max(value, _broadcast_vector_arg(As[j], i))
+        end
+        result[i] = value
+    end
+    return result
+end
+function _broadcast_vector_vararg_max_similar(A, B, C, As)
+    n = _broadcast_vector_vararg_length(A, B, C, As)
+    return _broadcast_vector_vararg_max_into!(similar(A, n), A, B, C, As)
+end
+broadcast(::typeof(+), A::Vector{Int64}, B::Vector{Int64}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Int8}, B::Vector{Int8}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Int16}, B::Vector{Int16}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Int32}, B::Vector{Int32}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{UInt8}, B::Vector{UInt8}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{UInt16}, B::Vector{UInt16}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{UInt32}, B::Vector{UInt32}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{UInt64}, B::Vector{UInt64}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Float32}, B::Vector{Float32}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Float64}, B::Vector{Float64}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Bool}, B::Vector{Bool}) = _broadcast_same_length_binary_map(+, A, B)
+broadcast(::typeof(+), A::Vector{Int32}, B::Vector{Int32}, C::Vector{Int32}) = _broadcast_same_length_ternary_map(+, A, B, C)
+broadcast(::typeof(+), A::Vector{Float32}, B::Vector{Float32}, C::Vector{Float32}) = _broadcast_same_length_ternary_map(+, A, B, C)
+broadcast(::typeof(+), A::Vector{Bool}, B::Vector{Bool}, C::Vector{Bool}) = _broadcast_same_length_ternary_map(+, A, B, C)
+broadcast(::typeof(+), A::Vector{Int32}, B::Vector{Int32}, C::Vector{Int32}, D::Vector{Int32}) = _broadcast_same_length_quaternary_map(+, A, B, C, D)
+broadcast(::typeof(+), A::Vector{Float32}, B::Vector{Float32}, C::Vector{Float32}, D::Vector{Float32}) = _broadcast_same_length_quaternary_map(+, A, B, C, D)
+broadcast(::typeof(+), A::Vector{Int64}, B::Vector{Int64}, C::Vector{Int64}, As::Vector{Int64}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{Int8}, B::Vector{Int8}, C::Vector{Int8}, As::Vector{Int8}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{Int16}, B::Vector{Int16}, C::Vector{Int16}, As::Vector{Int16}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{Int32}, B::Vector{Int32}, C::Vector{Int32}, As::Vector{Int32}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{UInt8}, B::Vector{UInt8}, C::Vector{UInt8}, As::Vector{UInt8}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{UInt16}, B::Vector{UInt16}, C::Vector{UInt16}, As::Vector{UInt16}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{UInt32}, B::Vector{UInt32}, C::Vector{UInt32}, As::Vector{UInt32}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{UInt64}, B::Vector{UInt64}, C::Vector{UInt64}, As::Vector{UInt64}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{Float32}, B::Vector{Float32}, C::Vector{Float32}, As::Vector{Float32}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{Float64}, B::Vector{Float64}, C::Vector{Float64}, As::Vector{Float64}...) = _broadcast_vector_vararg_plus_similar(A, B, C, As)
+broadcast(::typeof(+), A::Vector{Bool}, B::Vector{Bool}, C::Vector{Bool}, As::Vector{Bool}...) = _broadcast_vector_vararg_plus_into!(_array_undef_from_dims(Int64, (_broadcast_vector_vararg_length(A, B, C, As),)), A, B, C, As)
+broadcast(::typeof(*), A::Vector{Int64}, B::Vector{Int64}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{Int8}, B::Vector{Int8}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{Int16}, B::Vector{Int16}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{Int32}, B::Vector{Int32}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{UInt8}, B::Vector{UInt8}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{UInt16}, B::Vector{UInt16}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{UInt32}, B::Vector{UInt32}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{UInt64}, B::Vector{UInt64}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{Float32}, B::Vector{Float32}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{Float64}, B::Vector{Float64}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(*), A::Vector{Bool}, B::Vector{Bool}) = _broadcast_same_length_binary_map(*, A, B)
+broadcast(::typeof(min), A::Vector{Int64}, B::Vector{Int64}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{Int8}, B::Vector{Int8}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{Int16}, B::Vector{Int16}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{Int32}, B::Vector{Int32}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{UInt8}, B::Vector{UInt8}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{UInt16}, B::Vector{UInt16}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{UInt32}, B::Vector{UInt32}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{UInt64}, B::Vector{UInt64}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{Float32}, B::Vector{Float32}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(min), A::Vector{Float64}, B::Vector{Float64}) = _broadcast_same_length_binary_map(min, A, B)
+broadcast(::typeof(max), A::Vector{Int64}, B::Vector{Int64}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{Int8}, B::Vector{Int8}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{Int16}, B::Vector{Int16}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{Int32}, B::Vector{Int32}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{UInt8}, B::Vector{UInt8}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{UInt16}, B::Vector{UInt16}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{UInt32}, B::Vector{UInt32}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{UInt64}, B::Vector{UInt64}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{Float32}, B::Vector{Float32}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(max), A::Vector{Float64}, B::Vector{Float64}) = _broadcast_same_length_binary_map(max, A, B)
+broadcast(::typeof(*), A::Vector{Int64}, B::Vector{Int64}, C::Vector{Int64}, As::Vector{Int64}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{Int8}, B::Vector{Int8}, C::Vector{Int8}, As::Vector{Int8}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{Int16}, B::Vector{Int16}, C::Vector{Int16}, As::Vector{Int16}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{Int32}, B::Vector{Int32}, C::Vector{Int32}, As::Vector{Int32}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{UInt8}, B::Vector{UInt8}, C::Vector{UInt8}, As::Vector{UInt8}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{UInt16}, B::Vector{UInt16}, C::Vector{UInt16}, As::Vector{UInt16}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{UInt32}, B::Vector{UInt32}, C::Vector{UInt32}, As::Vector{UInt32}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{UInt64}, B::Vector{UInt64}, C::Vector{UInt64}, As::Vector{UInt64}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{Float32}, B::Vector{Float32}, C::Vector{Float32}, As::Vector{Float32}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{Float64}, B::Vector{Float64}, C::Vector{Float64}, As::Vector{Float64}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(*), A::Vector{Bool}, B::Vector{Bool}, C::Vector{Bool}, As::Vector{Bool}...) = _broadcast_vector_vararg_mul_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{Int64}, B::Vector{Int64}, C::Vector{Int64}, As::Vector{Int64}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{Int8}, B::Vector{Int8}, C::Vector{Int8}, As::Vector{Int8}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{Int16}, B::Vector{Int16}, C::Vector{Int16}, As::Vector{Int16}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{Int32}, B::Vector{Int32}, C::Vector{Int32}, As::Vector{Int32}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{UInt8}, B::Vector{UInt8}, C::Vector{UInt8}, As::Vector{UInt8}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{UInt16}, B::Vector{UInt16}, C::Vector{UInt16}, As::Vector{UInt16}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{UInt32}, B::Vector{UInt32}, C::Vector{UInt32}, As::Vector{UInt32}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{UInt64}, B::Vector{UInt64}, C::Vector{UInt64}, As::Vector{UInt64}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{Float32}, B::Vector{Float32}, C::Vector{Float32}, As::Vector{Float32}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(min), A::Vector{Float64}, B::Vector{Float64}, C::Vector{Float64}, As::Vector{Float64}...) = _broadcast_vector_vararg_min_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{Int64}, B::Vector{Int64}, C::Vector{Int64}, As::Vector{Int64}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{Int8}, B::Vector{Int8}, C::Vector{Int8}, As::Vector{Int8}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{Int16}, B::Vector{Int16}, C::Vector{Int16}, As::Vector{Int16}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{Int32}, B::Vector{Int32}, C::Vector{Int32}, As::Vector{Int32}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{UInt8}, B::Vector{UInt8}, C::Vector{UInt8}, As::Vector{UInt8}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{UInt16}, B::Vector{UInt16}, C::Vector{UInt16}, As::Vector{UInt16}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{UInt32}, B::Vector{UInt32}, C::Vector{UInt32}, As::Vector{UInt32}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{UInt64}, B::Vector{UInt64}, C::Vector{UInt64}, As::Vector{UInt64}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{Float32}, B::Vector{Float32}, C::Vector{Float32}, As::Vector{Float32}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(max), A::Vector{Float64}, B::Vector{Float64}, C::Vector{Float64}, As::Vector{Float64}...) = _broadcast_vector_vararg_max_similar(A, B, C, As)
+broadcast(::typeof(-), A::Vector{Int64}, B::Vector{Int64}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{Int8}, B::Vector{Int8}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{Int16}, B::Vector{Int16}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{Int32}, B::Vector{Int32}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{UInt8}, B::Vector{UInt8}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{UInt16}, B::Vector{UInt16}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{UInt32}, B::Vector{UInt32}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{UInt64}, B::Vector{UInt64}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{Float32}, B::Vector{Float32}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(-), A::Vector{Float64}, B::Vector{Float64}) = _broadcast_same_length_binary_map(-, A, B)
+broadcast(::typeof(/), A::Vector{Int64}, B::Vector{Int64}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{Int8}, B::Vector{Int8}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{Int16}, B::Vector{Int16}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{Int32}, B::Vector{Int32}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{UInt8}, B::Vector{UInt8}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{UInt16}, B::Vector{UInt16}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{UInt32}, B::Vector{UInt32}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{UInt64}, B::Vector{UInt64}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{Float32}, B::Vector{Float32}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{Float64}, B::Vector{Float64}) = _broadcast_same_length_binary_map(/, A, B)
+broadcast(::typeof(/), A::Vector{Bool}, B::Vector{Bool}) = _broadcast_same_length_binary_map(/, A, B)
 function broadcast(f, A, B, C)
-    return materialize(broadcasted(f, A, B, C))
+    bc = broadcasted(f, A, B, C)
+    return materialize(bc)
+end
+function broadcast(f, A, B, C, D)
+    bc = broadcasted(f, A, B, C, D)
+    return materialize(bc)
 end
 # Scalar-only optimizations: skip Broadcasted pipeline entirely
 function broadcast(f, a::Number, b::Number)
@@ -2124,15 +2851,23 @@ end
 # broadcast!: in-place entry point
 # Based on Julia's base/broadcast.jl L856-886
 function broadcast!(f, dest, A)
-    materialize!(dest, broadcasted(f, A))
+    bc = broadcasted(f, A)
+    materialize!(dest, bc)
     return dest
 end
 function broadcast!(f, dest, A, B)
-    materialize!(dest, broadcasted(f, A, B))
+    bc = broadcasted(f, A, B)
+    materialize!(dest, bc)
     return dest
 end
 function broadcast!(f, dest, A, B, C)
-    materialize!(dest, broadcasted(f, A, B, C))
+    bc = broadcasted(f, A, B, C)
+    materialize!(dest, bc)
+    return dest
+end
+function broadcast!(f, dest, A, B, C, D)
+    bc = broadcasted(f, A, B, C, D)
+    materialize!(dest, bc)
     return dest
 end
 

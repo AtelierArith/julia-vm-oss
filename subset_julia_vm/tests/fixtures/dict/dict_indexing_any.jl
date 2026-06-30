@@ -21,6 +21,15 @@ function get_value_typed(d::Dict, key)
     return d[key]
 end
 
+module StructKey8397
+    struct R <: Real
+        v::Int
+    end
+
+    Base.:(==)(a::R, b::R) = a.v == b.v
+    Base.hash(a::R, h::UInt) = hash(a.v, h)
+end
+
 @testset "Dict indexing with Any-typed parameters (Issue #1814)" begin
     d = Dict("a" => 1, "b" => 2, "c" => 3)
 
@@ -42,6 +51,13 @@ end
     d3 = Dict(1 => "one", 2 => "two")
     @test get_value(d3, 1) == "one"
     @test get_value(d3, 2) == "two"
+
+    # StructRef keys must still use Dict dispatch when the receiver is Any typed;
+    # the runtime IndexLoad fallback used to treat them as array indices before
+    # checking whether the target was a Dict (Issue #8397).
+    key = StructKey8397.R(1)
+    d4 = Dict(key => 40)
+    @test get_value(d4, StructKey8397.R(1)) == 40
 end
 
 true

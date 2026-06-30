@@ -15,3 +15,63 @@ name = "sets_pure_julia_inplace"
 file = "test_pure_julia_inplace.jl"
 expected = true
 description = "Phase 4-4: Set in-place operations in Pure Julia (Issue #2575)"
+
+[[tests]]
+name = "sets_nan_isequal"
+file = "test_nan_isequal.jl"
+expected = true
+description = "unique/allunique/allequal NaN handling via isequal (Issues #3582, #3583, #3584)"
+
+[[tests]]
+name = "sets_unique_non_float"
+file = "test_unique_non_float.jl"
+expected = true
+description = "unique works on non-Float arrays (Issues #3581, #3586)"
+
+[[tests]]
+name = "sets_unique_type_preservation"
+file = "test_unique_type_preservation.jl"
+expected = true
+description = "unique preserves Vector element types, including similar(arr, 0) fallback paths (Issues #3580, #4018)"
+
+[[tests]]
+name = "sets_unique_inplace_nan"
+file = "test_unique_inplace_nan.jl"
+expected = true
+description = "unique! collapses duplicate NaN values via isequal (Issue #3585)"
+
+[[tests]]
+name = "sets_pure_julia_dispatch"
+file = "test_pure_julia_dispatch.jl"
+expected = true
+description = "Set algebra (Set/Vector/mixed) routes through Pure Julia after removing BuiltinId::Set{Union,Intersect,...} (Issue #3724)"
+
+[[tests]]
+name = "sets_mutating_dispatch"
+file = "test_mutating_dispatch.jl"
+expected = true
+description = "Set push!/delete!/empty! and Array push!/pop! routing after lowering shortcut removal (Issue #3739)"
+
+[[tests]]
+name = "sets_parametric_set_subtype_4660"
+file = "test_parametric_set_subtype_4660.jl"
+expected = true
+description = "Parametric Set types subtype bare Set and dispatch to Set mutating methods (Issue #4660)"
+
+[[tests]]
+name = "sets_struct_tuple_element_membership_6693"
+file = "struct_tuple_element_membership_6693.jl"
+expected = true
+description = "Set of tuple / immutable-struct elements (incl. tuples of OneTo): construction, in, dedup, delete!, iteration, set algebra (DictKey::Composite resolves heap struct refs) (Issue #6693)"
+
+[[tests]]
+name = "sets_over_dict_parametric_dispatch_6721"
+file = "sets_over_dict_parametric_dispatch_6721.jl"
+expected = true
+description = "Set{T} re-implemented as pure-Julia Dict{T,Nothing} wrapper: ft(::Set{T})=T parity, typeof/isa/eltype, push!/in/length/delete!/empty!, union/intersect/setdiff, Set-of-tuples membership, iteration (Issue #6721)"
+
+[[tests]]
+name = "set_carrier_removed_pure_struct_6732"
+file = "set_carrier_removed_pure_struct_6732.jl"
+expected = true
+description = "The Value::Set Rust carrier (HashSet ops + _set_* intrinsics + Set* BuiltinIds) was removed (Issue #6732): every Set is a pure-Julia Set{T} struct over Dict{T,Nothing} (base/set.jl) and the public API (construction/push!/in/delete!/pop!/length/isempty/empty!/eltype/iteration + union/intersect/setdiff/symdiff/issubset) dispatches through its methods. The builtins_sets/ module, Value::Set variant, and Set BuiltinIds are deleted; Set Instrs are kept decodable-but-unreachable. Verified Dict still works alongside. Values vs julia 1.12."

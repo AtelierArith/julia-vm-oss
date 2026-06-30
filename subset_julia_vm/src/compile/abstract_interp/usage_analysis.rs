@@ -24,6 +24,8 @@
 
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
 use crate::compile::tfuncs::TransferFunctions;
+use crate::inference_core::CorePrimitive;
+use crate::inference_core::{CoreAbstract, CoreType};
 use crate::ir::core::{BinaryOp, Block, Expr, Function, Stmt};
 use std::collections::HashMap;
 
@@ -213,7 +215,9 @@ fn add_numeric_constraint_for_expr(
         if let Some(constraint_list) = constraints.get_mut(name) {
             // Use the abstract Number type for numeric constraints
             // This correctly represents that x could be any numeric type (Int*, UInt*, Float*, etc.)
-            constraint_list.push(LatticeType::Concrete(ConcreteType::Number));
+            constraint_list.push(LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Abstract(CoreAbstract::Number),
+            )));
         }
     }
 }
@@ -225,7 +229,9 @@ fn add_integer_constraint_for_expr(
 ) {
     if let Expr::Var(name, _) = expr {
         if let Some(constraint_list) = constraints.get_mut(name) {
-            constraint_list.push(LatticeType::Concrete(ConcreteType::Int64));
+            constraint_list.push(LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Int64),
+            )));
         }
     }
 }
@@ -234,7 +240,9 @@ fn add_integer_constraint_for_expr(
 fn add_bool_constraint_for_expr(expr: &Expr, constraints: &mut HashMap<String, Vec<LatticeType>>) {
     if let Expr::Var(name, _) = expr {
         if let Some(constraint_list) = constraints.get_mut(name) {
-            constraint_list.push(LatticeType::Concrete(ConcreteType::Bool));
+            constraint_list.push(LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Bool),
+            )));
         }
     }
 }
@@ -279,6 +287,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
@@ -288,7 +297,7 @@ mod tests {
         // Usage analysis should infer Number (abstract numeric type)
         assert_eq!(
             constraints["x"],
-            LatticeType::Concrete(ConcreteType::Number),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Abstract(CoreAbstract::Number))),
             "Expected Number constraint for x, got {:?}",
             constraints["x"]
         );
@@ -320,6 +329,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
@@ -327,7 +337,12 @@ mod tests {
 
         // i should be constrained to Int64 (used as array index)
         assert!(constraints.contains_key("i"));
-        assert_eq!(constraints["i"], LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            constraints["i"],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
@@ -357,14 +372,21 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
         let constraints = infer_parameter_constraints(&func, &tfuncs);
 
         // Both a and b should be constrained to Bool
-        assert_eq!(constraints["a"], LatticeType::Concrete(ConcreteType::Bool));
-        assert_eq!(constraints["b"], LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            constraints["a"],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
+        assert_eq!(
+            constraints["b"],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
@@ -395,6 +417,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
@@ -423,6 +446,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 

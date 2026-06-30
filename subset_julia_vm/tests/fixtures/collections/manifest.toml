@@ -76,7 +76,19 @@ description = "isdisjoint - check if arrays and sets have no common elements"
 name = "collections_keytype_valtype"
 file = "keytype_valtype.jl"
 expected = true
-description = "keytype and valtype - get key/value types of collections"
+description = "keytype and valtype - get key/value types of collections, including Complex Array wrapper valtype (Issue #5606)"
+
+[[tests]]
+name = "collections_keytype_valtype_abstractdict_5117"
+file = "keytype_valtype_abstractdict_5117.jl"
+expected = true
+description = "keytype/valtype for Dict/AbstractDict: type form and value form (Issue #5117)"
+
+[[tests]]
+name = "collections_eltype_generalized_5116"
+file = "eltype_generalized_5116.jl"
+expected = true
+description = "Generalized eltype: arrays, dicts→Pair, sets, ranges, strings, tuples, fallback; type and value forms (Issue #5116)"
 
 [[tests]]
 name = "collections_pair"
@@ -163,6 +175,30 @@ expected = true
 description = "pairs(), keys(), values() for arrays and tuples (Issue #1872)"
 
 [[tests]]
+name = "collections_pairs_collect_type_preservation_4634"
+file = "pairs_collect_type_preservation_4634.jl"
+expected = true
+description = "collect(pairs(...)) preserves Pair key/value element type (Issues #4018, #4634)"
+
+[[tests]]
+name = "collections_dict_narrow_integer_keys_4633"
+file = "dict_narrow_integer_keys_4633.jl"
+expected = true
+description = "Dict construction and mutation accept narrow integer keys without InvalidDictKey (Issues #4018, #4633)"
+
+[[tests]]
+name = "collections_dict_set_float_keys_4638"
+file = "dict_set_float_keys_4638.jl"
+expected = true
+description = "Dict and Set accept floating-point keys with Julia isequal semantics (Issues #4018, #4638)"
+
+[[tests]]
+name = "collections_dict_pair_destructuring_comprehension_4632"
+file = "dict_pair_destructuring_comprehension_4632.jl"
+expected = true
+description = "Array comprehensions support tuple destructuring over Dict Pair iteration (Issues #4018, #4632)"
+
+[[tests]]
 name = "collections_unique_allunique_allequal"
 file = "unique_allunique_allequal.jl"
 expected = true
@@ -172,7 +208,25 @@ description = "unique, allunique, allequal - array set utility functions (Issue 
 name = "collections_set_ops_array"
 file = "set_ops_array.jl"
 expected = true
-description = "union/intersect/setdiff/symdiff with Array arguments (Issue #2007)"
+description = "union/intersect/setdiff/symdiff with Array arguments and same-element Vector result allocation (Issues #2007, #4018)"
+
+[[tests]]
+name = "collections_set_ops_mixed_type_preservation_4630"
+file = "set_ops_mixed_type_preservation_4630.jl"
+expected = true
+description = "Mixed Vector set operations allocate promoted result eltypes instead of Vector{Any} fallback (Issues #4018, #4630)"
+
+[[tests]]
+name = "collections_set_typed_operations_4658"
+file = "set_typed_operations_4658.jl"
+expected = true
+description = "Set construction and Set/Vector set algebra preserve representative Int8 and Float32 Set/Vector result types (Issues #4018, #4609, #4658)"
+
+[[tests]]
+name = "collections_set_typed_empty_constructor_4661"
+file = "set_typed_empty_constructor_4661.jl"
+expected = true
+description = "Empty Set{T} construction, collect, and empty! preserve representative Int8 element type (Issues #4018, #4661)"
 
 [[tests]]
 name = "collections_count_string"
@@ -208,4 +262,34 @@ description = "unique(f, itr): unique elements by function (Issue #2155)"
 name = "collections_copy_type_preservation"
 file = "copy_type_preservation.jl"
 expected = true
-description = "copy() preserves type for all collection types (Issue #1829)"
+description = "copy() preserves type for supported mutable collection types (Issues #1829, #5867)"
+
+[[tests]]
+name = "collections_in_logical_array_element_3908"
+file = "in_logical_array_element_3908.jl"
+expected = true
+description = "in(x, array) reads logical ArrayValue elements for Complex arrays (Issue #3908)"
+
+[[tests]]
+name = "collections_array_struct_valtype_3908"
+file = "array_struct_valtype_3908.jl"
+expected = true
+description = "valtype/eltype/typeof for user-struct arrays use shared logical element metadata (Issue #3908)"
+
+[[tests]]
+name = "collections_array_any_struct_trait_projection_4416"
+file = "array_any_struct_trait_projection_4416.jl"
+expected = true
+description = "eltype/valtype/typeof for Any arrays preserve the declared element type (Issue #4416)"
+
+[[tests]]
+name = "collections_collect_pair_dict_into_typed_array_5233"
+file = "collect_pair_dict_into_typed_array_5233.jl"
+expected = true
+description = "collect/map/comprehension/typed-literal store Pair/Dict heap elements verbatim into the result array (Issue #5233)"
+
+[[tests]]
+name = "collections_dict_nonliteral_constructor_6531"
+file = "dict_nonliteral_constructor_6531.jl"
+expected = true
+description = "Dict constructors accept non-literal Pair values and iterable pairs (Issue #6531)"

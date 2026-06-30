@@ -1,0 +1,23 @@
+[[tests]]
+name = "statsplots_normal_pdf"
+file = "statsplots_normal_pdf.jl"
+expected = true
+description = "StatsPlots: plot(Normal(0,1)) draws the pdf bell curve as a :line series over the quantile range (Issue #7262)"
+
+[[tests]]
+name = "statsplots_continuous"
+file = "statsplots_continuous.jl"
+expected = true
+description = "StatsPlots: continuous distributions (Uniform, Exponential) plot the pdf as a :line over the quantile range (Issue #7262)"
+
+[[tests]]
+name = "statsplots_discrete"
+file = "statsplots_discrete.jl"
+expected = true
+description = "StatsPlots: discrete distributions (Poisson, Bernoulli) plot the pmf as integer-support :bar columns (Issue #7262)"
+
+[[tests]]
+name = "statsplots_using_comma"
+file = "statsplots_using_comma.jl"
+expected = true
+description = "StatsPlots: `using Distributions, StatsPlots` comma form then plot(Normal(0,1)) (Issue #7262)"

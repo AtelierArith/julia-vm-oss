@@ -2,45 +2,59 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SubsetJuliaVM Playground</title>
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
+    <link rel="preload" href="plotly.min.js?v=2.35.2" as="script">
+    <link rel="stylesheet" href="styles.css?v=1">
+    <!-- Plotly and JSXGraph ship UMD wrappers that register as AMD modules when a
+         `define` is present, so they must load BEFORE Monaco's RequireJS loader
+         (which defines `define.amd`). Otherwise the global `Plotly` / `JXG` the
+         renderers rely on is never set and plots/boards silently fail to draw
+         (Issue #7286). -->
+    <script src="plotly.min.js?v=2.35.2"></script>
+    <script src="jsxgraph.min.js?v=1.12.2"></script>
     <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
 </head>
 <body>
-    <header>
+    <header class="app-header">
         <h1>SubsetJuliaVM Playground</h1>
-        <p>Julia Subset VM - WebAssembly Edition</p>
+        <select id="sample-select" class="sample-select" aria-label="Choose a sample"></select>
     </header>
 
-    <main>
-        <div class="editor-container">
-            <div class="toolbar">
-                <select id="sample-select">
-                    <option value="">-- Select a sample --</option>
-                </select>
-                <button id="run-btn" class="primary">Run</button>
-                <button id="share-btn">Share URL</button>
-                <button id="copy-source-btn">Copy</button>
-            </div>
-            <div class="editor-wrapper">
-                <div id="monaco-container"></div>
-            </div>
-        </div>
+    <nav class="tab-bar" role="tablist" aria-label="Editor and output tabs">
+        <button class="tab active" data-tab="edit" role="tab" aria-selected="true">Edit</button>
+        <button class="tab" data-tab="output" role="tab" aria-selected="false">Output</button>
+    </nav>
 
-        <div class="output-container">
-            <div class="output-header">
-                <h2>Output</h2>
-                <button id="clear-output-btn" title="Clear output">Clear</button>
-                <button id="copy-btn" title="Copy output to clipboard">Copy</button>
-            </div>
-            <div id="error" class="error hidden"></div>
-            <pre id="output"></pre>
-            <div id="result"></div>
+    <main>
+        <div class="workspace">
+            <section id="edit-pane" class="pane active" role="tabpanel" aria-labelledby="tab-edit">
+                <div class="editor-toolbar">
+                    <button id="run-btn" class="primary">Run</button>
+                    <button id="share-btn">Share</button>
+                    <button id="copy-source-btn">Copy</button>
+                </div>
+                <div class="editor-wrapper">
+                    <div id="monaco-container" aria-label="Julia code editor"></div>
+                </div>
+            </section>
+
+            <section id="output-pane" class="pane" role="tabpanel" aria-labelledby="tab-output">
+                <div class="output-header">
+                    <h2>Output</h2>
+                    <button id="clear-output-btn" title="Clear output">Clear</button>
+                    <button id="copy-btn" title="Copy output to clipboard">Copy</button>
+                </div>
+                <div id="unsupported-notice" class="unsupported-notice hidden"></div>
+                <div id="error" class="error hidden"></div>
+                <pre id="output"></pre>
+                <div id="plot-output" class="hidden"></div>
+                <div id="result"></div>
+            </section>
         </div>
     </main>
 
@@ -52,7 +66,6 @@
         </p>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
-    <script type="module" src="app.js?v=50"></script>
+    <script type="module" src="app.js?v=1"></script>
 </body>
 </html>

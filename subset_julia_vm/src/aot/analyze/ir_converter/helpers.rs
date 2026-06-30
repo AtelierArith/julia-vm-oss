@@ -41,6 +41,9 @@ impl<'a> IrConverter<'a> {
             BuiltinOp::PopFirst => Some(AotBuiltinOp::PopFirst),
             BuiltinOp::Insert => Some(AotBuiltinOp::Insert),
             BuiltinOp::DeleteAt => Some(AotBuiltinOp::DeleteAt),
+            BuiltinOp::In => Some(AotBuiltinOp::In),
+            BuiltinOp::HasKey => Some(AotBuiltinOp::HasKey),
+            BuiltinOp::DictGet => Some(AotBuiltinOp::DictGet),
             BuiltinOp::Zeros => Some(AotBuiltinOp::Zeros),
             BuiltinOp::Ones => Some(AotBuiltinOp::Ones),
             // Note: BuiltinOp::Fill removed — fill is now Pure Julia (Issue #2640)
@@ -56,6 +59,7 @@ impl<'a> IrConverter<'a> {
             // Type operations
             BuiltinOp::TypeOf => Some(AotBuiltinOp::TypeOf),
             BuiltinOp::Isa => Some(AotBuiltinOp::Isa),
+            BuiltinOp::TimeNs => Some(AotBuiltinOp::TimeNs),
 
             // Unknown or unsupported builtins
             _ => None,
@@ -82,6 +86,7 @@ impl<'a> IrConverter<'a> {
             Literal::Str(v) => Ok(AotExpr::LitStr(v.clone())),
             Literal::Char(v) => Ok(AotExpr::LitChar(*v)),
             Literal::Nothing => Ok(AotExpr::LitNothing),
+            Literal::Missing => Ok(AotExpr::LitMissing),
             Literal::Struct(name, fields) => {
                 // Normalize Julia literal `Complex{Bool}(false, true)` (e.g. `im`) to `Complex`.
                 let normalized_name = if name.starts_with("Complex{") {
@@ -107,11 +112,6 @@ impl<'a> IrConverter<'a> {
                     fields: converted_fields,
                 })
             }
-            // Workaround: `missing` literal has no AotExpr::LitMissing variant (Issue #3343).
-            // Fails explicitly until the full 12-file literal pipeline is extended.
-            Literal::Missing => Err(crate::aot::AotError::ConversionError(
-                "AoT does not support `missing` literals (no AotExpr::LitMissing)".to_string(),
-            )),
             _ => Err(crate::aot::AotError::ConversionError(format!(
                 "unsupported literal kind in AoT conversion: {lit:?}"
             ))),
@@ -121,18 +121,112 @@ impl<'a> IrConverter<'a> {
     /// Convert a type name string to StaticType
     /// Used to resolve convert(Type, value) calls to AotExpr::Convert
     pub(crate) fn type_name_to_static(&self, name: &str) -> Option<StaticType> {
-        match name {
-            "Int64" | "Int" => Some(StaticType::I64),
-            "Int32" => Some(StaticType::I32),
-            "Float64" => Some(StaticType::F64),
-            "Float32" => Some(StaticType::F32),
-            "Bool" => Some(StaticType::Bool),
-            "String" => Some(StaticType::Str),
-            "Char" => Some(StaticType::Char),
-            "Nothing" => Some(StaticType::Nothing),
-            "Any" => Some(StaticType::Any),
+        StaticType::from_julia_name_lossy(name)
+    }
+
+    /// Extract the interned name of a bare Symbol-literal quote constructor,
+    /// i.e. the `"foo"` of `:foo`'s lowered `Builtin { SymbolNew, ["foo"] }`.
+    /// Returns `None` for quoted expressions that build runtime Expr objects
+    /// (Issue #7051).
+    pub(crate) fn quote_symbol_name(constructor: &Expr) -> Option<String> {
+        match constructor {
+            Expr::Builtin { name, args, .. }
+                if matches!(name, crate::ir::core::BuiltinOp::SymbolNew) && args.len() == 1 =>
+            {
+                match &args[0] {
+                    Expr::Literal(Literal::Str(s), _) => Some(s.clone()),
+                    _ => None,
+                }
+            }
             _ => None,
         }
+    }
+
+    /// Whether `name` is a recognized builtin type name (primitive, abstract,
+    /// `Any`, or `Union{}`). User-defined types are tracked separately via the
+    /// struct / abstract-type maps. Used to recognize type-name operands of the
+    /// subtype operator `<:` (Issue #7037).
+    fn is_builtin_type_name(name: &str) -> bool {
+        use crate::inference_core::CoreType;
+        matches!(
+            CoreType::from_julia_name(name),
+            CoreType::Primitive(_) | CoreType::Abstract(_) | CoreType::Any | CoreType::Bottom
+        )
+    }
+
+    /// Whether `name` denotes a statically known type: a builtin type, a
+    /// user-declared `struct`, or a user-declared `abstract type` (Issue #7037).
+    pub(crate) fn is_known_type_name(&self, name: &str) -> bool {
+        Self::is_builtin_type_name(name)
+            || self.engine.structs.contains_key(name)
+            || self.abstract_types.iter().any(|(n, _, _)| n == name)
+    }
+
+    /// Build the nominal type hierarchy for the program from user struct and
+    /// abstract-type declarations so the Core subtype solver can resolve
+    /// user-defined `<:` relations (Issue #7037).
+    pub(crate) fn build_struct_hierarchy(&self) -> crate::types::StructHierarchy {
+        use std::collections::HashMap;
+        let mut map: HashMap<String, (Option<String>, Vec<String>)> = HashMap::new();
+        for (name, info) in &self.engine.structs {
+            map.insert(
+                name.clone(),
+                (info.parent.clone(), info.type_params.clone()),
+            );
+        }
+        for (name, parent, type_params) in &self.abstract_types {
+            map.insert(name.clone(), (parent.clone(), type_params.clone()));
+        }
+        crate::types::StructHierarchy::from_parent_map(&map)
+    }
+
+    /// Extract the static type name an expression denotes, when it is a bare
+    /// reference to a statically known type (e.g. `Int`, `Real`, a user struct
+    /// or abstract type). Returns `None` for runtime type values, parametric
+    /// forms, or non-type expressions (Issue #7037).
+    pub(crate) fn expr_as_static_type_name(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Var(name, _) if self.is_known_type_name(name) => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    /// Try to const-fold a static subtype relation `left <: right`. Returns the
+    /// boolean result when both operands are statically known type names;
+    /// `None` when the relation involves runtime type values and must fall back
+    /// to the dynamic gate (Issue #7037).
+    pub(crate) fn try_fold_static_subtype(&self, left: &Expr, right: &Expr) -> Option<bool> {
+        let left_name = self.expr_as_static_type_name(left)?;
+        let right_name = self.expr_as_static_type_name(right)?;
+        let hierarchy = self.build_struct_hierarchy();
+        let engine = crate::inference_core::CoreSubtypeEngine::with_hierarchy(&hierarchy);
+        Some(engine.is_subtype_by_name(&left_name, &right_name))
+    }
+
+    pub(crate) fn array_constructor_element_and_dims<'b>(
+        &self,
+        function: &str,
+        args: &'b [&'b Expr],
+    ) -> Option<(StaticType, Vec<&'b Expr>)> {
+        if !matches!(function, "zeros" | "ones") {
+            return None;
+        }
+
+        let mut element_ty = StaticType::F64;
+        let mut dim_args = args;
+        if let Some(Expr::Var(type_name, _)) = args.first().copied() {
+            if let Some(ty) = self.type_name_to_static(type_name) {
+                element_ty = ty;
+                dim_args = &args[1..];
+            }
+        }
+
+        if dim_args.len() == 1 {
+            if let Expr::TupleLiteral { elements, .. } = dim_args[0] {
+                return Some((element_ty, elements.iter().collect()));
+            }
+        }
+        Some((element_ty, dim_args.to_vec()))
     }
 
     /// Map an operator function name to AotBinOp
@@ -144,7 +238,7 @@ impl<'a> IrConverter<'a> {
             "*" => Some(AotBinOp::Mul),
             "/" => Some(AotBinOp::Div),
             "÷" | "div" => Some(AotBinOp::IntDiv),
-            "%" | "mod" => Some(AotBinOp::Mod),
+            "%" => Some(AotBinOp::Mod),
             "^" => Some(AotBinOp::Pow),
             "&" => Some(AotBinOp::BitAnd),
             "|" => Some(AotBinOp::BitOr),
@@ -157,19 +251,7 @@ impl<'a> IrConverter<'a> {
 
     /// Convert JuliaType to StaticType
     pub(crate) fn julia_type_to_static(&self, jt: &crate::types::JuliaType) -> StaticType {
-        use crate::types::JuliaType as JT;
-        match jt {
-            JT::Int64 => StaticType::I64,
-            JT::Int32 => StaticType::I32,
-            JT::Float64 => StaticType::F64,
-            JT::Float32 => StaticType::F32,
-            JT::Bool => StaticType::Bool,
-            JT::String => StaticType::Str,
-            JT::Char => StaticType::Char,
-            JT::Nothing => StaticType::Nothing,
-            JT::Any => StaticType::Any,
-            _ => StaticType::Any,
-        }
+        StaticType::from_vm_julia_type_lossy(jt).unwrap_or(StaticType::Any)
     }
 
     /// Check if a function name corresponds to an operation handled directly by the AoT compiler
@@ -198,9 +280,9 @@ impl<'a> IrConverter<'a> {
             // Array operations
             "length" | "size" | "ndims" | "push!" | "pop!" |
             "pushfirst!" | "popfirst!" | "insert!" | "deleteat!" |
-            "zeros" | "ones" | "fill" | "reshape" | "sum" | "collect" |
+            "zeros" | "ones" | "fill" | "reshape" | "sum" | "collect" | "in" | "∈" |
             // Other built-ins
-            "println" | "print" | "string" | "repr" | "show" |
+            "println" | "print" | "time_ns" | "string" | "repr" | "show" |
             // Error/throw (intercepted in IR converter) (Issue #3410)
             "error" | "throw" |
             // Range dispatch functions — nothing-dispatch patterns don't translate to Rust (Issue #3413)

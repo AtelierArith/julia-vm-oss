@@ -10,7 +10,64 @@ use crate::vm::{Instr, ValueType};
 
 use super::super::{err, CResult, CoreCompiler};
 
+// Note: next_prev_float_result_type removed — nextfloat/prevfloat are now
+// Pure Julia (base/float.jl, Issue #6740).
+
+fn unary_float_preserving_result_type(arg: ValueType) -> ValueType {
+    match arg {
+        ValueType::F16 | ValueType::F32 | ValueType::F64 => arg,
+        ValueType::Any => ValueType::Any,
+        _ => ValueType::F64,
+    }
+}
+
 impl CoreCompiler<'_> {
+    fn compile_unary_rounding_struct_dispatch(
+        &mut self,
+        name: &str,
+        builtin_id: BuiltinId,
+        arg: &Expr,
+    ) -> CResult<Option<ValueType>> {
+        let arg_ty = self.infer_julia_type(arg);
+        if matches!(arg_ty, JuliaType::Struct(_)) {
+            if let Some(table) = self.method_tables.get(name) {
+                let arg_types = vec![arg_ty.clone()];
+                if let Ok(method) = table.dispatch(&arg_types) {
+                    self.compile_expr(arg)?;
+                    self.emit(Instr::Call(method.global_index, 1));
+                    return Ok(Some(method.return_type.clone()));
+                }
+            }
+        }
+
+        // For Any type, use runtime dispatch if struct methods exist.
+        if matches!(arg_ty, JuliaType::Any) {
+            if let Some(table) = self.method_tables.get(name) {
+                // Issue #6496: index-only payload; the runtime derives the
+                // expected first-parameter type name from FunctionInfo.
+                // Struct-spelling probe sourced from the canonical
+                // `core_signature` projection (Issue #6495, stages 7a/7c-ii);
+                // `params.len()` is an arity read.
+                let candidates: Vec<usize> = table
+                    .methods
+                    .iter()
+                    .filter(|m| {
+                        m.param_count() == 1
+                            && m.param_matches_at(0, super::binary::core_param_is_struct_spelling)
+                    })
+                    .map(|m| m.global_index)
+                    .collect();
+                if !candidates.is_empty() {
+                    self.compile_expr(arg)?;
+                    self.emit(Instr::CallDynamicOrBuiltin(builtin_id, candidates));
+                    return Ok(Some(ValueType::Any));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Compile math builtin functions.
     /// Returns `Ok(Some(result))` if handled, `Ok(None)` if not a math function.
     pub(in super::super) fn compile_builtin_math(
@@ -66,10 +123,10 @@ impl CoreCompiler<'_> {
                         }
                     }
                 }
-                // Fall back to builtin F64 sqrt
-                self.compile_expr_as(&args[0], ValueType::F64)?;
+                // Keep Float16/Float32 width; integer-like inputs still produce Float64.
+                let arg_ty = self.compile_expr(&args[0])?;
                 self.emit(Instr::SqrtF64);
-                Ok(Some(ValueType::F64))
+                Ok(Some(unary_float_preserving_result_type(arg_ty)))
             }
             "sdiv_int" => {
                 // Low-level signed integer division intrinsic
@@ -77,6 +134,36 @@ impl CoreCompiler<'_> {
                 // This matches Julia's checked_sdiv_int intrinsic
                 if args.len() != 2 {
                     return err(format!("sdiv_int requires 2 arguments, got {}", args.len()));
+                }
+                // Issue #3694: keep Int128 operands as I128 so the extended SdivInt
+                // intrinsic preserves the type. div(::Int128, ::Int128) in int.jl
+                // relies on this to return Int128 instead of Float64.
+                // Issue #3696: same for UInt128 with unsigned division semantics.
+                let left_ty = self.infer_expr_type(&args[0]);
+                let right_ty = self.infer_expr_type(&args[1]);
+                let both_i128 = left_ty == ValueType::I128 && right_ty == ValueType::I128;
+                let both_u128 = left_ty == ValueType::U128 && right_ty == ValueType::U128;
+                if both_i128 {
+                    self.compile_expr_as(&args[0], ValueType::I128)?;
+                    self.compile_expr_as(&args[1], ValueType::I128)?;
+                    self.emit(Instr::CallIntrinsic(crate::intrinsics::Intrinsic::SdivInt));
+                    return Ok(Some(ValueType::I128));
+                }
+                if both_u128 {
+                    self.compile_expr_as(&args[0], ValueType::U128)?;
+                    self.compile_expr_as(&args[1], ValueType::U128)?;
+                    self.emit(Instr::CallIntrinsic(crate::intrinsics::Intrinsic::SdivInt));
+                    return Ok(Some(ValueType::U128));
+                }
+                // Issue #3701: same for UInt64. Cast-through-I64 wraps for
+                // values above i64::MAX, so route through the native U64 arm
+                // of SdivInt instead.
+                let both_u64 = left_ty == ValueType::U64 && right_ty == ValueType::U64;
+                if both_u64 {
+                    self.compile_expr_as(&args[0], ValueType::U64)?;
+                    self.compile_expr_as(&args[1], ValueType::U64)?;
+                    self.emit(Instr::CallIntrinsic(crate::intrinsics::Intrinsic::SdivInt));
+                    return Ok(Some(ValueType::U64));
                 }
                 self.compile_expr_as(&args[0], ValueType::I64)?;
                 self.compile_expr_as(&args[1], ValueType::I64)?;
@@ -98,45 +185,17 @@ impl CoreCompiler<'_> {
                         }
                     }
                 }
-                // Check for user-defined floor method (e.g., floor(::Rational))
-                let arg_ty = self.infer_julia_type(&args[0]);
-                if matches!(arg_ty, JuliaType::Struct(_)) {
-                    if let Some(table) = self.method_tables.get("floor") {
-                        let arg_types = vec![arg_ty.clone()];
-                        if let Ok(method) = table.dispatch(&arg_types) {
-                            self.compile_expr(&args[0])?;
-                            self.emit(Instr::Call(method.global_index, 1));
-                            return Ok(Some(method.return_type.clone()));
-                        }
-                    }
+                if let Some(result) = self.compile_unary_rounding_struct_dispatch(
+                    "floor",
+                    BuiltinId::Floor,
+                    &args[0],
+                )? {
+                    return Ok(Some(result));
                 }
-                // For Any type, use runtime dispatch if struct methods exist
-                if matches!(arg_ty, JuliaType::Any) {
-                    if let Some(table) = self.method_tables.get("floor") {
-                        // Build candidates for runtime dispatch
-                        let candidates: Vec<(usize, String)> = table
-                            .methods
-                            .iter()
-                            .filter(|m| {
-                                m.params.len() == 1
-                                    && matches!(&m.params[0].1, JuliaType::Struct(_))
-                            })
-                            .map(|m| {
-                                let type_name = m.params[0].1.to_string();
-                                (m.global_index, type_name)
-                            })
-                            .collect();
-                        if !candidates.is_empty() {
-                            self.compile_expr(&args[0])?;
-                            self.emit(Instr::CallDynamicOrBuiltin(BuiltinId::Floor, candidates));
-                            return Ok(Some(ValueType::Any));
-                        }
-                    }
-                }
-                // Fall back to builtin F64 floor
-                self.compile_expr_as(&args[0], ValueType::F64)?;
+                // Keep Float16/Float32 width; integer-like inputs still produce Float64.
+                let arg_ty = self.compile_expr(&args[0])?;
                 self.emit(Instr::FloorF64); // Keep as intrinsic (CPU instruction)
-                Ok(Some(ValueType::F64))
+                Ok(Some(unary_float_preserving_result_type(arg_ty)))
             }
             "ceil" => {
                 // ceil(T, x) - ceil and convert to type T (Issue #2028)
@@ -150,45 +209,15 @@ impl CoreCompiler<'_> {
                         }
                     }
                 }
-                // Check for user-defined ceil method (e.g., ceil(::Rational))
-                let arg_ty = self.infer_julia_type(&args[0]);
-                if matches!(arg_ty, JuliaType::Struct(_)) {
-                    if let Some(table) = self.method_tables.get("ceil") {
-                        let arg_types = vec![arg_ty.clone()];
-                        if let Ok(method) = table.dispatch(&arg_types) {
-                            self.compile_expr(&args[0])?;
-                            self.emit(Instr::Call(method.global_index, 1));
-                            return Ok(Some(method.return_type.clone()));
-                        }
-                    }
+                if let Some(result) =
+                    self.compile_unary_rounding_struct_dispatch("ceil", BuiltinId::Ceil, &args[0])?
+                {
+                    return Ok(Some(result));
                 }
-                // For Any type, use runtime dispatch if struct methods exist
-                if matches!(arg_ty, JuliaType::Any) {
-                    if let Some(table) = self.method_tables.get("ceil") {
-                        // Build candidates for runtime dispatch
-                        let candidates: Vec<(usize, String)> = table
-                            .methods
-                            .iter()
-                            .filter(|m| {
-                                m.params.len() == 1
-                                    && matches!(&m.params[0].1, JuliaType::Struct(_))
-                            })
-                            .map(|m| {
-                                let type_name = m.params[0].1.to_string();
-                                (m.global_index, type_name)
-                            })
-                            .collect();
-                        if !candidates.is_empty() {
-                            self.compile_expr(&args[0])?;
-                            self.emit(Instr::CallDynamicOrBuiltin(BuiltinId::Ceil, candidates));
-                            return Ok(Some(ValueType::Any));
-                        }
-                    }
-                }
-                // Fall back to builtin F64 ceil
-                self.compile_expr_as(&args[0], ValueType::F64)?;
+                // Keep Float16/Float32 width; integer-like inputs still produce Float64.
+                let arg_ty = self.compile_expr(&args[0])?;
                 self.emit(Instr::CeilF64); // Keep as intrinsic (CPU instruction)
-                Ok(Some(ValueType::F64))
+                Ok(Some(unary_float_preserving_result_type(arg_ty)))
             }
             "round" => {
                 // round(T, x) - round and convert to type T (Issue #2028)
@@ -202,9 +231,16 @@ impl CoreCompiler<'_> {
                         }
                     }
                 }
-                self.compile_expr_as(&args[0], ValueType::F64)?;
+                if let Some(result) = self.compile_unary_rounding_struct_dispatch(
+                    "round",
+                    BuiltinId::Round,
+                    &args[0],
+                )? {
+                    return Ok(Some(result));
+                }
+                let arg_ty = self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::Round, 1));
-                Ok(Some(ValueType::F64))
+                Ok(Some(unary_float_preserving_result_type(arg_ty)))
             }
             "trunc" => {
                 // trunc(T, x) - truncate and convert to type T (Issue #2028)
@@ -218,120 +254,67 @@ impl CoreCompiler<'_> {
                         }
                     }
                 }
-                self.compile_expr_as(&args[0], ValueType::F64)?;
+                if let Some(result) = self.compile_unary_rounding_struct_dispatch(
+                    "trunc",
+                    BuiltinId::Trunc,
+                    &args[0],
+                )? {
+                    return Ok(Some(result));
+                }
+                let arg_ty = self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::Trunc, 1));
-                Ok(Some(ValueType::F64))
+                Ok(Some(unary_float_preserving_result_type(arg_ty)))
             }
-            "nextfloat" => {
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::NextFloat, 1));
-                Ok(Some(ValueType::F64))
-            }
-            "prevfloat" => {
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::PrevFloat, 1));
-                Ok(Some(ValueType::F64))
-            }
-            // Bit operations (work on integers, return integers)
-            "count_ones" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
+            // nextfloat / prevfloat removed - pure Julia (Issue #6740)
+            // Bit operations: low-level CPU intrinsics called by the pure-Julia
+            // public functions count_ones/leading_zeros/trailing_zeros/bitreverse/
+            // bswap (base/int.jl, Issue #6741). Issue #4785: do NOT coerce the
+            // input to I64 — the runtime dispatches on the actual integer variant
+            // so the bit width is preserved.
+            "_ctpop_int" => {
+                self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::CountOnes, 1));
                 Ok(Some(ValueType::I64))
             }
-            "count_zeros" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::CountZeros, 1));
-                Ok(Some(ValueType::I64))
-            }
-            "leading_zeros" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
+            "_ctlz_int" => {
+                self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::LeadingZeros, 1));
                 Ok(Some(ValueType::I64))
             }
-            "trailing_ones" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::TrailingOnes, 1));
-                Ok(Some(ValueType::I64))
-            }
-            "bitreverse" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
+            "_bitreverse_int" => {
+                // bitreverse preserves element type (UInt8 → UInt8).
+                let t = self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::Bitreverse, 1));
-                Ok(Some(ValueType::I64))
+                Ok(Some(t))
             }
-            "leading_ones" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::LeadingOnes, 1));
-                Ok(Some(ValueType::I64))
-            }
-            "trailing_zeros" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
+            "_cttz_int" => {
+                self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::TrailingZeros, 1));
                 Ok(Some(ValueType::I64))
             }
-            "bitrotate" => {
-                // bitrotate(x, k) - rotate bits
-                if args.len() != 2 {
-                    return err(format!(
-                        "bitrotate requires 2 arguments, got {}",
-                        args.len()
-                    ));
-                }
-                self.compile_expr_as(&args[0], ValueType::I64)?;
-                self.compile_expr_as(&args[1], ValueType::I64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Bitrotate, 2));
-                Ok(Some(ValueType::I64))
-            }
-            "bswap" => {
-                self.compile_expr_as(&args[0], ValueType::I64)?;
+            "_bswap_int" => {
+                // Issue #4787: preserve the original integer element
+                // type so bswap respects the actual bit width.
+                let t = self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::Bswap, 1));
-                Ok(Some(ValueType::I64))
+                Ok(Some(t))
             }
-            // Float decomposition
-            "exponent" => {
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Exponent, 1));
-                Ok(Some(ValueType::I64))
-            }
-            "significand" => {
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Significand, 1));
-                Ok(Some(ValueType::F64))
-            }
-            "frexp" => {
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Frexp, 1));
-                Ok(Some(ValueType::Tuple))
-            }
-            // Float inspection
-            "issubnormal" => {
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Issubnormal, 1));
-                Ok(Some(ValueType::Bool))
-            }
-            "maxintfloat" => {
-                // maxintfloat() takes no arguments (defaults to Float64)
-                self.emit(Instr::CallBuiltin(BuiltinId::Maxintfloat, 0));
-                Ok(Some(ValueType::F64))
-            }
-            // Fused multiply-add
-            "fma" => {
+            // Float decomposition: exponent / significand / frexp removed - pure Julia (Issue #6740)
+            // Float inspection: issubnormal removed - pure Julia (Issue #6740)
+            // Note: maxintfloat is now Pure Julia (base/floatfuncs.jl) — Issue #3732.
+            // Note: muladd is now Pure Julia (base/math.jl) — Issue #3732.
+            // Note: public fma is Pure Julia (base/math.jl); the Pure Julia
+            // wrapper calls the internal `_fma` intrinsic for IEEE fused
+            // semantics on Float64. The public name no longer reaches a Rust
+            // builtin route here.
+            "_fma" => {
                 if args.len() != 3 {
-                    return err(format!("fma requires 3 arguments, got {}", args.len()));
+                    return err(format!("_fma requires 3 arguments, got {}", args.len()));
                 }
                 self.compile_expr_as(&args[0], ValueType::F64)?;
                 self.compile_expr_as(&args[1], ValueType::F64)?;
                 self.compile_expr_as(&args[2], ValueType::F64)?;
                 self.emit(Instr::CallBuiltin(BuiltinId::Fma, 3));
-                Ok(Some(ValueType::F64))
-            }
-            "muladd" => {
-                if args.len() != 3 {
-                    return err(format!("muladd requires 3 arguments, got {}", args.len()));
-                }
-                self.compile_expr_as(&args[0], ValueType::F64)?;
-                self.compile_expr_as(&args[1], ValueType::F64)?;
-                self.compile_expr_as(&args[2], ValueType::F64)?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Muladd, 3));
                 Ok(Some(ValueType::F64))
             }
             // Number theory functions
@@ -406,21 +389,39 @@ mod tests {
 
     #[test]
     fn test_rounding_target_type_integer_names() {
-        assert!(matches!(rounding_target_type("Int64"), Some(ValueType::I64)));
+        assert!(matches!(
+            rounding_target_type("Int64"),
+            Some(ValueType::I64)
+        ));
         assert!(matches!(rounding_target_type("Int"), Some(ValueType::I64)));
-        assert!(matches!(rounding_target_type("UInt8"), Some(ValueType::I64)));
+        assert!(matches!(
+            rounding_target_type("UInt8"),
+            Some(ValueType::I64)
+        ));
     }
 
     #[test]
     fn test_rounding_target_type_float_names() {
-        assert!(matches!(rounding_target_type("Float64"), Some(ValueType::F64)));
-        assert!(matches!(rounding_target_type("Float32"), Some(ValueType::F32)));
-        assert!(matches!(rounding_target_type("Float16"), Some(ValueType::F16)));
+        assert!(matches!(
+            rounding_target_type("Float64"),
+            Some(ValueType::F64)
+        ));
+        assert!(matches!(
+            rounding_target_type("Float32"),
+            Some(ValueType::F32)
+        ));
+        assert!(matches!(
+            rounding_target_type("Float16"),
+            Some(ValueType::F16)
+        ));
     }
 
     #[test]
     fn test_rounding_target_type_bool() {
-        assert!(matches!(rounding_target_type("Bool"), Some(ValueType::Bool)));
+        assert!(matches!(
+            rounding_target_type("Bool"),
+            Some(ValueType::Bool)
+        ));
     }
 
     #[test]

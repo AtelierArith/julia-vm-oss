@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+#
+# 32-bit Raspberry Pi compatibility check for SubsetJuliaVM.
+#
+# Build from the repository root:
+#   docker buildx build --platform linux/arm/v7 -f docker/Dockerfile.raspberrypi32 --target smoke .
+#
+# Optional nextest gate, slower under QEMU:
+#   docker buildx build --platform linux/arm/v7 -f docker/Dockerfile.raspberrypi32 --target nextest .
+
+ARG RUST_IMAGE=arm32v7/rust:1.96-bookworm
+FROM --platform=linux/arm/v7 ${RUST_IMAGE} AS base
+
+ENV CARGO_TERM_COLOR=always \
+    CARGO_NET_RETRY=10
+
+WORKDIR /work/ailujsoi
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        coreutils \
+        file \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+RUN test "$(dpkg --print-architecture)" = "armhf" \
+    && rustc -Vv \
+    && cargo -V
+
+FROM base AS smoke
+
+# Build sjulia once to generate the precompile caches, then rebuild with the
+# caches embedded so startup does not recompile Base from source under QEMU.
+# Without this two-stage approach the cold-start `sjulia -e` step takes ~167 s
+# under QEMU because Base is compiled from scratch on every invocation.
+RUN timeout 3600 cargo build --release --bin sjulia --features repl
+RUN timeout 600 target/release/sjulia --precompile-prelude "$(pwd)/target/prelude_program_cache.bin" \
+    && timeout 600 target/release/sjulia --precompile-base "$(pwd)/target/base_cache.bin"
+RUN SJULIA_PRELUDE_PROGRAM_CACHE="$(pwd)/target/prelude_program_cache.bin" \
+    SJULIA_BASE_CACHE="$(pwd)/target/base_cache.bin" \
+    timeout 3600 cargo build --release --bin sjulia --features repl
+RUN file target/release/sjulia \
+    && timeout 300 target/release/sjulia -e '@assert Sys.WORD_SIZE == 32; @assert Int === Int32; @assert UInt === UInt32; println(1 + 2)'
+
+FROM base AS nextest
+
+RUN cargo install cargo-nextest --locked
+RUN timeout 1800 cargo nextest run --release --lib

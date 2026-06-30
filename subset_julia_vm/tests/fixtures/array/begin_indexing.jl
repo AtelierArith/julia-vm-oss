@@ -39,6 +39,8 @@ end
 
 @testset "Nested array begin indexing" begin
     nested = [[1, 2], [3, 4]]
+    x = nested[begin]
+    @test lastindex(x) == 2
     @test nested[begin][begin] == 1
     @test nested[begin][end] == 2
     @test nested[end][begin] == 3

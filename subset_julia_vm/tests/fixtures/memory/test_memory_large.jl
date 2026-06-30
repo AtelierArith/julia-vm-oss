@@ -33,6 +33,8 @@ using Test
     # Copy of large memory
     m2 = copy(m)
     @test length(m2) == n
+    @test typeof(m2) == Memory{Int64}
+    @test eltype(m2) == Int64
     @test m2[1] == 1
     @test m2[100] == 100
     # Verify independence

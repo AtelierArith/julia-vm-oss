@@ -22,7 +22,7 @@ pub enum RuntimeError {
     #[error("BoundsError: attempt to access index {index} of array with length {length}")]
     BoundsError {
         /// Attempted index
-        index: usize,
+        index: i64,
         /// Array length
         length: usize,
     },
@@ -88,7 +88,7 @@ impl RuntimeError {
     }
 
     /// Create a bounds error
-    pub fn bounds_error(index: usize, length: usize) -> Self {
+    pub fn bounds_error(index: i64, length: usize) -> Self {
         RuntimeError::BoundsError { index, length }
     }
 
@@ -141,6 +141,14 @@ impl RuntimeError {
 /// Result type alias for AoT runtime operations
 pub type RuntimeResult<T> = Result<T, RuntimeError>;
 
+/// Diverging `throw` used by AoT-compiled code: maps Julia's `throw(e)` to an
+/// aborting panic. Kept in the runtime crate (rather than inlined as
+/// `panic!(...)` in every generated file) so the generated code itself stays
+/// free of raw `panic!` / `.unwrap()` (Issue #5658).
+pub fn aot_throw<T: std::fmt::Display>(e: T) -> ! {
+    panic!("{}", e);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +173,11 @@ mod tests {
         let _ = RuntimeError::method_error("add(Int64, String)");
         let _ = RuntimeError::key_error("missing_key");
         let _ = RuntimeError::field_error("x", "Point");
+    }
+
+    #[test]
+    #[should_panic(expected = "DivideError: integer division error")]
+    fn aot_throw_uses_display_text_issue_7018() {
+        aot_throw(RuntimeError::DivisionByZero);
     }
 }

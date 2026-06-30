@@ -10,7 +10,7 @@
 use super::error::VmError;
 use super::util::value_type_name;
 use super::value::{
-    new_array_ref, ArrayRef, ArrayValue, DictValue, RangeValue, RustBigFloat, RustBigInt,
+    native_array_ref_from_value, new_array_ref, ArrayRef, RangeValue, RustBigFloat, RustBigInt,
     StructInstance, Value, BIGFLOAT_PRECISION,
 };
 
@@ -53,16 +53,15 @@ pub trait StackOps {
     /// Also handles automatic Range -> Array conversion.
     fn pop_array(&mut self) -> Result<ArrayRef, VmError>;
 
-    /// Pop a Dict value from the stack.
-    fn pop_dict(&mut self) -> Result<Box<DictValue>, VmError>;
-
     /// Pop a Range value from the stack.
     fn pop_range(&mut self) -> Result<RangeValue, VmError>;
 
-    /// Pop a BigInt from the stack, promoting I64/I128 if needed.
+    /// Pop a BigInt from the stack, promoting any primitive integer
+    /// (Bool, I8/16/32/64/128, U8/16/32/64/128) to BigInt.
     fn pop_bigint(&mut self) -> Result<RustBigInt, VmError>;
 
-    /// Pop a BigFloat from the stack, promoting F64/I64 if needed.
+    /// Pop a BigFloat from the stack, promoting any primitive numeric value
+    /// (Bool, all integer widths, F16/F32/F64, BigInt) to BigFloat.
     fn pop_bigfloat(&mut self) -> Result<RustBigFloat, VmError>;
 
     /// Pop any value from the stack.
@@ -162,32 +161,17 @@ impl StackOps for Vec<Value> {
 
     #[inline]
     fn pop_array(&mut self) -> Result<ArrayRef, VmError> {
-        match self.pop().ok_or(VmError::StackUnderflow)? {
-            Value::Array(arr) => Ok(arr),
-            Value::Range(r) => {
-                // Automatically collect Range to Array (needed for transpose, etc.)
-                let len = r.length() as usize;
-                let mut data = Vec::with_capacity(len);
-                for i in 0..len {
-                    data.push(r.start + (i as f64) * r.step);
-                }
-                Ok(new_array_ref(ArrayValue::from_f64(data, vec![len])))
+        let popped = self.pop().ok_or(VmError::StackUnderflow)?;
+        match native_array_ref_from_value(popped) {
+            Ok(arr) => Ok(arr),
+            Err(Value::Range(r)) => {
+                // Automatically collect Range to Array (needed for transpose,
+                // etc.) through the same Memory-first range materialization
+                // path used by public collect.
+                Ok(new_array_ref(r.collect()))
             }
-            // Memory → Array conversion (Issue #2764)
-            Value::Memory(mem) => Ok(super::util::memory_to_array_ref(&mem)),
-            other => Err(VmError::TypeError(format!(
+            Err(other) => Err(VmError::TypeError(format!(
                 "expected Array, got {:?}",
-                value_type_name(&other)
-            ))),
-        }
-    }
-
-    #[inline]
-    fn pop_dict(&mut self) -> Result<Box<DictValue>, VmError> {
-        match self.pop().ok_or(VmError::StackUnderflow)? {
-            Value::Dict(d) => Ok(d),
-            other => Err(VmError::TypeError(format!(
-                "expected Dict, got {:?}",
                 value_type_name(&other)
             ))),
         }
@@ -206,10 +190,23 @@ impl StackOps for Vec<Value> {
 
     #[inline]
     fn pop_bigint(&mut self) -> Result<RustBigInt, VmError> {
+        // Issue #3748: accept every primitive integer Value variant. In Julia,
+        // any integer + BigInt promotes to BigInt, so the runtime coercion
+        // helper must mirror that — Bool, all signed widths (I8/16/32/64/128),
+        // and all unsigned widths (U8/16/32/64/128).
         match self.pop().ok_or(VmError::StackUnderflow)? {
             Value::BigInt(v) => Ok(v),
-            Value::I64(v) => Ok(RustBigInt::from(v)), // Promote I64 to BigInt
-            Value::I128(v) => Ok(RustBigInt::from(v)), // Promote I128 to BigInt
+            Value::Bool(v) => Ok(RustBigInt::from(if v { 1u8 } else { 0u8 })),
+            Value::I8(v) => Ok(RustBigInt::from(v)),
+            Value::I16(v) => Ok(RustBigInt::from(v)),
+            Value::I32(v) => Ok(RustBigInt::from(v)),
+            Value::I64(v) => Ok(RustBigInt::from(v)),
+            Value::I128(v) => Ok(RustBigInt::from(v)),
+            Value::U8(v) => Ok(RustBigInt::from(v)),
+            Value::U16(v) => Ok(RustBigInt::from(v)),
+            Value::U32(v) => Ok(RustBigInt::from(v)),
+            Value::U64(v) => Ok(RustBigInt::from(v)),
+            Value::U128(v) => Ok(RustBigInt::from(v)),
             other => Err(VmError::TypeError(format!(
                 "expected BigInt, got {:?}",
                 value_type_name(&other)
@@ -219,10 +216,35 @@ impl StackOps for Vec<Value> {
 
     #[inline]
     fn pop_bigfloat(&mut self) -> Result<RustBigFloat, VmError> {
+        // Issue #3749: accept every primitive numeric Value variant. In Julia,
+        // any numeric + BigFloat promotes to BigFloat, so the runtime coercion
+        // helper must accept Bool, all integer widths, F16/F32/F64 and BigInt.
         match self.pop().ok_or(VmError::StackUnderflow)? {
             Value::BigFloat(v) => Ok(v),
-            Value::F64(v) => Ok(RustBigFloat::from_f64(v, BIGFLOAT_PRECISION)), // Promote F64 to BigFloat
-            Value::I64(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)), // Promote I64 to BigFloat
+            Value::F64(v) => Ok(RustBigFloat::from_f64(v, BIGFLOAT_PRECISION)),
+            Value::F32(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::F16(v) => Ok(RustBigFloat::from_f64(v.to_f64(), BIGFLOAT_PRECISION)),
+            Value::Bool(v) => Ok(RustBigFloat::from_f64(
+                if v { 1.0 } else { 0.0 },
+                BIGFLOAT_PRECISION,
+            )),
+            Value::I8(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::I16(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::I32(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::I64(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::I128(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::U8(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::U16(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::U32(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::U64(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::U128(v) => Ok(RustBigFloat::from_f64(v as f64, BIGFLOAT_PRECISION)),
+            Value::BigInt(v) => {
+                // Convert BigInt to BigFloat via f64 (matches vm/convert.rs strategy).
+                // Lossy for values exceeding f64 range, but consistent with existing path.
+                use std::str::FromStr;
+                let f = f64::from_str(&v.to_string()).unwrap_or(0.0);
+                Ok(RustBigFloat::from_f64(f, BIGFLOAT_PRECISION))
+            }
             other => Err(VmError::TypeError(format!(
                 "expected BigFloat, got {:?}",
                 value_type_name(&other)
@@ -316,19 +338,34 @@ impl StackOpsExt {
                 use num_traits::ToPrimitive;
                 Ok(b.to_f64().unwrap_or(f64::INFINITY))
             }
-            Value::Struct(s) => Self::rational_to_f64(&s).ok_or_else(|| {
-                VmError::TypeError(format!(
-                    "expected numeric value, got {:?}",
-                    value_type_name(&Value::Struct(s.clone()))
-                ))
-            }),
+            Value::Struct(s) => {
+                if let Some(v) = s.as_irrational_f64() {
+                    return Ok(v);
+                }
+                s.as_rational_parts_f64()
+                    .map(|(num, den)| num / den)
+                    .ok_or_else(|| {
+                        VmError::TypeError(format!(
+                            "expected numeric value, got {:?}",
+                            value_type_name(&Value::Struct(s.clone()))
+                        ))
+                    })
+            }
             Value::StructRef(idx) => {
                 let s = struct_heap.get(idx).ok_or_else(|| {
                     VmError::TypeError(format!("invalid struct reference: {}", idx))
                 })?;
-                Self::rational_to_f64(s).ok_or_else(|| {
-                    VmError::TypeError(format!("expected numeric value, got {:?}", s.struct_name))
-                })
+                if let Some(v) = s.as_irrational_f64() {
+                    return Ok(v);
+                }
+                s.as_rational_parts_f64()
+                    .map(|(num, den)| num / den)
+                    .ok_or_else(|| {
+                        VmError::TypeError(format!(
+                            "expected numeric value, got {:?}",
+                            s.struct_name
+                        ))
+                    })
             }
             other => Err(VmError::TypeError(format!(
                 "expected numeric value, got {:?}",
@@ -374,46 +411,11 @@ impl StackOpsExt {
             ))),
         }
     }
-
-    /// Convert a Rational struct to f64.
-    fn rational_to_f64(s: &StructInstance) -> Option<f64> {
-        if !(s.struct_name == "Rational" || s.struct_name.starts_with("Rational{")) {
-            return None;
-        }
-        let num = match s.values.first() {
-            Some(Value::I64(v)) => *v as f64,
-            Some(Value::I32(v)) => *v as f64,
-            Some(Value::I16(v)) => *v as f64,
-            Some(Value::I8(v)) => *v as f64,
-            Some(Value::Bool(v)) => {
-                if *v {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            _ => return None,
-        };
-        let den = match s.values.get(1) {
-            Some(Value::I64(v)) => *v as f64,
-            Some(Value::I32(v)) => *v as f64,
-            Some(Value::I16(v)) => *v as f64,
-            Some(Value::I8(v)) => *v as f64,
-            Some(Value::Bool(v)) => {
-                if *v {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            _ => return None,
-        };
-        Some(num / den)
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::value::{new_memory_ref, ArrayElementType, MemoryValue};
     use super::*;
 
     #[test]
@@ -472,5 +474,47 @@ mod tests {
         let mut stack = vec![Value::I64(10), Value::I64(-1)];
         assert!(stack.pop_usize().is_err()); // negative number
         assert_eq!(stack.pop_usize().unwrap(), 10);
+    }
+
+    #[test]
+    fn test_pop_array_rejects_memory_without_array_bridge() {
+        let mem = MemoryValue::undef_typed(&ArrayElementType::I64, 2);
+        let mut stack = vec![Value::Memory(new_memory_ref(mem))];
+
+        let err = stack
+            .pop_array()
+            .expect_err("Memory must not be converted to Array by pop_array");
+
+        match err {
+            VmError::TypeError(msg) => {
+                assert!(
+                    msg.contains("expected Array"),
+                    "unexpected TypeError: {msg}"
+                );
+                assert!(msg.contains("Memory"), "unexpected TypeError: {msg}");
+            }
+            other => panic!("expected TypeError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_pop_array_collects_integer_range_with_memory_first_element_type() {
+        let range = RangeValue::unit_range(1.0, 3.0);
+        let mut stack = vec![Value::Range(range)];
+
+        let arr = stack.pop_array().unwrap();
+        let arr = arr.borrow();
+
+        assert_eq!(arr.shape, vec![3]);
+        assert_eq!(arr.element_type(), ArrayElementType::I64);
+        let values = arr.to_logical_value_vec().unwrap();
+        let ints = values
+            .into_iter()
+            .map(|value| match value {
+                Value::I64(n) => n,
+                other => panic!("expected Int64 range element, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ints, vec![1, 2, 3]);
     }
 }

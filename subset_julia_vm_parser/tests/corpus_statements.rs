@@ -23,6 +23,22 @@ fn assert_root_child_kind(source: &str, expected_kind: NodeKind) {
     );
 }
 
+/// Assert `source` parses and some leaf in the resulting tree has the given text.
+/// Used to confirm a contextual keyword's payload (e.g. an import alias) is
+/// actually captured in the CST, not silently dropped.
+fn assert_tree_contains_text(source: &str, text: &str) {
+    let cst = parse(source).unwrap_or_else(|_| panic!("Failed to parse: {}", source));
+    fn has_text(node: &subset_julia_vm_parser::CstNode, text: &str) -> bool {
+        node.text.as_deref() == Some(text) || node.children.iter().any(|c| has_text(c, text))
+    }
+    assert!(
+        has_text(&cst, text),
+        "Expected a leaf with text {:?} in parse of: {}",
+        text,
+        source
+    );
+}
+
 // =============================================================================
 // Compound Statement (begin...end)
 // =============================================================================
@@ -201,6 +217,10 @@ fn test_for_outer() {
         "for outer i in 1:10\n  println(i)\nend",
         NodeKind::ForStatement,
     );
+    assert_root_child_kind(
+        "for outer in 1:10\n  println(outer)\nend",
+        NodeKind::ForStatement,
+    );
 }
 
 // =============================================================================
@@ -300,6 +320,8 @@ fn test_import_submodule() {
 #[test]
 fn test_import_specific() {
     assert_root_child_kind("import Base: sin, cos", NodeKind::ImportStatement);
+    assert_root_child_kind("import Base: *, ==, +", NodeKind::ImportStatement);
+    assert_parses("import Base: *,\n ==,\n +");
 }
 
 // import as
@@ -307,6 +329,48 @@ fn test_import_specific() {
 fn test_import_as() {
     assert_root_child_kind("import Base as B", NodeKind::ImportStatement);
     assert_parses("import Base: sin as s, cos as c");
+    // `as` is lexed as a plain identifier (Issue #8108); the alias payload must
+    // still be captured in the CST in import/using position.
+    assert_tree_contains_text("import Base as B", "B");
+    assert_tree_contains_text("import Base: sin as s, cos as c", "s");
+    assert_tree_contains_text("using LinearAlgebra: norm as n", "n");
+}
+
+// =============================================================================
+// Contextual keywords (`type`, `as`) as ordinary identifiers (Issue #8108)
+//
+// `type` and `as` are contextual keywords: `type` is significant only after
+// `abstract`/`primitive`, and `as` only in import/using aliasing. Everywhere
+// else they are plain identifiers, exactly as upstream Julia parses them.
+// =============================================================================
+
+#[test]
+fn test_type_as_function_name() {
+    assert_root_child_kind("function type()\n  1\nend", NodeKind::FunctionDefinition);
+    assert_root_child_kind("function as()\n  1\nend", NodeKind::FunctionDefinition);
+    // Short form lowers to an Assignment whose LHS is a call (see definitions).
+    assert_root_child_kind("type() = 7", NodeKind::Assignment);
+    assert_root_child_kind("as() = 7", NodeKind::Assignment);
+}
+
+#[test]
+fn test_type_as_variable_name() {
+    assert_root_child_kind("type = 5", NodeKind::Assignment);
+    assert_root_child_kind("as = 7", NodeKind::Assignment);
+    assert_parses("println(type)");
+    assert_parses("println(as)");
+}
+
+#[test]
+fn test_type_field_name() {
+    assert_root_child_kind("struct S\n  type::Int\nend", NodeKind::StructDefinition);
+}
+
+#[test]
+fn test_type_keyword_still_contextual() {
+    // `type` is still the keyword half of `abstract`/`primitive type`.
+    assert_root_child_kind("abstract type Foo end", NodeKind::AbstractDefinition);
+    assert_root_child_kind("primitive type Bar 8 end", NodeKind::PrimitiveDefinition);
 }
 
 // Relative import
@@ -316,6 +380,7 @@ fn test_import_relative() {
     assert_root_child_kind("import ..Foo", NodeKind::ImportStatement);
     assert_root_child_kind("import ...Foo", NodeKind::ImportStatement);
     assert_parses("import .Foo: bar");
+    assert_parses("import ..Foo: bar, baz");
 }
 
 // =============================================================================

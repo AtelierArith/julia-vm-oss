@@ -31,6 +31,8 @@ pub enum Value {
     Nothing,
     /// Missing value
     Missing,
+    /// Julia DataType/type object represented by its display name
+    DataType(String),
 
     // ========== Heap-Allocated Types ==========
     /// String
@@ -68,6 +70,7 @@ impl Value {
             Value::Char(_) => "Char",
             Value::Nothing => "Nothing",
             Value::Missing => "Missing",
+            Value::DataType(_) => "DataType",
             Value::Str(_) => "String",
             Value::Array(_) => "Array",
             Value::Tuple(_) => "Tuple",
@@ -247,6 +250,7 @@ impl fmt::Display for Value {
             Value::Char(v) => write!(f, "'{}'", v),
             Value::Nothing => write!(f, "nothing"),
             Value::Missing => write!(f, "missing"),
+            Value::DataType(name) => write!(f, "{}", name),
             Value::Str(s) => write!(f, "\"{}\"", s),
             Value::Array(arr) => {
                 let arr = arr.borrow();
@@ -317,6 +321,7 @@ impl PartialEq for Value {
             (Value::Char(a), Value::Char(b)) => a == b,
             (Value::Nothing, Value::Nothing) => true,
             (Value::Missing, Value::Missing) => true,
+            (Value::DataType(a), Value::DataType(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (
@@ -355,6 +360,7 @@ mod tests {
         assert_eq!(Value::F64(3.125).type_name(), "Float64");
         assert_eq!(Value::Bool(true).type_name(), "Bool");
         assert_eq!(Value::Nothing.type_name(), "Nothing");
+        assert_eq!(Value::DataType("Int64".to_string()).type_name(), "DataType");
     }
 
     #[test]
@@ -371,5 +377,6 @@ mod tests {
         assert_eq!(format!("{}", Value::F64(3.0)), "3.0");
         assert_eq!(format!("{}", Value::Bool(true)), "true");
         assert_eq!(format!("{}", Value::Nothing), "nothing");
+        assert_eq!(format!("{}", Value::DataType("Int64".to_string())), "Int64");
     }
 }

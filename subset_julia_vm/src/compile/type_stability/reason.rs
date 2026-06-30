@@ -3,6 +3,8 @@
 //! This module defines the reasons why a function might be type-unstable.
 
 use crate::compile::lattice::types::ConcreteType;
+#[cfg(test)]
+use crate::inference_core::{CorePrimitive, CoreType};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -153,8 +155,12 @@ mod tests {
     #[test]
     fn test_returns_union_description() {
         let mut types = BTreeSet::new();
-        types.insert(ConcreteType::Int64);
-        types.insert(ConcreteType::Float64);
+        types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
         let reason = TypeStabilityReason::ReturnsUnion { types };
         assert!(reason.description().contains("Union"));
     }

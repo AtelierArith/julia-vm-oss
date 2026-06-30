@@ -42,11 +42,16 @@
 
 module Iterators
 
-# Export iterator functions that are available in Base
-# These are re-exported for API compatibility with Julia's Iterators module
+# Match upstream julia/base/iterators.jl: these names are exported from
+# Iterators, while HOF-style iterator helpers are public but not exported.
 export enumerate, zip, rest, countfrom, take, drop, takewhile, dropwhile,
-       cycle, repeated, product, flatten, flatmap, partition, peel, nth,
-       filter, map, reverse, accumulate
+       cycle, repeated, product, flatten, flatmap, partition, nth
+
+public accumulate, filter, map, peel, reverse
+
+filter(flt, itr) = Base.Filter(flt, itr)
+
+map(f, arg, args...) = Base.Generator(f, arg, args...)
 
 # Note: The actual implementations are in Base (base/iteration.jl).
 # This module re-exports them for Julia compatibility.

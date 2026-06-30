@@ -1,0 +1,5 @@
+# bacon.toml
+
+[jobs.build]
+command = ["cargo", "build"]
+need_stdout = true

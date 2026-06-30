@@ -5,7 +5,8 @@
 
 use crate::compile::abstract_interp::TypeEnv;
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
-use crate::ir::core::{BinaryOp, BuiltinOp, Expr, Stmt};
+use crate::inference_core::{CorePrimitive, CoreType};
+use crate::ir::core::{BinaryOp, BuiltinOp, Expr, Literal, Stmt};
 use crate::vm::instr::Instr;
 
 /// Information about a specialized code path.
@@ -35,12 +36,15 @@ pub struct SpecializedPath {
 ///
 /// # Returns
 ///
-/// A vector of bytecode instructions (currently returns empty).
+/// A vector of bytecode instructions. Returns empty when this lightweight
+/// emitter cannot prove a safe specialized lowering without full `Compiler`
+/// context.
 ///
 /// # Implementation Status
 ///
-/// This function currently returns an empty instruction vector because full
-/// implementation requires deep integration with the `Compiler` struct:
+/// This function has a small context-free emitter for straight-line returns of
+/// literals and known primitive arithmetic. Full implementation still requires
+/// deep integration with the `Compiler` struct:
 ///
 /// 1. **Compiler State Access**: The main compiler maintains local variable maps,
 ///    slot allocations, and type tracking that would need to be available here.
@@ -75,10 +79,308 @@ pub fn specialize_block(
     // Analyze opportunities for debugging/metrics purposes
     let _opportunities = analyze_specialization_opportunities(block, env, specialized_type);
 
-    // Full bytecode generation requires Compiler context integration.
-    // For now, return empty vector - the caller should fall back to
-    // standard compilation with the specialized type environment.
-    Vec::new()
+    let mut local_env = env.clone();
+    let mut instructions = Vec::new();
+    for stmt in block {
+        if !emit_specialized_stmt(stmt, &mut local_env, &mut instructions) {
+            return Vec::new();
+        }
+    }
+    instructions
+}
+
+fn emit_specialized_stmt(stmt: &Stmt, env: &mut TypeEnv, instructions: &mut Vec<Instr>) -> bool {
+    match stmt {
+        Stmt::Assign { var, value, .. } => {
+            let Some(value_ty) = emit_specialized_expr(value, env, instructions) else {
+                return false;
+            };
+            if !emit_specialized_store(var, &value_ty, instructions) {
+                return false;
+            }
+            env.set(var, LatticeType::Concrete(value_ty));
+            true
+        }
+        Stmt::Return {
+            value: Some(expr), ..
+        } => match emit_specialized_expr(expr, env, instructions) {
+            Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))) => {
+                instructions.push(Instr::ReturnI64);
+                true
+            }
+            Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64))) => {
+                instructions.push(Instr::ReturnF64);
+                true
+            }
+            Some(_) => {
+                instructions.push(Instr::ReturnAny);
+                true
+            }
+            None => false,
+        },
+        Stmt::Return { value: None, .. } => {
+            instructions.push(Instr::ReturnNothing);
+            true
+        }
+        Stmt::Expr { expr, .. } => {
+            if emit_specialized_expr(expr, env, instructions).is_none() {
+                return false;
+            }
+            instructions.push(Instr::Pop);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn emit_specialized_store(name: &str, ty: &ConcreteType, instructions: &mut Vec<Instr>) -> bool {
+    match ty {
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)) => {
+            instructions.push(Instr::StoreI64(name.to_string()))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)) => {
+            instructions.push(Instr::StoreF64(name.to_string()))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float32)) => {
+            instructions.push(Instr::StoreF32(name.to_string()))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float16)) => {
+            instructions.push(Instr::StoreF16(name.to_string()))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)) => {
+            instructions.push(Instr::StoreBool(name.to_string()))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::String)) => {
+            instructions.push(Instr::StoreStr(name.to_string()))
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn emit_specialized_expr(
+    expr: &Expr,
+    env: &TypeEnv,
+    instructions: &mut Vec<Instr>,
+) -> Option<ConcreteType> {
+    match expr {
+        Expr::Literal(lit, _) => emit_specialized_literal(lit, instructions),
+        Expr::Var(name, _) => emit_specialized_var(name, env, instructions),
+        Expr::BinaryOp {
+            left, right, op, ..
+        } => emit_specialized_binary(op, left, right, env, instructions),
+        _ => None,
+    }
+}
+
+fn emit_specialized_literal(lit: &Literal, instructions: &mut Vec<Instr>) -> Option<ConcreteType> {
+    match lit {
+        Literal::Int(v) => {
+            instructions.push(Instr::PushI64(*v));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            )))
+        }
+        Literal::Float(v) => {
+            instructions.push(Instr::PushF64(*v));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            )))
+        }
+        Literal::Float32(v) => {
+            instructions.push(Instr::PushF32(*v));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32,
+            )))
+        }
+        Literal::Float16(v) => {
+            instructions.push(Instr::PushF16(*v));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float16,
+            )))
+        }
+        Literal::Bool(v) => {
+            instructions.push(Instr::PushBool(*v));
+            Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        }
+        Literal::Str(v) => {
+            instructions.push(Instr::PushStr(v.clone()));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            )))
+        }
+        Literal::Char(v) => {
+            instructions.push(Instr::PushChar(*v));
+            Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        }
+        Literal::Nothing => {
+            instructions.push(Instr::PushNothing);
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Nothing,
+            )))
+        }
+        _ => None,
+    }
+}
+
+fn emit_specialized_var(
+    name: &str,
+    env: &TypeEnv,
+    instructions: &mut Vec<Instr>,
+) -> Option<ConcreteType> {
+    match env.get(name).and_then(get_concrete_type)? {
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)) => {
+            instructions.push(Instr::LoadI64(name.to_string()));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            )))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)) => {
+            instructions.push(Instr::LoadF64(name.to_string()));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            )))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float32)) => {
+            instructions.push(Instr::LoadF32(name.to_string()));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32,
+            )))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float16)) => {
+            instructions.push(Instr::LoadF16(name.to_string()));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float16,
+            )))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)) => {
+            instructions.push(Instr::LoadBool(name.to_string()));
+            Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::String)) => {
+            instructions.push(Instr::LoadStr(name.to_string()));
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            )))
+        }
+        _ => None,
+    }
+}
+
+fn emit_specialized_binary(
+    op: &BinaryOp,
+    left: &Expr,
+    right: &Expr,
+    env: &TypeEnv,
+    instructions: &mut Vec<Instr>,
+) -> Option<ConcreteType> {
+    let mut left_emitted = Vec::new();
+    let left_ty = emit_specialized_expr(left, env, &mut left_emitted)?;
+    let mut right_emitted = Vec::new();
+    let right_ty = emit_specialized_expr(right, env, &mut right_emitted)?;
+    let mut emitted = left_emitted;
+    let left_instr_count = emitted.len();
+    emitted.extend(right_emitted);
+
+    let result_ty = match (left_ty, right_ty) {
+        (
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+        ) => {
+            if let Some(instr) = int64_comparison_instr(op) {
+                emitted.push(instr);
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))
+            } else {
+                let instr = match op {
+                    BinaryOp::Add => Instr::AddI64,
+                    BinaryOp::Sub => Instr::SubI64,
+                    BinaryOp::Mul => Instr::MulI64,
+                    BinaryOp::Mod => Instr::ModI64,
+                    _ => return None,
+                };
+                emitted.push(instr);
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+            }
+        }
+        (
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+        ) => {
+            if let Some(instr) = float64_comparison_instr(op) {
+                emitted.push(instr);
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))
+            } else {
+                let instr = match op {
+                    BinaryOp::Add => Instr::AddF64,
+                    BinaryOp::Sub => Instr::SubF64,
+                    BinaryOp::Mul => Instr::MulF64,
+                    BinaryOp::Div => Instr::DivF64,
+                    _ => return None,
+                };
+                emitted.push(instr);
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64))
+            }
+        }
+        (
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::String)),
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::String)),
+        ) => {
+            let instr = match op {
+                BinaryOp::Eq | BinaryOp::Ne => Instr::EqStr,
+                BinaryOp::Lt => Instr::LtStr,
+                BinaryOp::Le => Instr::LeStr,
+                BinaryOp::Gt => Instr::GtStr,
+                BinaryOp::Ge => Instr::GeStr,
+                _ => return None,
+            };
+            emitted.push(instr);
+            if matches!(op, BinaryOp::Ne) {
+                emitted.push(Instr::NotBool);
+            }
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))
+        }
+        (
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)),
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)),
+        ) => {
+            let instr = match op {
+                BinaryOp::Eq => Instr::EqI64,
+                BinaryOp::Ne => Instr::NeI64,
+                _ => return None,
+            };
+            emitted.insert(left_instr_count, Instr::BoolToI64);
+            emitted.push(Instr::BoolToI64);
+            emitted.push(instr);
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))
+        }
+        _ => return None,
+    };
+    instructions.extend(emitted);
+    Some(result_ty)
+}
+
+fn int64_comparison_instr(op: &BinaryOp) -> Option<Instr> {
+    match op {
+        BinaryOp::Lt => Some(Instr::LtI64),
+        BinaryOp::Gt => Some(Instr::GtI64),
+        BinaryOp::Le => Some(Instr::LeI64),
+        BinaryOp::Ge => Some(Instr::GeI64),
+        BinaryOp::Eq => Some(Instr::EqI64),
+        BinaryOp::Ne => Some(Instr::NeI64),
+        _ => None,
+    }
+}
+
+fn float64_comparison_instr(op: &BinaryOp) -> Option<Instr> {
+    match op {
+        BinaryOp::Lt => Some(Instr::LtF64),
+        BinaryOp::Gt => Some(Instr::GtF64),
+        BinaryOp::Le => Some(Instr::LeF64),
+        BinaryOp::Ge => Some(Instr::GeF64),
+        BinaryOp::Eq => Some(Instr::EqF64),
+        BinaryOp::Ne => Some(Instr::NeF64),
+        _ => None,
+    }
 }
 
 /// Create a specialized path for a given type and environment.
@@ -360,7 +662,7 @@ fn can_specialize_array_access(
     if let Expr::Var(name, _) = object {
         if let Some(var_type) = env.get(name) {
             // Check if the variable has an array type with matching element type
-            if let Some(ConcreteType::Array { element }) = get_concrete_type(var_type) {
+            if let Some(ConcreteType::Array { element, .. }) = get_concrete_type(var_type) {
                 return *element == *specialized_type;
             }
         }
@@ -373,11 +675,11 @@ fn can_inline_for_type(specialized_type: &ConcreteType) -> bool {
     // Primitive types have well-known operations that can be inlined
     matches!(
         specialized_type,
-        ConcreteType::Int64
-            | ConcreteType::Float64
-            | ConcreteType::Bool
-            | ConcreteType::String
-            | ConcreteType::Char
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))
     )
 }
 
@@ -385,20 +687,20 @@ fn can_inline_for_type(specialized_type: &ConcreteType) -> bool {
 fn is_numeric_type(ty: &ConcreteType) -> bool {
     matches!(
         ty,
-        ConcreteType::Int8
-            | ConcreteType::Int16
-            | ConcreteType::Int32
-            | ConcreteType::Int64
-            | ConcreteType::Int128
-            | ConcreteType::UInt8
-            | ConcreteType::UInt16
-            | ConcreteType::UInt32
-            | ConcreteType::UInt64
-            | ConcreteType::UInt128
-            | ConcreteType::Float32
-            | ConcreteType::Float64
-            | ConcreteType::BigInt
-            | ConcreteType::BigFloat
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int16))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int32))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int128))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt8))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt16))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt32))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt64))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt128))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float32))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigInt))
+            | ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigFloat))
     )
 }
 
@@ -416,7 +718,7 @@ mod tests {
     #[test]
     fn test_create_specialized_path() {
         let env = TypeEnv::new();
-        let specialized_type = ConcreteType::Int64;
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
 
         let block = vec![Stmt::Return {
             value: Some(Expr::Literal(Literal::Int(42), dummy_span())),
@@ -426,14 +728,16 @@ mod tests {
         let path = create_specialized_path(&block, env.clone(), specialized_type.clone());
 
         assert_eq!(path.specialized_type, specialized_type);
-        // Instructions are empty (requires Compiler context for full implementation)
-        assert_eq!(path.instructions.len(), 0);
+        assert!(matches!(
+            path.instructions.as_slice(),
+            [Instr::PushI64(42), Instr::ReturnI64]
+        ));
     }
 
     #[test]
-    fn test_specialize_block_returns_empty() {
+    fn test_specialize_block_emits_literal_return_issue_5077() {
         let env = TypeEnv::new();
-        let specialized_type = ConcreteType::String;
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::String));
 
         let block = vec![Stmt::Return {
             value: Some(Expr::Literal(
@@ -445,15 +749,260 @@ mod tests {
 
         let instructions = specialize_block(&block, &env, &specialized_type);
 
-        // Returns empty - full codegen requires Compiler context
-        assert_eq!(instructions.len(), 0);
+        assert!(matches!(instructions.as_slice(), [
+            Instr::PushStr(value),
+            Instr::ReturnAny
+        ] if value == "hello"));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_known_i64_arithmetic_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
+
+        let block = vec![Stmt::Return {
+            value: Some(Expr::BinaryOp {
+                op: BinaryOp::Mul,
+                left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                right: Box::new(Expr::Literal(Literal::Int(2), dummy_span())),
+                span: dummy_span(),
+            }),
+            span: dummy_span(),
+        }];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadI64(name),
+            Instr::PushI64(2),
+            Instr::MulI64,
+            Instr::ReturnI64
+        ] if name == "x"));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_known_i64_comparison_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
+
+        let block = vec![Stmt::Return {
+            value: Some(Expr::BinaryOp {
+                op: BinaryOp::Le,
+                left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                right: Box::new(Expr::Literal(Literal::Int(10), dummy_span())),
+                span: dummy_span(),
+            }),
+            span: dummy_span(),
+        }];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadI64(name),
+            Instr::PushI64(10),
+            Instr::LeI64,
+            Instr::ReturnAny
+        ] if name == "x"));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_known_f64_comparison_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64));
+
+        let block = vec![Stmt::Return {
+            value: Some(Expr::BinaryOp {
+                op: BinaryOp::Gt,
+                left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                right: Box::new(Expr::Literal(Literal::Float(2.5), dummy_span())),
+                span: dummy_span(),
+            }),
+            span: dummy_span(),
+        }];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadF64(name),
+            Instr::PushF64(value),
+            Instr::GtF64,
+            Instr::ReturnAny
+        ] if name == "x" && *value == 2.5));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_known_string_comparison_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::String));
+
+        let block = vec![Stmt::Return {
+            value: Some(Expr::BinaryOp {
+                op: BinaryOp::Ne,
+                left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                right: Box::new(Expr::Literal(
+                    Literal::Str("done".to_string()),
+                    dummy_span(),
+                )),
+                span: dummy_span(),
+            }),
+            span: dummy_span(),
+        }];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadStr(name),
+            Instr::PushStr(value),
+            Instr::EqStr,
+            Instr::NotBool,
+            Instr::ReturnAny
+        ] if name == "x" && value == "done"));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_known_bool_comparison_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool));
+
+        let block = vec![Stmt::Return {
+            value: Some(Expr::BinaryOp {
+                op: BinaryOp::Ne,
+                left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                right: Box::new(Expr::Literal(Literal::Bool(false), dummy_span())),
+                span: dummy_span(),
+            }),
+            span: dummy_span(),
+        }];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadBool(name),
+            Instr::BoolToI64,
+            Instr::PushBool(false),
+            Instr::BoolToI64,
+            Instr::NeI64,
+            Instr::ReturnAny
+        ] if name == "x"));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_assignment_and_reuses_narrowed_local_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
+
+        let block = vec![
+            Stmt::Assign {
+                var: "y".to_string(),
+                value: Expr::BinaryOp {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                    right: Box::new(Expr::Literal(Literal::Int(1), dummy_span())),
+                    span: dummy_span(),
+                },
+                span: dummy_span(),
+            },
+            Stmt::Return {
+                value: Some(Expr::Var("y".to_string(), dummy_span())),
+                span: dummy_span(),
+            },
+        ];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadI64(x_name),
+            Instr::PushI64(1),
+            Instr::AddI64,
+            Instr::StoreI64(y_store),
+            Instr::LoadI64(y_load),
+            Instr::ReturnI64
+        ] if x_name == "x" && y_store == "y" && y_load == "y"));
+    }
+
+    #[test]
+    fn test_specialize_block_emits_expression_statement_pop_issue_5077() {
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
+
+        let block = vec![
+            Stmt::Expr {
+                expr: Expr::BinaryOp {
+                    op: BinaryOp::Mul,
+                    left: Box::new(Expr::Var("x".to_string(), dummy_span())),
+                    right: Box::new(Expr::Literal(Literal::Int(2), dummy_span())),
+                    span: dummy_span(),
+                },
+                span: dummy_span(),
+            },
+            Stmt::Return {
+                value: Some(Expr::Var("x".to_string(), dummy_span())),
+                span: dummy_span(),
+            },
+        ];
+
+        let instructions = specialize_block(&block, &env, &specialized_type);
+
+        assert!(matches!(instructions.as_slice(), [
+            Instr::LoadI64(expr_name),
+            Instr::PushI64(2),
+            Instr::MulI64,
+            Instr::Pop,
+            Instr::LoadI64(return_name),
+            Instr::ReturnI64
+        ] if expr_name == "x" && return_name == "x"));
     }
 
     #[test]
     fn test_analyze_arithmetic_opportunities() {
         let mut env = TypeEnv::new();
-        env.set("x", LatticeType::Concrete(ConcreteType::Int64));
-        let specialized_type = ConcreteType::Int64;
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
 
         // x + 1
         let block = vec![Stmt::Expr {
@@ -475,8 +1024,13 @@ mod tests {
     #[test]
     fn test_analyze_type_check_elimination() {
         let mut env = TypeEnv::new();
-        env.set("x", LatticeType::Concrete(ConcreteType::Int64));
-        let specialized_type = ConcreteType::Int64;
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
 
         // if isa(x, Int64) ... end
         let block = vec![Stmt::If {
@@ -505,8 +1059,13 @@ mod tests {
     #[test]
     fn test_analyze_inlining_opportunity() {
         let mut env = TypeEnv::new();
-        env.set("x", LatticeType::Concrete(ConcreteType::Int64));
-        let specialized_type = ConcreteType::Int64;
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
 
         // f(x) where x is known to be Int64
         let block = vec![Stmt::Expr {
@@ -530,8 +1089,13 @@ mod tests {
     #[test]
     fn test_analyze_nested_blocks() {
         let mut env = TypeEnv::new();
-        env.set("x", LatticeType::Concrete(ConcreteType::Float64));
-        let specialized_type = ConcreteType::Float64;
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+        );
+        let specialized_type = ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64));
 
         // for i in 1:10
         //     x * 2.0
@@ -564,13 +1128,27 @@ mod tests {
 
     #[test]
     fn test_is_numeric_type() {
-        assert!(is_numeric_type(&ConcreteType::Int64));
-        assert!(is_numeric_type(&ConcreteType::Float64));
-        assert!(is_numeric_type(&ConcreteType::Int32));
-        assert!(is_numeric_type(&ConcreteType::BigInt));
+        assert!(is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64
+        ))));
+        assert!(is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64
+        ))));
+        assert!(is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int32
+        ))));
+        assert!(is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::BigInt
+        ))));
 
-        assert!(!is_numeric_type(&ConcreteType::String));
-        assert!(!is_numeric_type(&ConcreteType::Bool));
-        assert!(!is_numeric_type(&ConcreteType::Nothing));
+        assert!(!is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String
+        ))));
+        assert!(!is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Bool
+        ))));
+        assert!(!is_numeric_type(&ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Nothing
+        ))));
     }
 }

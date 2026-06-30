@@ -46,4 +46,31 @@ end
     @test parse(Int, string(73, base=8), base=8) == 73
 end
 
+# Issue #7875 (docs/COMPARISION.md P1): parse(Int, s; base=N) is now Pure Julia
+# (`_parse_int_base` wrapping `_tryparse_int` in base/parse.jl); the compiler
+# rewrites the kwargs form to a positional call instead of the former
+# `StringToIntBase` Rust builtin. These cover the edge cases the migration must
+# preserve (sign, surrounding whitespace, max base-36 digit, mixed-case hex).
+@testset "parse(Int, s; base=N) pure-Julia migration (#7875)" begin
+    @test parse(Int, "  -101  ", base=2) == -5
+    @test parse(Int, "+ff", base=16) == 255
+    @test parse(Int, "z", base=36) == 35
+    @test parse(Int, "DEAD", base=16) == 57005
+    @test parse(Int, "dead", base=16) == 57005
+end
+
+# Issue #7942: `_` is a digit separator only in numeric *literals* in source
+# code, not in parse()/tryparse() string input. Upstream julia throws
+# ArgumentError (parse) / returns nothing (tryparse). The pre-existing
+# underscore-skip in `_tryparse_int` (introduced by #2566) was removed, fixing
+# the base-10 path and keeping the migrated base-N path upstream-faithful.
+@testset "parse/tryparse reject underscores (#7942)" begin
+    @test tryparse(Int, "1_000") === nothing
+    @test_throws ArgumentError parse(Int, "1_000")
+    @test_throws ArgumentError parse(Int, "ff_ff", base=16)
+    # plain digit strings still parse correctly
+    @test parse(Int, "1000") == 1000
+    @test parse(Int, "ffff", base=16) == 65535
+end
+
 true

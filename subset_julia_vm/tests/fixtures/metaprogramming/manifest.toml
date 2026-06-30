@@ -61,6 +61,36 @@ expected = true
 description = "Quote of if with elseif: quote if a; elseif b; end end becomes Expr(:if, ..., Expr(:elseif, ...))"
 
 [[tests]]
+name = "metaprogramming_eval_expr_try_7683"
+file = "eval_expr_try_7683.jl"
+expected = true
+description = "eval executes Expr(:try, ...) with catch and finally blocks (Issue #7683)"
+
+[[tests]]
+name = "metaprogramming_eval_expr_try_storeslot_7687"
+file = "eval_expr_try_storeslot_7687.jl"
+expected = true
+description = "eval'd Expr(:try) with side-effecting catch/finally body does not StoreSlot out of bounds (Issue #7687)"
+
+[[tests]]
+name = "metaprogramming_eval_expr_try_else_7727"
+file = "eval_expr_try_else_7727.jl"
+expected = true
+description = "eval executes Expr(:try, ...) else branch values and unwinds caught eval frames (Issues #7727/#7730)"
+
+[[tests]]
+name = "metaprogramming_expr_quotenode_symbol_print_7696"
+file = "expr_quotenode_symbol_print_7696.jl"
+expected = true
+description = "Expr source printing renders QuoteNode(:sym) as quoted-symbol syntax and non-Symbol QuoteNode payloads as interpolation markers (Issue #7696)"
+
+[[tests]]
+name = "metaprogramming_var_string_macro_arg_symbols_7676"
+file = "var_string_macro_arg_symbols_7676.jl"
+expected = true
+description = "var-string identifiers such as var\"@q\" are passed to macros as Symbols and print as var-string identifiers (Issue #7676)"
+
+[[tests]]
 name = "meta_symbol_equality"
 file = "symbol_equality.jl"
 expected = true
@@ -134,10 +164,46 @@ expected = true
 description = "Quote expansion for :for loops - macro generates for loop in quote block"
 
 [[tests]]
+name = "metaprogramming_quote_for_multiple_bindings_7343"
+file = "quote_for_multiple_bindings_7343.jl"
+expected = true
+description = "Quoting a for-loop with multiple comma-separated bindings (for a = …, b = …) produces Expr(:for, Expr(:block, :(a=…), :(b=…)), body) like upstream; single binding stays inline (Issue #7343)"
+
+[[tests]]
 name = "metaprogramming_eval_not_operator"
 file = "eval_not_operator.jl"
 expected = true
 description = "eval with ! operator - eval(Expr(:call, :!, bool)) should negate boolean"
+
+[[tests]]
+name = "metaprogramming_eval_expr_tuple_5927"
+file = "eval_expr_tuple.jl"
+expected = true
+description = "eval(Expr(:tuple, ...)) recursively evaluates tuple elements and returns a runtime Tuple (Issue #5927)."
+
+[[tests]]
+name = "metaprogramming_eval_expr_vect_5928"
+file = "eval_expr_vect.jl"
+expected = true
+description = "eval(Expr(:vect, ...)) recursively evaluates vector elements and returns a Vector{Any} runtime array (Issue #5928)."
+
+[[tests]]
+name = "metaprogramming_eval_expr_if_5929"
+file = "eval_expr_if.jl"
+expected = true
+description = "eval(Expr(:if, cond, then[, else])) evaluates the selected branch and returns nothing for a missing false branch (Issue #5929)."
+
+[[tests]]
+name = "metaprogramming_eval_expr_curly_5930"
+file = "eval_expr_curly.jl"
+expected = true
+description = "eval(Expr(:curly, T, params...)) materializes parametric type expressions as DataType values (Issue #5930)."
+
+[[tests]]
+name = "metaprogramming_eval_expr_string_5931"
+file = "eval_expr_string.jl"
+expected = true
+description = "eval(Expr(:string, ...)) recursively evaluates interpolation parts and delegates to string conversion (Issue #5931)."
 
 [[tests]]
 name = "metaprogramming_copy_expr"
@@ -230,6 +296,12 @@ expected = true
 description = "include_string assignment support (Issue #1433)"
 
 [[tests]]
+name = "meta_include_string_pure_dispatch"
+file = "include_string_pure_dispatch.jl"
+expected = true
+description = "include_string dispatches to Pure Julia methods after migration (Issue #3738)"
+
+[[tests]]
 name = "meta_generated_unquote"
 file = "generated_unquote.jl"
 expected = true
@@ -240,3 +312,87 @@ name = "meta_static_basic"
 file = "static_basic.jl"
 expected = true
 description = "@static macro - compile-time conditional evaluation"
+
+[[tests]]
+name = "metaprogramming_expr_array_splat"
+file = "expr_array_splat.jl"
+expected = true
+description = "Expr(:call, args...) expands Array splats through logical Array reads (Issues #3908, #4435)"
+
+[[tests]]
+name = "metaprogramming_expr_loop_accumulate"
+file = "expr_loop_accumulate.jl"
+expected = true
+description = "Loop-accumulating a quoted Expr from a literal-seeded local (ex = :(0); ex = :($ex + $i)) no longer crashes with LoadSlotI64 (Issue #5935)"
+
+[[tests]]
+name = "metaprogramming_eval_expr_ref"
+file = "eval_expr_ref.jl"
+expected = true
+description = "eval(Expr(:ref, arr, idx...)) is getindex over Array/Matrix (Issue #5932)"
+
+[[tests]]
+name = "metaprogramming_eval_expr_ref_colon"
+file = "eval_expr_ref_colon.jl"
+expected = true
+description = "colon index in a quoted :ref round-trips to Colon() (Issue #7312)"
+
+[[tests]]
+name = "metaprogramming_expr_args_mutation_6616"
+file = "expr_args_mutation_6616.jl"
+expected = true
+description = "Expr.args field access returns the mutable args vector owned by the Expr, matching upstream Core.Expr semantics (Issue #6616)"
+
+[[tests]]
+name = "metaprogramming_esc_step_range_7020"
+file = "esc_step_range_7020.jl"
+expected = true
+description = "esc of a 3-arg step range a:b:c (parsed nested as (a:b):c) flattens back to a step range instead of failing with 'expected numeric value, got Range' (Issue #7020)"
+
+[[tests]]
+name = "metaprogramming_quote_broadcast_kwarg_interp_7029"
+file = "quote_broadcast_kwarg_interp_7029.jl"
+expected = true
+description = "quote→code round-trips broadcast calls (f.(x), x.-y), keyword args (comma and semicolon forms), and string interpolation instead of failing with 'quote for ... not yet supported' (Issue #7029)"
+
+[[tests]]
+name = "metaprogramming_quote_index_expr_7275"
+file = "quote_index_expr_7275.jl"
+expected = true
+description = "quote→code round-trips index expressions (a[i], a[i,j], nested d[i][j]) to Expr(:ref, target, indices...) instead of failing with 'quote for index_expression not yet supported'; unblocks indexing in macro quote bodies like Interact.@manipulate (Issue #7275)"
+
+[[tests]]
+name = "metaprogramming_quoted_vector_lhs_print_7641"
+file = "quoted_vector_lhs_print_7641.jl"
+expected = true
+description = "Quoting an assignment with a vector LHS keeps the LHS as Expr(:vect, ...); print/string of that Expr renders the Julia-code form ([a, b]) instead of the s-expr Expr(:vect, ...) constructor form (Issue #7641)"
+
+[[tests]]
+name = "metaprogramming_metaparse_roundtrip_internal_heads_7753"
+file = "metaparse_roundtrip_internal_heads_7753.jl"
+expected = true
+description = "Meta.parse roundtrip emits upstream-shaped AST heads: var\"...\" parses to a Symbol (printed var\"...\"), keyword args use Expr(:kw, ...) (printed name = value), and :a in pair position stays a QuoteNode so Dict(:a => 1) prints with the colon, instead of parser-internal :prefixedstringliteral / :keywordargument heads or a dropped quote (Issue #7753)"
+
+[[tests]]
+name = "metaprogramming_metaparse_keyword_eval_macro_return_7755"
+file = "metaparse_keyword_eval_macro_return_7755.jl"
+expected = true
+description = "Meta.parse keyword call expressions using Expr(:kw, ...) evaluate through runtime eval and macro-return lowering as keyword calls instead of rejecting the keyword head (Issue #7755)"
+
+[[tests]]
+name = "metaprogramming_metaparse_let_else_macro_return_7754"
+file = "metaparse_let_else_macro_return_7754.jl"
+expected = true
+description = "Meta.parse let and if/else forms normalize parser-internal :letexpression / :elseclause / :elseifclause nodes to upstream Expr(:let) / Expr(:if) / Expr(:elseif) shapes before runtime eval and macro-return lowering (Issue #7754)"
+
+[[tests]]
+name = "metaprogramming_where_quote_bounded_constraint_7845"
+file = "where_quote_bounded_constraint_7845.jl"
+expected = true
+description = "Quoting a value-position bounded where (`:(Tuple{T,S} where S<:Real)`) keeps the constraint as a single nested Expr arg (Expr(:<:, :S, :Real) / Expr(:>:, :S, :Int)) instead of flattening it into two bare symbol args; the unbounded `where S` form stays a bare Symbol (Issue #7845)"
+
+[[tests]]
+name = "metaprogramming_quoted_standalone_subtype_7863"
+file = "quoted_standalone_subtype_7863.jl"
+expected = true
+description = "A standalone quoted subtype/supertype constraint (`:(S<:Real)`, `:(S>:Int)`) uses the operator as its head (Expr(:<:, :S, :Real) / Expr(:>:, :S, :Int)) instead of the Expr(:call, :<:, ...) shape, matching upstream Julia (Issue #7863)"

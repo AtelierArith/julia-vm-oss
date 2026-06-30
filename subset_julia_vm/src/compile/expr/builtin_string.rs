@@ -44,7 +44,7 @@ impl CoreCompiler<'_> {
                 self.compile_expr(&args[0])?;
                 self.compile_expr(&args[1])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::Codeunit, 2));
-                Ok(Some(ValueType::I64))
+                Ok(Some(ValueType::U8))
             }
             "codeunits" => {
                 if args.len() != 1 {
@@ -52,7 +52,7 @@ impl CoreCompiler<'_> {
                 }
                 self.compile_expr(&args[0])?;
                 self.emit(Instr::CallBuiltin(BuiltinId::CodeUnits, 1));
-                Ok(Some(ValueType::ArrayOf(ArrayElementType::U8)))
+                Ok(Some(ValueType::ArrayOf(ArrayElementType::U8, None)))
             }
             "repeat" => {
                 // All repeat calls (String, Array, etc.) are handled by Pure Julia
@@ -80,24 +80,7 @@ impl CoreCompiler<'_> {
             }
             // Note: repr is now implemented in Pure Julia (base/io.jl)
             // It uses show(io, x) to get the string representation.
-            "bitstring" => {
-                // bitstring(x) - binary representation as string
-                if args.len() != 1 {
-                    return err("bitstring requires exactly 1 argument: bitstring(x)");
-                }
-                self.compile_expr(&args[0])?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Bitstring, 1));
-                Ok(Some(ValueType::Str))
-            }
-            "codepoint" => {
-                // codepoint(c) - Unicode codepoint as UInt32
-                if args.len() != 1 {
-                    return err("codepoint requires exactly 1 argument: codepoint(c::Char)");
-                }
-                self.compile_expr(&args[0])?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Codepoint, 1));
-                Ok(Some(ValueType::U32))
-            }
+            // codepoint/bitstring removed - pure Julia (Issue #6747)
             // "ascii" removed - now Pure Julia in base/strings/util.jl
             // nextind, prevind, thisind, reverseind removed - now Pure Julia (base/strings/basic.jl)
             // bytes2hex, hex2bytes removed - now Pure Julia (base/strings/util.jl)
@@ -112,70 +95,46 @@ impl CoreCompiler<'_> {
                 self.emit(Instr::CallBuiltin(BuiltinId::Sprintf, args.len()));
                 Ok(Some(ValueType::Str))
             }
-            "unescape_string" => {
-                // unescape_string(s) - unescape escape sequences
-                if args.is_empty() || args.len() > 2 {
-                    return err("unescape_string requires 1 or 2 arguments: unescape_string(s) or unescape_string(s, keep)");
-                }
-                self.compile_expr(&args[0])?;
-                self.emit(Instr::CallBuiltin(BuiltinId::UnescapeString, 1));
-                Ok(Some(ValueType::Str))
-            }
-            "isnumeric" => {
-                // isnumeric(c) - check if character is numeric (Unicode)
+            // unescape_string removed - now Pure Julia (base/strings/util.jl,
+            // Issue #6724); routed DispatchFirst to the method table.
+            // isnumeric removed - now Pure Julia (base/strings/unicode.jl,
+            // Issue #6752); routed DispatchFirst to the method table so the
+            // pure-Julia `isnumeric(c::Char)` (Nd/Nl/No range table) is selected.
+            "_substring_retag" => {
+                // _substring_retag(v) — internal helper used by split/rsplit so
+                // their results show as `SubString{String}["a", "b"]` rather
+                // than `["a", "b"]` (Issue #3574). Only changes the array's
+                // `element_type_override` to `SubString`; values stay the same.
                 if args.len() != 1 {
-                    return err("isnumeric requires exactly 1 argument: isnumeric(c)");
+                    return err(
+                        "_substring_retag requires exactly 1 argument: _substring_retag(v)",
+                    );
                 }
                 self.compile_expr(&args[0])?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Isnumeric, 1));
-                Ok(Some(ValueType::Bool))
+                self.emit(Instr::CallBuiltin(BuiltinId::SubStringRetag, 1));
+                Ok(Some(ValueType::Array))
             }
             "isvalid" => {
-                // isvalid(s, i) - check if index is valid character boundary
                 if args.len() != 2 {
                     return err("isvalid requires exactly 2 arguments: isvalid(s, i)");
                 }
                 self.compile_expr(&args[0])?;
-                self.compile_expr(&args[1])?;
+                self.compile_expr_as(&args[1], ValueType::I64)?;
                 self.emit(Instr::CallBuiltin(BuiltinId::IsvalidIndex, 2));
                 Ok(Some(ValueType::Bool))
             }
-            // tryparse(Int64, s) and parse(Int64, s) are now Pure Julia (base/parse.jl)
-            "tryparse" => {
-                // tryparse(T, s) - only Float64 remains as builtin
-                if args.len() != 2 {
-                    return Ok(None); // Fall through to method dispatch
+            // parse/tryparse for every type (Int64, Bool, Float64) are now Pure
+            // Julia (base/parse.jl, Issue #6748). Fall through to method dispatch;
+            // the Float64 methods call the `_tryparse_float64` intrinsic below.
+            "parse" | "tryparse" => Ok(None),
+            "_tryparse_float64" => {
+                // _tryparse_float64(s) - libc strtod; Float64 or nothing
+                if args.len() != 1 {
+                    return err("_tryparse_float64 requires 1 argument");
                 }
-                let type_name = match &args[0] {
-                    Expr::Var(name, _) => name.as_str(),
-                    _ => return Ok(None),
-                };
-                match type_name {
-                    "Float64" | "Float" => {
-                        self.compile_expr(&args[1])?;
-                        self.emit(Instr::CallBuiltin(BuiltinId::TryparseFloat64, 1));
-                        Ok(Some(ValueType::Any)) // Returns Union{Float64, Nothing}
-                    }
-                    _ => Ok(None), // Int64 etc. handled by Pure Julia
-                }
-            }
-            "parse" => {
-                // parse(T, s) - only Float64 remains as builtin
-                if args.len() != 2 {
-                    return Ok(None); // Fall through to method dispatch
-                }
-                let type_name = match &args[0] {
-                    Expr::Var(name, _) => name.as_str(),
-                    _ => return Ok(None),
-                };
-                match type_name {
-                    "Float64" | "Float" => {
-                        self.compile_expr(&args[1])?;
-                        self.emit(Instr::CallBuiltin(BuiltinId::StringToFloat, 1));
-                        Ok(Some(ValueType::F64))
-                    }
-                    _ => Ok(None), // Int64 etc. handled by Pure Julia
-                }
+                self.compile_expr(&args[0])?;
+                self.emit(Instr::CallBuiltin(BuiltinId::TryparseFloat64, 1));
+                Ok(Some(ValueType::Any)) // Union{Float64, Nothing}
             }
             "_regex_replace" => {
                 // _regex_replace(string, regex, replacement, count) - Issue #2112

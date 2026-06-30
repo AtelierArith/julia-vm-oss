@@ -1,0 +1,437 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build (default features)
+        run: cargo build
+
+      - name: Build (AoT feature)
+        run: cargo build --features aot
+
+      - name: Run tests (default features)
+        run: timeout 300 cargo test
+
+      - name: Run tests (AoT feature — lib only)
+        run: timeout 300 cargo test --features aot --lib
+
+  aot-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect AoT-relevant changes
+        id: changes
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [[ "$base" =~ ^0+$ ]]; then
+              base="${head}^"
+            fi
+          fi
+
+          git diff --name-only "$base" "$head" | tee changed-files.txt
+          if grep -Eq '^(subset_julia_vm/src/aot/|subset_julia_vm/src/bin/aot.rs|subset_julia_vm/src/bin/juliars.rs|subset_julia_vm_runtime/|scripts/test_aot.sh|docs/aot/|\.github/workflows/ci\.yml)' changed-files.txt; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install faster linker (lld)
+        if: steps.changes.outputs.run == 'true'
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        if: steps.changes.outputs.run == 'true'
+
+      - name: Install Rust toolchain
+        if: steps.changes.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install cargo-nextest
+        if: steps.changes.outputs.run == 'true'
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry and AoT build
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-aot-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-aot-
+            ${{ runner.os }}-cargo-
+
+      - name: Run AoT gate
+        if: steps.changes.outputs.run == 'true'
+        run: bash scripts/test_aot.sh
+
+      - name: Skip AoT gate
+        if: steps.changes.outputs.run != 'true'
+        run: echo "No AoT-relevant changes detected."
+
+  no-cache-dispatch-inference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUBSET_JULIA_VM_DISABLE_CACHE: "1"
+      SUBSET_JULIA_VM_DISABLE_PERSISTENT_BASE_CACHE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry and release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-no-cache-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-no-cache-release-
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Run fresh-Base dispatch/inference fixture categories
+        run: |
+          timeout 1800 cargo nextest run --release --test fixture_tests \
+            dispatch:: where_tests:: type_inference:: --no-fail-fast
+
+      - name: Run fresh-Base type propagation integration tests
+        run: timeout 1800 cargo nextest run --release --test type_propagation_call_tests --no-fail-fast
+
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  release-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Release build (default features)
+        run: cargo build --release
+
+      - name: Release build (AoT feature)
+        run: cargo build --release --features aot
+
+  code-audits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck and python3
+        run: sudo apt-get install -y shellcheck python3
+
+      - name: Shellcheck all audit scripts
+        run: |
+          shellcheck scripts/check_builtin_duplicates.sh
+          shellcheck scripts/check_no_expect_in_bin.sh
+          shellcheck scripts/check_no_panic_in_tests.sh
+          shellcheck scripts/check_vmerror_classification.sh
+          shellcheck scripts/check_missing_debug.sh
+          shellcheck scripts/check_fixture_test_names.sh
+          shellcheck scripts/check_docs_vm_refs.sh
+          shellcheck scripts/check_no_hardcoded_var_names_in_inference.sh
+          shellcheck scripts/check_workarounds_documented.sh
+          shellcheck scripts/check_generated_files.sh
+          shellcheck scripts/check_workarounds_sync.sh
+          shellcheck scripts/check_call_handler_kwargs.sh
+          shellcheck scripts/check_audit_scripts_bash3_compat.sh
+          shellcheck scripts/check_div_specializations.sh
+          shellcheck scripts/check_base_routing_registry.sh
+          shellcheck scripts/check_no_public_base_stdlib_routes.sh
+          shellcheck scripts/check_no_new_domain_builtins.sh
+          shellcheck scripts/check_complex_interleaved_allowlist.sh
+          shellcheck scripts/check_memory_to_array_ref_allowlist.sh
+          shellcheck scripts/check_value_array_allowlist.sh
+          shellcheck scripts/check_array_public_data_access.sh
+          shellcheck scripts/check_array_constructor_memory_first.sh
+          shellcheck scripts/check_array_literal_memory_first.sh
+          shellcheck scripts/check_collect_memory_first.sh
+          shellcheck scripts/check_broadcast_hof_memory_first.sh
+          shellcheck scripts/check_literal_repl_memory_first.sh
+          shellcheck scripts/check_fixture_chunk_size.sh
+          shellcheck scripts/check_collect_fallback_inventory.sh
+          shellcheck scripts/check_binary_both_fallback_inventory.sh
+          shellcheck scripts/check_plotly_bundle.sh
+          shellcheck scripts/check_format_value_resolves_structref.sh
+          shellcheck scripts/check_native_value_ops_resolve_structref.sh
+          shellcheck scripts/check_metaprogramming_roundtrip.sh
+          shellcheck scripts/check_structural_debt_inventory.sh
+          shellcheck scripts/check_ffi_header_compiles.sh
+          shellcheck scripts/check_ios_sample_catalog.sh
+
+      - name: Check for duplicate BuiltinId handlers (Issue #3033)
+        run: bash scripts/check_builtin_duplicates.sh
+
+      - name: Check no .expect() in bin/ crates (Issue #3051)
+        run: bash scripts/check_no_expect_in_bin.sh
+
+      - name: Check test assertion style — no panic! in tests (Issue #3053, #3090, #3098)
+        run: bash scripts/check_no_panic_in_tests.sh
+
+      - name: Check VmError classification annotations (Issue #3078)
+        run: bash scripts/check_vmerror_classification.sh
+
+      - name: Check public types derive Debug in compile/ and aot/ (Issue #3096, #3108)
+        run: bash scripts/check_missing_debug.sh
+
+      - name: Check for duplicate fixture test names across categories (Issue #3135)
+        run: bash scripts/check_fixture_test_names.sh
+
+      - name: Check docs/vm/ references in CLAUDE.md are not dangling (Issue #3118)
+        run: bash scripts/check_docs_vm_refs.sh
+
+      - name: Check no hardcoded variable names in type inference (Issue #3088, #3181)
+        run: bash scripts/check_no_hardcoded_var_names_in_inference.sh
+
+      - name: Check all Workaround comments have Issue links (Issue #3179)
+        run: bash scripts/check_workarounds_documented.sh
+
+      - name: Check @generated files have Re-generate with comment and script (Issue #3175)
+        run: bash scripts/check_generated_files.sh
+
+      - name: Check workaround Issue numbers appear in WORKAROUNDS.md (Issue #3263)
+        run: bash scripts/check_workarounds_sync.sh
+
+      - name: Check call handler kwargs inline loops do not increase (Issue #3324)
+        run: bash scripts/check_call_handler_kwargs.sh
+
+      - name: Check audit scripts stay bash-3.2 compatible (Issue #3759, #3766, #3771)
+        run: bash scripts/check_audit_scripts_bash3_compat.sh
+
+      - name: Check div specializations per integer width (Issue #3699)
+        run: bash scripts/check_div_specializations.sh
+
+      - name: Check public Base fallback routing registry (Issue #3893)
+        run: bash scripts/check_base_routing_registry.sh
+
+      - name: Check no public Base stdlib escape routes (Issue #8278)
+        run: bash scripts/check_no_public_base_stdlib_routes.sh
+
+      - name: Check no new domain-logic Rust builtins (Issue #7878)
+        run: bash scripts/check_no_new_domain_builtins.sh
+
+      - name: Check Complex interleaved-array containment (Issue #7876)
+        run: bash scripts/check_complex_interleaved_allowlist.sh
+
+      - name: Check Memory-to-Array compatibility bridge allowlist (Issue #3908)
+        run: bash scripts/check_memory_to_array_ref_allowlist.sh
+
+      - name: Check Value::Array compatibility allowlist (Issue #3908)
+        run: bash scripts/check_value_array_allowlist.sh
+
+      - name: Check public ArrayValue data access audit (Issue #3927)
+        run: bash scripts/check_array_public_data_access.sh
+
+      - name: Check array constructor builtins use Memory-first helpers (Issue #3952)
+        run: bash scripts/check_array_constructor_memory_first.sh
+
+      - name: Check array literal builders use Memory-first helpers (Issue #3953)
+        run: bash scripts/check_array_literal_memory_first.sh
+
+      - name: Check collect result builders use Memory-first helpers (Issue #3954)
+        run: bash scripts/check_collect_memory_first.sh
+
+      - name: Check broadcast/HOF result builders use Memory-first helpers (Issue #3962)
+        run: bash scripts/check_broadcast_hof_memory_first.sh
+
+      - name: Check literal and REPL array reconstruction use Memory-first helpers (Issue #3963)
+        run: bash scripts/check_literal_repl_memory_first.sh
+
+      - name: Check generated fixture chunk size (Issue #3972)
+        run: bash scripts/check_fixture_chunk_size.sh
+
+      - name: Check collect fallback inventory (Issue #4052)
+        run: bash scripts/check_collect_fallback_inventory.sh
+
+      - name: Check CallDynamicBinaryBoth fallback inventory (Issue #4262)
+        run: bash scripts/check_binary_both_fallback_inventory.sh
+
+      - name: Check bundled Plotly.js registers all VM trace types (Issue #6850)
+        run: bash scripts/check_plotly_bundle.sh
+
+      - name: Check display formatting resolves StructRef values (Issue #4766)
+        run: bash scripts/check_format_value_resolves_structref.sh
+
+      - name: Check native value ops resolve StructRef values (Issue #6694)
+        run: bash scripts/check_native_value_ops_resolve_structref.sh
+
+      - name: Check structural debt inventory ratchet (Issues #8327-#8337)
+        run: bash scripts/check_structural_debt_inventory.sh
+
+      - name: Check FFI C header completeness and C/C++ syntax (Issue #8455)
+        run: bash scripts/check_ffi_header_compiles.sh
+
+      - name: Check iOS sample catalog schema and README count (Issue #8457)
+        run: bash scripts/check_ios_sample_catalog.sh
+
+      - name: Verify all check_*.sh scripts are referenced in this workflow and docs (Issue #3112, #3114, #3775)
+        run: |
+          # CLAUDE.md was refactored at some point so audit policy bullets live
+          # in docs/vm/CODE_AUDITS.md; CLAUDE.md only carries the pointer + a
+          # handful of topic-specific mentions. The check now walks the same
+          # doc set as the local self-check at docs/vm/CODE_AUDITS.md
+          # "Adding a New Audit Script" so a script registered in any of the
+          # three official doc locations satisfies it (Issue #3775).
+          missing_ci=()
+          missing_docs=()
+          for f in scripts/check_*.sh; do
+            base=$(basename "$f")
+            if ! grep -q "$base" .github/workflows/ci.yml; then
+              missing_ci+=("$base")
+            fi
+            if ! grep -rq "$base" CLAUDE.md docs/vm/CODE_AUDITS.md docs/vm/TESTING_GUIDE.md; then
+              missing_docs+=("$base")
+            fi
+          done
+          failed=0
+          if [[ ${#missing_ci[@]} -gt 0 ]]; then
+            echo "ERROR: the following scripts are not referenced in ci.yml:"
+            for m in "${missing_ci[@]}"; do echo "  $m"; done
+            echo "Add shellcheck + run steps for each script to the code-audits job."
+            failed=1
+          fi
+          if [[ ${#missing_docs[@]} -gt 0 ]]; then
+            echo "ERROR: the following scripts are not referenced in CLAUDE.md, docs/vm/CODE_AUDITS.md, or docs/vm/TESTING_GUIDE.md:"
+            for m in "${missing_docs[@]}"; do echo "  $m"; done
+            echo "Add a bullet under Audit Policies in docs/vm/CODE_AUDITS.md (preferred) or a topical mention in CLAUDE.md."
+            failed=1
+          fi
+          if [[ $failed -eq 1 ]]; then exit 1; fi
+          echo "OK: all check_*.sh scripts are referenced in ci.yml and CLAUDE.md"
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (AoT feature)
+        run: cargo clippy --all-targets --features aot -- -D warnings

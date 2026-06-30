@@ -176,10 +176,7 @@ impl TypedProgram {
         let name = func.signature.name.clone();
         let level = func.signature.inference_level;
 
-        self.functions
-            .entry(name)
-            .or_default()
-            .push(func);
+        self.functions.entry(name).or_default().push(func);
 
         if level > self.inference_level {
             self.inference_level = level;

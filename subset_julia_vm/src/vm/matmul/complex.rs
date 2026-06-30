@@ -47,7 +47,11 @@ mod tests {
     fn test_complex64_from_real_has_zero_imaginary() {
         let c = Complex64::from_real(7.0);
         assert!((c.re - 7.0).abs() < 1e-15);
-        assert!(c.im.abs() < 1e-15, "imaginary part must be 0.0, got {}", c.im);
+        assert!(
+            c.im.abs() < 1e-15,
+            "imaginary part must be 0.0, got {}",
+            c.im
+        );
     }
 
     // ── Complex64::add ────────────────────────────────────────────────────────
@@ -89,8 +93,16 @@ mod tests {
         // i * i = -1: (0 + 1i) * (0 + 1i) = (0*0 - 1*1) + (0*1 + 1*0)i = -1 + 0i
         let i = Complex64::new(0.0, 1.0);
         let result = i.mul(i);
-        assert!((result.re - (-1.0)).abs() < 1e-15, "i² should be -1, got {}", result.re);
-        assert!(result.im.abs() < 1e-15, "imaginary part should be 0, got {}", result.im);
+        assert!(
+            (result.re - (-1.0)).abs() < 1e-15,
+            "i² should be -1, got {}",
+            result.re
+        );
+        assert!(
+            result.im.abs() < 1e-15,
+            "imaginary part should be 0, got {}",
+            result.im
+        );
     }
 
     #[test]

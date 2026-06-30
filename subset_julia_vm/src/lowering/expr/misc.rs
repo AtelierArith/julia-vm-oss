@@ -4,12 +4,19 @@
 //! broadcast calls, let expressions, ternary expressions, and parenthesized expressions.
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
-use crate::ir::core::{Block, Expr, Stmt};
-use crate::lowering::stmt::lower_stmt;
-use crate::lowering::LowerResult;
+use crate::ir::core::{Block, Expr, Literal, Stmt};
+use crate::lowering::stmt::{
+    lower_destructuring_from_targets, lower_stmt, lower_stmt_with_ctx, parse_destructure_targets,
+};
+use crate::lowering::{LambdaContext, LowerResult};
 use crate::parser::cst::{CstWalker, Node, NodeKind};
 
-use super::{lower_argument_list, lower_expr};
+use super::{lower_argument_list, lower_expr, lower_expr_with_ctx};
+
+enum LetBindingLowering {
+    Simple { var: String, value: Expr },
+    Prologue(Vec<Stmt>),
+}
 
 /// Lower parenthesized expression: (expr)
 pub fn lower_parenthesized_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Expr> {
@@ -55,10 +62,24 @@ pub fn lower_field_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
     // First child is the object, second is the field name
     let object = lower_expr(walker, named[0])?;
 
-    // The field name should be an identifier
+    // The field name is normally an identifier (`obj.field`). It may also be a
+    // quoted operator/keyword name (`Base.:(<:)`, `Base.:(>:)`, `Base.:(isa)`,
+    // `Base.:+`), parsed as a `QuoteExpression` leaf whose source text includes
+    // the `:`/`:(...)` wrapper. Strip the wrapper so the qualified form resolves
+    // to the same callable as the unqualified operator value (Issue #5115).
     let field_node = named[1];
     let field = match walker.kind(&field_node) {
         NodeKind::Identifier => walker.text(&field_node).to_string(),
+        NodeKind::QuoteExpression => {
+            let raw = walker.text(&field_node);
+            // `:(<:)` -> `<:`, `:+` -> `+`, `:isa` -> `isa`.
+            let stripped = raw.trim_start_matches(':');
+            let stripped = stripped
+                .strip_prefix('(')
+                .and_then(|s| s.strip_suffix(')'))
+                .unwrap_or(stripped);
+            stripped.trim().to_string()
+        }
         _ => {
             return Err(UnsupportedFeature::new(
                 UnsupportedFeatureKind::UnsupportedExpression("invalid field name".to_string()),
@@ -76,8 +97,74 @@ pub fn lower_field_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
 
 /// Lower tuple expression: (a, b, c) or (a=1, b=2)
 pub fn lower_tuple_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Expr> {
+    lower_tuple_expr_impl(walker, node, None)
+}
+
+pub fn lower_tuple_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    lower_tuple_expr_impl(walker, node, Some(lambda_ctx))
+}
+
+fn lower_tuple_expr_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
     let span = walker.span(&node);
     let named = walker.named_children(&node);
+
+    // A positional tuple literal containing a splat (e.g. `(A, B, xs...)`) must
+    // splice the splatted operand's elements into the tuple, not nest it as a
+    // single element. Mirror upstream Julia, which lowers `(a, b, xs...)` to a
+    // `Core.tuple(a, b, xs...)` call spread through `Core._apply_iterate`: route
+    // it to a splat-call of the `tuple` builtin with a per-element splat mask
+    // (`xs...` -> inner expr with mask=true; every other element -> mask=false).
+    // The plain `Expr::TupleLiteral` codegen has no splat handling, so without
+    // this a splat element would be boxed whole (Issue #7741). Named-tuple
+    // fields (`a = 1`) are handled by the named-tuple path below; this branch
+    // only fires for all-positional tuples that contain a splat.
+    let has_splat = named
+        .iter()
+        .any(|n| walker.kind(n) == NodeKind::SplatExpression);
+    let has_named_field = named.iter().any(|n| {
+        matches!(
+            walker.kind(n),
+            NodeKind::Assignment | NodeKind::KeywordArgument
+        )
+    });
+    if has_splat && !has_named_field {
+        let mut args = Vec::with_capacity(named.len());
+        let mut splat_mask = Vec::with_capacity(named.len());
+        for child in &named {
+            if walker.kind(child) == NodeKind::SplatExpression {
+                let inner_children = walker.named_children(child);
+                let inner = inner_children.first().ok_or_else(|| {
+                    UnsupportedFeature::new(
+                        UnsupportedFeatureKind::UnsupportedExpression(
+                            "splat_expression".to_string(),
+                        ),
+                        walker.span(child),
+                    )
+                })?;
+                args.push(lower_expr_maybe_ctx(walker, *inner, lambda_ctx)?);
+                splat_mask.push(true);
+            } else {
+                args.push(lower_expr_maybe_ctx(walker, *child, lambda_ctx)?);
+                splat_mask.push(false);
+            }
+        }
+        return Ok(Expr::Call {
+            function: "tuple".to_string(),
+            args,
+            kwargs: vec![],
+            splat_mask,
+            kwargs_splat_mask: vec![],
+            span,
+        });
+    }
 
     // Check if this is a named tuple (all elements are assignments)
     let mut is_named = true;
@@ -101,7 +188,7 @@ pub fn lower_tuple_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
                     let value_node = non_op_children[1];
                     if walker.kind(&name_node) == NodeKind::Identifier {
                         let name = walker.text(&name_node).to_string();
-                        let value = lower_expr(walker, value_node)?;
+                        let value = lower_expr_maybe_ctx(walker, value_node, lambda_ctx)?;
                         named_fields.push((name, value));
                     } else {
                         is_named = false;
@@ -112,7 +199,7 @@ pub fn lower_tuple_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
             }
             _ => {
                 is_named = false;
-                let elem = lower_expr(walker, *child)?;
+                let elem = lower_expr_maybe_ctx(walker, *child, lambda_ctx)?;
                 elements.push(elem);
             }
         }
@@ -131,7 +218,7 @@ pub fn lower_tuple_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
             // Re-process as regular tuple
             let mut elems = Vec::new();
             for child in &named {
-                let elem = lower_expr(walker, *child)?;
+                let elem = lower_expr_maybe_ctx(walker, *child, lambda_ctx)?;
                 elems.push(elem);
             }
             Ok(Expr::TupleLiteral {
@@ -139,6 +226,55 @@ pub fn lower_tuple_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
                 span,
             })
         }
+    }
+}
+
+/// Lower a `(; ...)` semicolon-form named tuple — a `ParameterList` appearing in
+/// expression position — into a `NamedTupleLiteral`, including the empty `(;)`
+/// which becomes the empty `NamedTuple`. The comma form `(a = 1, ...)` is handled
+/// by `lower_tuple_expr_impl`; this is its keyword/semicolon counterpart, and the
+/// empty case has no comma-form equivalent (`()` is the empty tuple) (Issue #5776).
+pub fn lower_parameter_list_named_tuple<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+) -> LowerResult<Expr> {
+    let span = walker.span(&node);
+    let mut fields: Vec<(String, Expr)> = Vec::new();
+    for child in walker.named_children(&node) {
+        match walker.kind(&child) {
+            NodeKind::Identifier => {
+                // `(; a)` shorthand: the field name and value are both `a`.
+                let name = walker.text(&child).to_string();
+                fields.push((name.clone(), Expr::Var(name, walker.span(&child))));
+            }
+            _ => {
+                // `name = value` (Assignment / KeywordArgument / Parameter w/ default).
+                let kids: Vec<_> = walker
+                    .named_children(&child)
+                    .into_iter()
+                    .filter(|c| walker.kind(c) != NodeKind::Operator)
+                    .collect();
+                if kids.len() >= 2 && walker.kind(&kids[0]) == NodeKind::Identifier {
+                    let name = walker.text(&kids[0]).to_string();
+                    let value = lower_expr(walker, kids[1])?;
+                    fields.push((name, value));
+                }
+                // Other children (the `;` separator marker in the empty `(;)`, etc.)
+                // carry no field and are skipped, so `(;)` yields an empty NamedTuple.
+            }
+        }
+    }
+    Ok(Expr::NamedTupleLiteral { fields, span })
+}
+
+fn lower_expr_maybe_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
+    match lambda_ctx {
+        Some(ctx) => lower_expr_with_ctx(walker, node, ctx),
+        None => lower_expr(walker, node),
     }
 }
 
@@ -264,20 +400,38 @@ pub fn lower_broadcast_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> 
         ));
     }
 
-    // First child is the function being called (identifier or operator)
+    // First child is the function being called (identifier or operator).
+    // Identifier callees must remain value expressions so `Tx = Float64;
+    // Tx.(xs)` broadcasts the local DataType value instead of a global function
+    // name. Operators still lower to function references. (Issue #8323)
     let callee = named[0];
-    let fn_name = match walker.kind(&callee) {
-        NodeKind::Identifier => walker.text(&callee).to_string(),
+    let callee_expr = match walker.kind(&callee) {
+        NodeKind::Identifier => Expr::Var(walker.text(&callee).to_string(), walker.span(&callee)),
         NodeKind::Operator => {
             // Handle dotted operator as function: .+, .-, .*, etc.
             // The operator text includes the dot prefix (e.g., ".+")
             // We need to extract the base operator for the broadcast call
             let op_text = walker.text(&callee);
-            if let Some(stripped) = op_text.strip_prefix('.') {
+            let name = if let Some(stripped) = op_text.strip_prefix('.') {
                 // Extract base operator (e.g., ".+" -> "+")
                 stripped.to_string()
             } else {
                 op_text.to_string()
+            };
+            Expr::FunctionRef { name, span }
+        }
+        NodeKind::ParenthesizedExpression => {
+            let children = walker.named_children(&callee);
+            if children.len() == 1 && walker.kind(&children[0]) == NodeKind::Operator {
+                Expr::FunctionRef {
+                    name: walker.text(&children[0]).to_string(),
+                    span,
+                }
+            } else {
+                return Err(UnsupportedFeature::new(
+                    UnsupportedFeatureKind::UnsupportedCallTarget,
+                    walker.span(&callee),
+                ));
             }
         }
         _ => {
@@ -313,7 +467,11 @@ pub fn lower_broadcast_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> 
     // e.g., sqrt.(x) -> materialize(Broadcasted(sqrt, (x,)))
     // e.g., .+([1,2,3]) -> materialize(Broadcasted(+, ([1,2,3],)))
     // Nested broadcasts are fused: sin.(cos.(x)) -> materialize(Broadcasted(sin, (Broadcasted(cos, (x,)),)))
-    Ok(super::make_broadcasted_call(&fn_name, args, span))
+    Ok(super::make_broadcasted_call_with_callee(
+        callee_expr,
+        args,
+        span,
+    ))
 }
 
 /// Lower let statement/expression: let a = 1, b = 2; body end
@@ -330,6 +488,8 @@ pub fn lower_let_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
 
     let mut bindings = Vec::new();
     let mut body_block = None;
+    let mut body_prefix = Vec::new();
+    let mut force_body_bindings = false;
 
     for child in named {
         match walker.kind(&child) {
@@ -337,16 +497,26 @@ pub fn lower_let_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 // Pure Rust parser wraps assignments in LetBindings node
                 for binding_child in walker.named_children(&child) {
                     if walker.kind(&binding_child) == NodeKind::Assignment {
-                        if let Some((var_name, value)) = parse_let_binding(walker, binding_child)? {
-                            bindings.push((var_name, value));
+                        if let Some(binding) = parse_let_binding(walker, binding_child)? {
+                            push_let_binding(
+                                binding,
+                                &mut bindings,
+                                &mut body_prefix,
+                                &mut force_body_bindings,
+                            );
                         }
                     }
                 }
             }
             NodeKind::Assignment => {
                 // Parse assignment: var = value
-                if let Some((var_name, value)) = parse_let_binding(walker, child)? {
-                    bindings.push((var_name, value));
+                if let Some(binding) = parse_let_binding(walker, child)? {
+                    push_let_binding(
+                        binding,
+                        &mut bindings,
+                        &mut body_prefix,
+                        &mut force_body_bindings,
+                    );
                 }
             }
             NodeKind::Block => {
@@ -382,10 +552,108 @@ pub fn lower_let_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
     }
 
     // If no body block found, default to empty block
-    let body = body_block.unwrap_or_else(|| Block {
+    let mut body = body_block.unwrap_or_else(|| Block {
         stmts: vec![],
         span,
     });
+    prepend_let_body_prefix(&mut body, body_prefix);
+
+    if bindings.is_empty() {
+        bindings.push((
+            format!("__sjulia_let_scope_{}", span.start),
+            Expr::Literal(Literal::Nothing, span),
+        ));
+    }
+
+    Ok(Expr::LetBlock {
+        bindings,
+        body,
+        span,
+    })
+}
+
+pub fn lower_let_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    let span = walker.span(&node);
+    let named = walker.named_children(&node);
+
+    let mut bindings = Vec::new();
+    let mut body_block = None;
+    let mut body_prefix = Vec::new();
+    let mut force_body_bindings = false;
+
+    for child in named {
+        match walker.kind(&child) {
+            NodeKind::LetBindings => {
+                for binding_child in walker.named_children(&child) {
+                    if walker.kind(&binding_child) == NodeKind::Assignment {
+                        if let Some(binding) =
+                            parse_let_binding_with_ctx(walker, binding_child, lambda_ctx)?
+                        {
+                            push_let_binding(
+                                binding,
+                                &mut bindings,
+                                &mut body_prefix,
+                                &mut force_body_bindings,
+                            );
+                        }
+                    }
+                }
+            }
+            NodeKind::Assignment => {
+                if let Some(binding) = parse_let_binding_with_ctx(walker, child, lambda_ctx)? {
+                    push_let_binding(
+                        binding,
+                        &mut bindings,
+                        &mut body_prefix,
+                        &mut force_body_bindings,
+                    );
+                }
+            }
+            NodeKind::Block => {
+                let block_children = walker.named_children(&child);
+                let block_span = walker.span(&child);
+                let mut stmts = Vec::new();
+                for stmt_node in block_children {
+                    stmts.push(lower_stmt_with_ctx(walker, stmt_node, lambda_ctx)?);
+                }
+                body_block = Some(Block {
+                    stmts,
+                    span: block_span,
+                });
+            }
+            _ => {
+                if body_block.is_none() {
+                    if let Ok(expr) = lower_expr_with_ctx(walker, child, lambda_ctx) {
+                        let child_span = walker.span(&child);
+                        body_block = Some(Block {
+                            stmts: vec![Stmt::Expr {
+                                expr,
+                                span: child_span,
+                            }],
+                            span: child_span,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let mut body = body_block.unwrap_or_else(|| Block {
+        stmts: vec![],
+        span,
+    });
+    prepend_let_body_prefix(&mut body, body_prefix);
+
+    if bindings.is_empty() {
+        bindings.push((
+            format!("__sjulia_let_scope_{}", span.start),
+            Expr::Literal(Literal::Nothing, span),
+        ));
+    }
 
     Ok(Expr::LetBlock {
         bindings,
@@ -399,28 +667,107 @@ pub fn lower_let_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
 fn parse_let_binding<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
-) -> LowerResult<Option<(String, Expr)>> {
+) -> LowerResult<Option<LetBindingLowering>> {
+    parse_let_binding_impl(walker, node, None)
+}
+
+fn parse_let_binding_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Option<LetBindingLowering>> {
+    parse_let_binding_impl(walker, node, Some(lambda_ctx))
+}
+
+fn parse_let_binding_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Option<LetBindingLowering>> {
     let assign_children = walker.named_children(&node);
-
-    // Find identifier and value, skipping the operator
-    let var_node = assign_children
+    let operands = assign_children
         .iter()
-        .find(|n| matches!(walker.kind(n), NodeKind::Identifier));
-    let value_node = assign_children
-        .iter()
-        .find(|n| !matches!(walker.kind(n), NodeKind::Identifier | NodeKind::Operator));
+        .filter(|n| walker.kind(n) != NodeKind::Operator)
+        .copied()
+        .collect::<Vec<_>>();
+    if operands.len() < 2 {
+        return Ok(None);
+    }
+    let lhs = operands[0];
+    let rhs = *operands.last().unwrap();
+    let value = match lambda_ctx {
+        Some(ctx) => lower_expr_with_ctx(walker, rhs, ctx)?,
+        None => lower_expr(walker, rhs)?,
+    };
 
-    if let (Some(var_node), Some(value_node)) = (var_node, value_node) {
-        let var_name = walker.text(var_node).to_string();
-        let value = lower_expr(walker, *value_node)?;
-        Ok(Some((var_name, value)))
-    } else {
-        Ok(None)
+    match walker.kind(&lhs) {
+        NodeKind::Identifier => Ok(Some(LetBindingLowering::Simple {
+            var: walker.text(&lhs).to_string(),
+            value,
+        })),
+        NodeKind::TupleExpression => {
+            let targets = parse_destructure_targets(walker, &walker.named_children(&lhs))?;
+            let stmt = lower_destructuring_from_targets(targets, value, walker.span(&node))?;
+            Ok(Some(LetBindingLowering::Prologue(stmt_to_stmts(stmt))))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn push_let_binding(
+    binding: LetBindingLowering,
+    bindings: &mut Vec<(String, Expr)>,
+    body_prefix: &mut Vec<Stmt>,
+    force_body_bindings: &mut bool,
+) {
+    match binding {
+        LetBindingLowering::Simple { var, value } if !*force_body_bindings => {
+            bindings.push((var, value));
+        }
+        LetBindingLowering::Simple { var, value } => {
+            let span = value.span();
+            body_prefix.push(Stmt::Assign { var, value, span });
+        }
+        LetBindingLowering::Prologue(mut stmts) => {
+            *force_body_bindings = true;
+            body_prefix.append(&mut stmts);
+        }
+    }
+}
+
+fn prepend_let_body_prefix(body: &mut Block, mut body_prefix: Vec<Stmt>) {
+    if body_prefix.is_empty() {
+        return;
+    }
+    body_prefix.append(&mut body.stmts);
+    body.stmts = body_prefix;
+}
+
+fn stmt_to_stmts(stmt: Stmt) -> Vec<Stmt> {
+    match stmt {
+        Stmt::Block(block) => block.stmts,
+        stmt => vec![stmt],
     }
 }
 
 /// Lower ternary expression: cond ? then_expr : else_expr
 pub fn lower_ternary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Expr> {
+    lower_ternary_expr_impl(walker, node, None)
+}
+
+pub fn lower_ternary_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    lower_ternary_expr_impl(walker, node, Some(lambda_ctx))
+}
+
+fn lower_ternary_expr_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
     let span = walker.span(&node);
 
     // Get all named children (condition, then_expr, else_expr)
@@ -441,9 +788,13 @@ pub fn lower_ternary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRe
         ));
     }
 
-    let condition = lower_expr(walker, operands[0])?;
-    let then_expr = lower_expr(walker, operands[1])?;
-    let else_expr = lower_expr(walker, operands[2])?;
+    let lower_operand = |operand| match lambda_ctx {
+        Some(ctx) => lower_expr_with_ctx(walker, operand, ctx),
+        None => lower_expr(walker, operand),
+    };
+    let condition = lower_operand(operands[0])?;
+    let then_expr = lower_operand(operands[1])?;
+    let else_expr = lower_operand(operands[2])?;
 
     Ok(Expr::Ternary {
         condition: Box::new(condition),
@@ -534,6 +885,98 @@ pub fn lower_if_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
     let then_expr = lower_block_as_expr(walker, then_block_node)?;
 
     // If no else branch, the else value is `nothing`
+    let else_expr = else_expr.unwrap_or(Expr::Literal(crate::ir::core::Literal::Nothing, span));
+
+    Ok(Expr::Ternary {
+        condition: Box::new(condition_expr),
+        then_expr: Box::new(then_expr),
+        else_expr: Box::new(else_expr),
+        span,
+    })
+}
+
+/// Lower if expression with lambda context.
+pub fn lower_if_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    let span = walker.span(&node);
+    let all_children: Vec<Node<'a>> = walker.children(&node);
+
+    let mut condition: Option<Node<'a>> = None;
+    let mut then_block: Option<Node<'a>> = None;
+    let mut else_expr: Option<Expr> = None;
+
+    let mut i = 0;
+    while i < all_children.len() {
+        let child = all_children[i];
+        let kind_str = child.kind();
+
+        match kind_str {
+            "if" | "end" => {}
+            "elseif" | "elseif_clause" => {
+                let elseif_expr =
+                    lower_elseif_as_expr_with_ctx(walker, &all_children, i, lambda_ctx)?;
+                else_expr = Some(elseif_expr);
+                break;
+            }
+            "else" => {
+                i += 1;
+                if i < all_children.len() {
+                    let else_node = all_children[i];
+                    if walker.kind(&else_node) == NodeKind::Block {
+                        else_expr =
+                            Some(lower_block_as_expr_with_ctx(walker, else_node, lambda_ctx)?);
+                    }
+                }
+                break;
+            }
+            "else_clause" => {
+                let else_all: Vec<Node<'a>> = walker.children(&child);
+                for else_child in else_all.iter() {
+                    if else_child.kind() == "block" {
+                        else_expr = Some(lower_block_as_expr_with_ctx(
+                            walker,
+                            *else_child,
+                            lambda_ctx,
+                        )?);
+                        break;
+                    }
+                }
+                break;
+            }
+            _ => {
+                if condition.is_none() {
+                    condition = Some(child);
+                } else if then_block.is_none() && walker.kind(&child) == NodeKind::Block {
+                    then_block = Some(child);
+                }
+            }
+        }
+        i += 1;
+    }
+
+    let condition_node = condition.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression(
+                "if expression: missing condition".to_string(),
+            ),
+            span,
+        )
+    })?;
+
+    let then_block_node = then_block.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression(
+                "if expression: missing then block".to_string(),
+            ),
+            span,
+        )
+    })?;
+
+    let condition_expr = lower_expr_with_ctx(walker, condition_node, lambda_ctx)?;
+    let then_expr = lower_block_as_expr_with_ctx(walker, then_block_node, lambda_ctx)?;
     let else_expr = else_expr.unwrap_or(Expr::Literal(crate::ir::core::Literal::Nothing, span));
 
     Ok(Expr::Ternary {
@@ -708,6 +1151,178 @@ fn lower_elseif_as_expr<'a>(
     })
 }
 
+fn lower_elseif_as_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    all_children: &[Node<'a>],
+    start: usize,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    let first = all_children[start];
+    let span = walker.span(&first);
+    let kind_str = first.kind();
+
+    if kind_str == "elseif_clause" {
+        let clause_children: Vec<Node<'a>> = walker.children(&first);
+        let mut condition: Option<Node<'a>> = None;
+        let mut then_block: Option<Node<'a>> = None;
+
+        for child in clause_children.iter() {
+            let child_kind = child.kind();
+            match child_kind {
+                "elseif" => {}
+                "block" => {
+                    if condition.is_some() && then_block.is_none() {
+                        then_block = Some(*child);
+                    }
+                }
+                _ => {
+                    if condition.is_none() {
+                        condition = Some(*child);
+                    }
+                }
+            }
+        }
+
+        let condition_node = condition.ok_or_else(|| {
+            UnsupportedFeature::new(
+                UnsupportedFeatureKind::UnsupportedExpression(
+                    "elseif: missing condition".to_string(),
+                ),
+                span,
+            )
+        })?;
+
+        let then_block_node = then_block.ok_or_else(|| {
+            UnsupportedFeature::new(
+                UnsupportedFeatureKind::UnsupportedExpression("elseif: missing block".to_string()),
+                span,
+            )
+        })?;
+
+        let condition_expr = lower_expr_with_ctx(walker, condition_node, lambda_ctx)?;
+        let then_expr = lower_block_as_expr_with_ctx(walker, then_block_node, lambda_ctx)?;
+
+        let remaining: Vec<Node<'a>> = all_children[start + 1..]
+            .iter()
+            .filter(|n| n.kind() == "elseif_clause" || n.kind() == "else_clause")
+            .copied()
+            .collect();
+
+        let else_expr = if !remaining.is_empty() {
+            let next = remaining[0];
+            if next.kind() == "else_clause" {
+                let else_children: Vec<Node<'a>> = walker.children(&next);
+                let mut block_expr = None;
+                for else_child in else_children.iter() {
+                    if else_child.kind() == "block" {
+                        block_expr = Some(lower_block_as_expr_with_ctx(
+                            walker,
+                            *else_child,
+                            lambda_ctx,
+                        )?);
+                        break;
+                    }
+                }
+                block_expr.unwrap_or(Expr::Literal(crate::ir::core::Literal::Nothing, span))
+            } else {
+                lower_elseif_clause_chain_as_expr_with_ctx(walker, &remaining, lambda_ctx)?
+            }
+        } else {
+            Expr::Literal(crate::ir::core::Literal::Nothing, span)
+        };
+
+        return Ok(Expr::Ternary {
+            condition: Box::new(condition_expr),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+            span,
+        });
+    }
+
+    let mut i = start;
+    let mut condition: Option<Node<'a>> = None;
+    let mut then_block: Option<Node<'a>> = None;
+    let mut else_expr: Option<Expr> = None;
+
+    while i < all_children.len() {
+        let child = all_children[i];
+        let child_kind = child.kind();
+
+        match child_kind {
+            "end" => break,
+            "elseif" => {
+                if condition.is_some() && then_block.is_some() {
+                    else_expr = Some(lower_elseif_as_expr_with_ctx(
+                        walker,
+                        all_children,
+                        i + 1,
+                        lambda_ctx,
+                    )?);
+                    break;
+                }
+            }
+            "else" => {
+                i += 1;
+                if i < all_children.len() {
+                    let else_node = all_children[i];
+                    if walker.kind(&else_node) == NodeKind::Block {
+                        else_expr =
+                            Some(lower_block_as_expr_with_ctx(walker, else_node, lambda_ctx)?);
+                    }
+                }
+                break;
+            }
+            "else_clause" => {
+                let else_all: Vec<Node<'a>> = walker.children(&child);
+                for else_child in else_all.iter() {
+                    if else_child.kind() == "block" {
+                        else_expr = Some(lower_block_as_expr_with_ctx(
+                            walker,
+                            *else_child,
+                            lambda_ctx,
+                        )?);
+                        break;
+                    }
+                }
+                break;
+            }
+            _ => {
+                if condition.is_none() {
+                    condition = Some(child);
+                } else if then_block.is_none() && walker.kind(&child) == NodeKind::Block {
+                    then_block = Some(child);
+                }
+            }
+        }
+        i += 1;
+    }
+
+    let condition_node = condition.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression("elseif: missing condition".to_string()),
+            span,
+        )
+    })?;
+
+    let then_block_node = then_block.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression("elseif: missing block".to_string()),
+            span,
+        )
+    })?;
+
+    let condition_expr = lower_expr_with_ctx(walker, condition_node, lambda_ctx)?;
+    let then_expr = lower_block_as_expr_with_ctx(walker, then_block_node, lambda_ctx)?;
+    let else_expr = else_expr.unwrap_or(Expr::Literal(crate::ir::core::Literal::Nothing, span));
+
+    Ok(Expr::Ternary {
+        condition: Box::new(condition_expr),
+        then_expr: Box::new(then_expr),
+        else_expr: Box::new(else_expr),
+        span,
+    })
+}
+
 /// Lower a chain of elseif_clause nodes as nested ternary
 fn lower_elseif_clause_chain_as_expr<'a>(
     walker: &CstWalker<'a>,
@@ -788,6 +1403,84 @@ fn lower_elseif_clause_chain_as_expr<'a>(
     })
 }
 
+fn lower_elseif_clause_chain_as_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    clauses: &[Node<'a>],
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    if clauses.is_empty() {
+        return Ok(Expr::Literal(
+            crate::ir::core::Literal::Nothing,
+            crate::span::Span::new(0, 0, 0, 0, 0, 0),
+        ));
+    }
+
+    let first = clauses[0];
+    let span = walker.span(&first);
+    let kind_str = first.kind();
+
+    if kind_str == "else_clause" {
+        let else_children: Vec<Node<'a>> = walker.children(&first);
+        for else_child in else_children.iter() {
+            if else_child.kind() == "block" {
+                return lower_block_as_expr_with_ctx(walker, *else_child, lambda_ctx);
+            }
+        }
+        return Ok(Expr::Literal(crate::ir::core::Literal::Nothing, span));
+    }
+
+    let clause_children: Vec<Node<'a>> = walker.children(&first);
+    let mut condition: Option<Node<'a>> = None;
+    let mut then_block: Option<Node<'a>> = None;
+
+    for child in clause_children.iter() {
+        let child_kind = child.kind();
+        match child_kind {
+            "elseif" => {}
+            "block" => {
+                if condition.is_some() && then_block.is_none() {
+                    then_block = Some(*child);
+                }
+            }
+            _ => {
+                if condition.is_none() {
+                    condition = Some(*child);
+                }
+            }
+        }
+    }
+
+    let condition_node = condition.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression("elseif: missing condition".to_string()),
+            span,
+        )
+    })?;
+
+    let then_block_node = then_block.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression("elseif: missing block".to_string()),
+            span,
+        )
+    })?;
+
+    let condition_expr = lower_expr_with_ctx(walker, condition_node, lambda_ctx)?;
+    let then_expr = lower_block_as_expr_with_ctx(walker, then_block_node, lambda_ctx)?;
+
+    let else_expr = if clauses.len() > 1 {
+        lower_elseif_clause_chain_as_expr_with_ctx(walker, &clauses[1..], lambda_ctx)?
+    } else {
+        Expr::Literal(crate::ir::core::Literal::Nothing, span)
+    };
+
+    Ok(Expr::Ternary {
+        condition: Box::new(condition_expr),
+        then_expr: Box::new(then_expr),
+        else_expr: Box::new(else_expr),
+        span,
+    })
+}
+
 /// Lower a block to an expression (returns the last expression's value)
 fn lower_block_as_expr<'a>(walker: &CstWalker<'a>, block_node: Node<'a>) -> LowerResult<Expr> {
     let span = walker.span(&block_node);
@@ -807,6 +1500,36 @@ fn lower_block_as_expr<'a>(walker: &CstWalker<'a>, block_node: Node<'a>) -> Lowe
     let mut stmts = Vec::new();
     for child in children {
         let stmt = lower_stmt(walker, child)?;
+        stmts.push(stmt);
+    }
+
+    let body = Block { stmts, span };
+    Ok(Expr::LetBlock {
+        bindings: vec![],
+        body,
+        span,
+    })
+}
+
+fn lower_block_as_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    block_node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    let span = walker.span(&block_node);
+    let children = walker.named_children(&block_node);
+
+    if children.is_empty() {
+        return Ok(Expr::Literal(crate::ir::core::Literal::Nothing, span));
+    }
+
+    if children.len() == 1 {
+        return lower_expr_with_ctx(walker, children[0], lambda_ctx);
+    }
+
+    let mut stmts = Vec::new();
+    for child in children {
+        let stmt = lower_stmt_with_ctx(walker, child, lambda_ctx)?;
         stmts.push(stmt);
     }
 

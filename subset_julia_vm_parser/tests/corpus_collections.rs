@@ -57,6 +57,19 @@ fn test_tuple_nested() {
     assert_parses("((1, 2), (3, 4))");
 }
 
+#[test]
+fn test_tuple_multiline_elements() {
+    assert_root_child_kind(
+        "(\n    (\"x\", 1),\n    (\"y\", 2)\n)",
+        NodeKind::TupleExpression,
+    );
+}
+
+#[test]
+fn test_parenthesized_multiline_expression() {
+    assert_root_child_kind("(\n    1 + 2\n)", NodeKind::ParenthesizedExpression);
+}
+
 // =============================================================================
 // Named Tuple
 // =============================================================================
@@ -113,6 +126,11 @@ fn test_vector_typed() {
     assert_parses("Float64[]");
 }
 
+#[test]
+fn test_vector_typed_comprehension() {
+    assert_root_child_kind("Float64[i / 10.0 for i in 1:10]", NodeKind::TypedExpression);
+}
+
 // =============================================================================
 // Matrix Expression
 // =============================================================================
@@ -144,6 +162,76 @@ fn test_matrix_typed() {
     assert_parses("Int[1 2; 3 4]");
 }
 
+// Issue #7196: whitespace-sensitive `+`/`-` element disambiguation in a
+// matrix/`hcat` row. Returns the element count of each row of the first
+// top-level matrix in `source`.
+fn matrix_row_lengths(source: &str) -> Vec<usize> {
+    let cst = parse(source).unwrap_or_else(|_| panic!("Failed to parse: {}", source));
+    // The matrix may be the top-level child or nested under a TypedExpression
+    // (`T[...]`); walk down to the first MatrixExpression.
+    fn find_matrix(
+        node: &subset_julia_vm_parser::CstNode,
+    ) -> Option<&subset_julia_vm_parser::CstNode> {
+        if node.kind == NodeKind::MatrixExpression {
+            return Some(node);
+        }
+        node.children.iter().find_map(find_matrix)
+    }
+    let matrix = find_matrix(&cst)
+        .unwrap_or_else(|| panic!("No MatrixExpression found for source: {}", source));
+    matrix
+        .children
+        .iter()
+        .filter(|row| row.kind == NodeKind::MatrixRow)
+        .map(|row| row.children.len())
+        .collect()
+}
+
+#[test]
+fn test_matrix_negative_element_space_before_no_space_after() {
+    // `[1 -2]` is two elements (Issue #7196), not `[1 - 2]`.
+    assert_eq!(matrix_row_lengths("[1 -2]"), vec![2]);
+    assert_eq!(matrix_row_lengths("[0.20 -0.26]"), vec![2]);
+    // The exact repro from the issue: 2x2.
+    assert_eq!(matrix_row_lengths("[0.20 -0.26; 0.23 0.22]"), vec![2, 2]);
+    // Unary `+` element.
+    assert_eq!(matrix_row_lengths("[1 +2]"), vec![2]);
+    // Three elements with leading signs.
+    assert_eq!(matrix_row_lengths("[1 -2 +3]"), vec![3]);
+}
+
+#[test]
+fn test_matrix_binary_minus_stays_single_element() {
+    // Spaces on both sides => binary subtraction => single element.
+    // `[1 - 2 3]` is `(1 - 2)` then `3`.
+    assert_eq!(matrix_row_lengths("[1 - 2 3]"), vec![2]);
+    // `*` is NOT subject to the rule: `[1 *2 3]` is `1*2`, `3` => 2 elements.
+    assert_eq!(matrix_row_lengths("[1 *2 3]"), vec![2]);
+    // Per-row independence.
+    assert_eq!(matrix_row_lengths("[1 -2; 3 4]"), vec![2, 2]);
+    assert_eq!(matrix_row_lengths("[1 1; 2 -3]"), vec![2, 2]);
+}
+
+#[test]
+fn test_typed_matrix_negative_element() {
+    // The same rule applies inside `T[...]`.
+    assert_eq!(matrix_row_lengths("Float64[1 -2]"), vec![2]);
+    assert_eq!(
+        matrix_row_lengths("Float64[0.20 -0.26; 0.23 0.22]"),
+        vec![2, 2]
+    );
+}
+
+#[test]
+fn test_matrix_minus_inside_call_arg_is_not_new_element() {
+    // The matrix-row context does not extend into a call's argument list: the
+    // `-` inside `[f(1 -2) 3]` is ordinary binary subtraction, so the row has
+    // two elements `f(1 -2)` and `3` (not three). This exercises the
+    // matrix-row flag being cleared on entering a call (Issue #7196).
+    assert_eq!(matrix_row_lengths("[f(1 -2) 3]"), vec![2]);
+    assert_eq!(matrix_row_lengths("[f(1 - 2) 3]"), vec![2]);
+}
+
 // =============================================================================
 // Comprehension Expression
 // =============================================================================
@@ -154,8 +242,40 @@ fn test_comprehension_simple() {
 }
 
 #[test]
+fn test_comprehension_newline_before_for() {
+    assert_root_child_kind("[x\n for x in 1:10]", NodeKind::ComprehensionExpression);
+}
+
+#[test]
 fn test_comprehension_expression() {
     assert_root_child_kind("[x^2 for x in 1:10]", NodeKind::ComprehensionExpression);
+}
+
+// Newlines inside `[...]` are insignificant, so a multi-line comprehension whose
+// `if`/`for` guard sits on a following line must parse identically to the
+// single-line form (Issue #8008).
+#[test]
+fn test_comprehension_newline_before_if() {
+    assert_root_child_kind(
+        "[x for x in 1:10\n if x > 5]",
+        NodeKind::ComprehensionExpression,
+    );
+}
+
+#[test]
+fn test_comprehension_newline_before_second_for() {
+    assert_root_child_kind(
+        "[x + y for x in 1:3\n for y in 1:3]",
+        NodeKind::ComprehensionExpression,
+    );
+}
+
+#[test]
+fn test_comprehension_newline_before_for_and_if() {
+    assert_root_child_kind(
+        "[x + y for x in 1:3\n for y in 1:3\n if x != y]",
+        NodeKind::ComprehensionExpression,
+    );
 }
 
 #[test]
@@ -190,6 +310,16 @@ fn test_comprehension_2d() {
     assert_parses("[i * j for i = 1:3, j = 1:3]"); // using = instead of in
 }
 
+// A 2D comprehension whose binding-separating comma is followed by a newline
+// parses identically to the single-line form (Issue #8008).
+#[test]
+fn test_comprehension_2d_newline_after_comma() {
+    assert_root_child_kind(
+        "[i + j for i in 1:3,\n j in 1:3]",
+        NodeKind::ComprehensionExpression,
+    );
+}
+
 // =============================================================================
 // Generator Expression
 // =============================================================================
@@ -207,6 +337,13 @@ fn test_generator_expression() {
 #[test]
 fn test_generator_with_condition() {
     assert_root_child_kind("(x for x in 1:10 if x > 5)", NodeKind::Generator);
+}
+
+// A multi-line generator with the `if` guard on a following line parses the same
+// as the single-line form (Issue #8008).
+#[test]
+fn test_generator_newline_before_if() {
+    assert_root_child_kind("(x for x in 1:10\n if x > 5)", NodeKind::Generator);
 }
 
 #[test]

@@ -3,12 +3,26 @@
 //! This module implements the core analysis logic for checking type stability.
 
 use crate::compile::abstract_interp::{usage_analysis, InferenceEngine, StructTypeInfo};
+use crate::compile::bridge::{
+    lattice_to_parametric_julia_type, lattice_to_value_type,
+    value_type_to_lattice_with_struct_table,
+};
+use crate::compile::collect_block_functions;
+use crate::compile::context::StructInfo;
+use crate::compile::inference::{
+    collect_global_types_for_inference, widen_non_const_globals_for_binding_inference,
+};
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
+use crate::compile::method_table::MethodSig;
 use crate::compile::tfuncs::TransferFunctions;
-use crate::compile::type_stability::analysis_report::TypeStabilityAnalysisReport;
+use crate::compile::type_stability::analysis_report::{
+    InferenceProvenance, TypeStabilityAnalysisReport,
+};
 use crate::compile::type_stability::reason::TypeStabilityReason;
 use crate::compile::type_stability::report::FunctionStabilityReport;
-use crate::ir::core::{Function, Program};
+use crate::ir::core::{Expr, Function, Program, Stmt};
+use crate::types::JuliaType;
+use crate::vm::{ArrayElementType, ValueType};
 use std::collections::HashMap;
 
 /// Configuration for the type stability analyzer.
@@ -48,6 +62,173 @@ pub struct TypeStabilityAnalyzer {
 
     /// Transfer functions for usage-based parameter inference.
     tfuncs: TransferFunctions,
+}
+
+/// Return-type facts collected from the same shared inference engine shape used
+/// by production code generation.
+#[derive(Clone, Debug, Default)]
+pub struct ProductionInferenceFacts {
+    return_types_by_function_index: HashMap<usize, LatticeType>,
+}
+
+impl ProductionInferenceFacts {
+    fn insert_return_type(&mut self, function_index: usize, return_type: LatticeType) {
+        self.return_types_by_function_index
+            .insert(function_index, return_type);
+    }
+
+    fn return_type_for(&self, function_index: usize) -> Option<&LatticeType> {
+        self.return_types_by_function_index.get(&function_index)
+    }
+}
+
+fn build_type_stability_struct_table(program: &Program) -> HashMap<String, StructInfo> {
+    let mut struct_table = HashMap::new();
+    for (type_id, struct_def) in program.structs.iter().enumerate() {
+        struct_table.insert(
+            struct_def.name.clone(),
+            StructInfo {
+                type_id,
+                is_mutable: struct_def.is_mutable,
+                fields: Vec::new(),
+                has_inner_constructor: !struct_def.inner_constructors.is_empty(),
+            },
+        );
+    }
+
+    let name_to_type_id: HashMap<String, usize> = struct_table
+        .iter()
+        .map(|(name, info)| (name.clone(), info.type_id))
+        .collect();
+    for struct_def in &program.structs {
+        if let Some(info) = struct_table.get_mut(&struct_def.name) {
+            info.fields = struct_def
+                .fields
+                .iter()
+                .map(|field| {
+                    let field_type = field
+                        .as_julia_type()
+                        .map(|ty| julia_type_to_type_stability_value_type(&ty, &name_to_type_id))
+                        .unwrap_or(ValueType::Any);
+                    (field.name.clone(), field_type)
+                })
+                .collect();
+        }
+    }
+
+    struct_table
+}
+
+fn julia_type_to_type_stability_value_type(
+    ty: &JuliaType,
+    name_to_type_id: &HashMap<String, usize>,
+) -> ValueType {
+    match ty {
+        JuliaType::Int64 => ValueType::I64,
+        JuliaType::Int32 => ValueType::I32,
+        JuliaType::Int16 => ValueType::I16,
+        JuliaType::Int8 => ValueType::I8,
+        JuliaType::Int128 => ValueType::I128,
+        JuliaType::UInt64 => ValueType::U64,
+        JuliaType::UInt32 => ValueType::U32,
+        JuliaType::UInt16 => ValueType::U16,
+        JuliaType::UInt8 => ValueType::U8,
+        JuliaType::UInt128 => ValueType::U128,
+        JuliaType::Float64 => ValueType::F64,
+        JuliaType::Float32 => ValueType::F32,
+        JuliaType::Float16 => ValueType::F16,
+        JuliaType::Bool => ValueType::Bool,
+        JuliaType::String => ValueType::Str,
+        JuliaType::Symbol => ValueType::Symbol,
+        JuliaType::Nothing => ValueType::Nothing,
+        JuliaType::VectorOf(element) => ValueType::ArrayOf(
+            match element.as_ref() {
+                JuliaType::Int64 => ArrayElementType::I64,
+                JuliaType::Float64 => ArrayElementType::F64,
+                JuliaType::Bool => ArrayElementType::Bool,
+                JuliaType::String => ArrayElementType::String,
+                _ => ArrayElementType::Any,
+            },
+            None,
+        ),
+        JuliaType::Struct(name) => name_to_type_id
+            .get(name)
+            .map(|type_id| ValueType::Struct(*type_id))
+            .unwrap_or(ValueType::Any),
+        _ => ValueType::Any,
+    }
+}
+
+fn recover_default_constructor_return_lattice(
+    struct_table: &HashMap<String, StructInfo>,
+    func: &Function,
+) -> Option<LatticeType> {
+    let expr = match func.body.stmts.as_slice() {
+        [Stmt::Return {
+            value: Some(expr), ..
+        }] => expr,
+        [Stmt::Expr { expr, .. }] => expr,
+        _ => return None,
+    };
+    let Expr::Call {
+        function,
+        args,
+        splat_mask,
+        kwargs,
+        kwargs_splat_mask,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if splat_mask.iter().any(|is_splat| *is_splat)
+        || kwargs_splat_mask.iter().any(|is_splat| *is_splat)
+        || !kwargs.is_empty()
+    {
+        return None;
+    }
+    let info = struct_table.get(function)?;
+    if info.has_inner_constructor || info.fields.len() != args.len() {
+        return None;
+    }
+    Some(LatticeType::Concrete(ConcreteType::Struct {
+        name: function.clone(),
+        type_id: info.type_id,
+    }))
+}
+
+fn add_inner_constructor_method_sigs(
+    engine: &mut InferenceEngine,
+    program: &Program,
+    struct_table: &HashMap<String, StructInfo>,
+    starting_global_index: usize,
+) {
+    let mut next_global_index = starting_global_index;
+    for struct_def in &program.structs {
+        let Some(info) = struct_table.get(&struct_def.name) else {
+            continue;
+        };
+        for ctor in &struct_def.inner_constructors {
+            let params = ctor
+                .params
+                .iter()
+                .map(|param| (param.name.clone(), param.effective_type()))
+                .collect();
+            let sig = MethodSig::from_julia_projections(
+                0,
+                next_global_index,
+                params,
+                ValueType::Struct(info.type_id),
+                Some(JuliaType::Struct(struct_def.name.clone())),
+                false,
+                ctor.type_params.clone(),
+                None,
+                None,
+            );
+            engine.add_initial_method(struct_def.name.clone(), sig);
+            next_global_index += 1;
+        }
+    }
 }
 
 impl TypeStabilityAnalyzer {
@@ -102,6 +283,26 @@ impl TypeStabilityAnalyzer {
     pub fn analyze_program(&mut self, program: &Program) -> TypeStabilityAnalysisReport {
         let mut report = TypeStabilityAnalysisReport::new();
 
+        let struct_table = build_type_stability_struct_table(program);
+        let mut global_types = HashMap::new();
+        let mut global_const_structs = HashMap::new();
+        collect_global_types_for_inference(
+            &program.main.stmts,
+            &mut global_types,
+            &struct_table,
+            &mut global_const_structs,
+        );
+        let lattice_global_types = global_types
+            .iter()
+            .map(|(name, ty)| {
+                (
+                    name.clone(),
+                    value_type_to_lattice_with_struct_table(ty, &struct_table),
+                )
+            })
+            .collect();
+        self.engine.set_global_types(lattice_global_types);
+
         // Determine which functions to analyze
         let functions_to_analyze: Vec<&Function> = if self.config.user_functions_only {
             // Only analyze user-defined functions (skip base functions)
@@ -122,10 +323,13 @@ impl TypeStabilityAnalyzer {
                 .collect()
         };
 
+        let functions_for_inference = Self::collect_program_functions_for_inference(program);
+
         // Add all functions to the engine for interprocedural analysis
-        for func in &program.functions {
+        for func in &functions_for_inference {
             self.engine.add_function(func.clone());
         }
+        self.seed_method_tables(&functions_for_inference);
 
         // Analyze each function
         for func in functions_to_analyze {
@@ -136,8 +340,259 @@ impl TypeStabilityAnalyzer {
         report
     }
 
+    /// Analyzes a complete program using return facts produced by the production
+    /// shared inference engine. The standalone analyzer remains responsible for
+    /// explanatory notes such as usage-inferred parameter constraints.
+    pub fn analyze_program_with_production_inference(
+        &mut self,
+        program: &Program,
+    ) -> TypeStabilityAnalysisReport {
+        let mut report = TypeStabilityAnalysisReport::new();
+        report.inference_provenance = InferenceProvenance::production_shared_inference_snapshot();
+
+        let facts = self.collect_production_inference_facts(program);
+        let functions_to_analyze: Vec<(usize, &Function)> = if self.config.user_functions_only {
+            program
+                .functions
+                .iter()
+                .enumerate()
+                .skip(program.base_function_count)
+                .collect()
+        } else if self.config.include_base_functions {
+            program.functions.iter().enumerate().collect()
+        } else {
+            program
+                .functions
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| !f.name.starts_with('_'))
+                .collect()
+        };
+
+        for (function_index, func) in functions_to_analyze {
+            let func_report = match facts.return_type_for(function_index) {
+                Some(return_type) => self.analyze_function_with_return_type(func, return_type),
+                None => self.analyze_function(func),
+            };
+            report.add_function(func_report);
+        }
+
+        report
+    }
+
+    fn collect_production_inference_facts(
+        &mut self,
+        program: &Program,
+    ) -> ProductionInferenceFacts {
+        let struct_table = build_type_stability_struct_table(program);
+        let mut global_types = HashMap::new();
+        let mut global_const_structs = HashMap::new();
+        collect_global_types_for_inference(
+            &program.main.stmts,
+            &mut global_types,
+            &struct_table,
+            &mut global_const_structs,
+        );
+        widen_non_const_globals_for_binding_inference(&program.main.stmts, &mut global_types);
+
+        let functions_for_inference =
+            Self::collect_program_functions_for_production_inference(program);
+        let mut engine = crate::compile::inference::build_shared_inference_engine(
+            &struct_table,
+            &global_types,
+            functions_for_inference.iter().map(|(_, func)| func),
+        );
+        add_inner_constructor_method_sigs(
+            &mut engine,
+            program,
+            &struct_table,
+            functions_for_inference.len(),
+        );
+        let mut facts = ProductionInferenceFacts::default();
+
+        let mut method_sigs = Vec::new();
+        for (global_index, (_, func)) in functions_for_inference.iter().enumerate() {
+            if !Self::should_collect_production_fact(program, global_index) {
+                continue;
+            }
+            let mut return_lattice = engine.infer_function(func);
+            if matches!(return_lattice, LatticeType::Top | LatticeType::Bottom) {
+                if let Some(recovered) =
+                    recover_default_constructor_return_lattice(&struct_table, func)
+                {
+                    return_lattice = recovered;
+                }
+            }
+            if global_index < program.functions.len() {
+                facts.insert_return_type(global_index, return_lattice.clone());
+            }
+            method_sigs.push((
+                func.name.clone(),
+                Self::method_sig_from_return(global_index, func, &return_lattice),
+            ));
+        }
+
+        // Rebuild with exact user-method return snapshots before collecting the
+        // final report facts. This avoids eagerly inferring every Base/prelude
+        // function while still giving user overload dispatch the same method
+        // return information shape used by production inference (Issue #4291).
+        let mut engine = crate::compile::inference::build_shared_inference_engine(
+            &struct_table,
+            &global_types,
+            functions_for_inference.iter().map(|(_, func)| func),
+        );
+        add_inner_constructor_method_sigs(
+            &mut engine,
+            program,
+            &struct_table,
+            functions_for_inference.len(),
+        );
+        for (name, sig) in method_sigs {
+            engine.add_initial_method(name, sig);
+        }
+        let mut facts = ProductionInferenceFacts::default();
+        for (global_index, (_, func)) in functions_for_inference.iter().enumerate() {
+            if !Self::should_collect_production_fact(program, global_index) {
+                continue;
+            }
+            let mut return_lattice = engine.infer_function(func);
+            if matches!(return_lattice, LatticeType::Top | LatticeType::Bottom) {
+                if let Some(recovered) =
+                    recover_default_constructor_return_lattice(&struct_table, func)
+                {
+                    return_lattice = recovered;
+                }
+            }
+            if global_index < program.functions.len() {
+                facts.insert_return_type(global_index, return_lattice.clone());
+            }
+        }
+
+        self.engine = engine;
+        facts
+    }
+
+    fn should_collect_production_fact(program: &Program, global_index: usize) -> bool {
+        global_index < program.functions.len() && global_index >= program.base_function_count
+    }
+
+    fn method_sig_from_return(
+        global_index: usize,
+        func: &Function,
+        return_lattice: &LatticeType,
+    ) -> MethodSig {
+        let return_type = lattice_to_value_type(return_lattice);
+        let return_julia_type = lattice_to_parametric_julia_type(return_lattice);
+        let vararg_param_index = func.params.iter().position(|param| param.is_varargs);
+        let vararg_fixed_count = func
+            .params
+            .iter()
+            .find(|param| param.is_varargs)
+            .and_then(|param| param.vararg_count);
+        let params = func
+            .params
+            .iter()
+            .map(|param| (param.name.clone(), param.effective_type()))
+            .collect();
+
+        MethodSig::from_julia_projections(
+            0,
+            global_index,
+            params,
+            return_type,
+            return_julia_type,
+            func.is_base_extension,
+            func.type_params.clone(),
+            vararg_param_index,
+            vararg_fixed_count,
+        )
+    }
+
+    fn collect_program_functions_for_inference(program: &Program) -> Vec<Function> {
+        let mut functions = program.functions.clone();
+        let mut nested_functions: Vec<(Function, Option<String>)> = Vec::new();
+        for func in &program.functions {
+            collect_block_functions(&func.body, &mut nested_functions, Some(&func.name));
+        }
+        functions.extend(nested_functions.into_iter().map(|(mut func, parent)| {
+            if let Some(parent) = parent {
+                func.name = format!("{}#{}", parent, func.name);
+            }
+            func
+        }));
+        functions
+    }
+
+    fn collect_program_functions_for_production_inference(
+        program: &Program,
+    ) -> Vec<(Option<usize>, Function)> {
+        let mut functions: Vec<(Option<usize>, Function)> = program
+            .functions
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, func)| (Some(index), func))
+            .collect();
+
+        let mut nested_functions: Vec<(Function, Option<String>)> = Vec::new();
+        for (index, func) in program.functions.iter().enumerate() {
+            if index < program.base_function_count {
+                continue;
+            }
+            collect_block_functions(&func.body, &mut nested_functions, Some(&func.name));
+        }
+        functions.extend(nested_functions.into_iter().map(|(mut func, parent)| {
+            if let Some(parent) = parent {
+                func.name = format!("{}#{}", parent, func.name);
+            }
+            (None, func)
+        }));
+        functions
+    }
+
+    fn seed_method_tables(&mut self, functions: &[Function]) {
+        for (global_index, func) in functions.iter().enumerate() {
+            let return_lattice = self.engine.infer_function(func);
+            let return_type = lattice_to_value_type(&return_lattice);
+            let return_julia_type = lattice_to_parametric_julia_type(&return_lattice);
+            let vararg_param_index = func.params.iter().position(|param| param.is_varargs);
+            let vararg_fixed_count = func
+                .params
+                .iter()
+                .find(|param| param.is_varargs)
+                .and_then(|param| param.vararg_count);
+            let params = func
+                .params
+                .iter()
+                .map(|param| (param.name.clone(), param.effective_type()))
+                .collect();
+
+            let sig = MethodSig::from_julia_projections(
+                0,
+                global_index,
+                params,
+                return_type,
+                return_julia_type,
+                func.is_base_extension,
+                func.type_params.clone(),
+                vararg_param_index,
+                vararg_fixed_count,
+            );
+            self.engine.add_method(func.name.clone(), sig);
+        }
+    }
+
     /// Analyzes a single function for type stability.
     pub fn analyze_function(&mut self, func: &Function) -> FunctionStabilityReport {
+        let return_type = self.engine.infer_function(func);
+        self.analyze_function_with_return_type(func, &return_type)
+    }
+
+    fn analyze_function_with_return_type(
+        &mut self,
+        func: &Function,
+        return_type: &LatticeType,
+    ) -> FunctionStabilityReport {
         // Use usage analysis to infer parameter constraints for untyped parameters
         let usage_constraints = usage_analysis::infer_parameter_constraints(func, &self.tfuncs);
 
@@ -170,11 +625,8 @@ impl TypeStabilityAnalyzer {
             })
             .collect();
 
-        // Infer the return type
-        let return_type = self.engine.infer_function(func);
-
-        // Get line number from span
-        let line = func.body.span.start;
+        // Use source line, not byte offset, in user-facing diagnostics.
+        let line = func.span.start_line;
 
         // Create the report
         let mut report = FunctionStabilityReport::new(
@@ -192,7 +644,7 @@ impl TypeStabilityAnalyzer {
         }
 
         // Add reasons for instability
-        self.analyze_instability_reasons(&mut report, func, &return_type, &input_signature);
+        self.analyze_instability_reasons(&mut report, func, return_type, &input_signature);
 
         report
     }
@@ -240,103 +692,15 @@ impl TypeStabilityAnalyzer {
         }
     }
 
-    /// Converts a Julia type to a LatticeType.
+    /// Converts a Julia type annotation to a LatticeType.
+    ///
+    /// Issue #5916: delegates to the canonical
+    /// [`crate::compile::bridge::julia_type_to_lattice`] (table-free: a
+    /// `JuliaType::Struct` keeps the `type_id: 0` placeholder) so the
+    /// stability analyzer and the compiler bridge cannot drift apart on
+    /// annotation lowering.
     fn julia_type_to_lattice(&self, ty: &crate::types::JuliaType) -> LatticeType {
-        use crate::types::JuliaType;
-
-        match ty {
-            // Signed integers
-            JuliaType::Int8 => LatticeType::Concrete(ConcreteType::Int8),
-            JuliaType::Int16 => LatticeType::Concrete(ConcreteType::Int16),
-            JuliaType::Int32 => LatticeType::Concrete(ConcreteType::Int32),
-            JuliaType::Int64 => LatticeType::Concrete(ConcreteType::Int64),
-            JuliaType::Int128 => LatticeType::Concrete(ConcreteType::Int128),
-            JuliaType::BigInt => LatticeType::Concrete(ConcreteType::BigInt),
-            // Unsigned integers
-            JuliaType::UInt8 => LatticeType::Concrete(ConcreteType::UInt8),
-            JuliaType::UInt16 => LatticeType::Concrete(ConcreteType::UInt16),
-            JuliaType::UInt32 => LatticeType::Concrete(ConcreteType::UInt32),
-            JuliaType::UInt64 => LatticeType::Concrete(ConcreteType::UInt64),
-            JuliaType::UInt128 => LatticeType::Concrete(ConcreteType::UInt128),
-            // Floating point
-            JuliaType::Float16 => LatticeType::Concrete(ConcreteType::Float16),
-            JuliaType::Float32 => LatticeType::Concrete(ConcreteType::Float32),
-            JuliaType::Float64 => LatticeType::Concrete(ConcreteType::Float64),
-            JuliaType::BigFloat => LatticeType::Concrete(ConcreteType::BigFloat),
-            // Other primitives
-            JuliaType::Bool => LatticeType::Concrete(ConcreteType::Bool),
-            JuliaType::String => LatticeType::Concrete(ConcreteType::String),
-            JuliaType::Char => LatticeType::Concrete(ConcreteType::Char),
-            JuliaType::Nothing => LatticeType::Concrete(ConcreteType::Nothing),
-            JuliaType::Missing => LatticeType::Concrete(ConcreteType::Missing),
-            JuliaType::Symbol => LatticeType::Concrete(ConcreteType::Symbol),
-            // Array types
-            JuliaType::Array => LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ConcreteType::Any),
-            }),
-            JuliaType::VectorOf(elem) => {
-                let elem_concrete =
-                    if let LatticeType::Concrete(ct) = self.julia_type_to_lattice(elem) {
-                        ct
-                    } else {
-                        ConcreteType::Any
-                    };
-                LatticeType::Concrete(ConcreteType::Array {
-                    element: Box::new(elem_concrete),
-                })
-            }
-            JuliaType::MatrixOf(elem) => {
-                let elem_concrete =
-                    if let LatticeType::Concrete(ct) = self.julia_type_to_lattice(elem) {
-                        ct
-                    } else {
-                        ConcreteType::Any
-                    };
-                LatticeType::Concrete(ConcreteType::Array {
-                    element: Box::new(elem_concrete),
-                })
-            }
-            // Tuple types
-            JuliaType::Tuple => LatticeType::Concrete(ConcreteType::Tuple { elements: vec![] }),
-            JuliaType::TupleOf(elems) => {
-                let element_types: Vec<ConcreteType> = elems
-                    .iter()
-                    .filter_map(|t| {
-                        if let LatticeType::Concrete(ct) = self.julia_type_to_lattice(t) {
-                            Some(ct)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                LatticeType::Concrete(ConcreteType::Tuple {
-                    elements: element_types,
-                })
-            }
-            // Dict and Set
-            JuliaType::Dict => LatticeType::Concrete(ConcreteType::Dict {
-                key: Box::new(ConcreteType::Any),
-                value: Box::new(ConcreteType::Any),
-            }),
-            JuliaType::Set => LatticeType::Concrete(ConcreteType::Set {
-                element: Box::new(ConcreteType::Any),
-            }),
-            // Range types
-            JuliaType::UnitRange | JuliaType::StepRange => {
-                LatticeType::Concrete(ConcreteType::Range {
-                    element: Box::new(ConcreteType::Int64),
-                })
-            }
-            // User-defined struct
-            JuliaType::Struct(name) => LatticeType::Concrete(ConcreteType::Struct {
-                name: name.clone(),
-                type_id: 0, // Type ID resolved later
-            }),
-            // Any type
-            JuliaType::Any => LatticeType::Top,
-            // Fallback: other JuliaType variants mapped to Top
-            _ => LatticeType::Top,
-        }
+        crate::compile::bridge::julia_type_to_lattice(ty)
     }
 }
 
@@ -366,7 +730,8 @@ impl Default for TypeStabilityAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::core::{Block, Expr, Literal, Stmt, TypedParam};
+    use crate::inference_core::{CoreAbstract, CorePrimitive, CoreType};
+    use crate::ir::core::{Block, Expr, Literal, Program, Stmt, TypedParam};
     use crate::span::Span;
     use crate::types::JuliaType;
 
@@ -379,12 +744,20 @@ mod tests {
             body,
             return_type: None,
             is_base_extension: false,
+            is_runtime_eval: false,
             span: create_span(),
         }
     }
 
     fn create_span() -> Span {
         Span::new(0, 10, 1, 1, 0, 10)
+    }
+
+    fn empty_block() -> Block {
+        Block {
+            stmts: vec![],
+            span: create_span(),
+        }
     }
 
     #[test]
@@ -457,6 +830,95 @@ mod tests {
     }
 
     #[test]
+    fn test_program_analysis_uses_method_table_dispatch() {
+        let int_method = create_test_function(
+            "f4291",
+            vec![TypedParam::new(
+                "x".to_string(),
+                Some(JuliaType::Integer),
+                create_span(),
+            )],
+            Block {
+                stmts: vec![Stmt::Return {
+                    value: Some(Expr::Literal(Literal::Int(1), create_span())),
+                    span: create_span(),
+                }],
+                span: create_span(),
+            },
+        );
+        let number_method = create_test_function(
+            "f4291",
+            vec![TypedParam::new(
+                "x".to_string(),
+                Some(JuliaType::Number),
+                create_span(),
+            )],
+            Block {
+                stmts: vec![Stmt::Return {
+                    value: Some(Expr::Literal(Literal::Float(1.0), create_span())),
+                    span: create_span(),
+                }],
+                span: create_span(),
+            },
+        );
+        let caller = create_test_function(
+            "caller4291",
+            vec![TypedParam::new(
+                "x".to_string(),
+                Some(JuliaType::Int64),
+                create_span(),
+            )],
+            Block {
+                stmts: vec![Stmt::Return {
+                    value: Some(Expr::Call {
+                        function: "f4291".to_string(),
+                        args: vec![Expr::Var("x".to_string(), create_span())],
+                        kwargs: vec![],
+                        splat_mask: vec![false],
+                        kwargs_splat_mask: vec![],
+                        span: create_span(),
+                    }),
+                    span: create_span(),
+                }],
+                span: create_span(),
+            },
+        );
+
+        let program = Program {
+            abstract_types: vec![],
+            primitive_types: vec![],
+            type_aliases: vec![],
+            structs: vec![],
+            functions: vec![int_method, number_method, caller],
+            base_function_count: 0,
+            modules: vec![],
+            usings: vec![],
+            macros: vec![],
+            enums: vec![],
+            main: empty_block(),
+        };
+
+        let mut analyzer = TypeStabilityAnalyzer::new();
+        let report = analyzer.analyze_program(&program);
+        let caller_report = report
+            .functions
+            .iter()
+            .find(|function| function.function_name == "caller4291")
+            .expect("caller4291 report should exist");
+
+        assert!(
+            caller_report.is_stable(),
+            "expected method table dispatch to infer caller4291, got {caller_report:?}"
+        );
+        assert_eq!(
+            caller_report.return_type,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
+    }
+
+    #[test]
     fn test_usage_analysis_infers_numeric_type() {
         // function add_one(x) return x + 1 end
         // Usage analysis should infer x as numeric (Union{Int64, Float64})
@@ -502,7 +964,12 @@ mod tests {
             .find(|(name, _)| name == "x")
             .map(|(_, ty)| ty);
         assert!(
-            matches!(x_type, Some(LatticeType::Concrete(ConcreteType::Number))),
+            matches!(
+                x_type,
+                Some(LatticeType::Concrete(ConcreteType::Core(
+                    CoreType::Abstract(CoreAbstract::Number)
+                )))
+            ),
             "Expected x to be inferred as Number, got: {:?}",
             x_type
         );
@@ -541,7 +1008,12 @@ mod tests {
             .find(|(name, _)| name == "i")
             .map(|(_, ty)| ty);
         assert!(
-            matches!(i_type, Some(LatticeType::Concrete(ConcreteType::Int64))),
+            matches!(
+                i_type,
+                Some(LatticeType::Concrete(ConcreteType::Core(
+                    CoreType::Primitive(CorePrimitive::Int64)
+                )))
+            ),
             "Expected i to be inferred as Int64, got: {:?}",
             i_type
         );

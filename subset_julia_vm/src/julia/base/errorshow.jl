@@ -90,17 +90,37 @@ function _showerror_str(ex::DomainError)
 end
 
 # InexactError
+# Mirrors julia/base/errorshow.jl `showerror(io, ex::InexactError)`: the target
+# type `T` is omitted when `nameof(T) === ex.func` (e.g. `InexactError: Int64(1.5)`
+# rather than `Int64(Int64, 1.5)`), matching upstream display (Issue #8212).
 function _showerror_str(ex::InexactError)
-    return string("InexactError: ", ex.func, "(", ex.T, ", ", ex.val, ")")
+    if nameof(ex.T) === ex.func
+        return string("InexactError: ", ex.func, "(", ex.val, ")")
+    else
+        return string("InexactError: ", ex.func, "(", ex.T, ", ", ex.val, ")")
+    end
 end
 
 # TypeError
+# Mirrors julia/base/errorshow.jl `showerror(io::IO, ex::TypeError)` (Issue #5146).
+# `ex.got` holds the offending VALUE (not its type); we format it as
+# "a value of type $(typeof(ex.got))", or "Type{...}" when the value is itself a
+# type. The `expected === Bool` case yields the "non-boolean (...)" message.
 function _showerror_str(ex::TypeError)
-    if ex.context == ""
-        return string("TypeError: in ", ex.func, ", expected ", ex.expected, ", got ", typeof(ex.got))
-    else
-        return string("TypeError: in ", ex.func, ", in ", ex.context, ", expected ", ex.expected, ", got ", typeof(ex.got))
+    if ex.expected === Bool
+        return string("TypeError: non-boolean (", typeof(ex.got), ") used in boolean context")
     end
+    if isa(ex.got, Type)
+        targ = string("Type{", ex.got, "}")
+    else
+        targ = string("a value of type ", typeof(ex.got))
+    end
+    if ex.context == ""
+        ctx = string("in ", ex.func)
+    else
+        ctx = string("in ", ex.func, ", in ", ex.context)
+    end
+    return string("TypeError: ", ctx, ", expected ", ex.expected, ", got ", targ)
 end
 
 # ArgumentError
@@ -186,9 +206,11 @@ end
 
 # CompositeException
 function _showerror_str(ex::CompositeException)
-    base = string("CompositeException: ", ex.count, " exception(s)")
-    if ex.first_msg != ""
-        return string(base, ", first: ", ex.first_msg)
+    n = length(ex.exceptions)
+    base = string("CompositeException: ", n, " exception(s)")
+    if n > 0
+        first_ex = ex.exceptions[1]
+        return string(base, ", first: ", string(first_ex))
     else
         return base
     end
@@ -196,10 +218,15 @@ end
 
 # TaskFailedException
 function _showerror_str(ex::TaskFailedException)
-    if ex.msg == ""
+    if ex.task === nothing
         return "TaskFailedException"
     else
-        return string("TaskFailedException: ", ex.msg)
+        t = ex.task
+        if t._isexception && t.result !== nothing
+            return string("TaskFailedException: nested task error: ", string(t.result))
+        else
+            return "TaskFailedException"
+        end
     end
 end
 

@@ -211,3 +211,39 @@ function trylock(l::SpinLock)
 end
 
 islocked(l::SpinLock) = l.locked
+
+# =============================================================================
+# @lock - acquire a lock for the duration of a block
+# =============================================================================
+# Macro version of `lock(f, l::AbstractLock)` but with `expr` instead of `f` function.
+# Expands to:
+#     lock(l)
+#     try
+#         expr
+#     finally
+#         unlock(l)
+#     end
+#
+# The lock is always released, even when an exception is thrown from `expr`.
+# `l` is evaluated only once. Mirrors official Julia base/lock.jl.
+#
+# Usage:
+#   lk = ReentrantLock()
+#   @lock lk begin
+#       # critical section
+#   end
+#
+#   @lock lk x = 1   # single expression body
+#
+# Issue #3499.
+macro lock(l, expr)
+    quote
+        temp = $(esc(l))
+        lock(temp)
+        try
+            $(esc(expr))
+        finally
+            unlock(temp)
+        end
+    end
+end

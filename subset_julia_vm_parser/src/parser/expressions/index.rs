@@ -11,31 +11,67 @@ impl<'a> Parser<'a> {
     /// Parse an index expression or typed array/matrix
     /// Handles: obj[i], obj[i, j], Type[1, 2, 3] (typed vector), Type[1 2; 3 4] (typed matrix)
     pub(crate) fn parse_index_expression(&mut self, object: CstNode) -> ParseResult<CstNode> {
-        let start = object.span.start;
-        self.expect(Token::LBracket)?;
+        // Inside the brackets we leave macro-argument whitespace sensitivity
+        // behind; it is restored before returning (Issue #5494). Any outer
+        // matrix-row context is also reset; the typed-matrix-row helpers below
+        // re-establish it per element so `Float64[1 -2]` parses two elements
+        // (Issue #7196), while `a[i, j]` indexing is unaffected.
+        let saved_space_sensitive = std::mem::replace(&mut self.macro_arg_space_sensitive, false);
+        let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, false);
+        let saved_in_ternary_then = std::mem::replace(&mut self.in_ternary_then, false);
+        let result = self.parse_index_expression_inner(object);
+        self.macro_arg_space_sensitive = saved_space_sensitive;
+        self.in_matrix_row = saved_in_matrix_row;
+        self.in_ternary_then = saved_in_ternary_then;
+        result
+    }
 
-        // Check for empty: Type[]
+    fn parse_index_expression_inner(&mut self, object: CstNode) -> ParseResult<CstNode> {
+        let start = object.span.start;
+        let bracket_token = self.expect(Token::LBracket)?;
+        let bracket_start = bracket_token.span.start;
+
+        // Skip newlines right after `[` so multi-line typed literals like
+        // `Bool[\n true,\n false,\n]` parse like their untyped `[...]` counterpart
+        // (Issue #8188). A newline immediately after `[` is cosmetic — it has no
+        // preceding element, so it can never be a matrix-row separator.
+        while self.check(&Token::Newline) {
+            self.advance();
+        }
+
+        // Empty brackets are syntactically zero-argument indexing (`a[]`).
+        // Lowering decides whether the left side is a type name and should become
+        // a typed empty array (`T[]`).
         if self.check(&Token::RBracket) {
             let end_token = self.advance().unwrap();
             let span = self.source_map.span(start, end_token.span.end);
-            // Empty typed array: Type[]
-            let inner = CstNode::new(
-                NodeKind::VectorExpression,
-                self.source_map
-                    .span(end_token.span.start, end_token.span.start),
-            );
             return Ok(CstNode::with_children(
-                NodeKind::TypedExpression,
+                NodeKind::IndexExpression,
                 span,
-                vec![object, inner],
+                vec![object],
             ));
         }
 
-        // Parse first element
+        // Parse first element. As with `[...]` literals, a `T[...]`/`a[...]`
+        // bracket may be a typed matrix/`hcat` row, so the first element parses
+        // in the whitespace-sensitive matrix-row context: `Float64[0.20 -0.26]`
+        // is two elements, and `a[i +j]` is typed-hcat (matching upstream),
+        // while `a[i + j]` and `a[i, j]` are ordinary indexing (Issue #7196).
+        let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, true);
         let first = self.parse_expression()?;
+        self.in_matrix_row = saved_in_matrix_row;
 
         // Check what follows to determine the type
-        if self.check(&Token::Comma) {
+        if self.check(&Token::KwFor) {
+            // Typed comprehension: Type[expr for x in iter]
+            let comprehension = self.parse_comprehension_rest(bracket_start, first)?;
+            let span = self.source_map.span(start, comprehension.span.end);
+            Ok(CstNode::with_children(
+                NodeKind::TypedExpression,
+                span,
+                vec![object, comprehension],
+            ))
+        } else if self.check(&Token::Comma) {
             // Comma-separated: either index or typed vector
             let mut elements = vec![first];
             while self.check(&Token::Comma) {
@@ -54,6 +90,12 @@ impl<'a> Parser<'a> {
                 elements.push(self.parse_expression()?);
             }
 
+            // Skip a cosmetic trailing newline before `]` when the last element
+            // had no trailing comma, e.g. `obj[\n i,\n j\n]` (Issue #8188).
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
+
             let end_token = self.expect(Token::RBracket)?;
             let span = self.source_map.span(start, end_token.span.end);
 
@@ -69,6 +111,23 @@ impl<'a> Parser<'a> {
         } else if self.check(&Token::RBracket) {
             // Single element: obj[i] or Type[expr]
             let end_token = self.advance().unwrap();
+            let span = self.source_map.span(start, end_token.span.end);
+            Ok(CstNode::with_children(
+                NodeKind::IndexExpression,
+                span,
+                vec![object, first],
+            ))
+        } else if self.check(&Token::Newline)
+            && self.peek_non_newline_token() == Some(Token::RBracket)
+        {
+            // A newline (or blank lines) before `]` with no further element is a
+            // cosmetic trailing newline, so this is single-element indexing
+            // `obj[\n i\n]`, not a vcat (Issue #8188). A newline *followed by*
+            // another element falls through to the matrix arm below.
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
+            let end_token = self.expect(Token::RBracket)?;
             let span = self.source_map.span(start, end_token.span.end);
             Ok(CstNode::with_children(
                 NodeKind::IndexExpression,
@@ -98,12 +157,15 @@ impl<'a> Parser<'a> {
         let mut first_row_elements = vec![first];
 
         // Parse rest of first row (space-separated elements until ; or newline)
+        // in the whitespace-sensitive matrix-row context (Issue #7196).
+        let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, true);
         while !self.check(&Token::Semicolon)
             && !self.check(&Token::Newline)
             && !self.check(&Token::RBracket)
         {
             first_row_elements.push(self.parse_expression()?);
         }
+        self.in_matrix_row = saved_in_matrix_row;
 
         let first_row_span = self.source_map.span(
             first_row_elements[0].span.start,
@@ -152,13 +214,16 @@ impl<'a> Parser<'a> {
         let matrix_start = first.span.start;
         let mut elements = vec![first];
 
-        // Parse remaining space-separated elements in the row
+        // Parse remaining space-separated elements in the row in the
+        // whitespace-sensitive matrix-row context (Issue #7196).
+        let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, true);
         while !self.check(&Token::RBracket)
             && !self.check(&Token::Semicolon)
             && !self.check(&Token::Newline)
         {
             elements.push(self.parse_expression()?);
         }
+        self.in_matrix_row = saved_in_matrix_row;
 
         // If we hit semicolon or newline, there are more rows
         if self.check(&Token::Semicolon) || self.check(&Token::Newline) {

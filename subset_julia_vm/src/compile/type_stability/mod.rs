@@ -62,6 +62,7 @@ pub use report::{FunctionStabilityReport, StabilityStatus};
 mod tests {
     use super::*;
     use crate::compile::lattice::types::{ConcreteType, LatticeType};
+    use crate::inference_core::{CorePrimitive, CoreType};
     use crate::ir::core::{BinaryOp, Block, Expr, Function, Literal, Stmt, TypedParam};
     use crate::span::Span;
     use crate::types::JuliaType;
@@ -85,6 +86,7 @@ mod tests {
             },
             return_type: None,
             is_base_extension: false,
+            is_runtime_eval: false,
             span: create_span(),
         }
     }
@@ -186,7 +188,9 @@ mod tests {
             "stable_func".to_string(),
             1,
             vec![],
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ));
 
         // Add an unstable function

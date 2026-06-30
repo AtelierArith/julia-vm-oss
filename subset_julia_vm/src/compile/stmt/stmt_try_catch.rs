@@ -3,8 +3,8 @@ use crate::vm::instr::Instr;
 use crate::vm::ValueType;
 
 use super::super::type_helpers::join_type;
-use super::super::CoreCompiler;
 use super::super::CResult;
+use super::super::CoreCompiler;
 
 impl CoreCompiler<'_> {
     pub(super) fn compile_try_stmt(&mut self, stmt: &Stmt) -> CResult<Option<()>> {
@@ -77,6 +77,7 @@ impl CoreCompiler<'_> {
             if let Some(catch_block) = catch_block {
                 self.compile_block(catch_block)?;
             }
+            self.emit(Instr::PopCaughtException);
             if has_finally {
                 self.emit(Instr::PopHandler);
             }
@@ -89,7 +90,8 @@ impl CoreCompiler<'_> {
                 // commit to either type alone — use join_type() to widen to Any when
                 // the two paths disagree. (Issue #3044)
                 let catch_ty = self.locals.get(name).cloned().unwrap_or(ValueType::Any);
-                self.locals.insert(name.clone(), join_type(try_ty, &catch_ty));
+                self.locals
+                    .insert(name.clone(), join_type(try_ty, &catch_ty));
             }
         }
 

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// - `Integer<:T<:Real` - type parameter with both bounds
 ///
 /// Bounds are stored as strings to support user-defined abstract types.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct TypeParam {
     /// The name of the type parameter (e.g., "T", "S")
     pub name: String,
@@ -26,12 +26,54 @@ pub struct TypeParam {
     /// Example: `T>:Integer` means Integer must be a subtype of T
     #[serde(default)]
     pub lower_bound: Option<String>,
-    /// Legacy field for backward compatibility (maps to upper_bound)
-    /// Deprecated: Use upper_bound instead
-    /// Note: skipped in all serialization formats (including bincode) to avoid
-    /// non-self-describing format incompatibility. Always reconstructed from upper_bound.
+    /// Legacy mirror of `upper_bound` (deprecated: use `upper_bound`).
+    ///
+    /// This is a LIVE field, not dead state: it is read by the
+    /// parametric-binding dispatch match (`types/julia_type/comparison.rs`,
+    /// enforcing `where T<:Bound`) and by parametric-struct bound checking
+    /// (`compile/context.rs`). Every production constructor keeps
+    /// `bound == upper_bound`.
+    ///
+    /// The field is `#[serde(skip)]` to keep the wire format independent of
+    /// non-self-describing formats (bincode), but it is **reconstructed from
+    /// `upper_bound` on deserialization** by the hand-written `Deserialize`
+    /// impl below. A plain `#[serde(skip)]` derive would default it to `None`,
+    /// silently dropping the bound constraint and making the prelude-program /
+    /// method-table caches non-transparent (the `bound: None` vs
+    /// `Some("Real")` divergence for `Complex{T} where T<:Real`, Issue #6518).
     #[serde(skip)]
     pub bound: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for TypeParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Wire shape mirrors the serialized fields (`bound` is `#[serde(skip)]`,
+        // so it never appears on the wire). On the way back in, `bound` is
+        // reconstructed from `upper_bound` so the value equals what every
+        // production constructor (`with_upper_bound`, `with_both_bounds`) and
+        // the `core_signature` reconstruction (`core_type_var_to_type_param`)
+        // produce — making the prelude-program and method-table caches
+        // round-trip exactly (Issue #6518).
+        #[derive(Deserialize)]
+        struct TypeParamWire {
+            name: String,
+            #[serde(default)]
+            upper_bound: Option<String>,
+            #[serde(default)]
+            lower_bound: Option<String>,
+        }
+
+        let wire = TypeParamWire::deserialize(deserializer)?;
+        Ok(Self {
+            name: wire.name,
+            bound: wire.upper_bound.clone(),
+            upper_bound: wire.upper_bound,
+            lower_bound: wire.lower_bound,
+        })
+    }
 }
 
 impl TypeParam {

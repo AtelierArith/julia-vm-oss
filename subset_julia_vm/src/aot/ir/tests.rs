@@ -1,5 +1,5 @@
 use super::*;
-use crate::aot::types::{JuliaType, StaticType};
+use crate::aot::types::StaticType;
 
 #[test]
 fn test_basic_block() {
@@ -14,7 +14,7 @@ fn test_basic_block() {
 
 #[test]
 fn test_var_ref() {
-    let var = VarRef::new("x".to_string(), JuliaType::Int64);
+    let var = VarRef::new("x".to_string(), StaticType::I64);
     assert_eq!(var.name, "x");
     assert_eq!(var.version, 0);
     assert_eq!(format!("{}", var), "%x");
@@ -26,17 +26,17 @@ fn test_var_ref() {
 
 #[test]
 fn test_const_value_type() {
-    assert_eq!(ConstValue::Int64(42).get_type(), JuliaType::Int64);
-    assert_eq!(ConstValue::Float64(1.25).get_type(), JuliaType::Float64);
-    assert_eq!(ConstValue::Bool(true).get_type(), JuliaType::Bool);
+    assert_eq!(ConstValue::Int64(42).get_type(), StaticType::I64);
+    assert_eq!(ConstValue::Float64(1.25).get_type(), StaticType::F64);
+    assert_eq!(ConstValue::Bool(true).get_type(), StaticType::Bool);
 }
 
 #[test]
 fn test_ir_function() {
     let func = IrFunction::new(
         "test".to_string(),
-        vec![("x".to_string(), JuliaType::Int64)],
-        JuliaType::Int64,
+        vec![("x".to_string(), StaticType::I64)],
+        StaticType::I64,
     );
     assert_eq!(func.name, "test");
     assert_eq!(func.params.len(), 1);
@@ -46,7 +46,7 @@ fn test_ir_function() {
 #[test]
 fn test_ir_module() {
     let mut module = IrModule::new("test_module".to_string());
-    let func = IrFunction::new("main".to_string(), vec![], JuliaType::Nothing);
+    let func = IrFunction::new("main".to_string(), vec![], StaticType::Nothing);
     module.add_function(func);
     assert_eq!(module.functions.len(), 1);
 }
@@ -132,6 +132,7 @@ fn test_aot_expr_get_type() {
         StaticType::Str
     );
     assert_eq!(AotExpr::LitNothing.get_type(), StaticType::Nothing);
+    assert_eq!(AotExpr::LitMissing.get_type(), StaticType::Missing);
 
     // Variable
     let var = AotExpr::Var {
@@ -190,12 +191,32 @@ fn test_aot_builtinop() {
         AotBuiltinOp::from_name("println"),
         Some(AotBuiltinOp::Println)
     );
+    assert_eq!(AotBuiltinOp::from_name("in"), Some(AotBuiltinOp::In));
     assert_eq!(AotBuiltinOp::from_name("unknown"), None);
 
     // return_type
     assert_eq!(AotBuiltinOp::Sqrt.return_type(&[]), StaticType::F64);
     assert_eq!(AotBuiltinOp::Length.return_type(&[]), StaticType::I64);
+    assert_eq!(AotBuiltinOp::In.return_type(&[]), StaticType::Bool);
     assert_eq!(AotBuiltinOp::Println.return_type(&[]), StaticType::Nothing);
+    assert_eq!(AotBuiltinOp::TypeOf.return_type(&[]), StaticType::DataType);
+}
+
+#[test]
+fn reduce_return_type_falls_back_to_collection_element_issue_7495() {
+    let unknown_reducer = StaticType::Function {
+        params: vec![StaticType::Any, StaticType::Any],
+        ret: Box::new(StaticType::Any),
+    };
+    let array = StaticType::Array {
+        element: Box::new(StaticType::I64),
+        ndims: Some(1),
+    };
+
+    assert_eq!(
+        AotBuiltinOp::Reduce.return_type(&[unknown_reducer, array]),
+        StaticType::I64
+    );
 }
 
 #[test]
@@ -206,6 +227,7 @@ fn test_aot_binop_from_core_ir() {
     assert_eq!(AotBinOp::from(&BinaryOp::Sub), AotBinOp::Sub);
     assert_eq!(AotBinOp::from(&BinaryOp::Mul), AotBinOp::Mul);
     assert_eq!(AotBinOp::from(&BinaryOp::Lt), AotBinOp::Lt);
+    assert_eq!(AotBinOp::from(&BinaryOp::Subtype), AotBinOp::Subtype);
     assert_eq!(AotBinOp::from(&BinaryOp::And), AotBinOp::And);
 }
 

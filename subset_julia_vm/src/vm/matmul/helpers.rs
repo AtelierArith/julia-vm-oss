@@ -3,6 +3,22 @@ use crate::vm::value::{ArrayData, ArrayElementType, ArrayValue, StructInstance, 
 
 use super::complex::Complex64;
 
+fn is_real_numeric_array(element_type: &ArrayElementType) -> bool {
+    matches!(
+        element_type,
+        ArrayElementType::F64
+            | ArrayElementType::F32
+            | ArrayElementType::I64
+            | ArrayElementType::I32
+            | ArrayElementType::I16
+            | ArrayElementType::I8
+            | ArrayElementType::U64
+            | ArrayElementType::U32
+            | ArrayElementType::U16
+            | ArrayElementType::U8
+    )
+}
+
 /// Check if an array contains complex numbers.
 pub(crate) fn is_complex_array(arr: &ArrayValue) -> bool {
     if let Some(ref override_type) = arr.element_type_override {
@@ -28,20 +44,60 @@ pub(crate) fn is_complex_array(arr: &ArrayValue) -> bool {
 
 /// Helper to extract array data as f64 Vec (for real arrays).
 pub(super) fn as_f64_data(arr: &ArrayValue) -> Result<Vec<f64>, VmError> {
-    match &arr.data {
-        ArrayData::F64(v) => Ok(v.clone()),
-        ArrayData::I64(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::F32(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::I32(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::I16(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::I8(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::U64(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::U32(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::U16(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        ArrayData::U8(v) => Ok(v.iter().map(|&x| x as f64).collect()),
-        _ => Err(VmError::TypeError(format!(
+    if is_real_numeric_array(&arr.element_type()) {
+        arr.to_logical_f64_vec()
+    } else {
+        Err(VmError::TypeError(format!(
             "matmul requires numeric arrays, got {}",
             arr.data.type_name()
+        )))
+    }
+}
+
+fn complex_from_value(val: Value, struct_heap: &[StructInstance]) -> Result<Complex64, VmError> {
+    match val {
+        Value::Struct(s) => {
+            if s.is_complex() {
+                s.as_complex_parts().map_or_else(
+                    || {
+                        Err(VmError::TypeError(
+                            "matmul: could not extract complex parts from struct".to_string(),
+                        ))
+                    },
+                    |(re, im)| Ok(Complex64::new(re, im)),
+                )
+            } else {
+                Err(VmError::TypeError(format!(
+                    "matmul: expected Complex struct, got {}",
+                    s.struct_name
+                )))
+            }
+        }
+        Value::StructRef(idx) => {
+            let s = struct_heap.get(idx).ok_or_else(|| {
+                VmError::TypeError("matmul: invalid struct reference".to_string())
+            })?;
+            if s.is_complex() {
+                s.as_complex_parts().map_or_else(
+                    || {
+                        Err(VmError::TypeError(
+                            "matmul: could not extract complex parts from struct".to_string(),
+                        ))
+                    },
+                    |(re, im)| Ok(Complex64::new(re, im)),
+                )
+            } else {
+                Err(VmError::TypeError(format!(
+                    "matmul: expected Complex struct, got {}",
+                    s.struct_name
+                )))
+            }
+        }
+        Value::F64(x) => Ok(Complex64::from_real(x)),
+        Value::I64(x) => Ok(Complex64::from_real(x as f64)),
+        other => Err(VmError::TypeError(format!(
+            "matmul: unsupported element type in array: {:?}",
+            other
         ))),
     }
 }
@@ -51,86 +107,12 @@ pub(crate) fn extract_complex_data(
     arr: &ArrayValue,
     struct_heap: &[StructInstance],
 ) -> Result<Vec<Complex64>, VmError> {
-    if let Some(ref override_type) = arr.element_type_override {
-        if *override_type == ArrayElementType::ComplexF64 {
-            if let ArrayData::F64(v) = &arr.data {
-                let mut result = Vec::with_capacity(v.len() / 2);
-                for chunk in v.chunks(2) {
-                    if chunk.len() == 2 {
-                        result.push(Complex64::new(chunk[0], chunk[1]));
-                    }
-                }
-                return Ok(result);
-            }
-        } else if *override_type == ArrayElementType::ComplexF32 {
-            if let ArrayData::F32(v) = &arr.data {
-                let mut result = Vec::with_capacity(v.len() / 2);
-                for chunk in v.chunks(2) {
-                    if chunk.len() == 2 {
-                        result.push(Complex64::new(chunk[0] as f64, chunk[1] as f64));
-                    }
-                }
-                return Ok(result);
-            }
-        }
-    }
-
-    if let ArrayData::StructRefs(indices) = &arr.data {
-        let mut result = Vec::with_capacity(indices.len());
-        for &idx in indices {
-            if let Some(s) = struct_heap.get(idx) {
-                if s.is_complex() {
-                    if let Some((re, im)) = s.as_complex_parts() {
-                        result.push(Complex64::new(re, im));
-                    } else {
-                        return Err(VmError::TypeError(
-                            "matmul: could not extract complex parts from struct".to_string(),
-                        ));
-                    }
-                } else {
-                    return Err(VmError::TypeError(format!(
-                        "matmul: expected Complex struct, got {}",
-                        s.struct_name
-                    )));
-                }
-            } else {
-                return Err(VmError::TypeError(
-                    "matmul: invalid struct reference".to_string(),
-                ));
-            }
-        }
-        return Ok(result);
-    }
-
-    if let ArrayData::Any(values) = &arr.data {
-        let mut result = Vec::with_capacity(values.len());
-        for val in values {
-            match val {
-                Value::Struct(s) => {
-                    if s.is_complex() {
-                        if let Some((re, im)) = s.as_complex_parts() {
-                            result.push(Complex64::new(re, im));
-                        } else {
-                            return Err(VmError::TypeError(
-                                "matmul: could not extract complex parts from struct".to_string(),
-                            ));
-                        }
-                    } else {
-                        return Err(VmError::TypeError(format!(
-                            "matmul: expected Complex struct, got {}",
-                            s.struct_name
-                        )));
-                    }
-                }
-                Value::F64(x) => result.push(Complex64::from_real(*x)),
-                Value::I64(x) => result.push(Complex64::from_real(*x as f64)),
-                _ => {
-                    return Err(VmError::TypeError(format!(
-                        "matmul: unsupported element type in Any array: {:?}",
-                        val
-                    )))
-                }
-            }
+    if arr.element_type().is_complex()
+        || matches!(arr.data, ArrayData::StructRefs(_) | ArrayData::Any(_))
+    {
+        let mut result = Vec::with_capacity(arr.element_count());
+        for i in 0..arr.element_count() {
+            result.push(complex_from_value(arr.get_linear(i)?, struct_heap)?);
         }
         return Ok(result);
     }
@@ -142,7 +124,7 @@ pub(crate) fn extract_complex_data(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::value::{ArrayData, ArrayValue};
+    use crate::vm::value::{new_array_ref, ArrayValue};
 
     fn f64_array(data: Vec<f64>) -> ArrayValue {
         let len = data.len();
@@ -170,26 +152,25 @@ mod tests {
 
     #[test]
     fn test_as_f64_data_i64_array() {
-        let data = vec![10i64, 20, 30];
-        let arr = ArrayValue {
-            data: ArrayData::I64(data),
-            shape: vec![3],
-            struct_type_id: None,
-            element_type_override: None,
-        };
+        let arr = ArrayValue::memory_first_from_i64(vec![10, 20, 30], vec![3]);
         let result = as_f64_data(&arr).unwrap();
         assert_eq!(result, vec![10.0, 20.0, 30.0]);
     }
 
     #[test]
     fn test_as_f64_data_invalid_type_returns_err() {
-        let arr = ArrayValue {
-            data: ArrayData::Bool(vec![true, false]),
-            shape: vec![2],
-            struct_type_id: None,
-            element_type_override: None,
-        };
+        let arr = ArrayValue::memory_first_from_bool(vec![true, false], vec![2]);
         assert!(matches!(as_f64_data(&arr), Err(VmError::TypeError(_))));
+    }
+
+    #[test]
+    fn test_as_f64_data_reads_reshaped_parent_logically() {
+        let source = new_array_ref(ArrayValue::memory_first_from_i64(vec![1, 2, 3, 4], vec![4]));
+        let reshaped = ArrayValue::reshaped_from_ref(&source, vec![2, 2]).unwrap();
+
+        let result = as_f64_data(&reshaped).unwrap();
+
+        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -200,5 +181,18 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].re, 1.0);
         assert_eq!(result[1].re, 2.0);
+    }
+
+    #[test]
+    fn test_extract_complex_data_reads_reshaped_complex_parent_logically() {
+        let source = new_array_ref(ArrayValue::complex_f64(vec![1.0, 2.0, 3.0, 4.0], vec![2]));
+        let reshaped = ArrayValue::reshaped_from_ref(&source, vec![2]).unwrap();
+        let heap = vec![];
+
+        let result = extract_complex_data(&reshaped, &heap).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!((result[0].re, result[0].im), (1.0, 2.0));
+        assert_eq!((result[1].re, result[1].im), (3.0, 4.0));
     }
 }

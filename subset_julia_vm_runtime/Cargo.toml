@@ -3,9 +3,10 @@ name = "subset_julia_vm_runtime"
 version = "0.1.0"
 edition = "2021"
 description = "Runtime library for SubsetJuliaVM AoT compiled code"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
+sha2 = "0.10"
 thiserror = "1.0"
 
 [features]

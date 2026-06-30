@@ -29,3 +29,9 @@ name = "let_blocks_in_expression"
 file = "let_in_expression.jl"
 expected = true
 description = "Let block used as expression in arithmetic"
+
+[[tests]]
+name = "let_blocks_tuple_destructuring_8403"
+file = "let_tuple_destructuring_8403.jl"
+expected = true
+description = "Let bindings accept tuple destructuring targets and make destructured names visible to later bindings and the body (Issue #8403)"

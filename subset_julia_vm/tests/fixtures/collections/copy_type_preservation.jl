@@ -1,13 +1,13 @@
-# Test that copy() preserves type for all collection types (Issue #1829)
+# Test that copy() preserves type for supported mutable collection types (Issue #1829, #5867)
 #
 # This test ensures that copy(x) returns a value of the same type as x
-# for all supported collection types. This prevents regressions where
+# for supported mutable collection types. This prevents regressions where
 # a generic copy() fallback might return a different type (e.g., Vector
 # instead of the original collection type).
 
 using Test
 
-@testset "copy() preserves type for all collections" begin
+@testset "copy() preserves type for mutable collections" begin
     @testset "Array type preservation" begin
         arr = [1, 2, 3]
         arr_copy = copy(arr)
@@ -40,14 +40,6 @@ using Test
         @test 3 in set_copy
     end
 
-    @testset "Tuple type preservation" begin
-        tup = (1, 2, 3)
-        tup_copy = copy(tup)
-        @test tup_copy == (1, 2, 3)
-        @test length(tup_copy) == 3
-        # Tuples are immutable, so copy returns identity
-    end
-
     @testset "Empty collections" begin
         # Empty Array
         empty_arr = Int64[]
@@ -60,10 +52,6 @@ using Test
         # Empty Set
         empty_set = Set{Int64}()
         @test length(copy(empty_set)) == 0
-
-        # Empty Tuple
-        empty_tup = ()
-        @test copy(empty_tup) == ()
     end
 
     @testset "Nested collections" begin

@@ -27,3 +27,183 @@ name = "numeric_narrow_int_return_preservation"
 file = "narrow_int_return_preservation.jl"
 expected = true
 description = "Narrow integer return type preservation: I8/I16/I32/I128/U8-U128/Bool (Issue #3255 / PR #3270)"
+
+[[tests]]
+name = "numeric_int128_runtime_drift"
+file = "numeric_int128_runtime_drift.jl"
+expected = true
+description = "Int128 arithmetic preserves Int128 instead of widening to BigInt (Issue #3621)"
+
+[[tests]]
+name = "numeric_float16_runtime_drift"
+file = "numeric_float16_runtime_drift.jl"
+expected = true
+description = "Inline Float16 arithmetic preserves Float16 instead of widening to Float64 (Issue #3621)"
+
+[[tests]]
+name = "numeric_int128_div"
+file = "numeric_int128_div.jl"
+expected = true
+description = "Int128 ÷ Int128 preserves Int128 via div(::Int128,::Int128) (Issue #3694)"
+
+[[tests]]
+name = "numeric_uint128_div"
+file = "numeric_uint128_div.jl"
+expected = true
+description = "UInt128 ÷ UInt128 preserves UInt128 via div(::UInt128,::UInt128) (Issue #3696)"
+
+[[tests]]
+name = "numeric_uint128_arithmetic"
+file = "numeric_uint128_arithmetic.jl"
+expected = true
+description = "UInt128 arithmetic (+,-,*,%) preserves UInt128 instead of truncating to Int64 (Issue #3697)"
+
+[[tests]]
+name = "numeric_uint_narrow_div"
+file = "numeric_uint_narrow_div.jl"
+expected = true
+description = "UInt8/UInt16/UInt32/UInt64 ÷ preserves UIntN via div(::UIntN,::UIntN) (Issue #3701)"
+
+[[tests]]
+name = "numeric_typemax_typemin_widths"
+file = "numeric_typemax_typemin_widths.jl"
+expected = true
+description = "typemax/typemin return the correct primitive type for all integer widths incl. 128-bit (Issue #3702)"
+
+[[tests]]
+name = "numeric_unary_neg_widths"
+file = "numeric_unary_neg_widths.jl"
+expected = true
+description = "Unary - works on every primitive integer width (Issue #3705)"
+
+[[tests]]
+name = "numeric_float16_print"
+file = "numeric_float16_print.jl"
+expected = true
+description = "Float16 prints without type wrapper, shortest-roundtrip decimal (Issue #3707)"
+
+[[tests]]
+name = "numeric_typed_param_int_widths"
+file = "numeric_typed_param_int_widths.jl"
+expected = true
+description = "Typed parameters of every primitive integer width preserve their type through +, -, *, ÷, % instead of dropping to Int64 (Issue #3622)"
+
+[[tests]]
+name = "numeric_primitive_arith_promotion"
+file = "numeric_primitive_arith_promotion.jl"
+expected = true
+description = "Inline primitive arithmetic on UInt64/UInt8/BigInt/Int128 preserves type, Int+Float promotes to Float (Issue #3498)"
+
+[[tests]]
+name = "numeric_int128_shifts"
+file = "numeric_int128_shifts.jl"
+expected = true
+description = "<<, >>, >>> on (Int128|UInt128, Int) preserve the 128-bit operand type (Issue #3747)"
+
+[[tests]]
+name = "numeric_bit_ops_width_4785"
+file = "bit_ops_width_4785.jl"
+expected = true
+description = "count_zeros / leading_zeros / leading_ones / bitreverse respect the element bit width for non-Int64 integer types (UInt8/16/32, Int8/16/32, Int128/UInt128); compile path no longer coerces to I64 (Issue #4785)"
+
+[[tests]]
+name = "numeric_reinterpret_float16_6740"
+file = "reinterpret_float16_6740.jl"
+expected = true
+description = "reinterpret between Float16 and UInt16/Int16 (was unimplemented, errored 'size mismatch'); needed by pure-Julia Float16 decomposition. Matches upstream (Issue #6740 precursor)"
+
+[[tests]]
+name = "numeric_parse_float_pure_julia_6748"
+file = "parse_float_pure_julia_6748.jl"
+expected = true
+description = "parse/tryparse(Float64,s) are pure-Julia wrappers over the _tryparse_float64 intrinsic; parse() raises ArgumentError on failure (was a generic error); parse(Int;base=) and string(x;base=) still work, matching upstream (Issue #6748)"
+
+[[tests]]
+name = "numeric_bitcount_pure_julia_6741"
+file = "bitcount_pure_julia_6741.jl"
+expected = true
+description = "count_ones/leading_zeros/trailing_zeros/bitreverse/bswap are pure-Julia public functions over underscored CPU intrinsics (_ctpop_int/_ctlz_int/_cttz_int/_bitreverse_int/_bswap_int); match upstream across widths and as first-class function values (Issue #6741)"
+
+[[tests]]
+name = "numeric_convert_promote_dispatch_first_6736"
+file = "convert_promote_dispatch_first_6736.jl"
+expected = true
+description = "convert/promote public API dispatch through pure-Julia methods (dispatch-first); user-defined convert and promote_rule are not shadowed by the Rust fallback, matching upstream (Issue #6736)"
+
+[[tests]]
+name = "numeric_conversions_pure_julia_6737"
+file = "numeric_conversions_pure_julia_6737.jl"
+expected = true
+description = "signed/unsigned/float/widemul go through pure-Julia dispatch and match upstream; widemul migrated to widen(x)*widen(y) (was Int64-only Rust handler erroring on Int8/16/32/128). reinterpret stays primitive. UInt32 widemul result-type gap tracked by #6755 (Issue #6737)"
+
+[[tests]]
+name = "numeric_bitrotate_type_preservation_6722"
+file = "bitrotate_type_preservation_6722.jl"
+expected = true
+description = "bitrotate preserves the element type across all BitInteger widths and matches upstream rotation/wrap values; count_zeros / leading_ones / trailing_ones / bitrotate migrated to pure Julia (base/int.jl), fixing the previous Int64-only Rust handler (Issue #6722)"
+
+[[tests]]
+name = "numeric_bswap_width_4787"
+file = "bswap_width_4787.jl"
+expected = true
+description = "bswap preserves the element type and bit width for non-Int64 integer types (UInt8/16/32/64, Int8/16/32); compile path no longer coerces to I64. Follow-up to #4785/#4786 (Issue #4787)"
+
+[[tests]]
+name = "numeric_abs_typemin_narrow_4789"
+file = "abs_typemin_narrow_4789.jl"
+expected = true
+description = "abs(typemin(IntN)) for N < 64 returns typemin(IntN) via two's-complement wrap instead of crashing; dynamic_neg now uses wrapping_neg for narrow signed integers (Issue #4789)"
+
+[[tests]]
+name = "numeric_narrow_integer_dispatch_matrix_4791"
+file = "narrow_integer_dispatch_matrix_4791.jl"
+expected = true
+description = "Prevention matrix for the narrow-integer dispatch parity family (#4785/#4787/#4789): abs/-(typemin), count_zeros, leading_zeros/ones, bswap, bitreverse, signbit/iseven/isodd across every signed/unsigned integer width must dispatch correctly without crashing or losing the element type. CI-enforced sibling of scripts/probe_base_api_parity.sh's narrow-int matrix section (Issue #4791)"
+
+[[tests]]
+name = "numeric_range_index_float_4760"
+file = "range_index_float_4760.jl"
+expected = true
+description = "Float64 whole-number ranges like 0.0:1.0:5.0 preserve Float64 element type at first/last/step/[i] / repr instead of narrowing to Int64; the range getindex heuristic now requires !is_float for the narrowing branch (Issue #4760)"
+
+[[tests]]
+name = "numeric_char_range_4795"
+file = "char_range_4795.jl"
+expected = true
+description = "Char range 'a':'e' constructs, length, [i], collect, first, last produce Char values. RangeElementType::Char + pop_f64_or_i64_or_char helper. For-loop iteration not yet covered (tracked separately) (Issue #4795)"
+
+[[tests]]
+name = "numeric_float_scientific_4802"
+file = "float_scientific_4802.jl"
+expected = true
+description = "Float64 print uses scientific notation for |x| < 1e-4 or |x| >= 1e6 instead of Rust's default fixed-point Display; thresholds match upstream Julia's shortest-roundtrip switchover and special values (NaN/Inf/-0.0) unchanged (Issue #4802)"
+
+[[tests]]
+name = "numeric_float32_scientific_4804"
+file = "float32_scientific_4804.jl"
+expected = true
+description = "Float32 print uses scientific notation for |x| < 1e-4 or |x| >= 1e6 via the new format_float32_scientific_julia helper (f32-direct Rust {:e}); follow-up to the Float64 fix in #4802 (Issue #4804)"
+
+[[tests]]
+name = "numeric_float16_scientific_4807"
+file = "float16_scientific_4807.jl"
+expected = true
+description = "Float16 print uses scientific notation for |x| < 1e-4 or |x| >= 1e3 (narrower large-side threshold matching F16's max magnitude); round-trip mantissa search via Rust {:.*e}. Closes the #4802/#4804 fix family for the third float width (Issue #4807)"
+
+[[tests]]
+name = "numeric_char_range_for_loop_4796"
+file = "char_range_for_loop_4796.jl"
+expected = true
+description = "for c in 'a':'c' binds the loop variable as Char instead of the underlying Int64 codepoint. Routes Char ranges through the generic ForEach path (same treatment small-int ranges got in #3550) so RangeValue::typed_element fires (Issue #4796, follow-up to #4795)"
+
+[[tests]]
+name = "numeric_char_range_display_4795"
+file = "char_range_display_4795.jl"
+expected = true
+description = "println / string / repr of 'a':'e' show as 'a':1:'e' (StepRange{Char, Int} form) instead of leaking the underlying codepoint integers 97:101. Char arm added to Value::Range arms in format_value_slow and value_to_string (Issue #4795 final display slice)"
+
+[[tests]]
+name = "numeric_char_range_typeof_4830"
+file = "char_range_typeof_4830.jl"
+expected = true
+description = "typeof('a':'e') and friends report StepRange{Char, Int64} (matching upstream) instead of UnitRange{Char}. Adds Char-element guards to value_enum::runtime_type, introspection::value_type, and call_dynamic::is_native_range_candidate_mismatch so typeof / isa / show dispatch all agree (Issue #4830, follow-up to #4795)"

@@ -39,3 +39,111 @@ name = "kwargs_splat_dispatch"
 file = "kwargs_splat_dispatch.jl"
 expected = true
 description = "kwargs varargs + splat dispatch combinations via bind_kwargs_defaults (Issue #3324)"
+
+[[tests]]
+name = "kwargs_typed_default_preservation"
+file = "typed_default_preservation.jl"
+expected = true
+description = "Typed kwarg defaults preserve value and type (Issue #3653)"
+
+[[tests]]
+name = "kwargs_real_default_preservation"
+file = "real_default_preservation.jl"
+expected = true
+description = "Abstract-typed kwarg defaults (::Real/::Number/::Integer) preserve value and type (Issue #3623)"
+
+[[tests]]
+name = "kwargs_symbol_default_4297"
+file = "symbol_default_4297.jl"
+expected = true
+description = "Quoted Symbol keyword defaults preserve Symbol values when omitted or overridden (Issue #4297)"
+
+[[tests]]
+name = "kwargs_default_expression_order_4297"
+file = "default_expression_order_4297.jl"
+expected = true
+description = "Omitted keyword default expressions evaluate left-to-right and see earlier kwargs (Issue #4297)"
+
+[[tests]]
+name = "kwargs_nothing_default_slot_any_5416"
+file = "kwarg_nothing_default_slot_any_5416.jl"
+expected = true
+description = "Unannotated keyword arguments with nothing defaults remain dynamically typed at slot boundaries (Issue #5416)"
+
+[[tests]]
+name = "kwargs_nothing_default_value_not_dropped_5416"
+file = "kwarg_nothing_default_value_not_dropped_5416.jl"
+expected = true
+description = "nothing-default kwarg returns the passed value instead of folding to nothing (Issue #5416 inference half)"
+
+[[tests]]
+name = "kwargs_string_kwarg_equality_5423"
+file = "string_kwarg_equality_5423.jl"
+expected = true
+description = "String keyword override values returned through Any compare by contents (Issue #5423)"
+
+[[tests]]
+name = "kwargs_shortform_annotated_5422"
+file = "shortform_annotated_kwarg_5422.jl"
+expected = true
+description = "Short-form method with an annotated keyword argument lowers correctly (Issue #5422)"
+
+[[tests]]
+name = "kwargs_typed_default_any_5425"
+file = "kwarg_typed_default_any_5425.jl"
+expected = true
+description = "Unannotated keyword arguments with typed non-nothing defaults accept any passed value via an Any-typed compiled body (Issue #5425)"
+
+[[tests]]
+name = "kwargs_computed_return_5466"
+file = "kwarg_computed_return_5466.jl"
+expected = true
+description = "An unannotated optional keyword argument returned through a computation (n + 1) accepts any passed value; the derived-from-kwparam return-type channels widen to Any (Issue #5466)"
+
+[[tests]]
+name = "kwargs_default_reeval_and_unknown_5121"
+file = "kwarg_default_reeval_and_unknown_5121.jl"
+expected = true
+description = "Keyword-argument default expressions are re-evaluated per call when omitted, and unknown keyword arguments raise a MethodError (Issue #5121)"
+
+[[tests]]
+name = "kwargs_literal_default_6876"
+file = "kwarg_literal_default_6876.jl"
+expected = true
+description = "Keyword-argument array-literal/tuple-literal/comprehension/typed-empty-array defaults bind to the literal (re-evaluated fresh per call) instead of 0 (Issue #6876)"
+
+[[tests]]
+name = "kwargs_runtime_dispatch_three_single_arg_methods_7021"
+file = "runtime_dispatch_three_single_arg_methods_7021.jl"
+expected = true
+description = "Runtime-dispatched keyword calls preserve explicit kwargs across three same-arity overloads (Issue #7021)"
+
+[[tests]]
+name = "kwargs_function_default_vararg_where_8367"
+file = "function_default_vararg_where_8367.jl"
+expected = true
+description = "Function-valued keyword defaults are evaluated in vararg where methods instead of binding as 0 (Issue #8367)"
+
+[[tests]]
+name = "kwargs_explicit_keyword_before_kwargs_splat_8375"
+file = "explicit_keyword_before_kwargs_splat_8375.jl"
+expected = true
+description = "Function-variable calls with positional varargs preserve an explicit keyword that appears before a trailing kwargs splat (Issue #8375)"
+
+[[tests]]
+name = "kwargs_default_global_with_positional_7774"
+file = "kwarg_default_global_with_positional_7774.jl"
+expected = true
+description = "An omitted keyword's default expression that references a global/const-global resolves to that binding (not the baked literal 0) even when the function also has positional parameters and dispatches through the specialize path (Issue #7774)"
+
+[[tests]]
+name = "kwargs_optional_positional_keyword_thread_7992"
+file = "optional_positional_keyword_thread_7992.jl"
+expected = true
+description = "A method with both an optional positional argument and a keyword threads an explicitly-passed keyword through the auto-generated reduced-arity forwarder instead of re-applying the keyword's default (Issue #7992)"
+
+[[tests]]
+name = "kwargs_inf_nan_default_8078"
+file = "kwarg_inf_nan_default_8078.jl"
+expected = true
+description = "A keyword-argument default of Inf/-Inf/NaN (and the Inf32/Inf16/Inf64/NaN* family) resolves to the float special constant instead of the baked 0 fallback; bound names still shadow it (Issue #8078)"

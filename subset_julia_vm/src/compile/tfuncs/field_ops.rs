@@ -5,6 +5,7 @@
 
 use crate::compile::lattice::types::{ConcreteType, ConstValue, LatticeType};
 use crate::compile::tfuncs::registry::TFuncContext;
+use crate::inference_core::{CorePrimitive, CoreType};
 
 /// Transfer function for `getfield` (field access).
 ///
@@ -154,7 +155,9 @@ pub fn tfunc_fieldnames(_args: &[LatticeType]) -> LatticeType {
     // fieldnames returns a tuple of symbols
     // For simplicity, we return a Tuple of Symbols
     LatticeType::Concrete(ConcreteType::Tuple {
-        elements: vec![ConcreteType::Symbol],
+        elements: vec![ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Symbol,
+        ))],
     })
 }
 
@@ -185,22 +188,39 @@ mod tests {
     fn test_getfield_named_tuple_known_field() {
         let named_tuple = LatticeType::Concrete(ConcreteType::NamedTuple {
             fields: vec![
-                ("x".to_string(), ConcreteType::Int64),
-                ("y".to_string(), ConcreteType::Float64),
+                (
+                    "x".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "y".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+                ),
             ],
         });
         let field_name = LatticeType::Const(ConstValue::String("x".to_string()));
         let args = vec![named_tuple, field_name];
         let result = tfunc_getfield(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_getfield_named_tuple_unknown_field() {
         let named_tuple = LatticeType::Concrete(ConcreteType::NamedTuple {
             fields: vec![
-                ("x".to_string(), ConcreteType::Int64),
-                ("y".to_string(), ConcreteType::Float64),
+                (
+                    "x".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "y".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+                ),
             ],
         });
         let field_name = LatticeType::Top; // Unknown field
@@ -230,7 +250,9 @@ mod tests {
             type_id: 1,
         });
         let field_name = LatticeType::Const(ConstValue::String("x".to_string()));
-        let value = LatticeType::Concrete(ConcreteType::Int64);
+        let value = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
         let args = vec![struct_type, field_name, value.clone()];
         let result = tfunc_setfield(&args);
         assert_eq!(result, value);

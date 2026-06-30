@@ -260,9 +260,10 @@ function sortperm!(perm, arr; by=nothing, rev=false, lt=nothing)
     return perm
 end
 
-# partialsortperm!: compute partial sort permutation in-place
-# Returns perm filled with indices such that arr[perm[1:k]] are the k smallest elements
-# in sorted order
+# partialsortperm!: compute partial sort permutation in-place.
+# `perm` is filled with the (partially) sorted index permutation; the return
+# value is `perm[k]` — a single index for an integer `k`, or the indices for a
+# range `k` — matching upstream (Issue #5745).
 function partialsortperm!(perm, arr, k)
     n = length(arr)
 
@@ -271,8 +272,11 @@ function partialsortperm!(perm, arr, k)
         perm[i] = i
     end
 
-    # Selection sort for the first k elements
-    for i in 1:k
+    # Number of leading positions that must be in sorted order (last(k) for a range).
+    kmax = k isa Integer ? k : maximum(k)
+
+    # Selection sort for the first kmax elements
+    for i in 1:kmax
         min_idx = i
         for j in (i+1):n
             if arr[perm[j]] < arr[perm[min_idx]]
@@ -285,10 +289,18 @@ function partialsortperm!(perm, arr, k)
             perm[min_idx] = temp
         end
     end
-    return perm
+    # Return the requested index/indices: a scalar for an integer `k`, a vector
+    # for a range. (A range-valued local index variable is compiled as a scalar
+    # index here, so build the range result explicitly.)
+    if k isa Integer
+        return perm[k]
+    else
+        return [perm[i] for i in k]
+    end
 end
 
-# partialsortperm: return partial sort permutation without modifying input
+# partialsortperm: return the index/indices of the k-th order statistic(s)
+# without modifying the input.
 function partialsortperm(arr, k)
     n = length(arr)
     perm = collect(1:n)

@@ -27,7 +27,7 @@ impl HygieneContext {
     }
 
     /// Generate a unique symbol name using gensym.
-    pub(super) fn gensym(base: &str) -> String {
+    pub(in crate::lowering) fn gensym(base: &str) -> String {
         let counter = GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst);
         format!("#{}#{}", base, counter)
     }
@@ -74,7 +74,10 @@ mod tests {
     #[test]
     fn test_new_starts_empty_and_not_escaped() {
         let ctx = HygieneContext::new();
-        assert!(!ctx.in_escaped, "New context should not be in escaped state");
+        assert!(
+            !ctx.in_escaped,
+            "New context should not be in escaped state"
+        );
         assert!(ctx.renames.is_empty(), "New context should have no renames");
     }
 
@@ -94,7 +97,10 @@ mod tests {
     fn test_gensym_consecutive_calls_produce_unique_names() {
         let first = HygieneContext::gensym("y");
         let second = HygieneContext::gensym("y");
-        assert_ne!(first, second, "Consecutive gensym calls should produce unique names");
+        assert_ne!(
+            first, second,
+            "Consecutive gensym calls should produce unique names"
+        );
     }
 
     // ── HygieneContext::register_local ────────────────────────────────────────
@@ -126,8 +132,14 @@ mod tests {
         let mut ctx = HygieneContext::new();
         ctx.in_escaped = true;
         let result = ctx.register_local("baz");
-        assert_eq!(result, "baz", "In escaped context, register_local should return original name");
-        assert!(ctx.renames.is_empty(), "In escaped context, no rename should be stored");
+        assert_eq!(
+            result, "baz",
+            "In escaped context, register_local should return original name"
+        );
+        assert!(
+            ctx.renames.is_empty(),
+            "In escaped context, no rename should be stored"
+        );
     }
 
     // ── HygieneContext::resolve ───────────────────────────────────────────────
@@ -137,14 +149,20 @@ mod tests {
         let mut ctx = HygieneContext::new();
         let gensym_name = ctx.register_local("abc");
         let resolved = ctx.resolve("abc");
-        assert_eq!(resolved, gensym_name, "resolve should return the gensym'd name for a registered variable");
+        assert_eq!(
+            resolved, gensym_name,
+            "resolve should return the gensym'd name for a registered variable"
+        );
     }
 
     #[test]
     fn test_resolve_unregistered_name_returns_original() {
         let ctx = HygieneContext::new();
         let resolved = ctx.resolve("unknown");
-        assert_eq!(resolved, "unknown", "resolve should return original name for unregistered variable");
+        assert_eq!(
+            resolved, "unknown",
+            "resolve should return original name for unregistered variable"
+        );
     }
 
     #[test]
@@ -155,7 +173,10 @@ mod tests {
         // Even though "x" was registered in the original context, resolving in
         // escaped context should return the original name
         let resolved = escaped.resolve("x");
-        assert_eq!(resolved, "x", "In escaped context, resolve should return original name");
+        assert_eq!(
+            resolved, "x",
+            "In escaped context, resolve should return original name"
+        );
     }
 
     // ── HygieneContext::enter_escaped ─────────────────────────────────────────
@@ -164,7 +185,10 @@ mod tests {
     fn test_enter_escaped_sets_in_escaped_true() {
         let ctx = HygieneContext::new();
         let escaped = ctx.enter_escaped();
-        assert!(escaped.in_escaped, "enter_escaped should set in_escaped to true");
+        assert!(
+            escaped.in_escaped,
+            "enter_escaped should set in_escaped to true"
+        );
     }
 
     #[test]

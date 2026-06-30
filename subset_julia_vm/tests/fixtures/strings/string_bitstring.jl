@@ -33,11 +33,13 @@ using Test
     @assert bs0_0 == "0000000000000000000000000000000000000000000000000000000000000000"
 
     # === Bool ===
+    # Bool is 1 byte → 8 bits (matches upstream; the old Rust builtin wrongly
+    # returned "1"/"0", fixed when bitstring became pure Julia — Issue #6747).
     bstrue = bitstring(true)
-    @assert bstrue == "1"
+    @assert bstrue == "00000001"
 
     bsfalse = bitstring(false)
-    @assert bsfalse == "0"
+    @assert bsfalse == "00000000"
 
     # All tests passed
     @test (true)

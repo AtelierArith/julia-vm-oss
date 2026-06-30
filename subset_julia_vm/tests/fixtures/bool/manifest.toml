@@ -13,7 +13,49 @@ expected = true
 description = "Bool ^ Bool returns Bool with x || !y semantics (Issue #1971)"
 
 [[tests]]
+name = "bool_div_result_6486"
+file = "div_result_6486.jl"
+expected = true
+description = "div(Bool, Bool) preserves Bool result type and throws DivideError for false denominator (Issue #6486)"
+
+[[tests]]
 name = "bool_numeric_coverage"
 file = "test_bool_numeric_coverage.jl"
 expected = true
 description = "Bool coverage in Pure Julia numeric functions: zero, one, float, abs, signbit (Issue #2724)"
+
+[[tests]]
+name = "bool_return_type_annotation"
+file = "return_type_annotation.jl"
+expected = true
+description = "::Bool return-type annotation must keep Bool dispatch (no erasure to Int64) (Issue #4376)"
+
+[[tests]]
+name = "bool_local_any_carrier_5081"
+file = "local_any_carrier_5081.jl"
+expected = true
+description = "Bool fallback locals store in locals_any with VarTypeTag::Bool (Issue #5081)"
+
+[[tests]]
+name = "bool_boolean_context_6162"
+file = "boolean_context_6162.jl"
+expected = true
+description = "Value-position &&/|| (x = a && b, function body bare &&/||) rejects a non-Bool left operand with TypeError instead of coercing via I64ToBool. compile_and_expr/compile_or_expr compile the left operand with its natural type so JumpIfZero enforces the Bool-only boolean-context rule (Issue #6162; branch position was already strict via PR #6165)"
+
+[[tests]]
+name = "bool_short_circuit_value_6278"
+file = "short_circuit_value_6278.jl"
+expected = true
+description = "Value-position &&/|| preserve the final operand's value (true && 1 -> 1, false || \"y\" -> \"y\") instead of coercing it to Bool. compile_and_expr/compile_or_expr compile the right operand with its natural type and the result type widens to Any when it isn't Bool; the binary-op inference paths (infer/mod.rs, inference.rs) agree via shared short_circuit_result_type so inline `(a && b) == lit` comparisons see the correct left type (Issue #6278; follow-up to #6162)"
+
+[[tests]]
+name = "bool_bitnot_bool_7305"
+file = "bitnot_bool_7305.jl"
+expected = true
+description = "~(::Bool) bitwise NOT returns the negation (~true === false, ~false === true) per upstream base/bool.jl (~)(x::Bool) = !x, and broadcasts as .~ over a Bool vector (Issue #7305)"
+
+[[tests]]
+name = "bool_bitwise_bool_8197"
+file = "bitwise_bool_8197.jl"
+expected = true
+description = "Bool-Bool bitwise operators &, |, ⊻ (and the xor function form) per upstream base/bool.jl: (&)(x::Bool,y::Bool)=and_int(x,y), (|)=or_int, xor=(x!=y). ⊻ and xor are distinct functions in sjulia so both get the Bool method; and_int/or_int intrinsics return Bool for Bool operands (Issue #8197)"

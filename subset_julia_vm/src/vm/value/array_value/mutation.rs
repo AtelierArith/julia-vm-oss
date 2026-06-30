@@ -10,23 +10,242 @@ use super::super::tuple::TupleValue;
 use super::super::Value;
 use super::ArrayValue;
 
+/// A real scalar value (`Int`, `Float`, `Bool`, ...) as an `f64`, for storing
+/// into an interleaved Complex array as `(re = x, im = 0)`. Mirrors
+/// `convert(Complex{T}, x::Real) = Complex{T}(x, 0)` so a typed Complex array
+/// literal / assignment with real elements stores `x + 0im` instead of erroring
+/// (Issue #6771). Returns `None` for non-real values (the caller keeps its own
+/// "Cannot store …" error for those).
+fn real_scalar_as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::F64(x) => Some(*x),
+        Value::F32(x) => Some(f64::from(*x)),
+        Value::I8(x) => Some(f64::from(*x)),
+        Value::I16(x) => Some(f64::from(*x)),
+        Value::I32(x) => Some(f64::from(*x)),
+        Value::I64(x) => Some(*x as f64),
+        Value::U8(x) => Some(f64::from(*x)),
+        Value::U16(x) => Some(f64::from(*x)),
+        Value::U32(x) => Some(f64::from(*x)),
+        Value::U64(x) => Some(*x as f64),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        _ => None,
+    }
+}
+
+/// Append `value` to flat, rank-1 typed array storage, handling the special
+/// interleaved (Complex) / array-of-structs (Tuple, isbits struct) layouts
+/// selected by `element_type_override`. Returns the new **logical** element
+/// count (what `ArrayValue::shape[0]` / `MemoryValue::length` becomes).
+///
+/// Shared by [`ArrayValue::push`] and [`super::super::MemoryValue::push`] so the
+/// literal/comprehension build buffer — a flat [`super::super::MemoryValue`]
+/// after the de-variant off the native-array carrier — grows with byte-identical
+/// semantics (Issue #6807). For normal element types the override branch is a
+/// no-op and the value is appended through [`ArrayData::push_value`].
+pub(crate) fn push_into_array_data(
+    data: &mut ArrayData,
+    element_type_override: Option<&ArrayElementType>,
+    value: Value,
+) -> Result<usize, VmError> {
+    if let Some(elem_type) = element_type_override {
+        match elem_type {
+            ArrayElementType::ComplexF64 => {
+                // Mirror `convert(Complex{Float64}, x)`: a Complex value
+                // contributes its (re, im); a real scalar (`Int`, `Float`,
+                // `Bool`, ...) contributes `(x, 0)`. Without the real-scalar
+                // arm, `Complex{Float64}[1, 2]` errored ("Cannot push I64 to
+                // Complex{Float64} array") instead of storing `1.0 + 0.0im`
+                // (Issue #6771).
+                let (re, im) = match &value {
+                    Value::Struct(s) if s.is_complex() && s.values.len() >= 2 => {
+                        let re = match &s.values[0] {
+                            Value::F64(x) => *x,
+                            Value::I64(x) => *x as f64,
+                            Value::F32(x) => *x as f64,
+                            _ => 0.0,
+                        };
+                        let im = match &s.values[1] {
+                            Value::F64(x) => *x,
+                            Value::I64(x) => *x as f64,
+                            Value::F32(x) => *x as f64,
+                            _ => 0.0,
+                        };
+                        (re, im)
+                    }
+                    _ => match real_scalar_as_f64(&value) {
+                        Some(re) => (re, 0.0),
+                        None => {
+                            return Err(VmError::TypeError(format!(
+                                "Cannot push {:?} to Complex{{Float64}} array",
+                                value.value_type()
+                            )))
+                        }
+                    },
+                };
+                if let ArrayData::F64(v) = data {
+                    v.push(re);
+                    v.push(im);
+                    return Ok(v.len() / 2);
+                }
+                return Err(VmError::TypeError(
+                    "Invalid array data for Complex{Float64}".to_string(),
+                ));
+            }
+            ArrayElementType::ComplexF32 => {
+                // See the ComplexF64 arm above: a real scalar contributes
+                // `(x, 0)`, mirroring `convert(Complex{Float32}, x)` so
+                // `Complex{Float32}[1, 2]` stores `1.0f0 + 0.0f0im`
+                // (Issue #6771).
+                let (re, im) = match &value {
+                    Value::Struct(s) if s.is_complex() && s.values.len() >= 2 => {
+                        let re = match &s.values[0] {
+                            Value::F32(x) => *x,
+                            Value::F64(x) => *x as f32,
+                            Value::I64(x) => *x as f32,
+                            _ => 0.0,
+                        };
+                        let im = match &s.values[1] {
+                            Value::F32(x) => *x,
+                            Value::F64(x) => *x as f32,
+                            Value::I64(x) => *x as f32,
+                            _ => 0.0,
+                        };
+                        (re, im)
+                    }
+                    _ => match real_scalar_as_f64(&value) {
+                        Some(re) => (re as f32, 0.0_f32),
+                        None => {
+                            return Err(VmError::TypeError(format!(
+                                "Cannot push {:?} to Complex{{Float32}} array",
+                                value.value_type()
+                            )))
+                        }
+                    },
+                };
+                if let ArrayData::F32(v) = data {
+                    v.push(re);
+                    v.push(im);
+                    return Ok(v.len() / 2);
+                }
+                return Err(VmError::TypeError(
+                    "Invalid array data for Complex{Float32}".to_string(),
+                ));
+            }
+            ArrayElementType::TupleOf(ref field_types) => {
+                let arity = field_types.len();
+                let elements = match value {
+                    Value::Tuple(t) if t.len() == arity => t.elements,
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "Cannot push {:?} to Tuple array (expected {}-element tuple)",
+                            value.value_type(),
+                            arity
+                        )))
+                    }
+                };
+
+                if let ArrayData::Any(v) = data {
+                    for elem in elements {
+                        v.push(elem);
+                    }
+                    return Ok(v.len() / arity);
+                }
+                return Err(VmError::TypeError(
+                    "Invalid array data for Tuple array".to_string(),
+                ));
+            }
+            ArrayElementType::StructInlineOf(_, field_count) => {
+                // Extract struct fields
+                let fields = match &value {
+                    Value::Struct(s) if s.values.len() == *field_count => s.values.clone(),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "Cannot push {:?} to isbits struct array (expected {}-field struct)",
+                            value.value_type(),
+                            field_count
+                        )))
+                    }
+                };
+
+                if let ArrayData::Any(v) = data {
+                    for field in fields {
+                        v.push(field);
+                    }
+                    return Ok(v.len() / field_count);
+                }
+                return Err(VmError::TypeError(
+                    "Invalid array data for isbits struct array".to_string(),
+                ));
+            }
+            ArrayElementType::Nothing if !matches!(value, Value::Nothing) => {
+                return Err(VmError::TypeError(format!(
+                    "Cannot push {:?} to Nothing array",
+                    value.value_type()
+                )));
+            }
+            _ => {} // Fall through to normal push
+        }
+    }
+
+    data.push_value(value)?;
+    Ok(data.raw_len())
+}
+
 impl ArrayValue {
     /// Set element at indices (1-indexed)
     /// For Complex arrays, packs Complex struct into interleaved storage
     /// For Tuple arrays, packs Tuple into AoS storage
     pub fn set(&mut self, indices: &[i64], value: Value) -> Result<(), VmError> {
         let linear = self.linear_index(indices)?;
+        let error_shape = self.shape.clone();
+        if let Some(parent) = self.shared_parent.clone() {
+            parent
+                .borrow_mut()
+                .set_linear_value(linear, indices, value.clone(), &error_shape)?;
+            return self.set_linear_value(linear, indices, value, &error_shape);
+        }
 
+        self.set_linear_value(linear, indices, value, &error_shape)
+    }
+
+    /// Set a logical linear element after the compiler has proved the index is
+    /// within the array axes. This skips the explicit linear-index calculation,
+    /// while storage accessors still report a BoundsError if the proof is wrong.
+    pub(crate) fn set_linear_inbounds(
+        &mut self,
+        linear: usize,
+        value: Value,
+    ) -> Result<(), VmError> {
+        let indices = [(linear + 1) as i64];
+        let error_shape = self.shape.clone();
+        if let Some(parent) = self.shared_parent.clone() {
+            parent
+                .borrow_mut()
+                .set_linear_value(linear, &indices, value.clone(), &error_shape)?;
+            return self.set_linear_value(linear, &indices, value, &error_shape);
+        }
+
+        self.set_linear_value(linear, &indices, value, &error_shape)
+    }
+
+    fn set_linear_value(
+        &mut self,
+        linear: usize,
+        indices: &[i64],
+        value: Value,
+        error_shape: &[usize],
+    ) -> Result<(), VmError> {
         // Handle complex/tuple arrays with special storage
         if let Some(ref elem_type) = self.element_type_override {
             match elem_type {
                 ArrayElementType::ComplexF64 => {
                     // Extract re and im from the Complex struct
                     // Complex struct has values in order: [re, im]
+                    // A real scalar stores as `(x, 0)`, mirroring
+                    // `convert(Complex{Float64}, x::Real)` (Issue #6771).
                     let (re, im) = match &value {
-                        Value::Struct(s)
-                            if s.struct_name.starts_with("Complex") && s.values.len() >= 2 =>
-                        {
+                        Value::Struct(s) if s.is_complex() && s.values.len() >= 2 => {
                             let re = match &s.values[0] {
                                 Value::F64(x) => *x,
                                 Value::I64(x) => *x as f64,
@@ -41,12 +260,15 @@ impl ArrayValue {
                             };
                             (re, im)
                         }
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot store {:?} in Complex{{Float64}} array",
-                                value.value_type()
-                            )))
-                        }
+                        _ => match real_scalar_as_f64(&value) {
+                            Some(re) => (re, 0.0),
+                            None => {
+                                return Err(VmError::TypeError(format!(
+                                    "Cannot store {:?} in Complex{{Float64}} array",
+                                    value.value_type()
+                                )))
+                            }
+                        },
                     };
                     // Write to interleaved storage
                     let raw_idx = linear * 2;
@@ -59,15 +281,15 @@ impl ArrayValue {
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 ArrayElementType::ComplexF32 => {
-                    // Extract re and im from the Complex struct
+                    // Extract re and im from the Complex struct; a real scalar
+                    // stores as `(x, 0)`, mirroring
+                    // `convert(Complex{Float32}, x::Real)` (Issue #6771).
                     let (re, im) = match &value {
-                        Value::Struct(s)
-                            if s.struct_name.starts_with("Complex") && s.values.len() >= 2 =>
-                        {
+                        Value::Struct(s) if s.is_complex() && s.values.len() >= 2 => {
                             let re = match &s.values[0] {
                                 Value::F32(x) => *x,
                                 Value::F64(x) => *x as f32,
@@ -82,12 +304,15 @@ impl ArrayValue {
                             };
                             (re, im)
                         }
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot store {:?} in Complex{{Float32}} array",
-                                value.value_type()
-                            )))
-                        }
+                        _ => match real_scalar_as_f64(&value) {
+                            Some(re) => (re as f32, 0.0_f32),
+                            None => {
+                                return Err(VmError::TypeError(format!(
+                                    "Cannot store {:?} in Complex{{Float32}} array",
+                                    value.value_type()
+                                )))
+                            }
+                        },
                     };
                     // Write to interleaved storage
                     let raw_idx = linear * 2;
@@ -100,7 +325,7 @@ impl ArrayValue {
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 ArrayElementType::TupleOf(ref field_types) => {
@@ -129,7 +354,7 @@ impl ArrayValue {
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 ArrayElementType::StructInlineOf(_, field_count) => {
@@ -157,8 +382,14 @@ impl ArrayValue {
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
+                }
+                ArrayElementType::Nothing if !matches!(value, Value::Nothing) => {
+                    return Err(VmError::TypeError(format!(
+                        "Cannot store {:?} in Nothing array",
+                        value.value_type()
+                    )));
                 }
                 _ => {} // Fall through to normal set
             }
@@ -182,136 +413,35 @@ impl ArrayValue {
                 got: self.shape.len(),
             });
         }
+        self.shape[0] =
+            push_into_array_data(&mut self.data, self.element_type_override.as_ref(), value)?;
+        Ok(())
+    }
 
-        // Handle complex/tuple arrays with special storage
-        if let Some(ref elem_type) = self.element_type_override {
-            match elem_type {
-                ArrayElementType::ComplexF64 => {
-                    let (re, im) = match &value {
-                        Value::Struct(s)
-                            if s.struct_name.starts_with("Complex") && s.values.len() >= 2 =>
-                        {
-                            let re = match &s.values[0] {
-                                Value::F64(x) => *x,
-                                Value::I64(x) => *x as f64,
-                                Value::F32(x) => *x as f64,
-                                _ => 0.0,
-                            };
-                            let im = match &s.values[1] {
-                                Value::F64(x) => *x,
-                                Value::I64(x) => *x as f64,
-                                Value::F32(x) => *x as f64,
-                                _ => 0.0,
-                            };
-                            (re, im)
-                        }
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot push {:?} to Complex{{Float64}} array",
-                                value.value_type()
-                            )))
-                        }
-                    };
-                    if let ArrayData::F64(v) = &mut self.data {
-                        v.push(re);
-                        v.push(im);
-                        self.shape[0] = v.len() / 2;
-                        return Ok(());
-                    }
-                    return Err(VmError::TypeError(
-                        "Invalid array data for Complex{Float64}".to_string(),
-                    ));
-                }
-                ArrayElementType::ComplexF32 => {
-                    let (re, im) = match &value {
-                        Value::Struct(s)
-                            if s.struct_name.starts_with("Complex") && s.values.len() >= 2 =>
-                        {
-                            let re = match &s.values[0] {
-                                Value::F32(x) => *x,
-                                Value::F64(x) => *x as f32,
-                                Value::I64(x) => *x as f32,
-                                _ => 0.0,
-                            };
-                            let im = match &s.values[1] {
-                                Value::F32(x) => *x,
-                                Value::F64(x) => *x as f32,
-                                Value::I64(x) => *x as f32,
-                                _ => 0.0,
-                            };
-                            (re, im)
-                        }
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot push {:?} to Complex{{Float32}} array",
-                                value.value_type()
-                            )))
-                        }
-                    };
-                    if let ArrayData::F32(v) = &mut self.data {
-                        v.push(re);
-                        v.push(im);
-                        self.shape[0] = v.len() / 2;
-                        return Ok(());
-                    }
-                    return Err(VmError::TypeError(
-                        "Invalid array data for Complex{Float32}".to_string(),
-                    ));
-                }
-                ArrayElementType::TupleOf(ref field_types) => {
-                    let arity = field_types.len();
-                    let elements = match value {
-                        Value::Tuple(t) if t.len() == arity => t.elements,
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot push {:?} to Tuple array (expected {}-element tuple)",
-                                value.value_type(),
-                                arity
-                            )))
-                        }
-                    };
-
-                    if let ArrayData::Any(v) = &mut self.data {
-                        for elem in elements {
-                            v.push(elem);
-                        }
-                        self.shape[0] = v.len() / arity;
-                        return Ok(());
-                    }
-                    return Err(VmError::TypeError(
-                        "Invalid array data for Tuple array".to_string(),
-                    ));
-                }
-                ArrayElementType::StructInlineOf(_, field_count) => {
-                    // Extract struct fields
-                    let fields = match &value {
-                        Value::Struct(s) if s.values.len() == *field_count => s.values.clone(),
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                            "Cannot push {:?} to isbits struct array (expected {}-field struct)",
-                            value.value_type(),
-                            field_count
-                        )))
-                        }
-                    };
-
-                    if let ArrayData::Any(v) = &mut self.data {
-                        for field in fields {
-                            v.push(field);
-                        }
-                        self.shape[0] = v.len() / field_count;
-                        return Ok(());
-                    }
-                    return Err(VmError::TypeError(
-                        "Invalid array data for isbits struct array".to_string(),
-                    ));
-                }
-                _ => {} // Fall through to normal push
-            }
+    /// Push a value using Julia's collect typejoin semantics.
+    ///
+    /// Normal `push!` respects the array's existing element type. Size-unknown
+    /// collection builders can instead widen from observed values, preserving
+    /// boxed values for abstract element types such as `Vector{Real}`.
+    pub fn push_typejoin(&mut self, value: Value) -> Result<(), VmError> {
+        if self.shape.len() != 1 {
+            return Err(VmError::DimensionMismatch {
+                expected: 1,
+                got: self.shape.len(),
+            });
         }
 
-        self.data.push_value(value)?;
-        self.shape[0] = self.data.raw_len();
+        let mut values = Vec::with_capacity(self.element_count() + 1);
+        for idx in 0..self.element_count() {
+            values.push(self.get_linear(idx)?);
+        }
+        values.push(value);
+
+        let rebuilt = ArrayValue::memory_first_collect_typejoin_values(
+            values,
+            ArrayElementType::UnionOf(Vec::new()),
+        )?;
+        *self = rebuilt;
         Ok(())
     }
 
@@ -336,33 +466,42 @@ impl ArrayValue {
         if let Some(ref elem_type) = self.element_type_override {
             match elem_type {
                 ArrayElementType::ComplexF64 => {
+                    // Derive the struct name from the element type's own Julia name
+                    // (single source of truth) before the mutable buffer borrow
+                    // (Issue #5152).
+                    let struct_name = elem_type.julia_type_name();
+                    let type_id = self.complex_type_id();
                     if let ArrayData::F64(v) = &mut self.data {
                         if v.len() >= 2 {
                             let im = v.pop().ok_or(VmError::EmptyArrayPop)?;
                             let re = v.pop().ok_or(VmError::EmptyArrayPop)?;
                             self.shape[0] = v.len() / 2;
                             // Use stored struct_type_id for correct runtime type_id lookup
-                            return Ok(Value::Struct(StructInstance {
-                                type_id: self.complex_type_id(),
-                                struct_name: "Complex{Float64}".to_string(),
-                                values: vec![Value::F64(re), Value::F64(im)],
-                            }));
+                            return Ok(Value::Struct(StructInstance::complex_from_storage(
+                                type_id,
+                                struct_name,
+                                Value::F64(re),
+                                Value::F64(im),
+                            )));
                         }
                     }
                     return Err(VmError::EmptyArrayPop);
                 }
                 ArrayElementType::ComplexF32 => {
+                    let struct_name = elem_type.julia_type_name();
+                    let type_id = self.complex_type_id();
                     if let ArrayData::F32(v) = &mut self.data {
                         if v.len() >= 2 {
                             let im = v.pop().ok_or(VmError::EmptyArrayPop)?;
                             let re = v.pop().ok_or(VmError::EmptyArrayPop)?;
                             self.shape[0] = v.len() / 2;
                             // Use stored struct_type_id for correct runtime type_id lookup
-                            return Ok(Value::Struct(StructInstance {
-                                type_id: self.complex_type_id(),
-                                struct_name: "Complex{Float32}".to_string(),
-                                values: vec![Value::F32(re), Value::F32(im)],
-                            }));
+                            return Ok(Value::Struct(StructInstance::complex_from_storage(
+                                type_id,
+                                struct_name,
+                                Value::F32(re),
+                                Value::F32(im),
+                            )));
                         }
                     }
                     return Err(VmError::EmptyArrayPop);
@@ -432,6 +571,12 @@ impl ArrayValue {
             (ArrayData::I64(v), Value::I64(i)) => v.insert(0, i),
             (ArrayData::Bool(v), Value::Bool(b)) => v.insert(0, b),
             (ArrayData::Bool(v), Value::I64(b)) => v.insert(0, b != 0),
+            (ArrayData::BitPackedBool(v), Value::Bool(b)) => {
+                let _ = v.insert(0, b);
+            }
+            (ArrayData::BitPackedBool(v), Value::I64(b)) => {
+                let _ = v.insert(0, b != 0);
+            }
             (ArrayData::String(v), Value::Str(s)) => v.insert(0, s),
             (ArrayData::Char(v), Value::Char(c)) => v.insert(0, c),
             (ArrayData::StructRefs(v), Value::StructRef(idx)) => v.insert(0, idx),
@@ -474,6 +619,12 @@ impl ArrayValue {
             ArrayData::U32(v) => Value::I64(v.remove(0) as i64),
             ArrayData::U64(v) => Value::I64(v.remove(0) as i64),
             ArrayData::Bool(v) => Value::Bool(v.remove(0)),
+            ArrayData::BitPackedBool(v) => {
+                Value::Bool(v.remove(0).ok_or(VmError::IndexOutOfBounds {
+                    indices: vec![1],
+                    shape: self.shape.clone(),
+                })?)
+            }
             ArrayData::String(v) => Value::Str(v.remove(0)),
             ArrayData::Char(v) => Value::Char(v.remove(0)),
             ArrayData::StructRefs(v) => Value::StructRef(v.remove(0)),
@@ -505,6 +656,12 @@ impl ArrayValue {
             (ArrayData::I64(v), Value::I64(i)) => v.insert(rust_index, i),
             (ArrayData::Bool(v), Value::Bool(b)) => v.insert(rust_index, b),
             (ArrayData::Bool(v), Value::I64(b)) => v.insert(rust_index, b != 0),
+            (ArrayData::BitPackedBool(v), Value::Bool(b)) => {
+                let _ = v.insert(rust_index, b);
+            }
+            (ArrayData::BitPackedBool(v), Value::I64(b)) => {
+                let _ = v.insert(rust_index, b != 0);
+            }
             (ArrayData::String(v), Value::Str(s)) => v.insert(rust_index, s),
             (ArrayData::Char(v), Value::Char(c)) => v.insert(rust_index, c),
             (ArrayData::StructRefs(v), Value::StructRef(idx)) => v.insert(rust_index, idx),
@@ -548,6 +705,12 @@ impl ArrayValue {
             ArrayData::U32(v) => Value::I64(v.remove(rust_index) as i64),
             ArrayData::U64(v) => Value::I64(v.remove(rust_index) as i64),
             ArrayData::Bool(v) => Value::Bool(v.remove(rust_index)),
+            ArrayData::BitPackedBool(v) => {
+                Value::Bool(v.remove(rust_index).ok_or(VmError::IndexOutOfBounds {
+                    indices: vec![index as i64],
+                    shape: self.shape.clone(),
+                })?)
+            }
             ArrayData::String(v) => Value::Str(v.remove(rust_index)),
             ArrayData::Char(v) => Value::Char(v.remove(rust_index)),
             ArrayData::StructRefs(v) => Value::StructRef(v.remove(rust_index)),
@@ -560,7 +723,24 @@ impl ArrayValue {
     /// Set complex value (re, im) at indices (for complex arrays with interleaved storage)
     pub fn set_complex(&mut self, indices: &[i64], re: f64, im: f64) -> Result<(), VmError> {
         let linear = self.linear_index(indices)?;
+        let error_shape = self.shape.clone();
+        if let Some(parent) = self.shared_parent.clone() {
+            parent
+                .borrow_mut()
+                .set_complex_linear_value(linear, indices, re, im, &error_shape)?;
+        }
 
+        self.set_complex_linear_value(linear, indices, re, im, &error_shape)
+    }
+
+    fn set_complex_linear_value(
+        &mut self,
+        linear: usize,
+        indices: &[i64],
+        re: f64,
+        im: f64,
+        error_shape: &[usize],
+    ) -> Result<(), VmError> {
         // Handle interleaved complex storage
         if let Some(ref elem_type) = self.element_type_override {
             match elem_type {
@@ -574,7 +754,7 @@ impl ArrayValue {
                         }
                         return Err(VmError::IndexOutOfBounds {
                             indices: indices.to_vec(),
-                            shape: self.shape.clone(),
+                            shape: error_shape.to_vec(),
                         });
                     }
                 }
@@ -588,7 +768,7 @@ impl ArrayValue {
                         }
                         return Err(VmError::IndexOutOfBounds {
                             indices: indices.to_vec(),
-                            shape: self.shape.clone(),
+                            shape: error_shape.to_vec(),
                         });
                     }
                 }
@@ -605,6 +785,7 @@ impl ArrayValue {
 
 #[cfg(test)]
 mod tests {
+    use super::super::new_array_ref;
     use super::ArrayValue;
     use super::Value;
 
@@ -637,6 +818,19 @@ mod tests {
         let mut arr = ArrayValue::from_f64(vec![1.0, 2.0], vec![2]);
         arr.set_f64(&[1], 42.0).unwrap();
         assert!(matches!(arr.get(&[1]).unwrap(), Value::F64(v) if (v - 42.0).abs() < 1e-12));
+    }
+
+    #[test]
+    fn test_mutation_set_complex_updates_reshape_parent() {
+        let source = new_array_ref(ArrayValue::zeros_complex_f64(vec![4]));
+        let mut reshaped = ArrayValue::reshaped_from_ref(&source, vec![2, 2]).unwrap();
+
+        reshaped.set_complex(&[2, 2], 3.0, 4.0).unwrap();
+
+        let from_parent = source.borrow().get(&[4]).unwrap();
+        assert_eq!(from_parent.as_complex_parts(), Some((3.0, 4.0)));
+        let from_child = reshaped.get(&[2, 2]).unwrap();
+        assert_eq!(from_child.as_complex_parts(), Some((3.0, 4.0)));
     }
 
     // ── push / push_f64 ──────────────────────────────────────────────────────

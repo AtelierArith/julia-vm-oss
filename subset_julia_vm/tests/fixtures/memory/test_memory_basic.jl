@@ -5,6 +5,9 @@ using Test
     m = Memory{Int64}(5)
     @test length(m) == 5
     @test size(m) == (5,)
+    @test size(m, 1) == 5
+    @test size(m, 2) == 1
+    @test ndims(m) == 1
 
     # setindex! and getindex
     m[1] = 10
@@ -32,6 +35,8 @@ using Test
     m3[3] = 3
     m4 = copy(m3)
     @test length(m4) == 3
+    @test typeof(m4) == Memory{Int64}
+    @test eltype(m4) == Int64
     @test m4[1] == 1
     @test m4[2] == 2
     @test m4[3] == 3
@@ -44,6 +49,7 @@ using Test
     m7 = Memory{Int64}(0)
     @test length(m7) == 0
     @test size(m7) == (0,)
+    @test ndims(m7) == 1
 end
 
 true

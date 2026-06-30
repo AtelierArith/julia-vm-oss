@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Error, Debug, Clone)]
 pub enum ParseError {
     /// Unexpected token
-    #[error("unexpected token '{found}' at {span:?}, expected {expected}")]
+    #[error("unexpected token '{found}' at {span}, expected {expected}")]
     UnexpectedToken {
         found: String,
         expected: String,
@@ -15,31 +15,31 @@ pub enum ParseError {
     },
 
     /// Unexpected end of input
-    #[error("unexpected end of input at {span:?}, expected {expected}")]
+    #[error("unexpected end of input at {span}, expected {expected}")]
     UnexpectedEof { expected: String, span: Span },
 
     /// Invalid escape sequence
-    #[error("invalid escape sequence '{sequence}' at {span:?}")]
+    #[error("invalid escape sequence '{sequence}' at {span}")]
     InvalidEscape { sequence: String, span: Span },
 
     /// Unterminated string
-    #[error("unterminated string literal starting at {span:?}")]
+    #[error("unterminated string literal starting at {span}")]
     UnterminatedString { span: Span },
 
     /// Unterminated block comment
-    #[error("unterminated block comment starting at {span:?}")]
+    #[error("unterminated block comment starting at {span}")]
     UnterminatedBlockComment { span: Span },
 
     /// Invalid number literal
-    #[error("invalid number literal '{literal}' at {span:?}")]
+    #[error("invalid number literal '{literal}' at {span}")]
     InvalidNumber { literal: String, span: Span },
 
     /// Invalid character literal
-    #[error("invalid character literal at {span:?}")]
+    #[error("invalid character literal at {span}")]
     InvalidCharacter { span: Span },
 
     /// Mismatched brackets
-    #[error("mismatched brackets: expected '{expected}', found '{found}' at {span:?}")]
+    #[error("mismatched brackets: expected '{expected}', found '{found}' at {span}")]
     MismatchedBrackets {
         expected: char,
         found: char,
@@ -47,15 +47,15 @@ pub enum ParseError {
     },
 
     /// Unclosed bracket
-    #[error("unclosed bracket '{bracket}' at {span:?}")]
+    #[error("unclosed bracket '{bracket}' at {span}")]
     UnclosedBracket { bracket: char, span: Span },
 
     /// Invalid syntax
-    #[error("{message} at {span:?}")]
+    #[error("{message} at {span}")]
     InvalidSyntax { message: String, span: Span },
 
     /// Lexer error
-    #[error("unrecognized token at {span:?}")]
+    #[error("unrecognized token at {span}")]
     LexerError { span: Span },
 }
 
@@ -84,7 +84,7 @@ impl ParseError {
         span: Span,
     ) -> Self {
         ParseError::UnexpectedToken {
-            found: found.into(),
+            found: display_token_text(found.into()),
             expected: expected.into(),
             span,
         }
@@ -115,32 +115,53 @@ impl ParseError {
         };
 
         let lines: Vec<&str> = source.lines().collect();
-        let line_idx = span.start_line.saturating_sub(1);
-
-        if line_idx >= lines.len() {
+        if span.start_line == 0 || span.start_line > lines.len() {
             return String::new();
         }
 
-        let line = lines[line_idx];
-        let col = span.start_column.saturating_sub(1);
-        let len = if span.start_line == span.end_line {
-            span.end_column.saturating_sub(span.start_column).max(1)
-        } else {
-            1
-        };
+        let end_line = span.end_line.max(span.start_line).min(lines.len());
+        let line_width = end_line.to_string().len();
+        let mut rendered = Vec::new();
 
-        // Build the error marker
-        let spaces = " ".repeat(col);
-        let marker = "^".repeat(len.min(line.len().saturating_sub(col)).max(1));
+        for line_no in span.start_line..=end_line {
+            let line = lines[line_no - 1];
+            let start_col = if line_no == span.start_line {
+                span.start_column.saturating_sub(1)
+            } else {
+                0
+            };
+            let marker_len = if span.start_line == span.end_line {
+                span.end_column
+                    .saturating_sub(span.start_column)
+                    .max(1)
+                    .min(line.len().saturating_sub(start_col).max(1))
+            } else if line_no == span.start_line {
+                line.len().saturating_sub(start_col).max(1)
+            } else if line_no == end_line {
+                span.end_column.saturating_sub(1).min(line.len()).max(1)
+            } else {
+                line.len().max(1)
+            };
 
-        format!(
-            "  {} | {}\n  {} | {}{}",
-            span.start_line,
-            line,
-            " ".repeat(span.start_line.to_string().len()),
-            spaces,
-            marker
-        )
+            rendered.push(format!("  {line_no:>line_width$} | {line}"));
+            rendered.push(format!(
+                "  {} | {}{}",
+                " ".repeat(line_width),
+                " ".repeat(start_col),
+                "^".repeat(marker_len)
+            ));
+        }
+
+        rendered.join("\n")
+    }
+}
+
+fn display_token_text(text: String) -> String {
+    match text.as_str() {
+        "\n" | "\r\n" | "\r" => "newline".to_string(),
+        "\t" => "tab".to_string(),
+        _ if text.chars().any(char::is_control) => text.escape_default().to_string(),
+        _ => text,
     }
 }
 
@@ -235,6 +256,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn span_and_parse_error_display_uses_line_columns_issue_8454() {
+        let span = Span::new(0, 5, 1, 1, 1, 6);
+        assert_eq!(span.to_string(), "1:1..1:6");
+
+        let err = ParseError::unexpected_token("foo", "bar", span);
+        assert_eq!(
+            err.to_string(),
+            "unexpected token 'foo' at 1:1..1:6, expected bar"
+        );
+    }
+
+    #[test]
     fn test_unexpected_token() {
         let span = Span::new(0, 5, 1, 1, 1, 6);
         let err = ParseError::unexpected_token("foo", "bar", span);
@@ -271,7 +304,7 @@ mod tests {
     #[test]
     fn test_format_with_context() {
         let source = "let x = \nlet y = 2";
-        let span = Span::new(8, 8, 1, 9, 1, 9);
+        let span = Span::new(8, 8, 1, 1, 9, 9);
         let err = ParseError::unexpected_eof("value", span);
 
         let context = err.format_with_context(source);
@@ -280,10 +313,22 @@ mod tests {
     }
 
     #[test]
+    fn format_with_context_underlines_multiline_spans_issue_8454() {
+        let source = "let xs = [\n    1,\n    2\n]\n";
+        let span = Span::new(9, 23, 1, 3, 10, 6);
+        let err = ParseError::invalid_syntax("array literal is incomplete", span);
+
+        assert_eq!(
+            err.format_with_context(source),
+            "  1 | let xs = [\n    |          ^\n  2 |     1,\n    | ^^^^^^\n  3 |     2\n    | ^^^^^"
+        );
+    }
+
+    #[test]
     fn test_format_all() {
         let source = "let x = \nlet y = 2";
-        let span1 = Span::new(8, 8, 1, 9, 1, 9);
-        let span2 = Span::new(9, 18, 2, 1, 2, 10);
+        let span1 = Span::new(8, 8, 1, 1, 9, 9);
+        let span2 = Span::new(9, 18, 2, 2, 1, 10);
 
         let mut errors = ParseErrors::new();
         errors.push(ParseError::unexpected_eof("value", span1));

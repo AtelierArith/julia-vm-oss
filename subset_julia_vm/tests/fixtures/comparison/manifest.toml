@@ -1,10 +1,22 @@
 # Test manifest for comparison category
 
 [[tests]]
+name = "comparison_symbol_ordering_5748"
+file = "symbol_ordering_5748.jl"
+expected = true
+description = "Symbols are orderable lexicographically: isless/< /<=/>/cmp/min/max/sort/sortperm on Symbol (Issue #5748)"
+
+[[tests]]
 name = "comparison_bool_equality"
 file = "bool_equality.jl"
 expected = true
 description = "Bool-Bool comparison operators: ==, !="
+
+[[tests]]
+name = "comparison_size_tuple_comparison_7578"
+file = "size_tuple_comparison_7578.jl"
+expected = true
+description = "Tuple-valued size(A) results compare as tuples inside function bodies instead of falling through to I64 conversion (Issue #7578)"
 
 [[tests]]
 name = "comparison_chained"
@@ -29,3 +41,39 @@ name = "comparison_singleton_parity"
 file = "singleton_comparison_parity.jl"
 expected = true
 description = "Singleton comparison parity: == vs === and != vs !== for nothing, DataType, Symbol, Char (Issue #1754)"
+
+[[tests]]
+name = "comparison_default_struct_field_identity"
+file = "default_struct_field_identity.jl"
+expected = true
+description = "Default immutable struct equality uses field identity for mutable reference fields"
+
+[[tests]]
+name = "comparison_union_eq_string_4686"
+file = "union_eq_string_4686.jl"
+expected = true
+description = "Call-site `==` against a Union-typed function return defers to runtime dispatch so a `Union{Int64, String}` slot holding a `String` matches the literal (Issue #4686)"
+
+[[tests]]
+name = "comparison_chained_subtype_5492"
+file = "chained_subtype_5492.jl"
+expected = true
+description = "Chained subtype comparison `A <: B <: C` expands to `(A <: B) && (B <: C)`, and `>:` chains likewise (Issue #5492)"
+
+[[tests]]
+name = "comparison_isequal_isless_structref_6725"
+file = "isequal_isless_structref_6725.jl"
+expected = true
+description = "Native isequal/isless/in resolve heap Value::StructRef through the shared value-op resolver, so nested struct-field refs compare/hash by value and isequal ⟹ hash holds (Issue #6725)"
+
+[[tests]]
+name = "comparison_mixed_int_float_exact_8187"
+file = "mixed_int_float_exact_8187.jl"
+expected = true
+description = "Mixed Int64/Float64 ==, !=, <, <=, >, >= are value-based (no rounding the integer to Float64) for |i| > 2^53, across scalar/array/isequal/in/tuple surfaces (Issue #8187)"
+
+[[tests]]
+name = "comparison_mixed_int_float_widths_8199"
+file = "mixed_int_float_widths_8199.jl"
+expected = true
+description = "Mixed integer/float ==, !=, <, <=, >, >= (and isequal/in/tuple-==) are value-based for ALL widths — UInt64/Int128/UInt128 × Float64, every int × Float32, Float16 mixes — not promote-then-round; isequal keeps the signed-zero rule across widths (Issue #8199, generalizing #8187)"

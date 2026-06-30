@@ -4,7 +4,7 @@
 //! and juxtaposition expressions (implicit multiplication).
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
-use crate::ir::core::{BinaryOp, Expr};
+use crate::ir::core::{BinaryOp, Block, Expr, Literal, Stmt};
 use crate::lowering::LowerResult;
 use crate::parser::cst::{CstWalker, Node, NodeKind};
 
@@ -15,9 +15,66 @@ use super::{
 };
 use crate::lowering::LambdaContext;
 
+fn lower_pipe_operator(left: Expr, right: Expr, span: crate::span::Span) -> Expr {
+    match right {
+        Expr::Var(name, _) | Expr::FunctionRef { name, .. } => Expr::Call {
+            function: name,
+            args: vec![left],
+            kwargs: Vec::new(),
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
+            span,
+        },
+        callable_expr => {
+            let arg_temp = format!("__pipe_arg_{}_{}", span.start, span.end);
+            let func_temp = format!("__pipe_func_{}_{}", span.start, span.end);
+            let call_expr = Expr::Call {
+                function: func_temp.clone(),
+                args: vec![Expr::Var(arg_temp.clone(), span)],
+                kwargs: Vec::new(),
+                splat_mask: vec![],
+                kwargs_splat_mask: vec![],
+                span,
+            };
+
+            Expr::LetBlock {
+                bindings: vec![(arg_temp, left), (func_temp, callable_expr)],
+                body: Block {
+                    stmts: vec![Stmt::Expr {
+                        expr: call_expr,
+                        span,
+                    }],
+                    span,
+                },
+                span,
+            }
+        }
+    }
+}
+
 /// Lower binary expression: a + b, a == b, etc.
 pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Expr> {
     let span = walker.span(&node);
+    let op_text = extract_operator_text(walker, node).ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedOperator("unknown".to_string()),
+            span,
+        )
+    })?;
+
+    // Pair operator: key => value. Do this before the generic operator filter so
+    // a bare operator value (`:f => +`) is preserved as the RHS (Issue #6461).
+    if op_text == "=>" {
+        let (left_node, right_node) = pair_operand_nodes(walker, node, span)?;
+        let left = lower_expr(walker, left_node)?;
+        let right = lower_expr(walker, right_node)?;
+        return Ok(Expr::Pair {
+            key: Box::new(left),
+            value: Box::new(right),
+            span,
+        });
+    }
+
     // Filter out operator nodes - tree-sitter includes them as named children
     let operands: Vec<_> = walker
         .named_children(&node)
@@ -30,13 +87,6 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
             span,
         ));
     }
-
-    let op_text = extract_operator_text(walker, node).ok_or_else(|| {
-        UnsupportedFeature::new(
-            UnsupportedFeatureKind::UnsupportedOperator("unknown".to_string()),
-            span,
-        )
-    })?;
 
     // Julia parses chained operators like `a + b + c` as a single multi-argument call `+(a, b, c)`.
     // This is important for method dispatch: if user defines `+(a::Int, b::Int)` (2-argument),
@@ -85,19 +135,12 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
 
             let mut result: Option<Expr> = None;
             for (i, comp_op) in comparisons.iter().enumerate() {
-                let comp_binary_op = map_binary_op(comp_op).ok_or_else(|| {
-                    UnsupportedFeature::new(
-                        UnsupportedFeatureKind::UnsupportedOperator(comp_op.clone()),
-                        span,
-                    )
-                })?;
-
-                let comparison = Expr::BinaryOp {
-                    op: comp_binary_op,
-                    left: Box::new(lowered_operands[i].clone()),
-                    right: Box::new(lowered_operands[i + 1].clone()),
+                let comparison = build_chain_link(
+                    comp_op,
+                    lowered_operands[i].clone(),
+                    lowered_operands[i + 1].clone(),
                     span,
-                };
+                )?;
 
                 result = match result {
                     None => Some(comparison),
@@ -116,16 +159,6 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
 
     let left = lower_expr(walker, operands[0])?;
     let right = lower_expr(walker, operands[1])?;
-
-    // Pair operator: key => value
-    // Sometimes parsed as BinaryExpression instead of PairExpression
-    if op_text == "=>" {
-        return Ok(Expr::Pair {
-            key: Box::new(left),
-            value: Box::new(right),
-            span,
-        });
-    }
 
     // Broadcast operators: generate materialize(Broadcasted(op, (left, right))) (Issue #2546)
     if is_broadcast_op(&op_text) {
@@ -168,39 +201,7 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
 
     // Pipe operator: x |> f => f(x), x |> f |> g => g(f(x))
     if op_text == "|>" {
-        // right should be a callable (identifier or FunctionRef from lambda)
-        match right {
-            Expr::Var(name, _) => {
-                return Ok(Expr::Call {
-                    function: name,
-                    args: vec![left],
-                    kwargs: Vec::new(),
-                    splat_mask: vec![],
-                    kwargs_splat_mask: vec![],
-                    span,
-                });
-            }
-            Expr::FunctionRef { name, .. } => {
-                // x |> (y -> expr) where lambda was lifted to a named function
-                return Ok(Expr::Call {
-                    function: name,
-                    args: vec![left],
-                    kwargs: Vec::new(),
-                    splat_mask: vec![],
-                    kwargs_splat_mask: vec![],
-                    span,
-                });
-            }
-            _ => {
-                return Err(UnsupportedFeature::new(
-                    UnsupportedFeatureKind::UnsupportedExpression(
-                        "pipe operator requires a function name or lambda on the right side"
-                            .to_string(),
-                    ),
-                    span,
-                ));
-            }
-        }
+        return Ok(lower_pipe_operator(left, right, span));
     }
 
     // Bit-shift operators: a << b, a >> b, a >>> b
@@ -422,10 +423,10 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
         });
     }
 
-    // ∈ (in): x ∈ a => in(x, a)
+    // ∈ (in): x ∈ a => ∈(x, a)
     if op_text == "∈" {
         return Ok(Expr::Call {
-            function: "in".to_string(),
+            function: "∈".to_string(),
             args: vec![left, right],
             kwargs: Vec::new(),
             splat_mask: vec![],
@@ -434,27 +435,11 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
         });
     }
 
-    // ∉ (not in): x ∉ a => !in(x, a)
+    // ∉ (not in): x ∉ a => ∉(x, a)
     if op_text == "∉" {
-        return Ok(Expr::UnaryOp {
-            op: crate::ir::core::UnaryOp::Not,
-            operand: Box::new(Expr::Call {
-                function: "in".to_string(),
-                args: vec![left, right],
-                kwargs: Vec::new(),
-                splat_mask: vec![],
-                kwargs_splat_mask: vec![],
-                span,
-            }),
-            span,
-        });
-    }
-
-    // ∋ (contains): a ∋ x => in(x, a)  (reversed arguments)
-    if op_text == "∋" {
         return Ok(Expr::Call {
-            function: "in".to_string(),
-            args: vec![right, left], // Swap arguments
+            function: "∉".to_string(),
+            args: vec![left, right],
             kwargs: Vec::new(),
             splat_mask: vec![],
             kwargs_splat_mask: vec![],
@@ -462,18 +447,26 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
         });
     }
 
-    // ∌ (not contains): a ∌ x => !in(x, a)
+    // ∋ (contains): a ∋ x => ∋(a, x)
+    if op_text == "∋" {
+        return Ok(Expr::Call {
+            function: "∋".to_string(),
+            args: vec![left, right],
+            kwargs: Vec::new(),
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
+            span,
+        });
+    }
+
+    // ∌ (not contains): a ∌ x => ∌(a, x)
     if op_text == "∌" {
-        return Ok(Expr::UnaryOp {
-            op: crate::ir::core::UnaryOp::Not,
-            operand: Box::new(Expr::Call {
-                function: "in".to_string(),
-                args: vec![right, left], // Swap arguments
-                kwargs: Vec::new(),
-                splat_mask: vec![],
-                kwargs_splat_mask: vec![],
-                span,
-            }),
+        return Ok(Expr::Call {
+            function: "∌".to_string(),
+            args: vec![left, right],
+            kwargs: Vec::new(),
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
             span,
         });
     }
@@ -501,6 +494,12 @@ pub fn lower_binary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRes
             kwargs_splat_mask: vec![],
             span,
         });
+    }
+
+    // `x ^ <literal negative integer>` routes through `Base.literal_pow`
+    // (Issue #7233) so e.g. `2^-3 == 0.125` rather than throwing a DomainError.
+    if let Some(call) = try_lower_literal_negative_pow(walker, &op_text, &left, operands[1], span) {
+        return Ok(call);
     }
 
     let op = map_binary_op(&op_text).ok_or_else(|| {
@@ -523,6 +522,26 @@ pub fn lower_binary_expr_with_ctx<'a>(
     lambda_ctx: &LambdaContext,
 ) -> LowerResult<Expr> {
     let span = walker.span(&node);
+    let op_text = extract_operator_text(walker, node).ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedOperator("unknown".to_string()),
+            span,
+        )
+    })?;
+
+    // Pair operator: key => value. Do this before the generic operator filter so
+    // a bare operator value (`:f => +`) is preserved as the RHS (Issue #6461).
+    if op_text == "=>" {
+        let (left_node, right_node) = pair_operand_nodes(walker, node, span)?;
+        let left = lower_expr_with_ctx(walker, left_node, lambda_ctx)?;
+        let right = lower_expr_with_ctx(walker, right_node, lambda_ctx)?;
+        return Ok(Expr::Pair {
+            key: Box::new(left),
+            value: Box::new(right),
+            span,
+        });
+    }
+
     // Filter out operator nodes - tree-sitter includes them as named children
     let operands: Vec<_> = walker
         .named_children(&node)
@@ -535,13 +554,6 @@ pub fn lower_binary_expr_with_ctx<'a>(
             span,
         ));
     }
-
-    let op_text = extract_operator_text(walker, node).ok_or_else(|| {
-        UnsupportedFeature::new(
-            UnsupportedFeatureKind::UnsupportedOperator("unknown".to_string()),
-            span,
-        )
-    })?;
 
     // Julia parses chained operators like `a + b + c` as a single multi-argument call `+(a, b, c)`.
     // This is important for method dispatch: if user defines `+(a::Int, b::Int)` (2-argument),
@@ -590,19 +602,12 @@ pub fn lower_binary_expr_with_ctx<'a>(
 
             let mut result: Option<Expr> = None;
             for (i, comp_op) in comparisons.iter().enumerate() {
-                let comp_binary_op = map_binary_op(comp_op).ok_or_else(|| {
-                    UnsupportedFeature::new(
-                        UnsupportedFeatureKind::UnsupportedOperator(comp_op.clone()),
-                        span,
-                    )
-                })?;
-
-                let comparison = Expr::BinaryOp {
-                    op: comp_binary_op,
-                    left: Box::new(lowered_operands[i].clone()),
-                    right: Box::new(lowered_operands[i + 1].clone()),
+                let comparison = build_chain_link(
+                    comp_op,
+                    lowered_operands[i].clone(),
+                    lowered_operands[i + 1].clone(),
                     span,
-                };
+                )?;
 
                 result = match result {
                     None => Some(comparison),
@@ -621,16 +626,6 @@ pub fn lower_binary_expr_with_ctx<'a>(
 
     let left = lower_expr_with_ctx(walker, operands[0], lambda_ctx)?;
     let right = lower_expr_with_ctx(walker, operands[1], lambda_ctx)?;
-
-    // Pair operator: key => value
-    // Sometimes parsed as BinaryExpression instead of PairExpression
-    if op_text == "=>" {
-        return Ok(Expr::Pair {
-            key: Box::new(left),
-            value: Box::new(right),
-            span,
-        });
-    }
 
     // Broadcast operators: generate materialize(Broadcasted(op, (left, right))) (Issue #2546)
     if is_broadcast_op(&op_text) {
@@ -673,39 +668,7 @@ pub fn lower_binary_expr_with_ctx<'a>(
 
     // Pipe operator: x |> f => f(x), x |> f |> g => g(f(x))
     if op_text == "|>" {
-        // right should be a callable (identifier or FunctionRef from lambda)
-        match right {
-            Expr::Var(name, _) => {
-                return Ok(Expr::Call {
-                    function: name,
-                    args: vec![left],
-                    kwargs: Vec::new(),
-                    splat_mask: vec![],
-                    kwargs_splat_mask: vec![],
-                    span,
-                });
-            }
-            Expr::FunctionRef { name, .. } => {
-                // x |> (y -> expr) where lambda was lifted to a named function
-                return Ok(Expr::Call {
-                    function: name,
-                    args: vec![left],
-                    kwargs: Vec::new(),
-                    splat_mask: vec![],
-                    kwargs_splat_mask: vec![],
-                    span,
-                });
-            }
-            _ => {
-                return Err(UnsupportedFeature::new(
-                    UnsupportedFeatureKind::UnsupportedExpression(
-                        "pipe operator requires a function name or lambda on the right side"
-                            .to_string(),
-                    ),
-                    span,
-                ));
-            }
-        }
+        return Ok(lower_pipe_operator(left, right, span));
     }
 
     // Bit-shift operators: a << b, a >> b, a >>> b
@@ -927,10 +890,10 @@ pub fn lower_binary_expr_with_ctx<'a>(
         });
     }
 
-    // ∈ (in): x ∈ a => in(x, a)
+    // ∈ (in): x ∈ a => ∈(x, a)
     if op_text == "∈" {
         return Ok(Expr::Call {
-            function: "in".to_string(),
+            function: "∈".to_string(),
             args: vec![left, right],
             kwargs: Vec::new(),
             splat_mask: vec![],
@@ -939,27 +902,11 @@ pub fn lower_binary_expr_with_ctx<'a>(
         });
     }
 
-    // ∉ (not in): x ∉ a => !in(x, a)
+    // ∉ (not in): x ∉ a => ∉(x, a)
     if op_text == "∉" {
-        return Ok(Expr::UnaryOp {
-            op: crate::ir::core::UnaryOp::Not,
-            operand: Box::new(Expr::Call {
-                function: "in".to_string(),
-                args: vec![left, right],
-                kwargs: Vec::new(),
-                splat_mask: vec![],
-                kwargs_splat_mask: vec![],
-                span,
-            }),
-            span,
-        });
-    }
-
-    // ∋ (contains): a ∋ x => in(x, a)  (reversed arguments)
-    if op_text == "∋" {
         return Ok(Expr::Call {
-            function: "in".to_string(),
-            args: vec![right, left], // Swap arguments
+            function: "∉".to_string(),
+            args: vec![left, right],
             kwargs: Vec::new(),
             splat_mask: vec![],
             kwargs_splat_mask: vec![],
@@ -967,18 +914,26 @@ pub fn lower_binary_expr_with_ctx<'a>(
         });
     }
 
-    // ∌ (not contains): a ∌ x => !in(x, a)
+    // ∋ (contains): a ∋ x => ∋(a, x)
+    if op_text == "∋" {
+        return Ok(Expr::Call {
+            function: "∋".to_string(),
+            args: vec![left, right],
+            kwargs: Vec::new(),
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
+            span,
+        });
+    }
+
+    // ∌ (not contains): a ∌ x => ∌(a, x)
     if op_text == "∌" {
-        return Ok(Expr::UnaryOp {
-            op: crate::ir::core::UnaryOp::Not,
-            operand: Box::new(Expr::Call {
-                function: "in".to_string(),
-                args: vec![right, left], // Swap arguments
-                kwargs: Vec::new(),
-                splat_mask: vec![],
-                kwargs_splat_mask: vec![],
-                span,
-            }),
+        return Ok(Expr::Call {
+            function: "∌".to_string(),
+            args: vec![left, right],
+            kwargs: Vec::new(),
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
             span,
         });
     }
@@ -1008,6 +963,12 @@ pub fn lower_binary_expr_with_ctx<'a>(
         });
     }
 
+    // `x ^ <literal negative integer>` routes through `Base.literal_pow`
+    // (Issue #7233) so e.g. `2^-3 == 0.125` rather than throwing a DomainError.
+    if let Some(call) = try_lower_literal_negative_pow(walker, &op_text, &left, operands[1], span) {
+        return Ok(call);
+    }
+
     let op = map_binary_op(&op_text).ok_or_else(|| {
         UnsupportedFeature::new(UnsupportedFeatureKind::UnsupportedOperator(op_text), span)
     })?;
@@ -1018,6 +979,85 @@ pub fn lower_binary_expr_with_ctx<'a>(
         right: Box::new(right),
         span,
     })
+}
+
+/// Route `x ^ <literal negative integer>` through `Base.literal_pow`, matching
+/// upstream Julia where a literal integer exponent `p` lowers to
+/// `Base.literal_pow(^, x, Val(p))` so e.g. `2^-3 == 0.125` instead of throwing
+/// a `DomainError` (Issue #7233).
+///
+/// Only a *literal* negative integer exponent is intercepted: the right operand
+/// must be a unary `-` applied directly to a decimal `IntegerLiteral`. A
+/// non-literal negative exponent (`n = -3; 2^n`) keeps the ordinary `Pow` path,
+/// which throws `DomainError` for integer bases just like upstream. Positive
+/// literal exponents (`x^2`) are likewise left on the fast `Pow` path; only the
+/// previously-erroring negative case is redirected.
+///
+/// `right_node` is the (not-yet-lowered) right operand CST node; `left` is the
+/// already-lowered base expression. Returns `Ok(None)` when the exponent is not
+/// a literal negative integer so the caller falls back to `BinaryOp::Pow`.
+fn try_lower_literal_negative_pow(
+    walker: &CstWalker<'_>,
+    op_text: &str,
+    left: &Expr,
+    right_node: Node<'_>,
+    span: crate::span::Span,
+) -> Option<Expr> {
+    if op_text != "^" {
+        return None;
+    }
+    let exponent = literal_negative_integer_exponent(walker, right_node)?;
+
+    // Build `Base.literal_pow(^, left, exponent)`, mirroring upstream's lowering
+    // of literal-integer powers. The exponent is passed as a plain integer
+    // literal (rather than upstream's `Val(p)`) because sjulia does not reliably
+    // recover a `Val{p}` type-parameter as a *value* for use in arithmetic
+    // inside the method body; a plain `Integer` argument dispatches and computes
+    // identically here.
+    let pow_fn = Expr::Var("^".to_string(), span);
+    Some(Expr::Call {
+        function: "literal_pow".to_string(),
+        args: vec![
+            pow_fn,
+            left.clone(),
+            Expr::Literal(Literal::Int(exponent), span),
+        ],
+        kwargs: Vec::new(),
+        splat_mask: vec![],
+        kwargs_splat_mask: vec![],
+        span,
+    })
+}
+
+/// If `node` is a unary `-` applied directly to a decimal `IntegerLiteral`,
+/// return the (negative) `i64` value of that exponent. Otherwise `None`.
+fn literal_negative_integer_exponent(walker: &CstWalker<'_>, node: Node<'_>) -> Option<i64> {
+    if walker.kind(&node) != NodeKind::UnaryExpression {
+        return None;
+    }
+    let children = walker.named_children(&node);
+    // Operand is the single non-operator child; the operator must be `-`.
+    let mut op_text = None;
+    let mut operand = None;
+    for child in &children {
+        if walker.kind(child) == NodeKind::Operator {
+            op_text = Some(walker.text(child).to_string());
+        } else if operand.is_none() {
+            operand = Some(*child);
+        } else {
+            // More than one operand: not a simple unary minus on a literal.
+            return None;
+        }
+    }
+    if op_text.as_deref() != Some("-") {
+        return None;
+    }
+    let operand = operand?;
+    if walker.kind(&operand) != NodeKind::IntegerLiteral {
+        return None;
+    }
+    let magnitude: i64 = walker.text(&operand).replace('_', "").parse().ok()?;
+    magnitude.checked_neg()
 }
 
 /// Lower juxtaposition expression (2x => 2 * x) as implicit multiplication
@@ -1046,6 +1086,22 @@ pub fn lower_juxtaposition_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> L
 
 /// Lower unary expression: -x, !x, +x
 pub fn lower_unary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Expr> {
+    lower_unary_expr_impl(walker, node, None)
+}
+
+pub fn lower_unary_expr_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    lower_unary_expr_impl(walker, node, Some(lambda_ctx))
+}
+
+fn lower_unary_expr_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
     let span = walker.span(&node);
     // Filter out operator nodes - tree-sitter includes them as named children
     let mut operands: Vec<_> = walker
@@ -1067,7 +1123,85 @@ pub fn lower_unary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
         )
     })?;
 
-    let operand = lower_expr(walker, operands.remove(operands.len() - 1))?;
+    if op_text == "$" {
+        // MacroTools @q templates can route quoted interpolation nodes through
+        // unary lowering after nested macro substitution. Preserve the intended
+        // inner expression for the forms needed by shortdef patterns (Issue #7541).
+        if let Some(inner) = operands.last() {
+            if matches!(
+                walker.kind(inner),
+                NodeKind::Identifier | NodeKind::FieldExpression
+            ) {
+                return match lambda_ctx {
+                    Some(ctx) => lower_expr_with_ctx(walker, *inner, ctx),
+                    None => lower_expr(walker, *inner),
+                };
+            }
+            if walker.kind(inner) == NodeKind::ParenthesizedExpression {
+                let paren_children = walker.named_children(inner);
+                if let Some(paren_inner) = paren_children.first() {
+                    if walker.kind(paren_inner) == NodeKind::SplatExpression {
+                        let splat_children = walker.named_children(paren_inner);
+                        if let Some(splat_inner) = splat_children.first() {
+                            return match lambda_ctx {
+                                Some(ctx) => lower_expr_with_ctx(walker, *splat_inner, ctx),
+                                None => lower_expr(walker, *splat_inner),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // `@generated` syntactic-unquote interpolation (Issues #5934 / #5936).
+    //
+    // While lowering a `@generated` quote's inner expression as plain code, a
+    // `$ident` or `$(expr)` must resolve to the bound type/value expression
+    // that upstream Julia would splice during staging. Gated on the
+    // generated-unquote thread-local flag so `$` written outside a quote keeps
+    // erroring as `UnsupportedOperator("$")`, matching Julia's
+    // "`$` expression outside quote" syntax error.
+    //
+    // SCOPE: expression splicing only. `$(esc(...))` hygiene and `$(p...)`
+    // splat forms still require the real staging engine.
+    if op_text == "$" && crate::lowering::generated_unquote::is_active() {
+        if let Some(inner) = operands.last() {
+            match walker.kind(inner) {
+                NodeKind::Identifier => {
+                    let name = walker.text(inner);
+                    return Ok(Expr::Var(name.to_string(), span));
+                }
+                NodeKind::ParenthesizedExpression => {
+                    return match lambda_ctx {
+                        Some(ctx) => lower_expr_with_ctx(walker, *inner, ctx),
+                        None => lower_expr(walker, *inner),
+                    };
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // `+(1, 2, 3)`, `+(xs...)`, `-(0, xs...)`: the unary-capable operators `+`
+    // and `-` followed by parentheses are parsed by tree-sitter as a unary
+    // expression whose operand is a tuple (multi-arg) or a parenthesized splat,
+    // never as a `CallExpression`. Detect those shapes and lower them as a real
+    // operator-function call so dispatch and splat expansion match Julia
+    // (Issue #5144). A bare single-argument paren (`+(1)` == `+1`) is left as a
+    // unary op below — both lower to the same value.
+    let operand_node = operands[operands.len() - 1];
+    if let Some(call) =
+        try_lower_operator_function_paren_call(walker, &op_text, operand_node, span)?
+    {
+        return Ok(call);
+    }
+
+    let operand_node = operands.remove(operands.len() - 1);
+    let operand = match lambda_ctx {
+        Some(ctx) => lower_expr_with_ctx(walker, operand_node, ctx)?,
+        None => lower_expr(walker, operand_node)?,
+    };
 
     // Broadcast NOT (.!) is represented as a Call expression
     if op_text == ".!" {
@@ -1136,6 +1270,88 @@ pub fn lower_unary_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResu
     })
 }
 
+/// Detect and lower an operator-function call written with the unary-capable
+/// operators `+`/`-` directly followed by parentheses (Issue #5144).
+///
+/// tree-sitter parses these as a `UnaryExpression` whose operand is either:
+/// - a `TupleExpression` — `+(1, 2, 3)`, `-(0, xs...)` (two or more comma
+///   separated items, any of which may be a splat); or
+/// - a `ParenthesizedExpression` wrapping a single `SplatExpression` —
+///   `+(xs...)`.
+///
+/// Both are real function calls in Julia, so they are lowered to
+/// `Expr::Call { function: op, .. }` with the proper positional splat mask.
+/// Any other operand shape (a plain value, e.g. `+(1)` == `+1`, or a non
+/// `+`/`-` operator) returns `Ok(None)` so the caller falls back to the normal
+/// unary-op lowering.
+fn try_lower_operator_function_paren_call<'a>(
+    walker: &CstWalker<'a>,
+    op_text: &str,
+    operand_node: Node<'a>,
+    span: crate::span::Span,
+) -> LowerResult<Option<Expr>> {
+    if !super::is_operator_function_call_target(op_text) {
+        return Ok(None);
+    }
+
+    let (mut args, mut splat_mask): (Vec<Expr>, Vec<bool>) = (Vec::new(), Vec::new());
+
+    match walker.kind(&operand_node) {
+        NodeKind::TupleExpression => {
+            for child in walker.named_children(&operand_node) {
+                lower_operator_call_argument(walker, child, &mut args, &mut splat_mask)?;
+            }
+        }
+        NodeKind::ParenthesizedExpression => {
+            let children = walker.named_children(&operand_node);
+            // Only a single splatted child is unambiguously a call: `+(xs...)`.
+            // A single plain child is just `+(value)` (== `+value`); leave it
+            // to the unary-op path.
+            if children.len() == 1 && walker.kind(&children[0]) == NodeKind::SplatExpression {
+                lower_operator_call_argument(walker, children[0], &mut args, &mut splat_mask)?;
+            } else {
+                return Ok(None);
+            }
+        }
+        _ => return Ok(None),
+    }
+
+    if args.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(Expr::Call {
+        function: op_text.to_string(),
+        args,
+        kwargs: Vec::new(),
+        splat_mask,
+        kwargs_splat_mask: Vec::new(),
+        span,
+    }))
+}
+
+/// Lower one positional argument of an operator-function call, recording whether
+/// it is splatted (Issue #5144). A `SplatExpression` (`xs...`) contributes its
+/// inner expression with `splat_mask = true`; any other node is a plain
+/// positional argument.
+fn lower_operator_call_argument<'a>(
+    walker: &CstWalker<'a>,
+    child: Node<'a>,
+    args: &mut Vec<Expr>,
+    splat_mask: &mut Vec<bool>,
+) -> LowerResult<()> {
+    if walker.kind(&child) == NodeKind::SplatExpression {
+        if let Some(inner) = walker.named_children(&child).first() {
+            args.push(lower_expr(walker, *inner)?);
+            splat_mask.push(true);
+        }
+    } else {
+        args.push(lower_expr(walker, child)?);
+        splat_mask.push(false);
+    }
+    Ok(())
+}
+
 /// Recursively collect all operands from chained same-operator binary expressions.
 /// For example, `((a + b) + c) + d` with operator `+` collects [a, b, c, d].
 fn collect_chained_operands<'a>(
@@ -1170,6 +1386,42 @@ fn collect_chained_operands<'a>(
         // Right operand: also check if it's a chain of the same operator
         collect_chained_operands(walker, children[1], target_op, operands);
     }
+}
+
+/// Build a single comparison link for a chained comparison expansion.
+///
+/// Most comparison operators map directly onto a `BinaryOp` via
+/// [`map_binary_op`]. The supertype operator `>:` has no `BinaryOp` of its own:
+/// just like the single-operator path (`A >: B` => `B <: A`), it lowers to a
+/// `Subtype` check with the operands swapped (Issue #5492).
+fn build_chain_link(
+    op: &str,
+    left: Expr,
+    right: Expr,
+    span: crate::span::Span,
+) -> LowerResult<Expr> {
+    if op == ">:" {
+        // A >: B  ==>  B <: A
+        return Ok(Expr::BinaryOp {
+            op: BinaryOp::Subtype,
+            left: Box::new(right),
+            right: Box::new(left),
+            span,
+        });
+    }
+
+    let binary_op = map_binary_op(op).ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedOperator(op.to_string()),
+            span,
+        )
+    })?;
+    Ok(Expr::BinaryOp {
+        op: binary_op,
+        left: Box::new(left),
+        right: Box::new(right),
+        span,
+    })
 }
 
 /// Recursively collect all comparison operators and operands from chained comparisons.
@@ -1225,4 +1477,33 @@ fn extract_operator_text<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> Option<S
         }
     }
     None
+}
+
+fn pair_operand_nodes<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    span: crate::span::Span,
+) -> LowerResult<(Node<'a>, Node<'a>)> {
+    let children = walker.named_children(&node);
+    for (idx, child) in children.iter().enumerate() {
+        if walker.kind(child) == NodeKind::Operator && walker.text(child) == "=>" {
+            let Some(left_idx) = idx.checked_sub(1) else {
+                break;
+            };
+            let Some(left) = children.get(left_idx) else {
+                break;
+            };
+            let Some(right) = children.get(idx + 1) else {
+                break;
+            };
+            return Ok((*left, *right));
+        }
+    }
+
+    Err(UnsupportedFeature::new(
+        UnsupportedFeatureKind::UnsupportedExpression(
+            "pair expression (expected operands around =>)".to_string(),
+        ),
+        span,
+    ))
 }

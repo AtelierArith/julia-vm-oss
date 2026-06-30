@@ -79,8 +79,15 @@ pub enum VmError {
 
 impl VmError {
     /// Create a TypeError for "{instruction}: expected {expected}, got {value}" patterns (Issue #2927).
-    pub fn type_error_expected(instruction: &str, expected: &str, got: &impl std::fmt::Debug) -> Self {
-        Self::TypeError(format!("{}: expected {}, got {:?}", instruction, expected, got))
+    pub fn type_error_expected(
+        instruction: &str,
+        expected: &str,
+        got: &impl std::fmt::Debug,
+    ) -> Self {
+        Self::TypeError(format!(
+            "{}: expected {}, got {:?}",
+            instruction, expected, got
+        ))
     }
 
     /// Create a MethodError for "no method matching operator({type1}, {type2})" patterns (Issue #2927).
@@ -93,10 +100,7 @@ impl VmError {
 
     /// Create a MethodError for "unsupported {type_combo} operation: {op}" patterns (Issue #2927).
     pub fn unsupported_op(type_combo: &str, op: &impl std::fmt::Debug) -> Self {
-        Self::MethodError(format!(
-            "unsupported {} operation: {:?}",
-            type_combo, op
-        ))
+        Self::MethodError(format!("unsupported {} operation: {:?}", type_combo, op))
     }
 }
 

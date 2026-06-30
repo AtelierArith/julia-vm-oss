@@ -1,43 +1,23 @@
+use std::borrow::Cow;
+
 use crate::ir::core::{Expr, Literal, Stmt};
 use crate::span::Span;
-use crate::vm::{StructInstance, Value};
+use crate::vm::value::{array_wrapper_shape_and_offset, MemoryValue};
+use crate::vm::{ArrayElementType, ArrayValue, StructInstance, Value};
 
 /// Convert a Value to a Literal for IR injection.
 pub(crate) fn value_to_literal(value: &Value) -> Option<Literal> {
-    // Handle Complex structs first - convert to Literal::Struct
-    if value.is_complex() {
-        if let Some((re, im)) = value.as_complex_parts() {
-            return Some(Literal::Struct(
-                "Complex{Float64}".to_string(),
-                vec![Literal::Float(re), Literal::Float(im)],
-            ));
-        }
+    if let Some(arr) = crate::vm::value::native_array_value_ref(value) {
+        let arr = arr.borrow();
+        return array_value_to_literal(&arr);
     }
     match value {
         Value::I64(v) => Some(Literal::Int(*v)),
         Value::F64(v) => Some(Literal::Float(*v)),
         Value::Str(v) => Some(Literal::Str(v.clone())),
-        Value::Array(arr) => {
-            let arr = arr.borrow();
-            // Convert ArrayData to appropriate Literal variant preserving element type
-            match &arr.data {
-                crate::vm::ArrayData::F64(v) => Some(Literal::Array(v.clone(), arr.shape.clone())),
-                crate::vm::ArrayData::I64(v) => {
-                    Some(Literal::ArrayI64(v.clone(), arr.shape.clone()))
-                }
-                crate::vm::ArrayData::Bool(v) => {
-                    Some(Literal::ArrayBool(v.clone(), arr.shape.clone()))
-                }
-                // For complex arrays (StructRefs), we can't convert to Literal::Array
-                // but the array is still stored in REPLGlobals, so return None here
-                // The array will be available via get() but won't be injected as a literal
-                _ => None, // Complex, String, Char, Any arrays not supported yet
-            }
-        }
-        // Memory → Array (Issue #2764)
         Value::Memory(mem) => {
-            let arr = crate::vm::util::memory_to_array_ref(mem);
-            value_to_literal(&Value::Array(arr))
+            let mem = mem.borrow();
+            memory_value_to_literal(&mem)
         }
         Value::Nothing => Some(Literal::Nothing),
         Value::Missing => Some(Literal::Missing),
@@ -71,7 +51,7 @@ pub(crate) fn value_to_literal(value: &Value) -> Option<Literal> {
             // Recursively convert ExprValue to Literal::Expr
             let head = expr.head.as_str().to_string();
             let args = expr
-                .args
+                .args_snapshot()
                 .iter()
                 .map(value_to_literal)
                 .collect::<Option<Vec<_>>>()?;
@@ -90,8 +70,354 @@ pub(crate) fn value_to_literal(value: &Value) -> Option<Literal> {
             type_name: type_name.clone(),
             value: *value,
         }),
-        // Structs are handled specially via struct_instance_to_literal
+        // Bare struct values (including Complex{Float64}/Complex{Int}/Complex{Float32},
+        // Rational, and user structs) convert generically via struct_instance_to_literal,
+        // preserving the real struct_name and per-field literal types. This replaces the
+        // former Complex-specific special-case that hardcoded "Complex{Float64}" with
+        // lossy Literal::Float fields (Issue #5163). Complex globals normally come back
+        // from the VM as Value::StructRef and are persisted via the StructRef path in
+        // extract_globals_from_vm; this arm covers the remaining cases where a whole
+        // struct value is passed (NamedTuple fields, Expr args, ans).
+        Value::Struct(s) => struct_instance_to_literal(s, &s.struct_name),
         // Range, Tuple, Dict, etc. would need special handling
+        _ => None,
+    }
+}
+
+/// Recursively reconstruct a runtime `Value` as an injectable `Expr`, including
+/// nested arrays (`Any[]` holding a `Vector{Series}`) and struct elements that
+/// the flat `value_to_literal` path cannot express. Used to persist module-level
+/// mutable state (e.g. `Plots._CURRENT_SERIES`) across REPL evaluations so that
+/// `plot!`/`scatter!` keep appending to the current plot (Issue #5296).
+///
+/// Returns `None` — meaning "do not persist; keep the module's own initializer" —
+/// when any element cannot be reconstructed, or when an array is empty (the empty
+/// form is exactly what the module initializer already produces).
+pub(crate) fn value_to_init_expr(
+    value: &Value,
+    heap: &[StructInstance],
+    span: Span,
+) -> Option<Expr> {
+    // Top-level entry: an empty array defers to a module initializer (Issue #5296).
+    value_to_init_expr_inner(value, heap, span, false)
+}
+
+/// `nested` is `true` when reconstructing a value that lives *inside* another
+/// value (a struct field or an array element). At top level an empty array
+/// returns `None` so a module's own initializer wins (Issue #5296); nested, an
+/// empty array MUST be rebuilt as an empty typed array, otherwise the whole
+/// enclosing struct fails to persist — which dropped a REPL global holding an
+/// array of `Plot`s after the struct grew an empty `hlines`/`vlines = Float64[]`
+/// field (Issue #8086 / #8063).
+fn value_to_init_expr_inner(
+    value: &Value,
+    heap: &[StructInstance],
+    span: Span,
+    nested: bool,
+) -> Option<Expr> {
+    // Primitives, numeric/bool arrays, Memory, symbols, nothing, and bare structs
+    // whose fields are all literal-able round-trip through value_to_literal.
+    if let Some(lit) = value_to_literal(value) {
+        return Some(Expr::Literal(lit, span));
+    }
+
+    // A function/closure value held inside a persisted value (e.g. an ODEProblem's
+    // `f` field, `g = sin`) reconstructs as a `FunctionRef` by name; the function
+    // itself is preserved in `REPLSession::functions` and re-injected. Without this
+    // a struct carrying a function field had no init expr and was dropped.
+    if let Some(expr) = callable_value_to_expr(value, span) {
+        return Some(expr);
+    }
+
+    // Heterogeneous (`Any`) / struct-element arrays and `Array` wrappers: rebuild
+    // as a nested ArrayLiteral, recursing on each element. Checked before the
+    // struct arm so `Vector{Series}`/`Array{...}` wrappers (which are structs)
+    // take the array path rather than being treated as constructible structs.
+    if let Some(arr) = value_as_array(value, heap) {
+        let elements = arr.to_value_vec();
+        if elements.is_empty() {
+            // Top-level empty arrays defer to a module initializer (Issue #5296);
+            // a nested empty array (e.g. a `Plot.hlines = Float64[]` struct field)
+            // must be reconstructed or the enclosing struct fails to persist and
+            // the whole global is dropped (Issue #8086).
+            return if nested {
+                empty_array_init_expr(value, heap, span)
+            } else {
+                None
+            };
+        }
+        let exprs = elements
+            .iter()
+            .map(|e| value_to_init_expr_inner(e, heap, span, true))
+            .collect::<Option<Vec<_>>>()?;
+        return Some(Expr::ArrayLiteral {
+            elements: exprs,
+            shape: arr.shape.clone(),
+            span,
+        });
+    }
+
+    // A bare tuple (`tspan = (0.0, 60.0)`) has no `Literal` form; rebuild it as a
+    // `TupleLiteral`, recursing on each element. Without this a tuple-valued REPL
+    // global was dropped and the next eval raised `UndefVarError` (Issue #8243).
+    // Mirrors the NamedTuple / Range cases.
+    if let Value::Tuple(t) = value {
+        let elements = t
+            .elements
+            .iter()
+            .map(|e| value_to_init_expr_inner(e, heap, span, true))
+            .collect::<Option<Vec<_>>>()?;
+        return Some(Expr::TupleLiteral { elements, span });
+    }
+
+    // StaticArrays `@SVector` / `@SMatrix` are stored as an inline static-array
+    // value (not a tuple/struct), so they had no reconstruction and were dropped —
+    // `u = @SVector [...]` then `u` raised `UndefVarError` (Issue #8249). Rebuild
+    // from the column-major elements via the same constructor calls the lowering
+    // emits: `SVector(xs...)` for a vector, `SMatrix{M,N}(xs...)` for a matrix
+    // (the IR encodes the type parameters in the function-name string).
+    if let Value::StaticArrayInline(sa) = value {
+        let args = sa
+            .to_tuple_value()
+            .elements
+            .iter()
+            .map(|e| value_to_init_expr_inner(e, heap, span, true))
+            .collect::<Option<Vec<_>>>()?;
+        let arity = args.len();
+        let function = if sa.is_vector() {
+            "SVector".to_string()
+        } else {
+            format!("SMatrix{{{},{}}}", sa.rows, sa.cols)
+        };
+        return Some(Expr::Call {
+            function,
+            args,
+            kwargs: Vec::new(),
+            splat_mask: vec![false; arity],
+            kwargs_splat_mask: Vec::new(),
+            span,
+        });
+    }
+
+    if let Value::NamedTuple(nt) = value {
+        let fields = nt
+            .names
+            .iter()
+            .zip(nt.values.iter())
+            .map(|(name, field_value)| {
+                value_to_init_expr_inner(field_value, heap, span, true)
+                    .map(|expr| (name.clone(), expr))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some(Expr::NamedTupleLiteral { fields, span });
+    }
+
+    // A non-array struct (e.g. a `Series`). Fields that are not literal-able —
+    // such as broadcast/range-backed `Array` wrappers in a 3D series' x/y/z —
+    // are reconstructed recursively and the struct is rebuilt via a positional
+    // constructor call `StructName(field0, field1, ...)`.
+    // A `Range` field (e.g. `plot!(x, y, t)` stores the range `t` as the series'
+    // z without collecting it). Rebuild the `start:step:stop` expression, mirroring
+    // the user-global Range path in `inject_globals`.
+    if let Value::Range(r) = value {
+        let lit = |x: f64| {
+            if r.is_float {
+                Literal::Float(x)
+            } else {
+                Literal::Int(x as i64)
+            }
+        };
+        return Some(Expr::Range {
+            start: Box::new(Expr::Literal(lit(r.start), span)),
+            step: Some(Box::new(Expr::Literal(lit(r.step), span))),
+            stop: Box::new(Expr::Literal(lit(r.stop), span)),
+            span,
+        });
+    }
+
+    if let Some(instance) = as_struct(value, heap) {
+        let short_name = short_constructible_type_name(&instance.struct_name);
+        let args = instance
+            .values
+            .iter()
+            .map(|v| value_to_init_expr_inner(v, heap, span, true))
+            .collect::<Option<Vec<_>>>()?;
+        let arity = args.len();
+        return Some(Expr::Call {
+            function: short_name.into_owned(),
+            args,
+            kwargs: Vec::new(),
+            splat_mask: vec![false; arity],
+            kwargs_splat_mask: Vec::new(),
+            span,
+        });
+    }
+
+    None
+}
+
+/// Re-create a REPL global bound to an **empty** array (`x = []`, `Int[]`,
+/// `Any[]`, `Float64[]`) as an `Expr::TypedEmptyArray` init expression.
+///
+/// `value_to_init_expr` deliberately returns `None` for empty arrays so a
+/// module's own initializer wins for module-level state (`_CURRENT_SERIES`,
+/// Issue #5296). But a *user* global like `ps = []` has no initializer to fall
+/// back on, so without this it is silently dropped and the next evaluation sees
+/// `UndefVarError` — which is exactly what breaks `@gif`/`push!(ps, …)` in the
+/// REPL (Issue #7151). The element type is parsed from the array's `struct_name`
+/// (`Array{Any, 1}` → `Any`, `Array{Int64, 1}` → `Int64`) so `eltype`/`push!`
+/// keep matching upstream. Only 1-D (vector) empties are handled; higher-rank
+/// empties return `None` (no worse than today) since `TypedEmptyArray` builds a
+/// `Vector`.
+pub(crate) fn empty_array_init_expr(
+    value: &Value,
+    heap: &[StructInstance],
+    span: Span,
+) -> Option<Expr> {
+    let arr = value_as_array(value, heap)?;
+    if arr.element_count() != 0 || arr.shape.len() > 1 {
+        return None;
+    }
+    let element_type = array_value_element_type_name(value);
+    Some(Expr::TypedEmptyArray { element_type, span })
+}
+
+/// Best-effort Julia element-type name for an array `value`, parsed from its
+/// `struct_name` (`Array{T, N}` / `Vector{T}`). Falls back to `Any`.
+fn array_value_element_type_name(value: &Value) -> String {
+    if let Value::Struct(s) = value {
+        if let Some(name) = array_struct_element_type_name(&s.struct_name) {
+            return name;
+        }
+    }
+    "Any".to_string()
+}
+
+/// Extract the first (element) type parameter from an array wrapper type name,
+/// honoring nested braces: `Array{Any, 1}` → `Any`, `Vector{Int64}` → `Int64`,
+/// `Array{Complex{Float64}, 1}` → `Complex{Float64}`.
+fn array_struct_element_type_name(struct_name: &str) -> Option<String> {
+    let base = short_constructible_type_name(struct_name);
+    let inner = base
+        .strip_prefix("Array{")
+        .or_else(|| base.strip_prefix("Vector{"))
+        .or_else(|| base.strip_prefix("Matrix{"))?
+        .strip_suffix('}')?;
+    let mut depth = 0usize;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => return Some(inner[..i].trim().to_string()),
+            _ => {}
+        }
+    }
+    Some(inner.trim().to_string())
+}
+
+/// Resolve `value` to a `StructInstance` if it is a struct (by-ref or by-value),
+/// for recursive reconstruction. Array wrappers are intentionally excluded here:
+/// the caller handles them via `value_as_array` first.
+fn as_struct<'a>(value: &'a Value, heap: &'a [StructInstance]) -> Option<&'a StructInstance> {
+    match value {
+        Value::StructRef(idx) => heap.get(*idx),
+        Value::Struct(s) => Some(s),
+        _ => None,
+    }
+}
+
+/// Interpret `value` as an array (native array or a `Memory`-backed `Array`/
+/// `Vector`/`Matrix` wrapper) for recursive reconstruction. Returns `None` for
+/// scalars and non-wrapper structs (e.g. `Series`), which `linalg_value_to_array_value`
+/// rejects with an `Err` rather than panicking.
+fn value_as_array(value: &Value, heap: &[StructInstance]) -> Option<ArrayValue> {
+    let looks_arrayish = crate::vm::value::is_native_array_value(value)
+        || matches!(value, Value::StructRef(_) | Value::Struct(_));
+    if !looks_arrayish {
+        return None;
+    }
+    crate::vm::builtins_linalg::linalg_value_to_array_value(
+        value.clone(),
+        heap,
+        "repl_persist",
+        None,
+    )
+    .ok()
+}
+
+fn array_value_to_literal(arr: &ArrayValue) -> Option<Literal> {
+    match arr.element_type() {
+        ArrayElementType::F64 => {
+            let mut data = Vec::with_capacity(arr.element_count());
+            for idx in 0..arr.element_count() {
+                match arr.get_linear(idx).ok()? {
+                    Value::F64(v) => data.push(v),
+                    _ => return None,
+                }
+            }
+            Some(Literal::Array(data, arr.shape.clone()))
+        }
+        ArrayElementType::I64 => {
+            let mut data = Vec::with_capacity(arr.element_count());
+            for idx in 0..arr.element_count() {
+                match arr.get_linear(idx).ok()? {
+                    Value::I64(v) => data.push(v),
+                    _ => return None,
+                }
+            }
+            Some(Literal::ArrayI64(data, arr.shape.clone()))
+        }
+        ArrayElementType::Bool => {
+            let mut data = Vec::with_capacity(arr.element_count());
+            for idx in 0..arr.element_count() {
+                match arr.get_linear(idx).ok()? {
+                    Value::Bool(v) => data.push(v),
+                    _ => return None,
+                }
+            }
+            Some(Literal::ArrayBool(data, arr.shape.clone()))
+        }
+        // Complex, String, Char, Any, and StructRef arrays do not have literal
+        // array variants yet. They remain available in REPLGlobals but are not
+        // injected as Literal::Array*.
+        _ => None,
+    }
+}
+
+fn memory_value_to_literal(mem: &MemoryValue) -> Option<Literal> {
+    let shape = vec![mem.len()];
+    match mem.element_type() {
+        ArrayElementType::F64 => {
+            let mut data = Vec::with_capacity(mem.len());
+            for idx in 1..=mem.len() {
+                match mem.get(idx).ok()? {
+                    Value::F64(v) => data.push(v),
+                    _ => return None,
+                }
+            }
+            Some(Literal::Array(data, shape))
+        }
+        ArrayElementType::I64 => {
+            let mut data = Vec::with_capacity(mem.len());
+            for idx in 1..=mem.len() {
+                match mem.get(idx).ok()? {
+                    Value::I64(v) => data.push(v),
+                    _ => return None,
+                }
+            }
+            Some(Literal::ArrayI64(data, shape))
+        }
+        ArrayElementType::Bool => {
+            let mut data = Vec::with_capacity(mem.len());
+            for idx in 1..=mem.len() {
+                match mem.get(idx).ok()? {
+                    Value::Bool(v) => data.push(v),
+                    _ => return None,
+                }
+            }
+            Some(Literal::ArrayBool(data, shape))
+        }
+        // Other Memory element types do not have Literal::Array* variants yet.
         _ => None,
     }
 }
@@ -140,18 +466,109 @@ pub(crate) fn struct_instance_to_literal(
     instance: &StructInstance,
     struct_name: &str,
 ) -> Option<Literal> {
+    if is_array_wrapper_name(struct_name) {
+        return array_wrapper_struct_to_literal(instance);
+    }
+
     let mut field_literals = Vec::with_capacity(instance.values.len());
     for value in &instance.values {
         // Delegate field conversion to value_to_literal() for consistent coverage.
-        // value_to_literal() handles Complex (via is_complex() check), Array (with element
-        // type preservation), Memory, and all primitive types. Any type that value_to_literal()
-        // cannot convert causes the whole struct to fail persistence.
+        // value_to_literal() handles nested structs (incl. Complex, via the generic
+        // Value::Struct arm — Issue #5163), Array (with element type preservation),
+        // Memory, and all primitive types. Any type that value_to_literal() cannot
+        // convert causes the whole struct to fail persistence.
         match value_to_literal(value) {
             Some(lit) => field_literals.push(lit),
             None => return None,
         }
     }
     Some(Literal::Struct(struct_name.to_string(), field_literals))
+}
+
+fn is_array_wrapper_name(name: &str) -> bool {
+    let base = short_constructible_type_name(name);
+    base == "Array" || base.starts_with("Array{")
+}
+
+fn short_constructible_type_name(name: &str) -> Cow<'_, str> {
+    let Some(brace_idx) = name.find('{') else {
+        return Cow::Borrowed(name.rsplit('.').next().unwrap_or(name));
+    };
+
+    let base = &name[..brace_idx];
+    let params = &name[brace_idx..];
+    let short_base = base.rsplit('.').next().unwrap_or(base);
+    if short_base.len() == base.len() {
+        Cow::Borrowed(name)
+    } else {
+        Cow::Owned(format!("{short_base}{params}"))
+    }
+}
+
+fn array_wrapper_struct_to_literal(instance: &StructInstance) -> Option<Literal> {
+    let storage = instance.values.first()?;
+    let size = instance.values.get(1)?;
+    let (shape, offset) = array_wrapper_shape_and_offset(size)?;
+    let len: usize = shape.iter().product();
+
+    let mut values = Vec::with_capacity(len);
+    let element_type = if let Some(arr_ref) = crate::vm::value::native_array_value_ref(storage) {
+        let arr = arr_ref.borrow();
+        for linear in 0..len {
+            values.push(arr.get_linear(offset - 1 + linear).ok()?);
+        }
+        arr.element_type()
+    } else if let Value::Memory(mem_ref) = storage {
+        let mem = mem_ref.borrow();
+        for linear in 0..len {
+            values.push(mem.get(offset + linear).ok()?);
+        }
+        mem.element_type.clone()
+    } else {
+        return None;
+    };
+
+    values_to_array_literal(values, shape, element_type)
+}
+
+fn values_to_array_literal(
+    values: Vec<Value>,
+    shape: Vec<usize>,
+    element_type: ArrayElementType,
+) -> Option<Literal> {
+    match element_type {
+        ArrayElementType::F64 => Some(Literal::Array(
+            values
+                .into_iter()
+                .map(|value| match value {
+                    Value::F64(v) => Some(v),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?,
+            shape,
+        )),
+        ArrayElementType::I64 => Some(Literal::ArrayI64(
+            values
+                .into_iter()
+                .map(|value| match value {
+                    Value::I64(v) => Some(v),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?,
+            shape,
+        )),
+        ArrayElementType::Bool => Some(Literal::ArrayBool(
+            values
+                .into_iter()
+                .map(|value| match value {
+                    Value::Bool(v) => Some(v),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?,
+            shape,
+        )),
+        _ => None,
+    }
 }
 
 /// Extract variable names that are assigned in a list of statements.
@@ -263,6 +680,114 @@ mod tests {
     use crate::ir::core::Literal;
     use crate::vm::Value;
 
+    // Issue #5163: a bare `Value::Struct` Complex must convert faithfully via the
+    // generic struct path — preserving the real `struct_name` and field literal
+    // types — rather than being collapsed to a hardcoded
+    // `Complex{Float64}` / `Literal::Float` representation.
+
+    #[test]
+    fn test_value_to_literal_bare_complex_f64_struct_is_faithful() {
+        use crate::vm::StructInstance;
+        // Complex{Float64}(3.0, -4.0) as a bare struct value
+        let value = Value::Struct(StructInstance::with_name(
+            0,
+            "Complex{Float64}".to_string(),
+            vec![Value::F64(3.0), Value::F64(-4.0)],
+        ));
+        let result = value_to_literal(&value);
+        let Some(Literal::Struct(name, fields)) = result else {
+            panic!("Expected Literal::Struct for Complex{{Float64}}, got {result:?}");
+        };
+        assert_eq!(name, "Complex{Float64}");
+        assert!(
+            matches!(&fields[0], Literal::Float(re) if (re - 3.0).abs() < 1e-15),
+            "re field should be Literal::Float(3.0), got {:?}",
+            fields[0]
+        );
+        assert!(
+            matches!(&fields[1], Literal::Float(im) if (im + 4.0).abs() < 1e-15),
+            "im field should be Literal::Float(-4.0), got {:?}",
+            fields[1]
+        );
+    }
+
+    #[test]
+    fn test_value_to_literal_bare_complex_int_struct_preserves_int_fields() {
+        use crate::vm::StructInstance;
+        // Complex{Int64}(5, 6) — fields must stay Literal::Int, NOT widen to Float
+        let value = Value::Struct(StructInstance::with_name(
+            0,
+            "Complex{Int64}".to_string(),
+            vec![Value::I64(5), Value::I64(6)],
+        ));
+        let result = value_to_literal(&value);
+        let Some(Literal::Struct(name, fields)) = result else {
+            panic!("Expected Literal::Struct for Complex{{Int64}}, got {result:?}");
+        };
+        assert_eq!(
+            name, "Complex{Int64}",
+            "struct_name must be preserved, not hardcoded to Complex{{Float64}}"
+        );
+        assert!(
+            matches!(&fields[0], Literal::Int(5)),
+            "re field should be Literal::Int(5), got {:?}",
+            fields[0]
+        );
+        assert!(
+            matches!(&fields[1], Literal::Int(6)),
+            "im field should be Literal::Int(6), got {:?}",
+            fields[1]
+        );
+    }
+
+    #[test]
+    fn test_value_to_literal_bare_complex_f32_struct_preserves_float32_fields() {
+        use crate::vm::StructInstance;
+        // Complex{Float32}(1.5f0, 2.5f0) — fields must stay Literal::Float32
+        let value = Value::Struct(StructInstance::with_name(
+            0,
+            "Complex{Float32}".to_string(),
+            vec![Value::F32(1.5_f32), Value::F32(2.5_f32)],
+        ));
+        let result = value_to_literal(&value);
+        let Some(Literal::Struct(name, fields)) = result else {
+            panic!("Expected Literal::Struct for Complex{{Float32}}, got {result:?}");
+        };
+        assert_eq!(
+            name, "Complex{Float32}",
+            "struct_name must be preserved, not hardcoded to Complex{{Float64}}"
+        );
+        assert!(
+            matches!(&fields[0], Literal::Float32(re) if (re - 1.5_f32).abs() < 1e-6),
+            "re field should be Literal::Float32(1.5), got {:?}",
+            fields[0]
+        );
+        assert!(
+            matches!(&fields[1], Literal::Float32(im) if (im - 2.5_f32).abs() < 1e-6),
+            "im field should be Literal::Float32(2.5), got {:?}",
+            fields[1]
+        );
+    }
+
+    #[test]
+    fn test_value_to_literal_bare_non_complex_struct_round_trips() {
+        use crate::vm::StructInstance;
+        // A bare non-Complex struct must also convert via the generic arm
+        // (regression guard for the NamedTuple-field / Expr-arg paths that
+        // pass whole structs through value_to_literal — Issue #5163 risk note).
+        let value = Value::Struct(StructInstance::with_name(
+            0,
+            "Point".to_string(),
+            vec![Value::I64(1), Value::I64(2)],
+        ));
+        let result = value_to_literal(&value);
+        assert!(
+            matches!(result, Some(Literal::Struct(ref name, ref fields))
+                if name == "Point" && fields.len() == 2),
+            "Expected Literal::Struct(Point, [..]), got {result:?}"
+        );
+    }
+
     // Issue #3296: narrow int types must produce Some from value_to_literal
 
     #[test]
@@ -276,7 +801,10 @@ mod tests {
     #[test]
     fn test_value_to_literal_i16() {
         assert!(
-            matches!(value_to_literal(&Value::I16(1000)), Some(Literal::Int(1000))),
+            matches!(
+                value_to_literal(&Value::I16(1000)),
+                Some(Literal::Int(1000))
+            ),
             "Expected Literal::Int(1000) for I16(1000)"
         );
     }
@@ -363,12 +891,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_value_to_literal_reads_reshaped_array_logically() {
+        use crate::vm::{new_array_ref, ArrayValue};
+
+        let source = new_array_ref(ArrayValue::memory_first_from_i64(
+            vec![1, 2, 3, 4],
+            vec![2, 2],
+        ));
+        let reshaped = ArrayValue::reshaped_from_ref(&source, vec![4]).unwrap();
+        source.borrow_mut().set(&[2, 2], Value::I64(40)).unwrap();
+
+        let result = array_value_to_literal(&reshaped);
+
+        assert!(
+            matches!(result, Some(Literal::ArrayI64(ref data, ref shape))
+                if data == &vec![1, 2, 3, 40] && shape == &vec![4]),
+            "Expected logical reshaped array literal, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_value_to_literal_memory_reads_storage_without_array_wrapper() {
+        use crate::vm::value::{new_memory_ref, MemoryValue};
+
+        let mut memory = MemoryValue::undef_typed(&ArrayElementType::I64, 3);
+        memory.set(1, Value::I64(10)).unwrap();
+        memory.set(2, Value::I64(20)).unwrap();
+        memory.set(3, Value::I64(30)).unwrap();
+        let mem = new_memory_ref(memory);
+        let result = value_to_literal(&Value::Memory(mem));
+
+        assert!(
+            matches!(result, Some(Literal::ArrayI64(ref data, ref shape))
+                if data == &vec![10, 20, 30] && shape == &vec![3]),
+            "Expected Memory-backed literal array, got {:?}",
+            result
+        );
+    }
+
     // Issue #3299: Regex persistence
     #[test]
     fn test_value_to_literal_regex_simple() {
         use crate::vm::value::RegexValue;
         let rv = RegexValue::new("hello", "").unwrap();
-        let result = value_to_literal(&Value::Regex(rv));
+        let result = value_to_literal(&Value::Regex(Box::new(rv)));
         assert!(
             matches!(result, Some(Literal::Regex { ref pattern, ref flags }) if pattern == "hello" && flags.is_empty()),
             "Expected Literal::Regex(hello, ''), got {:?}",
@@ -380,7 +948,7 @@ mod tests {
     fn test_value_to_literal_regex_with_flags() {
         use crate::vm::value::RegexValue;
         let rv = RegexValue::new("world", "i").unwrap();
-        let result = value_to_literal(&Value::Regex(rv));
+        let result = value_to_literal(&Value::Regex(Box::new(rv)));
         assert!(
             matches!(result, Some(Literal::Regex { ref pattern, ref flags }) if pattern == "world" && flags == "i"),
             "Expected Literal::Regex(world, 'i'), got {:?}",
@@ -457,7 +1025,7 @@ mod tests {
             ("Char", Value::Char('a')),
             (
                 "Regex",
-                Value::Regex(RegexValue::new("test", "").expect("valid regex")),
+                Value::Regex(Box::new(RegexValue::new("test", "").expect("valid regex"))),
             ),
             (
                 "Enum",
@@ -486,7 +1054,8 @@ mod tests {
         // - Value::Pairs: no Literal::Pairs exists (Issue #3301)
         // - Value::Set: no Literal::Set exists (Issue #3301)
         // - Value::RegexMatch: no Literal::RegexMatch exists (Issue #3301)
-        // - Value::Memory: no Literal::Memory exists (Issue #3301)
+        // - Value::Memory: no Literal::Memory exists; REPLSession injects Memory
+        //   globals via Memory{T}(undef, n) + setindex! reconstruction (Issue #4009)
         // - Value::Closure: injected via callable_value_to_expr(), not value_to_literal()
     }
 
@@ -532,10 +1101,13 @@ mod tests {
     #[test]
     fn test_struct_instance_enum_field() {
         use crate::vm::StructInstance;
-        let instance = StructInstance::new(0, vec![Value::Enum {
-            type_name: "Color".to_string(),
-            value: 2,
-        }]);
+        let instance = StructInstance::new(
+            0,
+            vec![Value::Enum {
+                type_name: "Color".to_string(),
+                value: 2,
+            }],
+        );
         let result = struct_instance_to_literal(&instance, "Pixel");
         assert!(
             matches!(
@@ -565,12 +1137,18 @@ mod tests {
     fn test_struct_instance_mixed_fields() {
         use crate::vm::StructInstance;
         // Struct with I64, Bool, Char, Enum fields — all must be preserved (Issue #3310)
-        let instance = StructInstance::new(0, vec![
-            Value::I64(10),
-            Value::Bool(false),
-            Value::Char('a'),
-            Value::Enum { type_name: "Status".to_string(), value: 0 },
-        ]);
+        let instance = StructInstance::new(
+            0,
+            vec![
+                Value::I64(10),
+                Value::Bool(false),
+                Value::Char('a'),
+                Value::Enum {
+                    type_name: "Status".to_string(),
+                    value: 0,
+                },
+            ],
+        );
         let result = struct_instance_to_literal(&instance, "Complex");
         assert!(
             result.is_some(),
@@ -654,10 +1232,7 @@ mod tests {
         );
         // F64 → Float
         assert!(
-            matches!(
-                value_to_literal(&Value::F64(1.5)),
-                Some(Literal::Float(_))
-            ),
+            matches!(value_to_literal(&Value::F64(1.5)), Some(Literal::Float(_))),
             "F64 must produce Literal::Float (Issue #3320)"
         );
         // I64 → Int
@@ -702,18 +1277,12 @@ mod tests {
         );
         // Nothing → Nothing
         assert!(
-            matches!(
-                value_to_literal(&Value::Nothing),
-                Some(Literal::Nothing)
-            ),
+            matches!(value_to_literal(&Value::Nothing), Some(Literal::Nothing)),
             "Nothing must produce Literal::Nothing (Issue #3320)"
         );
         // Missing → Missing
         assert!(
-            matches!(
-                value_to_literal(&Value::Missing),
-                Some(Literal::Missing)
-            ),
+            matches!(value_to_literal(&Value::Missing), Some(Literal::Missing)),
             "Missing must produce Literal::Missing (Issue #3320)"
         );
         // Str → Str

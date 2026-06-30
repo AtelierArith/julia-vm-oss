@@ -5,6 +5,7 @@
 //! These properties enable optimization opportunities and safety guarantees.
 
 pub mod inference;
+pub mod instr;
 pub mod propagation;
 
 /// Effect bit representing a tri-state boolean property.
@@ -121,6 +122,43 @@ impl Effects {
     pub fn pure_arithmetic() -> Self {
         Self {
             consistent: EffectBit::AlwaysTrue,
+            effect_free: EffectBit::AlwaysTrue,
+            nothrow: true,
+            terminates: true,
+            notaskstate: true,
+            inaccessiblememonly: true,
+            noub: true,
+            nonoverlayed: true,
+            nortcall: true,
+        }
+    }
+
+    /// Create effects for deterministic, effect-free operations that can throw
+    /// for some input values (e.g. `div`, `rem`, `sqrt` domain errors).
+    pub fn effect_free_may_throw() -> Self {
+        Self {
+            consistent: EffectBit::AlwaysTrue,
+            effect_free: EffectBit::AlwaysTrue,
+            nothrow: false,
+            terminates: true,
+            notaskstate: true,
+            inaccessiblememonly: true,
+            noub: true,
+            nonoverlayed: true,
+            nortcall: true,
+        }
+    }
+
+    /// Effects for operations that allocate a fresh mutable object (`zeros`,
+    /// `ones`, `fill`, `similar`, `copy`, `collect`, …). Effect-free and nothrow,
+    /// but deliberately NOT `:consistent`: each call returns an independent,
+    /// non-egal, mutable result, so two textually-identical calls must never be
+    /// merged by CSE or hoisted/const-folded into a shared value. Sharing such an
+    /// allocation made `a = zeros(n); b = zeros(n)` alias the same array, which
+    /// silently corrupted any code that mutates the two independently (Issue #7176).
+    pub fn allocating() -> Self {
+        Self {
+            consistent: EffectBit::AlwaysFalse,
             effect_free: EffectBit::AlwaysTrue,
             nothrow: true,
             terminates: true,

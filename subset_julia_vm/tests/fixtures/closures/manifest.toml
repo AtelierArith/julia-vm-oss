@@ -43,10 +43,28 @@ expected = true
 description = "Calling closures via tuple indexing e.g. tuple[1]() (Issue #2240)"
 
 [[tests]]
+name = "closures_hof_capture_4289"
+file = "hof_capture_4289.jl"
+expected = true
+description = "Captured nested functions keep their closure environment through map and Base.Generator (Issue #4289)"
+
+[[tests]]
+name = "closures_callable_closure_method_4309"
+file = "callable_closure_method_4309.jl"
+expected = true
+description = "Methods added to typeof(f) participate in closure object dispatch for static top-level callable aliases (Issue #4309)"
+
+[[tests]]
 name = "closures_testset_capture"
 file = "testset_closure_capture.jl"
 expected = true
 description = "Closures inside @testset capture outer variables (Issue #2358)"
+
+[[tests]]
+name = "closures_any_tuple_array_lambda_4650"
+file = "any_tuple_array_lambda_4650.jl"
+expected = true
+description = "Anonymous functions stored in Any tuple array elements keep callable bindings (Issue #4650)"
 
 [[tests]]
 name = "closures_mixed_closure_nonclosure"
@@ -65,3 +83,129 @@ name = "closures_very_deep_nesting"
 file = "test_very_deep_nesting.jl"
 expected = true
 description = "Very deeply nested closures (5-6 levels), sibling capture, deep shadowing (Issue #1764)"
+
+[[tests]]
+name = "closures_rc_shared_capture_hot_path_5189"
+file = "rc_shared_capture_hot_path_5189.jl"
+expected = true
+description = "Rc-shared closure captures preserve capture-heavy HOF behavior (Issue #5189)"
+
+[[tests]]
+name = "closures_captured_function_call_5723"
+file = "captured_function_call_5723.jl"
+expected = true
+description = "A closure can call a function-valued variable captured from an enclosing scope (makeapply(f)=x->f(x)), incl. named nested, compose, and map-with-captured-fn; capturing non-function values still works (Issue #5723)"
+
+[[tests]]
+name = "closures_pipe_into_inline_lambda_5673"
+file = "pipe_into_inline_lambda_5673.jl"
+expected = true
+description = "Piping into an inline lambda (value |> x -> expr) parses as value |> (x -> expr) — the arrow binds its parameter before the higher-precedence |> applies, so the lambda body's parameter is bound (Issue #5673)"
+
+[[tests]]
+name = "closures_scalar_capture_reassign_6262"
+file = "scalar_capture_reassign_6262.jl"
+expected = true
+description = "A closure capturing a scalar local observes later reassignments (Julia Core.Box cell semantics) instead of a stale value snapshot. A post-lowering pass (lowering/closure_box.rs) boxes a local as Ref when it is captured by a closure and reassigned >=2 times at its scope's top level, rewriting binding/reads/reassignments to Ref form in the scope and the closure; single-assignment captures stay unboxed (Issue #6262)"
+
+[[tests]]
+name = "closures_testset_closure_capture_reassign_6281"
+file = "testset_closure_capture_reassign_6281.jl"
+expected = true
+description = "A closure capturing a scalar local to an @testset block (or a bare begin block) observes later top-level reassignments of that local, like the function-local case in #6262. Such bodies lower to nested empty-binding let blocks (Stmt::Expr(LetBlock{bindings:[]})), so the boxing pass (lowering/closure_box.rs) descends into empty-binding let blocks as defining scopes to unify the binding, its reassignments, and the capturing closure. The final boolean is the regression guard (a stale value snapshot makes it false); inner @tests are diagnostics. Matches upstream Julia (Issue #6281)"
+
+[[tests]]
+name = "closures_time_block_closure_capture_6288"
+file = "time_block_closure_capture_6288.jl"
+expected = true
+description = "A closure capturing a variable local to a @time/@elapsed block compiles (previously failed 'Undefined variable' even read-only) and observes later reassignments (Core.Box semantics), including `r = @time begin … end` as an assignment value. @time lowers its body to `#result# = let … end` (an empty-binding let block as an assignment value), so the lambda-capture pre-analysis (compile/mod.rs) and the boxing pass (lowering/closure_box.rs) descend into that form. Final boolean is the regression guard; inner @tests are diagnostics; @testset regression included. Matches upstream Julia (Issues #6288/#6281)"
+
+[[tests]]
+name = "closures_short_form_arrow_capture_7531"
+file = "short_form_arrow_capture_7531.jl"
+expected = true
+description = "Arrow closures returned from short-form function bodies capture outer parameters instead of compiling as top-level lifted lambdas with missing captures (Issue #7531)"
+
+[[tests]]
+name = "closures_nested_arrow_in_typed_method_7545"
+file = "nested_arrow_in_typed_method_7545.jl"
+expected = true
+description = "Arrow lambdas nested in typed full-form methods remain callable after nested-function qualification (Issue #7545)"
+
+[[tests]]
+name = "closures_do_block_tuple_destructuring_7562"
+file = "do_block_tuple_destructuring_7562.jl"
+expected = true
+description = "Tuple destructuring assignment lowers correctly inside do-block bodies (Issue #7562)"
+
+[[tests]]
+name = "closures_module_qualified_do_args_7565"
+file = "module_qualified_do_args_7565.jl"
+expected = true
+description = "Module-qualified do-block calls preserve existing positional arguments after the do function (Issue #7565)"
+
+[[tests]]
+name = "closures_do_block_if_assignment_value_7566"
+file = "do_block_if_assignment_value_7566.jl"
+expected = true
+description = "Do-block if-expression branches can assign to captured outer locals and still yield the branch assignment value (Issue #7566)"
+
+[[tests]]
+name = "closures_nested_lambda_index_assign_7615"
+file = "nested_lambda_index_assign_7615.jl"
+expected = true
+description = "Nested lambdas in the value/index of an index-assignment, a field-assignment value, and a Dict-style index-assignment value are registered by collect_stmt_functions, so they no longer fail at runtime with 'Function ...__lambda_nested_... not found' (Issue #7615)"
+
+[[tests]]
+name = "closures_lambda_in_index_assignment_7615"
+file = "lambda_in_index_assignment_7615.jl"
+expected = true
+description = "Nested arrow lambdas in index-assignment RHS values are collected and registered before runtime dispatch (Issue #7615)"
+
+[[tests]]
+name = "closures_nested_closure_global_capture_7600"
+file = "nested_closure_global_capture_7600.jl"
+expected = true
+description = "A global / const / builtin constant (pi, user const K, non-const global G) referenced from a second-level (or deeper) nested do-block resolves to the global binding instead of failing with 'Cannot capture undefined variable'; outer do-block locals still flow through intermediate do-blocks (Issue #7600)"
+
+[[tests]]
+name = "closures_capture_base_named_local_7619"
+file = "capture_base_named_local_7619.jl"
+expected = true
+description = "A closure that captures and mutates an enclosing local whose name collides with a Base function (count, sum, length) resolves to the captured slot via LoadCaptured, not the Base FunctionValue (Issue #7619)"
+
+[[tests]]
+name = "closures_arrow_index_assign_body_8007"
+file = "arrow_index_assign_body_8007.jl"
+expected = true
+description = "An arrow lambda whose single-expression body is an index/field assignment (x -> (x[2] = v), x -> (x.u[2] = v)) lowers to a closure that performs the mutation, instead of failing with 'missing lambda body' / 'assignment target must be identifier'; index/field assignment in expression position yields the assigned RHS value (Issue #8007)"
+
+[[tests]]
+name = "closures_iife_arrow_control_flow_8018"
+file = "iife_arrow_control_flow_8018.jl"
+expected = true
+description = "An immediately-applied anonymous arrow lambda ((x -> body)(arg)) inside a function body lowers to a normal value-yielding call, not a tail return of the enclosing function: the continuation after the IIFE runs (returning a bool), and arithmetic on the IIFE result works instead of the lifted lambda's return leaking out (returning the lambda value early) or failing to compile with 'Cannot convert Nothing to I64' (Issue #8018)"
+
+[[tests]]
+name = "closures_fullform_iife_nested_8030"
+file = "fullform_iife_nested_8030.jl"
+expected = true
+description = "An immediately-applied FULL-FORM anonymous function ((function(x) body end)(arg)) inside an enclosing function body lifts the lambda into a nested FunctionDef embedded in the LetBlock body (collected as a nested function of the frame) instead of routing through build_indirect_call, which buried the FunctionDef in a LetBlock binding the collector never visits — so the lambda compiles and dispatch no longer fails with 'Function <parent>#__anonymous_function_N not found'; covers capture of an outer local, multiple params, control-flow nesting, the with-LambdaContext (macro-containing) path, the top-level form, and arrow-form equivalence (Issue #8030)"
+
+[[tests]]
+name = "closures_closure_factory_name_collision_8080"
+file = "closure_factory_name_collision_8080.jl"
+expected = true
+description = "A module-private closure factory _grad(f) returning a closure that captures `f`, built from an inner-constructor body and invoked deep inside a nested line-search-style loop, resolves the captured `f` correctly even though three distinct `f` bindings collide (the global `f`, the optimize/factory parameter `f`, and the captured `f`); renaming the global to `myf` gives the identical result — regression for the capture name collision behind Optim W-42 (Issue #8080)"
+
+[[tests]]
+name = "closures_nested_local_shadows_global_8105"
+file = "nested_local_shadows_global_8105.jl"
+expected = true
+description = "A nested LOCAL function sharing a name with an existing GLOBAL function shadows that global within its enclosing scope while leaving the global intact elsewhere: zero-arg `g()`/`h()`, the value-reference variant (`f = zztop; f()` resolves to the global, `make_zztop()` to the inner zztop), argument forms, a recursive nested `fact` that must self-recurse to the LOCAL (not the global), typed-method visibility, the no-global-counterpart case, and globals intact after the enclosing call. Root causes: the inliner did not treat a nested FunctionDef name as a local binding (inlined the global body at the call site), and nested functions were registered in the shared short-name method table where signature dedup let the inner method replace the global's (Issue #8105)"
+
+[[tests]]
+name = "closures_recursive_nested_closure_8118"
+file = "recursive_nested_closure_8118.jl"
+expected = true
+description = "A nested function that captures an enclosing local (a closure) can call itself recursively and call a mutually-recursive sibling: the self/sibling reference resolves through the captured environment instead of failing as 'Unknown function'. Covers self-recursion capturing a value (MWE1), pure mutual recursion (MWE2), self-recursion doing real work, mutually-recursive even/odd predicates, mutual recursion where only the callee captures an enclosing local, where both siblings capture it, three-way mutual recursion capturing a local, and regression guards for a non-recursive escaping closure and a captured function argument. prescan_mutual_closure_captures propagates a sibling closure's enclosing-local captures into every member that (transitively) calls it (sibling names excluded — reconstructed, not data-captured), so each member can reconstruct the others from the shared captures (Issue #8118)"

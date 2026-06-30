@@ -19,10 +19,22 @@ expected = true
 description = "isequal function - NaN-aware equality"
 
 [[tests]]
+name = "operators_mixed_string_equality_4642"
+file = "mixed_string_equality_4642.jl"
+expected = true
+description = "Mixed String/non-String == and != follow Julia fallback equality instead of raising conversion or MethodError (Issue #4642)"
+
+[[tests]]
 name = "operator_subtype_basic"
 file = "subtype_basic.jl"
 expected = true
 description = "<: subtype expression"
+
+[[tests]]
+name = "operators_type_value_equality_mutual_subtype_5921"
+file = "type_value_equality_mutual_subtype_5921.jl"
+expected = true
+description = "Type value ==/=== are derived from mutual subtyping, matching Tuple === Tuple{Vararg{Any}} (Issue #5921)"
 
 [[tests]]
 name = "operator_integer_division"
@@ -121,6 +133,12 @@ expected = true
 description = "set operators (issubset, in, proper subset/superset)"
 
 [[tests]]
+name = "operators_membership_alias_tuple_function_call_3911"
+file = "membership_alias_tuple_function_call_3911.jl"
+expected = true
+description = "Membership aliases are callable for tuple membership through direct and Base-qualified syntax (Issue #3911)"
+
+[[tests]]
 name = "operators_not_bug"
 file = "operators_not_bug.jl"
 expected = true
@@ -139,6 +157,12 @@ expected = true
 description = "pipe operator |> - applies function to argument"
 
 [[tests]]
+name = "operators_pipe_expression_rhs_7559"
+file = "pipe_expression_rhs_7559.jl"
+expected = true
+description = "pipe operator accepts expression-valued RHS callables such as ternary-selected functions (Issue #7559)"
+
+[[tests]]
 name = "operators_isgreater"
 file = "isgreater.jl"
 expected = true
@@ -155,6 +179,24 @@ name = "operators_in"
 file = "in_operator.jl"
 expected = true
 description = "in operator - check if element is in collection (Issue #488)"
+
+[[tests]]
+name = "operators_in_tuple_struct_membership_6691"
+file = "in_tuple_struct_membership_6691.jl"
+expected = true
+description = "in/∈ over a collection of tuples folds == over elements: primitive tuples, named tuples, and heap struct elements (OneTo/UnitRange/Complex) compare by value, not heap identity (Issue #6691, builds on #6685)"
+
+[[tests]]
+name = "operators_membership_alias_dispatch_first_3911"
+file = "membership_alias_dispatch_first_3911.jl"
+expected = true
+description = "membership unicode aliases route through dispatch-first Base.in extensions (Issue #3911)"
+
+[[tests]]
+name = "operators_narrow_integer_identity_membership_4637"
+file = "narrow_integer_identity_membership_4637.jl"
+expected = true
+description = "narrow integer ===, isequal/hash, and tuple membership (Issue #4637)"
 
 [[tests]]
 name = "operators_juxtaposition_call"
@@ -221,3 +263,39 @@ name = "operators_isless_pure_julia"
 file = "test_isless_pure_julia.jl"
 expected = true
 description = "isless Pure Julia: NaN, Missing, cross-type, string, char, bool (Issue #2712)"
+
+[[tests]]
+name = "operators_pair_bare_operator_rhs_6461"
+file = "pair_bare_operator_rhs_6461.jl"
+expected = true
+description = "Pair expressions preserve a bare operator RHS as a callable value (Issue #6461)"
+
+[[tests]]
+name = "operators_egal_immutable_struct_6709"
+file = "egal_immutable_struct_6709.jl"
+expected = true
+description = "=== (egal) on immutable structs stored as StructRef compares by value; mutable structs keep reference identity; tuple ==/hash/in regressions (Issue #6709, #6694)"
+
+[[tests]]
+name = "operators_unary_power_precedence_7232"
+file = "unary_power_precedence_7232.jl"
+expected = true
+description = "^/.^ bind tighter than a prefix unary operator: -x^2 == -(x^2), not (-x)^2 (Issue #7232)"
+
+[[tests]]
+name = "operators_unicode_not_equal_7450"
+file = "unicode_not_equal_7450.jl"
+expected = true
+description = "Unicode ≠ lowers as != / BinaryOp::Ne, matching upstream Julia and unblocking MacroTools.jl (Issues #7450/#7437)"
+
+[[tests]]
+name = "operators_unicode_comparison_7500"
+file = "unicode_comparison_7500.jl"
+expected = true
+description = "Unicode ≤ and ≥ lower as <= and >= comparisons, matching upstream Julia and unblocking MacroTools.jl (Issue #7500)"
+
+[[tests]]
+name = "operators_short_circuit_type_narrow_restore_7546"
+file = "short_circuit_type_narrow_restore_7546.jl"
+expected = true
+description = "Type narrowings applied while compiling && RHS are restored before later expressions (Issue #7546)"

@@ -32,6 +32,9 @@ export
     Complex,
     ComplexF64,
     CompositeException,
+    DenseArray,
+    DenseMatrix,
+    DenseVector,
     Dict,
     DimensionMismatch,
     DivideError,
@@ -47,6 +50,7 @@ export
     IOBuffer,
     IOContext,
     Irrational,
+    Iterators,
     KeyError,
     LinearIndices,
     LinRange,
@@ -90,7 +94,10 @@ export
     StringIndexError,
     Symbol,
     SystemError,
+    Channel,
+    Task,
     TaskFailedException,
+    Condition,
     Text,
     TextDisplay,
     Tuple,
@@ -481,6 +488,7 @@ export
     setindex!,
     haskey,
     hasmethod,
+    applicable,
     in,
     in!,
     intersect,
@@ -613,7 +621,9 @@ export
     close,
     countlines,
     cp,
+    eachline,
     eof,
+    eachline,
     filesize,
     isdir,
     isfile,
@@ -678,6 +688,7 @@ export
     fieldindex,
     fieldname,
     fieldnames,
+    fieldoffset,
     fieldtype,
     fieldtypes,
     getfield,
@@ -711,6 +722,9 @@ export
     randn,
 
 # bitarrays
+    BitArray,
+    BitMatrix,
+    BitVector,
     falses,
     trues,
 
@@ -719,6 +733,30 @@ export
 
 # errors
     error,
+
+# tasks and concurrency
+    asyncmap,
+    schedule,
+    fetch,
+    wait,
+    yield,
+    yieldto,
+    notify,
+    istaskdone,
+    istaskstarted,
+    istaskfailed,
+    current_task,
+    task_local_storage,
+    timedwait,
+    waitany,
+    waitall,
+    errormonitor,
+
+# channels
+    bind,
+    put!,
+    isfull,
+    isready,
 
 # metaprogramming
     __precompile__,
@@ -741,6 +779,7 @@ export
     @coalesce,
     @elapsed,
     @evalpoly,
+    @lock,
     @show,
     @showtime,
     @something,

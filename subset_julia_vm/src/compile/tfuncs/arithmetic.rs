@@ -8,6 +8,7 @@
 
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
 use crate::compile::promotion::{extract_complex_param, promote_type};
+use crate::inference_core::{CorePrimitive, CoreType};
 
 /// Transfer function for the `+` operator.
 ///
@@ -77,16 +78,18 @@ pub fn tfunc_add(args: &[LatticeType]) -> LatticeType {
         {
             // If either is float, result is float
             if a.is_float() || b.is_float() {
-                LatticeType::Concrete(ConcreteType::Float64)
+                LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64,
+                )))
             } else {
                 promote_integer_types(a, b)
             }
         }
 
         // Union types: be conservative
-        _ if left.is_numeric() && right.is_numeric() => {
-            LatticeType::Concrete(ConcreteType::Float64)
-        }
+        _ if left.is_numeric() && right.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        )),
 
         // Unknown or non-numeric types
         _ => LatticeType::Top,
@@ -96,8 +99,15 @@ pub fn tfunc_add(args: &[LatticeType]) -> LatticeType {
 /// Transfer function for the `-` operator.
 ///
 /// Handles both unary negation (-x) and binary subtraction (x - y).
-/// Unary negation preserves the operand type (Julia semantics: -x::T → T).
-/// Binary subtraction follows the same promotion rules as `+`.
+/// Unary negation preserves the operand type (Julia semantics: `-x::T → T`).
+/// This is type-preserving for *any* concrete operand, not only the lattice's
+/// `is_numeric()` primitives: `Complex{T}` (and other user numeric structs)
+/// negate to their own type, but the empty-table engine cannot prove
+/// `Complex{Float64} <: Number`, so gating on `is_numeric()` wrongly widened
+/// `-c::ComplexF64` to `Top`/`Any`. Mirroring the legacy pre-scan / upstream
+/// Julia (`typeof(-(1.0+2.0im)) === ComplexF64`), preserve the concrete operand
+/// type unconditionally (Issue #6601). Binary subtraction follows the same
+/// promotion rules as `+`.
 pub fn tfunc_sub(args: &[LatticeType]) -> LatticeType {
     // Handle unary negation: -x preserves the type
     if args.len() == 1 {
@@ -107,7 +117,9 @@ pub fn tfunc_sub(args: &[LatticeType]) -> LatticeType {
         };
         return match &operand {
             LatticeType::Bottom => LatticeType::Bottom,
-            LatticeType::Concrete(ct) if ct.is_numeric() => operand,
+            // Negation preserves the concrete operand type (numeric primitives
+            // and numeric structs like `Complex{T}` alike).
+            LatticeType::Concrete(_) => operand,
             _ => LatticeType::Top,
         };
     }
@@ -119,18 +131,86 @@ pub fn tfunc_sub(args: &[LatticeType]) -> LatticeType {
 ///
 /// Follows the same promotion rules as `+`.
 pub fn tfunc_mul(args: &[LatticeType]) -> LatticeType {
-    // Multiplication follows the same type rules as addition
+    // `*` on strings is concatenation -> String (Julia: `"a" * "b" == "ab"`).
+    if args.len() == 2
+        && (matches!(
+            &args[0],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String
+            )))
+        ) || matches!(
+            &args[1],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String
+            )))
+        ))
+    {
+        return LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
+    }
+    // Multiplication otherwise follows the same type rules as addition.
+    tfunc_add(args)
+}
+
+/// Transfer function for the `^` (power) operator.
+///
+/// Julia type rules: numeric powers mirror addition (`Int^Int -> Int`,
+/// any-Float -> Float, `Complex^_ -> Complex`); a String base repeats
+/// (`"ab"^3 == "ababab"`, type `String`).
+pub fn tfunc_pow(args: &[LatticeType]) -> LatticeType {
+    if args.len() != 2 {
+        return LatticeType::Top;
+    }
+    let left = match &args[0] {
+        LatticeType::Const(cv) => LatticeType::Concrete(cv.to_concrete_type()),
+        other => other.clone(),
+    };
+    let right = match &args[1] {
+        LatticeType::Const(cv) => LatticeType::Concrete(cv.to_concrete_type()),
+        other => other.clone(),
+    };
+
+    // `s^n` repeats a String (`^` repeats; `*` concatenates).
+    if let LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) =
+        &left
+    {
+        return LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
+    }
+    if let (
+        LatticeType::Concrete(base),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigInt))),
+    ) = (&left, &right)
+    {
+        if base.is_float() {
+            return left;
+        }
+    }
+    // Numeric powers follow the same promotion as addition.
     tfunc_add(args)
 }
 
 /// Transfer function for the `/` operator.
 ///
 /// In Julia, division always returns a Float64 (unlike `÷` which returns Int).
+/// SubsetJuliaVM-specific: when at least one operand is a `BigInt`, `/` is
+/// dispatched at runtime through `DivBigInt` (see
+/// `subset_julia_vm/src/vm/exec/binary_both.rs:1169`), which performs
+/// integer division and returns `BigInt`. Likewise, `BigFloat` × numeric
+/// dispatches to `DivBigFloat` and returns `BigFloat`. We mirror that here
+/// so that user-defined wrappers like `function div(a::BigInt, b::BigInt)
+/// return a / b end` (in `julia/base/intfuncs.jl`) infer the correct
+/// return type instead of widening to `Float64` (Issue #3531).
 ///
 /// # Examples
 /// ```text
 /// /(Int64, Int64) → Float64
 /// /(Float64, Float64) → Float64
+/// /(BigInt, BigInt) → BigInt
+/// /(BigInt, Int64) → BigInt
+/// /(BigFloat, BigFloat) → BigFloat
 /// ```
 pub fn tfunc_div(args: &[LatticeType]) -> LatticeType {
     if args.len() != 2 {
@@ -142,11 +222,52 @@ pub fn tfunc_div(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Bottom;
     }
 
-    match (&args[0], &args[1]) {
-        // Numeric / Numeric → Float64
-        _ if args[0].is_numeric() && args[1].is_numeric() => {
-            LatticeType::Concrete(ConcreteType::Float64)
+    let left = match &args[0] {
+        LatticeType::Const(cv) => LatticeType::Concrete(cv.to_concrete_type()),
+        other => other.clone(),
+    };
+    let right = match &args[1] {
+        LatticeType::Const(cv) => LatticeType::Concrete(cv.to_concrete_type()),
+        other => other.clone(),
+    };
+
+    match (&left, &right) {
+        // BigFloat × numeric (or numeric × BigFloat) → BigFloat
+        // Matches `DivBigFloat` runtime dispatch.
+        (LatticeType::Concrete(a), LatticeType::Concrete(b))
+            if (matches!(
+                a,
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigFloat))
+            ) && b.is_numeric())
+                || (matches!(
+                    b,
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigFloat))
+                ) && a.is_numeric()) =>
+        {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat,
+            )))
         }
+        // BigInt × {BigInt, integer} → BigInt
+        // Matches `DivBigInt` runtime dispatch (BigInt `/` is integer division).
+        (LatticeType::Concrete(a), LatticeType::Concrete(b))
+            if (matches!(
+                a,
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigInt))
+            ) && b.is_integer())
+                || (matches!(
+                    b,
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigInt))
+                ) && a.is_integer()) =>
+        {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            )))
+        }
+        // Numeric / Numeric → Float64
+        _ if left.is_numeric() && right.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        )),
 
         // Unknown or non-numeric types
         _ => LatticeType::Top,
@@ -167,7 +288,7 @@ pub fn tfunc_eq(args: &[LatticeType]) -> LatticeType {
     }
 
     // == always returns Bool for any types
-    LatticeType::Concrete(ConcreteType::Bool)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
 }
 
 /// Transfer function for the `<` operator.
@@ -186,19 +307,20 @@ pub fn tfunc_lt(args: &[LatticeType]) -> LatticeType {
     match (&args[0], &args[1]) {
         // Numeric < Numeric → Bool
         _ if args[0].is_numeric() && args[1].is_numeric() => {
-            LatticeType::Concrete(ConcreteType::Bool)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
         }
 
         // String < String → Bool
         (
-            LatticeType::Concrete(ConcreteType::String),
-            LatticeType::Concrete(ConcreteType::String),
-        ) => LatticeType::Concrete(ConcreteType::Bool),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))),
+        ) => LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
 
         // Char < Char → Bool
-        (LatticeType::Concrete(ConcreteType::Char), LatticeType::Concrete(ConcreteType::Char)) => {
-            LatticeType::Concrete(ConcreteType::Bool)
-        }
+        (
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
+        ) => LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
 
         // Unknown or non-comparable types
         _ => LatticeType::Top,
@@ -222,20 +344,19 @@ pub fn tfunc_ge(args: &[LatticeType]) -> LatticeType {
 
 /// Transfer function for the `!` operator (logical negation).
 ///
-/// Returns Bool for Bool input. In Julia, `!` is primarily for Bool,
-/// but other types may define their own `!` method.
+/// Logical negation always yields `Bool` (`typeof(!x) === Bool` in upstream
+/// Julia whenever `!` dispatches, e.g. `!true`, `!isempty(x)`). This matches
+/// the legacy pre-scan, which types `UnaryOp::Not` as `Bool` unconditionally.
+/// Previously the engine widened a non-`Bool` operand to `Top`, leaving the
+/// `Assign`-RHS slot `Any`; returning `Bool` removes that divergence so the
+/// pre-scan seam can route `UnaryOp` through the shared engine (Issue #6601).
 pub fn tfunc_not(args: &[LatticeType]) -> LatticeType {
     if args.len() != 1 {
         return LatticeType::Top;
     }
 
-    match &args[0] {
-        LatticeType::Concrete(ConcreteType::Bool) => LatticeType::Concrete(ConcreteType::Bool),
-        // For other types, we conservatively return Bool since `!` typically
-        // returns Bool in Julia (via truthiness conversion)
-        LatticeType::Concrete(_) => LatticeType::Concrete(ConcreteType::Bool),
-        _ => LatticeType::Top,
-    }
+    // `!` is logical negation: its result type is always `Bool`.
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
 }
 
 /// Helper: promote two integer types to their common type.
@@ -249,7 +370,9 @@ fn promote_integer_types(a: &ConcreteType, b: &ConcreteType) -> LatticeType {
         }
     }
     // Fallback to Int64 if conversion fails
-    LatticeType::Concrete(ConcreteType::Int64)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+        CorePrimitive::Int64,
+    )))
 }
 
 /// Helper: promote two float types to their common type.
@@ -263,7 +386,9 @@ fn promote_float_types(a: &ConcreteType, b: &ConcreteType) -> LatticeType {
         }
     }
     // Fallback to Float64 if conversion fails
-    LatticeType::Concrete(ConcreteType::Float64)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+        CorePrimitive::Float64,
+    )))
 }
 
 /// Extract the element type from a Complex struct type, if present.
@@ -320,6 +445,74 @@ fn promote_complex_arithmetic(
     })
 }
 
+/// Transfer function for `gcd` / `lcm`.
+///
+/// Type rules (Issue #5922, mirrors the legacy expression-inference gate):
+/// - any `BigInt` argument → `BigInt` (Issue #2383)
+/// - all-`Int64` arguments → `Int64`
+/// - anything else → Top (the expression adapter falls back to `Int64`)
+pub fn tfunc_gcd(args: &[LatticeType]) -> LatticeType {
+    let arg_concrete = |arg: &LatticeType| match arg {
+        LatticeType::Concrete(ct) => Some(ct.clone()),
+        LatticeType::Const(cv) => Some(cv.to_concrete_type()),
+        _ => None,
+    };
+    if args.iter().any(|arg| {
+        matches!(
+            arg_concrete(arg),
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt
+            )))
+        )
+    }) {
+        return LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::BigInt,
+        )));
+    }
+    if !args.is_empty()
+        && args.iter().all(|arg| {
+            matches!(
+                arg_concrete(arg),
+                Some(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                )))
+            )
+        })
+    {
+        return LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+    }
+    LatticeType::Top
+}
+
+/// Transfer function for `fld` / `cld` (floored / ceiling integer division).
+///
+/// Type rules (Issue #5922): claim `Int64` only for the all-`Int64` case;
+/// other shapes stay Top so the shared engine makes no unsound claim while
+/// the expression adapter keeps the legacy `Int64` fallback.
+pub fn tfunc_fld(args: &[LatticeType]) -> LatticeType {
+    let all_int64 = args.len() == 2
+        && args.iter().all(|arg| match arg {
+            LatticeType::Concrete(ct) => matches!(
+                ct,
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+            ),
+            LatticeType::Const(cv) => matches!(
+                cv.to_concrete_type(),
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+            ),
+            _ => false,
+        });
+    if all_int64 {
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )))
+    } else {
+        LatticeType::Top
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,83 +521,245 @@ mod tests {
     #[test]
     fn test_add_int_int() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_add(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_add_float_float() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Float64),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_add(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
     fn test_add_int_float() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_add(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
     fn test_add_const_int() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
             LatticeType::Const(ConstValue::Int64(1)),
         ];
         let result = tfunc_add(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_div_always_returns_float() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_div(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+    }
+
+    /// Issue #3531: BigInt `/` BigInt is integer division returning BigInt
+    /// (matches the runtime DivBigInt dispatch). Without this, `function
+    /// div(a::BigInt, b::BigInt) return a / b end` would infer Float64.
+    #[test]
+    fn test_div_bigint_bigint_returns_bigint() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            ))),
+        ];
+        let result = tfunc_div(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt
+            )))
+        );
+    }
+
+    #[test]
+    fn test_div_bigint_int64_returns_bigint() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        ];
+        let result = tfunc_div(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt
+            )))
+        );
+    }
+
+    #[test]
+    fn test_div_int64_bigint_returns_bigint() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            ))),
+        ];
+        let result = tfunc_div(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt
+            )))
+        );
+    }
+
+    #[test]
+    fn test_div_bigfloat_bigfloat_returns_bigfloat() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat,
+            ))),
+        ];
+        let result = tfunc_div(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat
+            )))
+        );
+    }
+
+    #[test]
+    fn test_div_bigfloat_float64_returns_bigfloat() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+        ];
+        let result = tfunc_div(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat
+            )))
+        );
     }
 
     #[test]
     fn test_eq_returns_bool() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_eq(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_lt_numeric_returns_bool() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_lt(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_not_bool() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Bool)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Bool),
+        ))];
         let result = tfunc_not(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_add_wrong_arity() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_add(&args);
         assert_eq!(result, LatticeType::Top);
     }
@@ -412,29 +767,48 @@ mod tests {
     #[test]
     fn test_lt_string_string() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::String),
-            LatticeType::Concrete(ConcreteType::String),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
         ];
         let result = tfunc_lt(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_lt_char_char() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Char),
-            LatticeType::Concrete(ConcreteType::Char),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
         ];
         let result = tfunc_lt(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_not_concrete_type() {
-        // !x for any concrete type should return Bool
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        // `!` is logical negation: its result type is always `Bool` (matching the
+        // legacy pre-scan, which types `UnaryOp::Not` as `Bool` unconditionally).
+        // Previously the engine widened a non-`Bool` operand to `Top`, leaving the
+        // `Assign`-RHS slot `Any`; that divergence blocked routing `UnaryOp`
+        // through the shared engine (Issue #6601, superseding Issue #3476).
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_not(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     // Bottom propagation tests (Issue #1717 prevention)
@@ -445,7 +819,9 @@ mod tests {
     fn test_add_bottom_left() {
         let args = vec![
             LatticeType::Bottom,
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_add(&args);
         assert_eq!(result, LatticeType::Bottom);
@@ -454,7 +830,9 @@ mod tests {
     #[test]
     fn test_add_bottom_right() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
             LatticeType::Bottom,
         ];
         let result = tfunc_add(&args);
@@ -473,7 +851,9 @@ mod tests {
         // tfunc_sub delegates to tfunc_add
         let args = vec![
             LatticeType::Bottom,
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_sub(&args);
         assert_eq!(result, LatticeType::Bottom);
@@ -483,7 +863,9 @@ mod tests {
     fn test_mul_bottom() {
         // tfunc_mul delegates to tfunc_add
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
             LatticeType::Bottom,
         ];
         let result = tfunc_mul(&args);
@@ -494,7 +876,9 @@ mod tests {
     fn test_div_bottom() {
         let args = vec![
             LatticeType::Bottom,
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_div(&args);
         assert_eq!(result, LatticeType::Bottom);
@@ -503,7 +887,9 @@ mod tests {
     #[test]
     fn test_eq_bottom() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::String),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
             LatticeType::Bottom,
         ];
         let result = tfunc_eq(&args);
@@ -514,7 +900,9 @@ mod tests {
     fn test_lt_bottom() {
         let args = vec![
             LatticeType::Bottom,
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_lt(&args);
         assert_eq!(result, LatticeType::Bottom);
@@ -524,7 +912,9 @@ mod tests {
     fn test_le_bottom() {
         // tfunc_le delegates to tfunc_lt
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
             LatticeType::Bottom,
         ];
         let result = tfunc_le(&args);
@@ -544,7 +934,7 @@ mod tests {
         // tfunc_ge delegates to tfunc_lt
         let args = vec![
             LatticeType::Bottom,
-            LatticeType::Concrete(ConcreteType::Char),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
         ];
         let result = tfunc_ge(&args);
         assert_eq!(result, LatticeType::Bottom);
@@ -559,65 +949,119 @@ mod tests {
     #[test]
     fn test_sub_unary_negation_float32() {
         // Unary negation: -x::Float32 → Float32
-        let args = vec![LatticeType::Concrete(ConcreteType::Float32)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float32),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float32));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_float64() {
         // Unary negation: -x::Float64 → Float64
-        let args = vec![LatticeType::Concrete(ConcreteType::Float64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_int64() {
         // Unary negation: -x::Int64 → Int64
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_int32() {
         // Unary negation: -x::Int32 → Int32
-        let args = vec![LatticeType::Concrete(ConcreteType::Int32)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int32),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int32));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32
+            )))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_int16() {
         // Unary negation: -x::Int16 → Int16
-        let args = vec![LatticeType::Concrete(ConcreteType::Int16)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int16),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int16));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int16
+            )))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_int8() {
         // Unary negation: -x::Int8 → Int8
-        let args = vec![LatticeType::Concrete(ConcreteType::Int8)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int8),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int8));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8)))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_int128() {
         // Unary negation: -x::Int128 → Int128
-        let args = vec![LatticeType::Concrete(ConcreteType::Int128)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int128),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int128));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int128
+            )))
+        );
     }
 
     #[test]
     fn test_sub_unary_negation_uint64() {
         // Unary negation: -x::UInt64 → UInt64 (bit pattern negation)
-        let args = vec![LatticeType::Concrete(ConcreteType::UInt64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::UInt64),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::UInt64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt64
+            )))
+        );
     }
 
     #[test]
@@ -625,7 +1069,12 @@ mod tests {
         // Unary negation with const value: -1::Int64 → Int64
         let args = vec![LatticeType::Const(ConstValue::Int64(1))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
@@ -633,7 +1082,12 @@ mod tests {
         // Unary negation with const value: -1.0::Float64 → Float64
         let args = vec![LatticeType::Const(ConstValue::Float64(1.0))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
@@ -645,11 +1099,18 @@ mod tests {
     }
 
     #[test]
-    fn test_sub_unary_negation_non_numeric() {
-        // Unary negation of non-numeric type → Top
-        let args = vec![LatticeType::Concrete(ConcreteType::String)];
-        let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Top);
+    fn test_sub_unary_negation_concrete_preserved() {
+        // Unary negation preserves the concrete operand type (Issue #6601):
+        // negation is type-preserving for numeric structs like `Complex{T}`
+        // (`typeof(-(1.0+2.0im)) === ComplexF64`), and the empty-table engine
+        // cannot prove `Complex{Float64} <: Number`, so we no longer gate on
+        // `is_numeric()` and instead preserve any concrete operand — matching
+        // the legacy pre-scan (`Neg → infer_value_type(operand)`).
+        let complex = LatticeType::Concrete(ConcreteType::Struct {
+            name: "Complex{Float64}".to_string(),
+            type_id: 0,
+        });
+        assert_eq!(tfunc_sub(std::slice::from_ref(&complex)), complex);
     }
 
     #[test]
@@ -657,8 +1118,13 @@ mod tests {
         // Unary negation of Bool → Bool (Bool is numeric in Julia, subtype of Integer)
         // Note: In Julia, -true == -1 (Int64), but for type inference purposes
         // we preserve Bool type. The runtime handles actual value conversion.
-        let args = vec![LatticeType::Concrete(ConcreteType::Bool)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Bool),
+        ))];
         let result = tfunc_sub(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 }

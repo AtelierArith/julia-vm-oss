@@ -1,9 +1,9 @@
 using Test
 
-# Test get() and haskey() on IOContext (Issue #3152)
+# Test get() and haskey() on IOContext (Issue #3152, Issue #6408)
 @testset "IOContext get and haskey" begin
     buf = IOBuffer()
-    ctx = iocontext(buf, :compact => true)
+    ctx = IOContext(buf, :compact => true)
 
     # get() returns the value for a set key
     @test get(ctx, :compact, false) == true
@@ -19,7 +19,7 @@ using Test
 
     # Multiple properties
     buf2 = IOBuffer()
-    ctx2 = iocontext(buf2, :compact => true, :limit => true)
+    ctx2 = IOContext(buf2, :compact => true, :limit => true)
     @test get(ctx2, :compact, false) == true
     @test get(ctx2, :limit, false) == true
     @test haskey(ctx2, :compact) == true

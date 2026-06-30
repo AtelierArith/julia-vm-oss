@@ -4,7 +4,7 @@
 //! and struct literal types from the IR tree. They also handle type qualification
 //! and resolution for module-scoped types.
 
-use crate::ir::core::{Block, Expr, Function, Literal, Stmt, UsingImport};
+use crate::ir::core::{Block, BuiltinOp, Expr, Function, Literal, Stmt, UsingImport};
 use crate::types::JuliaType;
 use std::collections::{HashMap, HashSet};
 
@@ -52,22 +52,41 @@ pub(in crate::compile) fn collect_module_info(
         format!("{}.{}", prefix, module.name)
     };
 
-    // Collect function names
-    let func_names: HashSet<String> = module.functions.iter().map(|f| f.name.clone()).collect();
+    // Collect constants from module body (top-level assignments)
+    let mut const_names: HashSet<String> = HashSet::new();
+    collect_module_body_binding_names(&module.body, &mut const_names);
+    module_constants.insert(module_path.clone(), const_names.clone());
+
+    // Collect callable names plus direct module bindings. Despite the historical
+    // field name, the import resolver uses this set as the module surface for
+    // `using Module`: functions, types, type aliases, macros, submodules, and
+    // module constants all need to become visible when exported.
+    let mut func_names: HashSet<String> = module.functions.iter().map(|f| f.name.clone()).collect();
+    func_names.extend(module.structs.iter().map(|s| s.name.clone()));
+    func_names.extend(module.abstract_types.iter().map(|a| a.name.clone()));
+    func_names.extend(module.primitive_types.iter().map(|p| p.name.clone()));
+    func_names.extend(module.type_aliases.iter().map(|t| t.name.clone()));
+    func_names.extend(module.macros.iter().map(|m| format!("@{}", m.name)));
+    func_names.extend(module.submodules.iter().map(|m| m.name.clone()));
+    func_names.extend(const_names);
     module_functions.insert(module_path.clone(), func_names);
 
     // Collect exports
-    let export_names: HashSet<String> = module.exports.iter().cloned().collect();
+    let mut export_names: HashSet<String> = module.exports.iter().cloned().collect();
+    export_names.insert(module.name.clone());
+    let mut known_exports = HashSet::new();
+    let mut emitted_exports = export_names.clone();
+    known_exports.insert(module.name.clone());
+    collect_module_body_export_names(
+        &module.body,
+        &mut export_names,
+        &mut known_exports,
+        &mut emitted_exports,
+        &module.name,
+        &module_path,
+    );
+    export_names.remove(&module.name);
     module_exports.insert(module_path.clone(), export_names);
-
-    // Collect constants from module body (top-level assignments)
-    let mut const_names: HashSet<String> = HashSet::new();
-    for stmt in &module.body.stmts {
-        if let crate::ir::core::Stmt::Assign { var, .. } = stmt {
-            const_names.insert(var.clone());
-        }
-    }
-    module_constants.insert(module_path.clone(), const_names);
 
     // Recursively process submodules
     for submodule in &module.submodules {
@@ -78,6 +97,248 @@ pub(in crate::compile) fn collect_module_info(
             module_exports,
             module_constants,
         );
+    }
+}
+
+fn collect_module_body_binding_names(block: &Block, names: &mut HashSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Assign { var, .. } => {
+                names.insert(var.clone());
+            }
+            // `begin ... end` blocks introduce no new scope at module top level,
+            // so their assignments are module bindings.
+            Stmt::Block(inner) => collect_module_body_binding_names(inner, names),
+            // `if`/`elseif`/`else` introduce no new scope at module top level, so a
+            // `const`/`global` assignment in any branch is registered as a member of
+            // the module — matching upstream Julia, where `module M; if true; const
+            // x = 1; end; end` defines `M.x` (Issue #7917). `elseif` chains are
+            // lowered as a nested `Stmt::If` inside `else_branch`, so recursing into
+            // both branch bodies walks the whole chain. We deliberately do NOT
+            // recurse into `for`/`while`/`let`/function bodies, which DO introduce a
+            // local scope whose assignments must not leak as module bindings.
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                collect_module_body_binding_names(then_branch, names);
+                if let Some(else_branch) = else_branch {
+                    collect_module_body_binding_names(else_branch, names);
+                }
+            }
+            Stmt::Expr { expr, .. } => collect_module_body_expr_binding_names(expr, names),
+            _ => {}
+        }
+    }
+}
+
+fn collect_module_body_expr_binding_names(expr: &Expr, names: &mut HashSet<String>) {
+    match expr {
+        Expr::AssignExpr { var, .. } => {
+            names.insert(var.clone());
+        }
+        // Macro-expanded `begin`/`quote` blocks may lower to an empty-binding
+        // LetBlock at module top level. Unlike a source `let`, this wrapper does
+        // not introduce a fresh binding scope, so assignments inside it remain
+        // module bindings.
+        Expr::LetBlock { bindings, body, .. } if bindings.is_empty() => {
+            collect_module_body_binding_names(body, names);
+        }
+        _ => {}
+    }
+}
+
+fn collect_module_body_export_names(
+    block: &Block,
+    names: &mut HashSet<String>,
+    known_exports: &mut HashSet<String>,
+    emitted_exports: &mut HashSet<String>,
+    module_name: &str,
+    module_path: &str,
+) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Export {
+                names: export_names,
+                ..
+            } => {
+                for name in export_names {
+                    known_exports.insert(name.clone());
+                    if emitted_exports.insert(name.clone()) {
+                        names.insert(name.clone());
+                    }
+                }
+            }
+            Stmt::Block(inner) => {
+                collect_module_body_export_names(
+                    inner,
+                    names,
+                    known_exports,
+                    emitted_exports,
+                    module_name,
+                    module_path,
+                );
+            }
+            Stmt::Expr { expr, .. } => {
+                collect_module_body_expr_export_names(
+                    expr,
+                    names,
+                    known_exports,
+                    emitted_exports,
+                    module_name,
+                    module_path,
+                );
+            }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => match eval_module_export_condition(
+                condition,
+                known_exports,
+                module_name,
+                module_path,
+            ) {
+                Some(true) => {
+                    collect_module_body_export_names(
+                        then_branch,
+                        names,
+                        known_exports,
+                        emitted_exports,
+                        module_name,
+                        module_path,
+                    );
+                }
+                Some(false) => {
+                    if let Some(else_branch) = else_branch {
+                        collect_module_body_export_names(
+                            else_branch,
+                            names,
+                            known_exports,
+                            emitted_exports,
+                            module_name,
+                            module_path,
+                        );
+                    }
+                }
+                None => {}
+            },
+            _ => {}
+        }
+    }
+}
+
+fn collect_module_body_expr_export_names(
+    expr: &Expr,
+    names: &mut HashSet<String>,
+    known_exports: &mut HashSet<String>,
+    emitted_exports: &mut HashSet<String>,
+    module_name: &str,
+    module_path: &str,
+) {
+    if let Expr::LetBlock { bindings, body, .. } = expr {
+        if bindings.is_empty() {
+            collect_module_body_export_names(
+                body,
+                names,
+                known_exports,
+                emitted_exports,
+                module_name,
+                module_path,
+            );
+        }
+    }
+}
+
+fn eval_module_export_condition(
+    expr: &Expr,
+    known_exports: &HashSet<String>,
+    module_name: &str,
+    module_path: &str,
+) -> Option<bool> {
+    match expr {
+        Expr::Literal(Literal::Bool(value), _) => Some(*value),
+        Expr::Var(name, _) if name == "true" => Some(true),
+        Expr::Var(name, _) if name == "false" => Some(false),
+        Expr::UnaryOp {
+            op: crate::ir::core::UnaryOp::Not,
+            operand,
+            ..
+        } => eval_module_export_condition(operand, known_exports, module_name, module_path)
+            .map(|value| !value),
+        Expr::Call { function, args, .. }
+            if matches!(function.as_str(), "in" | "∈") && args.len() == 2 =>
+        {
+            eval_symbol_in_module_names(&args[0], &args[1], known_exports, module_name, module_path)
+        }
+        Expr::Call { function, args, .. }
+            if matches!(function.as_str(), "∉") && args.len() == 2 =>
+        {
+            eval_symbol_in_module_names(&args[0], &args[1], known_exports, module_name, module_path)
+                .map(|value| !value)
+        }
+        Expr::Builtin {
+            name: BuiltinOp::In,
+            args,
+            ..
+        } if args.len() == 2 => {
+            eval_symbol_in_module_names(&args[0], &args[1], known_exports, module_name, module_path)
+        }
+        _ => None,
+    }
+}
+
+fn eval_symbol_in_module_names(
+    needle: &Expr,
+    haystack: &Expr,
+    known_exports: &HashSet<String>,
+    module_name: &str,
+    module_path: &str,
+) -> Option<bool> {
+    let symbol = expr_symbol_name(needle)?;
+    let haystack_module = names_call_module_name(haystack)?;
+    if haystack_module != module_name && haystack_module != module_path {
+        return None;
+    }
+    Some(known_exports.contains(symbol))
+}
+
+fn expr_symbol_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Literal(Literal::Symbol(name), _) => Some(name),
+        Expr::Literal(Literal::QuoteNode(inner), _) => match inner.as_ref() {
+            Literal::Symbol(name) => Some(name),
+            _ => None,
+        },
+        Expr::QuoteLiteral { constructor, .. } => expr_symbol_name(constructor),
+        Expr::Builtin {
+            name: BuiltinOp::SymbolNew,
+            args,
+            ..
+        } if args.len() == 1 => match &args[0] {
+            Expr::Literal(Literal::Str(name), _) => Some(name),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn names_call_module_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Call { function, args, .. } if function == "names" && args.len() == 1 => {
+            expr_module_name(&args[0])
+        }
+        _ => None,
+    }
+}
+
+fn expr_module_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Literal(Literal::Module(name), _) => Some(name),
+        Expr::Var(name, _) => Some(name),
+        _ => None,
     }
 }
 
@@ -122,9 +383,25 @@ pub(in crate::compile) fn collect_expr_functions(
         Expr::LetBlock { body, .. } => {
             collect_block_functions(body, functions, parent_func_name);
         }
-        Expr::Call { args, .. } => {
+        Expr::Call { args, kwargs, .. } => {
             for arg in args {
                 collect_expr_functions(arg, functions, parent_func_name);
+            }
+            for (_, value) in kwargs {
+                collect_expr_functions(value, functions, parent_func_name);
+            }
+        }
+        Expr::Builtin { args, .. } => {
+            for arg in args {
+                collect_expr_functions(arg, functions, parent_func_name);
+            }
+        }
+        Expr::ModuleCall { args, kwargs, .. } => {
+            for arg in args {
+                collect_expr_functions(arg, functions, parent_func_name);
+            }
+            for (_, value) in kwargs {
+                collect_expr_functions(value, functions, parent_func_name);
             }
         }
         Expr::BinaryOp { left, right, .. } => {
@@ -133,6 +410,50 @@ pub(in crate::compile) fn collect_expr_functions(
         }
         Expr::UnaryOp { operand, .. } => {
             collect_expr_functions(operand, functions, parent_func_name);
+        }
+        Expr::Index { array, indices, .. } => {
+            collect_expr_functions(array, functions, parent_func_name);
+            for index in indices {
+                collect_expr_functions(index, functions, parent_func_name);
+            }
+        }
+        Expr::Range {
+            start, step, stop, ..
+        } => {
+            collect_expr_functions(start, functions, parent_func_name);
+            if let Some(step) = step {
+                collect_expr_functions(step, functions, parent_func_name);
+            }
+            collect_expr_functions(stop, functions, parent_func_name);
+        }
+        Expr::Comprehension {
+            body, iter, filter, ..
+        }
+        | Expr::Generator {
+            body, iter, filter, ..
+        } => {
+            collect_expr_functions(body, functions, parent_func_name);
+            collect_expr_functions(iter, functions, parent_func_name);
+            if let Some(filter) = filter {
+                collect_expr_functions(filter, functions, parent_func_name);
+            }
+        }
+        Expr::MultiComprehension {
+            body,
+            iterations,
+            filter,
+            ..
+        } => {
+            collect_expr_functions(body, functions, parent_func_name);
+            for (_, iter) in iterations {
+                collect_expr_functions(iter, functions, parent_func_name);
+            }
+            if let Some(filter) = filter {
+                collect_expr_functions(filter, functions, parent_func_name);
+            }
+        }
+        Expr::FieldAccess { object, .. } => {
+            collect_expr_functions(object, functions, parent_func_name);
         }
         Expr::Ternary {
             condition,
@@ -148,6 +469,52 @@ pub(in crate::compile) fn collect_expr_functions(
             for elem in elements {
                 collect_expr_functions(elem, functions, parent_func_name);
             }
+        }
+        Expr::NamedTupleLiteral { fields, .. } => {
+            for (_, value) in fields {
+                collect_expr_functions(value, functions, parent_func_name);
+            }
+        }
+        Expr::Pair { key, value, .. } => {
+            collect_expr_functions(key, functions, parent_func_name);
+            collect_expr_functions(value, functions, parent_func_name);
+        }
+        Expr::DictLiteral { pairs, .. } => {
+            for (key, value) in pairs {
+                collect_expr_functions(key, functions, parent_func_name);
+                collect_expr_functions(value, functions, parent_func_name);
+            }
+        }
+        Expr::StringConcat { parts, .. } => {
+            for part in parts {
+                collect_expr_functions(part, functions, parent_func_name);
+            }
+        }
+        Expr::New { args, .. } => {
+            for arg in args {
+                collect_expr_functions(arg, functions, parent_func_name);
+            }
+        }
+        Expr::DynamicTypeConstruct {
+            base_expr,
+            type_args,
+            ..
+        } => {
+            if let Some(base_expr) = base_expr {
+                collect_expr_functions(base_expr, functions, parent_func_name);
+            }
+            for arg in type_args {
+                collect_expr_functions(arg, functions, parent_func_name);
+            }
+        }
+        Expr::QuoteLiteral { constructor, .. } => {
+            collect_expr_functions(constructor, functions, parent_func_name);
+        }
+        Expr::AssignExpr { value, .. }
+        | Expr::ReturnExpr {
+            value: Some(value), ..
+        } => {
+            collect_expr_functions(value, functions, parent_func_name);
         }
         _ => {}
     }
@@ -173,19 +540,44 @@ pub(in crate::compile) fn collect_stmt_functions(
             };
             collect_block_functions(&func.body, functions, Some(&qualified_parent));
         }
-        Stmt::For { body, .. }
-        | Stmt::ForEach { body, .. }
-        | Stmt::ForEachTuple { body, .. }
-        | Stmt::While { body, .. }
-        | Stmt::Timed { body, .. }
-        | Stmt::TestSet { body, .. } => {
+        Stmt::EvalFunctionDef { func, .. } => {
+            functions.push(((*func.clone()).clone(), None));
+            collect_block_functions(&func.body, functions, Some(&func.name));
+        }
+        Stmt::For {
+            start,
+            end,
+            step,
+            body,
+            ..
+        } => {
+            collect_expr_functions(start, functions, parent_func_name);
+            collect_expr_functions(end, functions, parent_func_name);
+            if let Some(step) = step {
+                collect_expr_functions(step, functions, parent_func_name);
+            }
+            collect_block_functions(body, functions, parent_func_name);
+        }
+        Stmt::ForEach { iterable, body, .. } | Stmt::ForEachTuple { iterable, body, .. } => {
+            collect_expr_functions(iterable, functions, parent_func_name);
+            collect_block_functions(body, functions, parent_func_name);
+        }
+        Stmt::While {
+            condition, body, ..
+        } => {
+            collect_expr_functions(condition, functions, parent_func_name);
+            collect_block_functions(body, functions, parent_func_name);
+        }
+        Stmt::Timed { body, .. } | Stmt::TestSet { body, .. } => {
             collect_block_functions(body, functions, parent_func_name);
         }
         Stmt::If {
+            condition,
             then_branch,
             else_branch,
             ..
         } => {
+            collect_expr_functions(condition, functions, parent_func_name);
             collect_block_functions(then_branch, functions, parent_func_name);
             if let Some(else_block) = else_branch {
                 collect_block_functions(else_block, functions, parent_func_name);
@@ -219,9 +611,39 @@ pub(in crate::compile) fn collect_stmt_functions(
         Stmt::Assign { value, .. } => {
             collect_expr_functions(value, functions, parent_func_name);
         }
+        // Index/field/dict assignments also carry value (and index/key) expressions
+        // that may embed lambdas. Without recursing here, a lambda in the RHS of
+        // `xs[i] = map(x -> ..., xs[i])` (or its index/field/dict-key variants) is
+        // compiled as a function value but its generated function is never
+        // registered, failing at runtime with `Function '...__lambda_nested_...'
+        // not found` (Issue #7615). Mirror the AOT call-graph traversal.
+        Stmt::AddAssign { value, .. } => {
+            collect_expr_functions(value, functions, parent_func_name);
+        }
+        Stmt::DictAssign { key, value, .. } => {
+            collect_expr_functions(key, functions, parent_func_name);
+            collect_expr_functions(value, functions, parent_func_name);
+        }
+        Stmt::IndexAssign { indices, value, .. } => {
+            for index in indices {
+                collect_expr_functions(index, functions, parent_func_name);
+            }
+            collect_expr_functions(value, functions, parent_func_name);
+        }
+        Stmt::FieldAssign { value, .. } | Stmt::DestructuringAssign { value, .. } => {
+            collect_expr_functions(value, functions, parent_func_name);
+        }
         // Recurse into return values so that FunctionDefs embedded in LetBlocks inside
         // return statements are discovered (e.g. partial-apply lambdas: Issue #3119).
-        Stmt::Return { value: Some(expr), .. } => {
+        Stmt::Return {
+            value: Some(expr), ..
+        } => {
+            collect_expr_functions(expr, functions, parent_func_name);
+        }
+        Stmt::Test { condition, .. } => {
+            collect_expr_functions(condition, functions, parent_func_name);
+        }
+        Stmt::TestThrows { expr, .. } => {
             collect_expr_functions(expr, functions, parent_func_name);
         }
         _ => {}
@@ -253,9 +675,7 @@ pub(in crate::compile) fn collect_struct_literal_types(
             Stmt::Assign { value, .. } => {
                 collect_struct_literal_types_from_expr(value, struct_names)
             }
-            Stmt::Expr { expr, .. } => {
-                collect_struct_literal_types_from_expr(expr, struct_names)
-            }
+            Stmt::Expr { expr, .. } => collect_struct_literal_types_from_expr(expr, struct_names),
             Stmt::For {
                 start,
                 end,
@@ -401,15 +821,36 @@ pub(in crate::compile) fn qualify_type_for_module(
             }
             jt
         }
+        (JuliaType::TypeOf(inner), _) => {
+            let qualified_inner =
+                qualify_type_for_module(inner.as_ref().clone(), module_path, module_struct_names);
+            JuliaType::TypeOf(Box::new(qualified_inner))
+        }
         // Recursively qualify element types in VectorOf
         (JuliaType::VectorOf(elem), _) => {
-            let qualified_elem = qualify_type_for_module(
-                elem.as_ref().clone(),
-                module_path,
-                module_struct_names,
-            );
+            let qualified_elem =
+                qualify_type_for_module(elem.as_ref().clone(), module_path, module_struct_names);
             JuliaType::VectorOf(Box::new(qualified_elem))
         }
+        (JuliaType::MatrixOf(elem), _) => {
+            let qualified_elem =
+                qualify_type_for_module(elem.as_ref().clone(), module_path, module_struct_names);
+            JuliaType::MatrixOf(Box::new(qualified_elem))
+        }
+        (JuliaType::TupleOf(types), _) => JuliaType::TupleOf(
+            types
+                .iter()
+                .cloned()
+                .map(|ty| qualify_type_for_module(ty, module_path, module_struct_names))
+                .collect(),
+        ),
+        (JuliaType::Union(types), _) => JuliaType::Union(
+            types
+                .iter()
+                .cloned()
+                .map(|ty| qualify_type_for_module(ty, module_path, module_struct_names))
+                .collect(),
+        ),
         _ => jt,
     }
 }
@@ -422,12 +863,85 @@ pub(in crate::compile) fn resolve_abstract_type(
     if let JuliaType::Struct(name) = &jt {
         // Extract base name (without type params) for lookup
         let base_name = name.find('{').map(|idx| &name[..idx]).unwrap_or(name);
-        if let Some(parent) = abstract_type_parents.get(base_name) {
-            // This is an abstract type - convert to AbstractUser
-            return JuliaType::AbstractUser(base_name.to_string(), parent.clone());
+        if name.contains('{')
+            && matches!(
+                base_name,
+                "AbstractArray" | "AbstractVector" | "AbstractMatrix"
+            )
+        {
+            return jt;
+        }
+        // A module-qualified abstract annotation (`f(s::M.Shape)` written from
+        // outside the module) parses to `Struct("M.Shape")`, but module abstract
+        // types are registered under their *bare* name (`Shape`) in
+        // `abstract_type_parents`. Strip the module prefix before the lookup so
+        // the qualified annotation is reclassified to `AbstractUser("Shape")` and
+        // dispatches identically to the unqualified `f(s::Shape)` form — module
+        // qualification is not part of type identity (Issue #7302).
+        let lookup_name = base_name.rsplit('.').next().unwrap_or(base_name);
+        if let Some(parent) = abstract_type_parents.get(lookup_name) {
+            // This is an abstract type - convert to AbstractUser.
+            //
+            // An abstract supertype parameterized by INTEGER/BOOL VALUE
+            // parameters (`AbsM{2,2,T}`, `StaticMatrix{2,2,T}`) must keep those
+            // parameters in the carried name so dispatch can distinguish the
+            // `{2,2,T}` and `{3,3,T}` specializations when the argument is a
+            // concrete subtype (`ConM{2,2,Float64}`). The historical projection
+            // dropped every parameter to the bare family name, collapsing all
+            // value-parameter specializations into one signature so the
+            // last-defined one always won (Issue #7960). Only retain the
+            // parameters when at least one is a value literal: type-only
+            // parametric abstracts (`AbstractDict{K,V}`) keep the bare-family
+            // representation the rest of the dispatcher already handles.
+            let stored_name = match name.find('{') {
+                Some(open) if name_has_value_param(&name[open..]) => {
+                    format!("{lookup_name}{}", &name[open..])
+                }
+                _ => lookup_name.to_string(),
+            };
+            return JuliaType::AbstractUser(stored_name, parent.clone());
         }
     }
     jt
+}
+
+/// Whether a `{...}` parameter list spells at least one integer/bool VALUE
+/// parameter (e.g. the `2`s in `{2,2,T}`). Used to decide whether a parametric
+/// abstract supertype must keep its parameters in the carried dispatch name
+/// (Issue #7960). Type-only parameter lists (`{K,V}`, `{T<:Real}`) return false.
+fn name_has_value_param(params_suffix: &str) -> bool {
+    let inner = params_suffix
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .unwrap_or(params_suffix);
+    split_top_level_type_args(inner).into_iter().any(|tok| {
+        let tok = tok.trim();
+        tok.parse::<i128>().is_ok() || tok == "true" || tok == "false"
+    })
+}
+
+/// Split a comma-separated parametric argument list, respecting `{...}` nesting
+/// so `Tuple{N},T` yields `["Tuple{N}", "T"]`.
+fn split_top_level_type_args(inner: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(inner[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = inner[start..].trim();
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
+    parts
 }
 
 /// Resolve type aliases in function parameter types (Issue #2527).
@@ -481,11 +995,8 @@ mod tests {
     #[test]
     fn test_qualify_type_for_module_no_module_path() {
         let module_structs = HashMap::new();
-        let result = qualify_type_for_module(
-            JuliaType::Struct("Foo".to_string()),
-            None,
-            &module_structs,
-        );
+        let result =
+            qualify_type_for_module(JuliaType::Struct("Foo".to_string()), None, &module_structs);
         assert_eq!(result, JuliaType::Struct("Foo".to_string()));
     }
 
@@ -509,13 +1020,28 @@ mod tests {
     }
 
     #[test]
-    fn test_qualify_type_non_struct_unchanged() {
-        let module_structs = HashMap::new();
+    fn test_qualify_type_for_module_typeof_inner_struct_issue_7247_8410() {
+        let mut module_structs = HashMap::new();
+        let mut mod_structs = HashSet::new();
+        mod_structs.insert("Foo".to_string());
+        module_structs.insert("D7247".to_string(), mod_structs);
+
         let result = qualify_type_for_module(
-            JuliaType::Int64,
-            Some(&"Mod".to_string()),
+            JuliaType::TypeOf(Box::new(JuliaType::Struct("Foo".to_string()))),
+            Some(&"D7247".to_string()),
             &module_structs,
         );
+        assert_eq!(
+            result,
+            JuliaType::TypeOf(Box::new(JuliaType::Struct("D7247.Foo".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_qualify_type_non_struct_unchanged() {
+        let module_structs = HashMap::new();
+        let result =
+            qualify_type_for_module(JuliaType::Int64, Some(&"Mod".to_string()), &module_structs);
         assert_eq!(result, JuliaType::Int64);
     }
 
@@ -527,8 +1053,7 @@ mod tests {
         abstract_types.insert("Number".to_string(), None);
         abstract_types.insert("Real".to_string(), Some("Number".to_string()));
 
-        let result =
-            resolve_abstract_type(JuliaType::Struct("Real".to_string()), &abstract_types);
+        let result = resolve_abstract_type(JuliaType::Struct("Real".to_string()), &abstract_types);
         assert_eq!(
             result,
             JuliaType::AbstractUser("Real".to_string(), Some("Number".to_string()))
@@ -556,12 +1081,74 @@ mod tests {
         let mut abstract_types = HashMap::new();
         abstract_types.insert("Any".to_string(), None);
 
-        let result =
-            resolve_abstract_type(JuliaType::Struct("Any".to_string()), &abstract_types);
-        assert_eq!(
-            result,
-            JuliaType::AbstractUser("Any".to_string(), None)
+        let result = resolve_abstract_type(JuliaType::Struct("Any".to_string()), &abstract_types);
+        assert_eq!(result, JuliaType::AbstractUser("Any".to_string(), None));
+    }
+
+    #[test]
+    fn test_resolve_abstract_type_preserves_parametric_abstract_vector_issue_6239() {
+        let mut abstract_types = HashMap::new();
+        abstract_types.insert(
+            "AbstractVector".to_string(),
+            Some("AbstractArray".to_string()),
         );
+
+        let ty = JuliaType::Struct("AbstractVector{T}".to_string());
+        let result = resolve_abstract_type(ty.clone(), &abstract_types);
+        assert_eq!(result, ty);
+    }
+
+    #[test]
+    fn test_resolve_abstract_type_preserves_parametric_abstract_matrix_issue_6240() {
+        let mut abstract_types = HashMap::new();
+        abstract_types.insert(
+            "AbstractMatrix".to_string(),
+            Some("AbstractArray".to_string()),
+        );
+
+        let ty = JuliaType::Struct("AbstractMatrix{T}".to_string());
+        let result = resolve_abstract_type(ty.clone(), &abstract_types);
+        assert_eq!(result, ty);
+    }
+
+    #[test]
+    fn test_resolve_abstract_type_preserves_parametric_abstract_array_rank_issue_6243() {
+        let mut abstract_types = HashMap::new();
+        abstract_types.insert("AbstractArray".to_string(), Some("Any".to_string()));
+
+        let ty = JuliaType::Struct("AbstractArray{T,2}".to_string());
+        let result = resolve_abstract_type(ty.clone(), &abstract_types);
+        assert_eq!(result, ty);
+    }
+
+    #[test]
+    fn test_resolve_abstract_type_preserves_parametric_abstract_array_rank1_issue_6245() {
+        let mut abstract_types = HashMap::new();
+        abstract_types.insert("AbstractArray".to_string(), Some("Any".to_string()));
+
+        let ty = JuliaType::Struct("AbstractArray{T,1}".to_string());
+        let result = resolve_abstract_type(ty.clone(), &abstract_types);
+        assert_eq!(result, ty);
+    }
+
+    #[test]
+    fn test_resolve_abstract_type_preserves_parametric_abstract_array_rank_omitted_issue_6247() {
+        let mut abstract_types = HashMap::new();
+        abstract_types.insert("AbstractArray".to_string(), Some("Any".to_string()));
+
+        let ty = JuliaType::Struct("AbstractArray{T}".to_string());
+        let result = resolve_abstract_type(ty.clone(), &abstract_types);
+        assert_eq!(result, ty);
+    }
+
+    #[test]
+    fn test_resolve_abstract_type_preserves_parametric_abstract_array_rank_typevar_issue_6249() {
+        let mut abstract_types = HashMap::new();
+        abstract_types.insert("AbstractArray".to_string(), Some("Any".to_string()));
+
+        let ty = JuliaType::Struct("AbstractArray{T,N}".to_string());
+        let result = resolve_abstract_type(ty.clone(), &abstract_types);
+        assert_eq!(result, ty);
     }
 
     // === resolve_type_alias ===
@@ -571,16 +1158,14 @@ mod tests {
         let mut aliases = HashMap::new();
         aliases.insert("IntWrapper".to_string(), "Wrapper{Int64}".to_string());
 
-        let result =
-            resolve_type_alias(JuliaType::Struct("IntWrapper".to_string()), &aliases);
+        let result = resolve_type_alias(JuliaType::Struct("IntWrapper".to_string()), &aliases);
         assert_eq!(result, JuliaType::Struct("Wrapper{Int64}".to_string()));
     }
 
     #[test]
     fn test_resolve_type_alias_unknown() {
         let aliases = HashMap::new();
-        let result =
-            resolve_type_alias(JuliaType::Struct("MyType".to_string()), &aliases);
+        let result = resolve_type_alias(JuliaType::Struct("MyType".to_string()), &aliases);
         assert_eq!(result, JuliaType::Struct("MyType".to_string()));
     }
 
@@ -591,5 +1176,76 @@ mod tests {
         // JuliaType::Int64 is not a Struct variant, so alias lookup won't apply
         let result = resolve_type_alias(JuliaType::Int64, &aliases);
         assert_eq!(result, JuliaType::Int64);
+    }
+
+    // === collect_module_body_binding_names ===
+
+    fn dummy_span() -> crate::span::Span {
+        crate::span::Span::new(0, 0, 0, 0, 0, 0)
+    }
+
+    fn assign(name: &str) -> Stmt {
+        Stmt::Assign {
+            var: name.to_string(),
+            value: Expr::Literal(Literal::Int(1), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn block(stmts: Vec<Stmt>) -> Block {
+        Block {
+            stmts,
+            span: dummy_span(),
+        }
+    }
+
+    /// Module top-level `if`/`elseif`/`else` branches introduce no new scope, so
+    /// their assignments are collected as module bindings (Issue #7917).
+    #[test]
+    fn test_collect_module_bindings_recurses_into_if_branches_issue_7917() {
+        // module body:
+        //   if true; const x = 1; elseif ...; const y = 1; else; const z = 1; end
+        let else_chain = Stmt::If {
+            condition: Expr::Literal(Literal::Bool(true), dummy_span()),
+            then_branch: block(vec![assign("y")]),
+            else_branch: Some(block(vec![assign("z")])),
+            span: dummy_span(),
+        };
+        let body = block(vec![Stmt::If {
+            condition: Expr::Literal(Literal::Bool(true), dummy_span()),
+            then_branch: block(vec![assign("x")]),
+            else_branch: Some(block(vec![else_chain])),
+            span: dummy_span(),
+        }]);
+
+        let mut names = HashSet::new();
+        collect_module_body_binding_names(&body, &mut names);
+
+        assert!(names.contains("x"));
+        assert!(names.contains("y"));
+        assert!(names.contains("z"));
+    }
+
+    /// `for`/`while`/`let`/function bodies DO introduce a local scope at module
+    /// top level, so their assignments must NOT leak as module bindings.
+    #[test]
+    fn test_collect_module_bindings_does_not_leak_loop_scope_issue_7917() {
+        let body = block(vec![
+            assign("kept"),
+            Stmt::For {
+                var: "i".to_string(),
+                start: Expr::Literal(Literal::Int(1), dummy_span()),
+                end: Expr::Literal(Literal::Int(1), dummy_span()),
+                step: None,
+                body: block(vec![assign("leaked")]),
+                span: dummy_span(),
+            },
+        ]);
+
+        let mut names = HashSet::new();
+        collect_module_body_binding_names(&body, &mut names);
+
+        assert!(names.contains("kept"));
+        assert!(!names.contains("leaked"));
     }
 }

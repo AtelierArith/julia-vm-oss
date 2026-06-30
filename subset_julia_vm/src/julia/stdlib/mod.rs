@@ -303,13 +303,17 @@ mod tests {
         // Check exported functions
         assert!(INTERACTIVE_UTILS_JL.contains("export versioninfo"));
         assert!(INTERACTIVE_UTILS_JL.contains("function versioninfo"));
+        // code_warntype / @code_warntype type-stability diagnostic (Issue #5145).
+        assert!(INTERACTIVE_UTILS_JL.contains("function code_warntype"));
+        assert!(INTERACTIVE_UTILS_JL.contains("@code_warntype"));
     }
 
     #[test]
     fn test_interactive_utils_no_unsupported_features() {
-        // Verify that functions requiring compiler introspection are NOT present
-        // These require LLVM/Julia compiler internals
-        assert!(!INTERACTIVE_UTILS_JL.contains("function code_warntype"));
+        // Verify that functions requiring compiler introspection that the no-JIT
+        // runtime still cannot meaningfully implement remain absent. (The
+        // `code_warntype` type-stability diagnostic IS supported via the shared
+        // inference surface — see Issue #5145.)
         assert!(!INTERACTIVE_UTILS_JL.contains("function code_llvm"));
         assert!(!INTERACTIVE_UTILS_JL.contains("function code_native"));
         assert!(!INTERACTIVE_UTILS_JL.contains("function code_typed"));

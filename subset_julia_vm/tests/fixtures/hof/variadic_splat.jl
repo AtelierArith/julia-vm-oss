@@ -37,6 +37,14 @@ mul3(x, y, z) = x * y * z
     end
 
     @test apply_typed(add, 100, 200) == 300
+
+    # Captured function value in a returned closure; Base.retry uses this
+    # forwarding shape (Issue #8434).
+    function make_variadic_apply(f)
+        return (args...) -> f(args...)
+    end
+    captured_apply = make_variadic_apply(add)
+    @test captured_apply(7, 8) == 15
 end
 
 true

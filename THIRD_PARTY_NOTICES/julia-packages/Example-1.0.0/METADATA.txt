@@ -1,0 +1,8 @@
+package: Example
+version: 1.0.0
+local_uuid: 7876af07-990d-54b4-ab0e-23690620f79a
+registry_uuid: 7876af07-990d-54b4-ab0e-23690620f79a
+repository: https://github.com/JuliaLang/Example.jl
+license: MIT
+license_source: LICENSE from repository default branch
+note: upstream tag v1.0.0 was not found.

@@ -5,6 +5,8 @@
 
 use crate::compile::type_stability::analysis_report::TypeStabilityAnalysisReport;
 use crate::compile::type_stability::report::FunctionStabilityReport;
+#[cfg(test)]
+use crate::inference_core::{CorePrimitive, CoreType};
 
 /// Formats the analysis report as human-readable text.
 pub fn format_text_report(report: &TypeStabilityAnalysisReport) -> String {
@@ -16,6 +18,14 @@ pub fn format_text_report(report: &TypeStabilityAnalysisReport) -> String {
 
     // Summary section
     output.push_str("Summary:\n");
+    output.push_str(&format!(
+        "  Inference source: {}\n",
+        report.inference_provenance.source
+    ));
+    output.push_str(&format!(
+        "  Uses production inference: {}\n",
+        report.inference_provenance.uses_production_inference
+    ));
     output.push_str(&format!(
         "  Total functions: {}\n",
         report.summary.total_functions
@@ -33,6 +43,9 @@ pub fn format_text_report(report: &TypeStabilityAnalysisReport) -> String {
 
     if report.summary.unknown_count > 0 {
         output.push_str(&format!("  Unknown: {}\n", report.summary.unknown_count));
+    }
+    for note in &report.inference_provenance.notes {
+        output.push_str(&format!("  Note: {}\n", note));
     }
     output.push('\n');
 
@@ -124,8 +137,7 @@ pub fn format_json_compact(report: &TypeStabilityAnalysisReport) -> Result<Strin
 }
 
 /// Output format options.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     /// Human-readable text format.
     #[default]
@@ -135,7 +147,6 @@ pub enum OutputFormat {
     /// Compact JSON format.
     JsonCompact,
 }
-
 
 /// Formats the report according to the specified format.
 pub fn format_report(
@@ -163,11 +174,15 @@ mod tests {
             vec![
                 (
                     "x".to_string(),
-                    LatticeType::Concrete(ConcreteType::Float64),
+                    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Float64,
+                    ))),
                 ),
                 (
                     "flag".to_string(),
-                    LatticeType::Concrete(ConcreteType::Bool),
+                    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Bool,
+                    ))),
                 ),
             ],
             LatticeType::Top,
@@ -184,6 +199,7 @@ mod tests {
         let text = format_text_report(&analysis);
 
         assert!(text.contains("Type Stability Analysis Report"));
+        assert!(text.contains("Inference source: standalone type-stability analyzer"));
         assert!(text.contains("compute_value"));
         assert!(text.contains("line 15"));
         assert!(text.contains("Unstable"));
@@ -196,12 +212,16 @@ mod tests {
             "stable_func".to_string(),
             1,
             vec![],
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ));
 
         let json = format_json_report(&analysis).unwrap();
 
         assert!(json.contains("stable_func"));
+        assert!(json.contains("\"inference_provenance\""));
+        assert!(json.contains("\"uses_production_inference\": false"));
         assert!(json.contains("\"status\":"));
     }
 
@@ -212,7 +232,9 @@ mod tests {
             "stable_func".to_string(),
             1,
             vec![],
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ));
 
         let text = format_text_report(&analysis);

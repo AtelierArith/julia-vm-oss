@@ -244,6 +244,63 @@ fn try_eval_compile_time_bool<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> Opt
                 _ => None,
             }
         }
+        NodeKind::BinaryExpression => try_eval_version_comparison(walker, node),
         _ => None,
     }
+}
+
+fn try_eval_version_comparison<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> Option<bool> {
+    let children = walker.named_children(&node);
+    let operands: Vec<Node<'a>> = children
+        .iter()
+        .copied()
+        .filter(|child| walker.kind(child) != NodeKind::Operator)
+        .collect();
+    if operands.len() != 2 {
+        return None;
+    }
+    let op = children
+        .iter()
+        .find(|child| walker.kind(child) == NodeKind::Operator)
+        .map(|child| walker.text(child))?;
+
+    let lhs = compile_time_version_value(walker, operands[0])?;
+    let rhs = compile_time_version_value(walker, operands[1])?;
+    Some(match op {
+        "==" => lhs == rhs,
+        "!=" => lhs != rhs,
+        "<" => lhs < rhs,
+        "<=" => lhs <= rhs,
+        ">" => lhs > rhs,
+        ">=" => lhs >= rhs,
+        _ => return None,
+    })
+}
+
+fn compile_time_version_value<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+) -> Option<(u64, u64, u64)> {
+    match walker.kind(&node) {
+        NodeKind::Identifier if walker.text(&node) == "VERSION" => {
+            parse_version_tuple(env!("CARGO_PKG_VERSION"))
+        }
+        _ if node.kind() == "prefixed_string_literal" => {
+            let children = walker.named_children(&node);
+            if children.len() < 2 || walker.text(&children[0]) != "v" {
+                return None;
+            }
+            parse_version_tuple(walker.text(&children[1]).trim_matches('"'))
+        }
+        _ => None,
+    }
+}
+
+fn parse_version_tuple(text: &str) -> Option<(u64, u64, u64)> {
+    let core = text.split(['-', '+']).next().unwrap_or(text);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
 }

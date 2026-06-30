@@ -4,6 +4,7 @@
 //! the OptimizationPass trait for IrFunction optimization.
 //!
 //! These passes operate on the lower-level SSA IR (IrFunction, BasicBlock, Instruction).
+#![allow(clippy::cast_sign_loss)] // known-safe constant casts (i64->u32)
 
 use super::OptimizationPass;
 use crate::aot::ir::{
@@ -85,7 +86,7 @@ impl ConstantFolding {
                 }
             }
             BinOpKind::Pow => {
-                if b >= 0 && b <= 63 {
+                if (0..=63).contains(&b) {
                     Some(ConstValue::Int64(a.wrapping_pow(b as u32)))
                 } else {
                     Some(ConstValue::Float64((a as f64).powf(b as f64)))
@@ -338,9 +339,14 @@ impl DeadCodeElimination {
                     Instruction::UnaryOp { operand, .. } => {
                         uses.insert(format!("{}.{}", operand.name, operand.version));
                     }
-                    Instruction::Call { args, .. } => {
+                    Instruction::Call { args, .. } | Instruction::CallMulti { args, .. } => {
                         for arg in args {
                             uses.insert(format!("{}.{}", arg.name, arg.version));
+                        }
+                    }
+                    Instruction::StructNew { fields, .. } => {
+                        for field in fields {
+                            uses.insert(format!("{}.{}", field.value.name, field.value.version));
                         }
                     }
                     Instruction::GetIndex { array, index, .. } => {
@@ -359,7 +365,14 @@ impl DeadCodeElimination {
                     Instruction::GetField { object, .. } => {
                         uses.insert(format!("{}.{}", object.name, object.version));
                     }
+                    Instruction::GetFieldOffset { object, .. } => {
+                        uses.insert(format!("{}.{}", object.name, object.version));
+                    }
                     Instruction::SetField { object, value, .. } => {
+                        uses.insert(format!("{}.{}", object.name, object.version));
+                        uses.insert(format!("{}.{}", value.name, value.version));
+                    }
+                    Instruction::SetFieldOffset { object, value, .. } => {
                         uses.insert(format!("{}.{}", object.name, object.version));
                         uses.insert(format!("{}.{}", value.name, value.version));
                     }
@@ -380,6 +393,11 @@ impl DeadCodeElimination {
                 match term {
                     Terminator::Return(Some(var)) => {
                         uses.insert(format!("{}.{}", var.name, var.version));
+                    }
+                    Terminator::ReturnMany(vars) => {
+                        for var in vars {
+                            uses.insert(format!("{}.{}", var.name, var.version));
+                        }
                     }
                     Terminator::Branch { cond, .. } => {
                         uses.insert(format!("{}.{}", cond.name, cond.version));
@@ -408,14 +426,18 @@ impl DeadCodeElimination {
                 Instruction::UnaryOp { dest, .. } => Some(dest),
                 Instruction::GetIndex { dest, .. } => Some(dest),
                 Instruction::GetField { dest, .. } => Some(dest),
+                Instruction::StructNew { dest, .. } => Some(dest),
+                Instruction::GetFieldOffset { dest, .. } => Some(dest),
                 Instruction::TypeAssert { dest, .. } => Some(dest),
                 Instruction::Phi { dest, .. } => Some(dest),
                 // These may have side effects or modify state
-                Instruction::Call { dest: _, .. } => {
+                Instruction::Call { dest: _, .. } | Instruction::CallMulti { .. } => {
                     // Keep calls even if result is unused (may have side effects)
                     return true;
                 }
-                Instruction::SetIndex { .. } | Instruction::SetField { .. } => {
+                Instruction::SetIndex { .. }
+                | Instruction::SetField { .. }
+                | Instruction::SetFieldOffset { .. } => {
                     // Always keep mutations
                     return true;
                 }
@@ -465,7 +487,7 @@ impl DeadCodeElimination {
                             }
                             worklist.push(default.clone());
                         }
-                        Terminator::Return(_) => {}
+                        Terminator::Return(_) | Terminator::ReturnMany(_) => {}
                     }
                 }
             }
@@ -553,7 +575,8 @@ impl OptimizationPass for StrengthReduction {
     }
 
     fn optimize_function(&self, _func: &mut IrFunction) -> AotResult<bool> {
-        // Low-level IR optimization is not yet implemented
+        // Low-level IrFunction strength reduction is documented as an
+        // explicit AoT gap (Issue #6944).
         // Use optimize_aot_program_with_strength_reduction for AoT IR
         Ok(false)
     }
@@ -622,7 +645,7 @@ impl LoopInvariantCodeMotion {
                             v.push(block.label.clone());
                         }
                     }
-                    Terminator::Return(_) => {}
+                    Terminator::Return(_) | Terminator::ReturnMany(_) => {}
                 }
             }
         }
@@ -630,46 +653,139 @@ impl LoopInvariantCodeMotion {
         preds
     }
 
-    /// Find back edges (edges where target dominates source - simplified detection)
+    /// Return the labels that can be reached from `block`'s terminator.
+    fn terminator_successors(block: &BasicBlock) -> Vec<&str> {
+        match &block.terminator {
+            Some(Terminator::Jump(target)) => vec![target.as_str()],
+            Some(Terminator::Branch {
+                then_block,
+                else_block,
+                ..
+            }) => vec![then_block.as_str(), else_block.as_str()],
+            Some(Terminator::Switch { cases, default, .. }) => {
+                let mut targets: Vec<_> = cases.iter().map(|(_, target)| target.as_str()).collect();
+                targets.push(default.as_str());
+                targets
+            }
+            Some(Terminator::Return(_)) | Some(Terminator::ReturnMany(_)) | None => Vec::new(),
+        }
+    }
+
+    /// Find blocks reachable from the function entry block.
+    fn find_reachable_blocks(func: &IrFunction) -> HashSet<String> {
+        let Some(entry) = func.blocks.first() else {
+            return HashSet::new();
+        };
+
+        let block_labels: HashSet<_> = func
+            .blocks
+            .iter()
+            .map(|block| block.label.clone())
+            .collect();
+        let block_by_label: HashMap<_, _> = func
+            .blocks
+            .iter()
+            .map(|block| (block.label.as_str(), block))
+            .collect();
+        let mut reachable = HashSet::new();
+        let mut worklist = vec![entry.label.clone()];
+
+        while let Some(label) = worklist.pop() {
+            if !reachable.insert(label.clone()) {
+                continue;
+            }
+            let Some(block) = block_by_label.get(label.as_str()) else {
+                continue;
+            };
+            for target in Self::terminator_successors(block) {
+                if block_labels.contains(target) && !reachable.contains(target) {
+                    worklist.push(target.to_string());
+                }
+            }
+        }
+
+        reachable
+    }
+
+    /// Compute classic forward dominator sets for reachable blocks.
+    fn compute_dominators(
+        func: &IrFunction,
+        preds: &HashMap<String, Vec<String>>,
+    ) -> HashMap<String, HashSet<String>> {
+        let Some(entry) = func.blocks.first().map(|block| block.label.clone()) else {
+            return HashMap::new();
+        };
+
+        let reachable = Self::find_reachable_blocks(func);
+        let mut dominators = HashMap::new();
+
+        for block in &func.blocks {
+            let doms = if block.label == entry || !reachable.contains(&block.label) {
+                HashSet::from([block.label.clone()])
+            } else {
+                reachable.clone()
+            };
+            dominators.insert(block.label.clone(), doms);
+        }
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+
+            for block in &func.blocks {
+                if block.label == entry || !reachable.contains(&block.label) {
+                    continue;
+                }
+
+                let mut reachable_preds = preds
+                    .get(&block.label)
+                    .into_iter()
+                    .flatten()
+                    .filter(|pred| reachable.contains(*pred));
+
+                let Some(first_pred) = reachable_preds.next() else {
+                    continue;
+                };
+
+                let mut new_doms = dominators.get(first_pred).cloned().unwrap_or_default();
+                for pred in reachable_preds {
+                    if let Some(pred_doms) = dominators.get(pred) {
+                        new_doms.retain(|dom| pred_doms.contains(dom));
+                    }
+                }
+                new_doms.insert(block.label.clone());
+
+                if dominators.get(&block.label) != Some(&new_doms) {
+                    dominators.insert(block.label.clone(), new_doms);
+                    changed = true;
+                }
+            }
+        }
+
+        dominators
+    }
+
+    /// Find back edges (edges where target dominates source)
     /// Returns (source_block, target_block) pairs
     fn find_back_edges(func: &IrFunction) -> Vec<(String, String)> {
         let mut back_edges = Vec::new();
-
-        // A simple heuristic: if a block jumps to a block that comes earlier
-        // in the function (by index), it might be a back edge
-        let block_order: HashMap<String, usize> = func
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(i, b)| (b.label.clone(), i))
-            .collect();
+        let preds = Self::find_predecessors(func);
+        let dominators = Self::compute_dominators(func, &preds);
+        let reachable = Self::find_reachable_blocks(func);
 
         for block in &func.blocks {
-            if let Some(term) = &block.terminator {
-                let targets: Vec<&String> = match term {
-                    Terminator::Jump(t) => vec![t],
-                    Terminator::Branch {
-                        then_block,
-                        else_block,
-                        ..
-                    } => vec![then_block, else_block],
-                    Terminator::Switch { cases, default, .. } => {
-                        let mut t: Vec<_> = cases.iter().map(|(_, target)| target).collect();
-                        t.push(default);
-                        t
-                    }
-                    Terminator::Return(_) => vec![],
-                };
-
-                for target in targets {
-                    // Check if target comes before source (potential back edge)
-                    if let (Some(&target_idx), Some(&source_idx)) =
-                        (block_order.get(target), block_order.get(&block.label))
-                    {
-                        if target_idx <= source_idx {
-                            back_edges.push((block.label.clone(), target.clone()));
-                        }
-                    }
+            if !reachable.contains(&block.label) {
+                continue;
+            }
+            for target in Self::terminator_successors(block) {
+                if !reachable.contains(target) {
+                    continue;
+                }
+                if dominators
+                    .get(&block.label)
+                    .is_some_and(|doms| doms.contains(target))
+                {
+                    back_edges.push((block.label.clone(), target.to_string()));
                 }
             }
         }
@@ -729,6 +845,38 @@ impl LoopInvariantCodeMotion {
         defs
     }
 
+    /// Collect the variable keys (`name.version`) consumed by loop block
+    /// terminators (i.e. branch/switch conditions).
+    ///
+    /// These definitions need extra care: induction-variable dependent
+    /// conditions must stay inside the loop (Issue #4840), but a condition
+    /// computed only from loop-invariant scalar values can be hoisted once the
+    /// dependency check proves that it does not depend on loop-carried state
+    /// (Issue #6983).
+    fn collect_loop_control_uses(
+        func: &IrFunction,
+        loop_blocks: &HashSet<String>,
+    ) -> HashSet<String> {
+        let mut control_uses = HashSet::new();
+
+        for block in &func.blocks {
+            if !loop_blocks.contains(&block.label) {
+                continue;
+            }
+            match &block.terminator {
+                Some(Terminator::Branch { cond, .. }) => {
+                    control_uses.insert(format!("{}.{}", cond.name, cond.version));
+                }
+                Some(Terminator::Switch { value, .. }) => {
+                    control_uses.insert(format!("{}.{}", value.name, value.version));
+                }
+                _ => {}
+            }
+        }
+
+        control_uses
+    }
+
     /// Get the destination variable of an instruction
     fn get_instruction_dest(inst: &Instruction) -> Option<&VarRef> {
         match inst {
@@ -737,11 +885,16 @@ impl LoopInvariantCodeMotion {
             Instruction::BinOp { dest, .. } => Some(dest),
             Instruction::UnaryOp { dest, .. } => Some(dest),
             Instruction::Call { dest, .. } => dest.as_ref(),
+            Instruction::CallMulti { .. } => None,
+            Instruction::StructNew { dest, .. } => Some(dest),
             Instruction::GetIndex { dest, .. } => Some(dest),
             Instruction::GetField { dest, .. } => Some(dest),
+            Instruction::GetFieldOffset { dest, .. } => Some(dest),
             Instruction::TypeAssert { dest, .. } => Some(dest),
             Instruction::Phi { dest, .. } => Some(dest),
-            Instruction::SetIndex { .. } | Instruction::SetField { .. } => None,
+            Instruction::SetIndex { .. }
+            | Instruction::SetField { .. }
+            | Instruction::SetFieldOffset { .. } => None,
         }
     }
 
@@ -776,7 +929,7 @@ impl LoopInvariantCodeMotion {
             Instruction::UnaryOp { operand, .. } => is_operand_invariant(operand),
 
             // Calls are generally not invariant (may have side effects)
-            Instruction::Call { .. } => false,
+            Instruction::Call { .. } | Instruction::CallMulti { .. } => false,
 
             // Array/field access may not be invariant (array contents may change)
             Instruction::GetIndex { array, index, .. } => {
@@ -784,9 +937,13 @@ impl LoopInvariantCodeMotion {
             }
 
             Instruction::GetField { object, .. } => is_operand_invariant(object),
+            Instruction::GetFieldOffset { object, .. } => is_operand_invariant(object),
+            Instruction::StructNew { .. } => false,
 
             // These instructions have side effects
-            Instruction::SetIndex { .. } | Instruction::SetField { .. } => false,
+            Instruction::SetIndex { .. }
+            | Instruction::SetField { .. }
+            | Instruction::SetFieldOffset { .. } => false,
 
             // Type assertions are invariant if source is invariant
             Instruction::TypeAssert { src, .. } => is_operand_invariant(src),
@@ -804,6 +961,7 @@ impl LoopInvariantCodeMotion {
             | Instruction::BinOp { .. }
             | Instruction::UnaryOp { .. }
             | Instruction::GetField { .. }
+            | Instruction::GetFieldOffset { .. }
             | Instruction::TypeAssert { .. } => true,
 
             // GetIndex could be safe if we know the array is not modified
@@ -811,10 +969,27 @@ impl LoopInvariantCodeMotion {
 
             // These have side effects or depend on control flow
             Instruction::Call { .. }
+            | Instruction::CallMulti { .. }
+            | Instruction::StructNew { .. }
             | Instruction::SetIndex { .. }
             | Instruction::SetField { .. }
+            | Instruction::SetFieldOffset { .. }
             | Instruction::Phi { .. } => false,
         }
+    }
+
+    /// Control-flow condition definitions are more constrained than ordinary
+    /// loop-invariant instructions. Keep memory reads and assertions in place
+    /// until the low-level IR tracks the no-throw/no-alias proof required to
+    /// evaluate them once before the loop.
+    fn is_safe_to_hoist_control_def(inst: &Instruction) -> bool {
+        matches!(
+            inst,
+            Instruction::LoadConst { .. }
+                | Instruction::Copy { .. }
+                | Instruction::BinOp { .. }
+                | Instruction::UnaryOp { .. }
+        )
     }
 
     /// Retarget a terminator's edges from `old_target` to `new_target`
@@ -842,9 +1017,7 @@ impl LoopInvariantCodeMotion {
                         *else_block = new_target.to_string();
                     }
                 }
-                Terminator::Switch {
-                    cases, default, ..
-                } => {
+                Terminator::Switch { cases, default, .. } => {
                     for (_, target) in cases.iter_mut() {
                         if target == old_target {
                             *target = new_target.to_string();
@@ -854,7 +1027,7 @@ impl LoopInvariantCodeMotion {
                         *default = new_target.to_string();
                     }
                 }
-                Terminator::Return(_) => {}
+                Terminator::Return(_) | Terminator::ReturnMany(_) => {}
             }
         }
     }
@@ -886,6 +1059,11 @@ impl OptimizationPass for LoopInvariantCodeMotion {
             // Collect definitions within the loop
             let loop_defs = Self::collect_loop_defs(func, &loop_blocks);
 
+            // Collect variables consumed by loop control-flow conditions. The
+            // dependency check below keeps induction-dependent definitions in
+            // place while allowing scalar invariant condition defs to hoist.
+            let control_uses = Self::collect_loop_control_uses(func, &loop_blocks);
+
             // Find invariant instructions (iterate until fixed point)
             let mut invariant_defs: HashSet<String> = HashSet::new();
             let mut invariant_insts: Vec<(String, usize)> = Vec::new();
@@ -899,17 +1077,20 @@ impl OptimizationPass for LoopInvariantCodeMotion {
                     }
 
                     for (inst_idx, inst) in block.instructions.iter().enumerate() {
-                        // Skip if already marked as invariant
-                        if let Some(dest) = Self::get_instruction_dest(inst) {
+                        let control_def = if let Some(dest) = Self::get_instruction_dest(inst) {
                             let key = format!("{}.{}", dest.name, dest.version);
                             if invariant_defs.contains(&key) {
                                 continue;
                             }
-                        }
+                            control_uses.contains(&key)
+                        } else {
+                            false
+                        };
 
                         // Check if instruction is invariant and safe to hoist
                         if Self::is_loop_invariant(inst, &loop_defs, &invariant_defs)
                             && Self::is_safe_to_hoist(inst)
+                            && (!control_def || Self::is_safe_to_hoist_control_def(inst))
                         {
                             if let Some(dest) = Self::get_instruction_dest(inst) {
                                 let key = format!("{}.{}", dest.name, dest.version);
@@ -1062,7 +1243,8 @@ impl OptimizationPass for Inlining {
     }
 
     fn optimize_function(&self, _func: &mut IrFunction) -> AotResult<bool> {
-        // Note: Low-level IR inlining is not yet implemented
+        // Low-level IrFunction inlining is documented as an explicit AoT gap
+        // (Issue #6944).
         // Use optimize_aot_program for high-level AoT IR inlining
         Ok(false)
     }
@@ -1075,13 +1257,13 @@ impl OptimizationPass for Inlining {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aot::types::JuliaType;
+    use crate::aot::types::StaticType;
 
     fn make_var(name: &str, version: usize) -> VarRef {
         VarRef {
             name: name.to_string(),
             version,
-            ty: JuliaType::Int64,
+            ty: StaticType::I64,
         }
     }
 
@@ -1170,7 +1352,7 @@ mod tests {
     #[test]
     fn test_dce_removes_unused_defs() {
         // Create a function with unused definitions
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         let unused_var = make_var("unused", 0);
         let used_var = make_var("used", 0);
@@ -1196,7 +1378,7 @@ mod tests {
     #[test]
     fn test_dce_keeps_used_defs() {
         // Create a function where all definitions are used
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         let var_a = make_var("a", 0);
         let var_b = make_var("b", 0);
@@ -1228,7 +1410,7 @@ mod tests {
     #[test]
     fn test_licm_finds_back_edges() {
         // Create a simple loop structure
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         // entry -> loop_header -> loop_body -> loop_header (back edge)
         func.blocks[0].label = "entry".to_string();
@@ -1265,13 +1447,54 @@ mod tests {
     }
 
     #[test]
-    fn test_licm_hoists_invariant_to_preheader() {
-        // CFG: entry -> loop_header -> loop_body -> loop_header (back edge)
-        //                           \-> exit
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+    fn test_licm_back_edges_require_dominance_issue_6982() {
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
+        // entry branches directly to `right`, so `left` does not dominate
+        // `right`; the right -> left edge is a cross edge, not a loop back edge.
+        func.blocks[0].label = "entry".to_string();
+        let cond = make_var("cond", 0);
+        func.blocks[0].instructions.push(Instruction::LoadConst {
+            dest: cond.clone(),
+            value: ConstValue::Bool(true),
+        });
+        func.blocks[0].terminator = Some(Terminator::Branch {
+            cond,
+            then_block: "left".to_string(),
+            else_block: "right".to_string(),
+        });
+
+        let mut left = BasicBlock::new("left".to_string());
+        left.terminator = Some(Terminator::Jump("exit".to_string()));
+
+        let mut right = BasicBlock::new("right".to_string());
+        right.terminator = Some(Terminator::Jump("left".to_string()));
+
+        let mut exit = BasicBlock::new("exit".to_string());
+        exit.terminator = Some(Terminator::Return(None));
+
+        func.blocks.push(left);
+        func.blocks.push(right);
+        func.blocks.push(exit);
+
+        let back_edges = LoopInvariantCodeMotion::find_back_edges(&func);
+        assert!(
+            back_edges.is_empty(),
+            "Cross edges to earlier blocks must not be treated as LICM loops: {back_edges:?}"
+        );
+    }
+
+    #[test]
+    fn test_licm_finds_later_header_back_edge_issue_6982() {
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
+
+        // Deliberately place the body before the header. Dominance, not block
+        // order, identifies loop_body -> loop_header as the back edge.
         func.blocks[0].label = "entry".to_string();
         func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
+
+        let mut body = BasicBlock::new("loop_body".to_string());
+        body.terminator = Some(Terminator::Jump("loop_header".to_string()));
 
         let mut header = BasicBlock::new("loop_header".to_string());
         let cond = make_var("cond", 0);
@@ -1279,6 +1502,41 @@ mod tests {
             dest: cond.clone(),
             value: ConstValue::Bool(true),
         });
+        header.terminator = Some(Terminator::Branch {
+            cond,
+            then_block: "loop_body".to_string(),
+            else_block: "exit".to_string(),
+        });
+
+        let mut exit = BasicBlock::new("exit".to_string());
+        exit.terminator = Some(Terminator::Return(None));
+
+        func.blocks.push(body);
+        func.blocks.push(header);
+        func.blocks.push(exit);
+
+        let back_edges = LoopInvariantCodeMotion::find_back_edges(&func);
+        assert_eq!(
+            back_edges,
+            vec![("loop_body".to_string(), "loop_header".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_licm_hoists_invariant_to_preheader() {
+        // CFG: entry -> loop_header -> loop_body -> loop_header (back edge)
+        //                           \-> exit
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
+
+        func.blocks[0].label = "entry".to_string();
+        let cond = make_var("cond", 0);
+        func.blocks[0].instructions.push(Instruction::LoadConst {
+            dest: cond.clone(),
+            value: ConstValue::Bool(true),
+        });
+        func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
+
+        let mut header = BasicBlock::new("loop_header".to_string());
         header.terminator = Some(Terminator::Branch {
             cond,
             then_block: "loop_body".to_string(),
@@ -1341,11 +1599,7 @@ mod tests {
         );
 
         // The loop body should no longer contain the invariant instruction
-        let body_block = func
-            .blocks
-            .iter()
-            .find(|b| b.label == "loop_body")
-            .unwrap();
+        let body_block = func.blocks.iter().find(|b| b.label == "loop_body").unwrap();
         assert!(
             body_block.instructions.is_empty(),
             "Loop body should be empty after hoisting, got {:?}",
@@ -1355,7 +1609,7 @@ mod tests {
 
     #[test]
     fn test_licm_entry_redirected_to_preheader() {
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         func.blocks[0].label = "entry".to_string();
         func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
@@ -1402,7 +1656,7 @@ mod tests {
 
     #[test]
     fn test_licm_back_edge_not_redirected() {
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         func.blocks[0].label = "entry".to_string();
         func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
@@ -1438,11 +1692,7 @@ mod tests {
         pass.optimize_function(&mut func).unwrap();
 
         // The loop body's back edge should still point to loop_header
-        let body_block = func
-            .blocks
-            .iter()
-            .find(|b| b.label == "loop_body")
-            .unwrap();
+        let body_block = func.blocks.iter().find(|b| b.label == "loop_body").unwrap();
         assert!(
             matches!(&body_block.terminator, Some(Terminator::Jump(t)) if t == "loop_header"),
             "Back edge should still target loop_header, got {:?}",
@@ -1452,31 +1702,41 @@ mod tests {
 
     #[test]
     fn test_licm_no_change_without_invariants() {
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         func.blocks[0].label = "entry".to_string();
+        let entry_flag = make_var("entry_flag", 0);
+        func.blocks[0].instructions.push(Instruction::LoadConst {
+            dest: entry_flag.clone(),
+            value: ConstValue::Bool(true),
+        });
         func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
 
         let mut header = BasicBlock::new("loop_header".to_string());
+        let loop_flag = make_var("loop_flag", 0);
+        let backedge_flag = make_var("backedge_flag", 0);
         let cond = make_var("cond", 0);
-        header.instructions.push(Instruction::LoadConst {
+        header.instructions.push(Instruction::Phi {
+            dest: loop_flag.clone(),
+            incoming: vec![
+                ("entry".to_string(), entry_flag),
+                ("loop_body".to_string(), backedge_flag.clone()),
+            ],
+        });
+        header.instructions.push(Instruction::Copy {
             dest: cond.clone(),
-            value: ConstValue::Bool(true),
+            src: loop_flag,
         });
         header.terminator = Some(Terminator::Branch {
-            cond: cond.clone(),
+            cond,
             then_block: "loop_body".to_string(),
             else_block: "exit".to_string(),
         });
 
         let mut body = BasicBlock::new("loop_body".to_string());
-        let phi_var = make_var("phi", 0);
-        body.instructions.push(Instruction::Phi {
-            dest: phi_var,
-            incoming: vec![
-                ("loop_header".to_string(), cond.clone()),
-                ("loop_body".to_string(), cond),
-            ],
+        body.instructions.push(Instruction::Copy {
+            dest: backedge_flag,
+            src: make_var("loop_flag", 0),
         });
         body.terminator = Some(Terminator::Jump("loop_header".to_string()));
 
@@ -1501,11 +1761,87 @@ mod tests {
     }
 
     #[test]
+    fn test_licm_hoists_invariant_control_condition_issue_6983() {
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
+
+        func.blocks[0].label = "entry".to_string();
+        func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
+
+        let mut header = BasicBlock::new("loop_header".to_string());
+        let left = make_var("left", 0);
+        let right = make_var("right", 0);
+        let cond = make_var("cond", 0);
+        header.instructions.push(Instruction::LoadConst {
+            dest: left.clone(),
+            value: ConstValue::Int64(1),
+        });
+        header.instructions.push(Instruction::LoadConst {
+            dest: right.clone(),
+            value: ConstValue::Int64(2),
+        });
+        header.instructions.push(Instruction::BinOp {
+            dest: cond.clone(),
+            op: BinOpKind::Lt,
+            left,
+            right,
+        });
+        header.terminator = Some(Terminator::Branch {
+            cond,
+            then_block: "loop_body".to_string(),
+            else_block: "exit".to_string(),
+        });
+
+        let mut body = BasicBlock::new("loop_body".to_string());
+        body.terminator = Some(Terminator::Jump("loop_header".to_string()));
+
+        let mut exit = BasicBlock::new("exit".to_string());
+        exit.terminator = Some(Terminator::Return(None));
+
+        func.blocks.push(header);
+        func.blocks.push(body);
+        func.blocks.push(exit);
+
+        let pass = LoopInvariantCodeMotion::new();
+        let changed = pass.optimize_function(&mut func).unwrap();
+        assert!(changed);
+
+        let preheader = func
+            .blocks
+            .iter()
+            .find(|b| b.label.starts_with("preheader_"))
+            .unwrap();
+        assert_eq!(preheader.instructions.len(), 3);
+        assert!(
+            matches!(
+                preheader.instructions.last(),
+                Some(Instruction::BinOp {
+                    op: BinOpKind::Lt,
+                    ..
+                })
+            ),
+            "Invariant scalar control condition should be hoisted: {:?}",
+            preheader.instructions
+        );
+
+        let header = func
+            .blocks
+            .iter()
+            .find(|b| b.label == "loop_header")
+            .unwrap();
+        assert!(
+            header.instructions.is_empty(),
+            "Hoisted condition defs should be removed from the header: {:?}",
+            header.instructions
+        );
+    }
+
+    #[test]
     fn test_licm_hoists_binop_with_external_operands() {
-        let mut func = IrFunction::new("test".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("test".to_string(), vec![], StaticType::Nothing);
 
         let var_a = make_var("a", 0);
         let var_b = make_var("b", 0);
+        let cond = make_var("cond", 0);
         func.blocks[0].label = "entry".to_string();
         func.blocks[0].instructions.push(Instruction::LoadConst {
             dest: var_a.clone(),
@@ -1515,14 +1851,13 @@ mod tests {
             dest: var_b.clone(),
             value: ConstValue::Int64(20),
         });
-        func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
-
-        let mut header = BasicBlock::new("loop_header".to_string());
-        let cond = make_var("cond", 0);
-        header.instructions.push(Instruction::LoadConst {
+        func.blocks[0].instructions.push(Instruction::LoadConst {
             dest: cond.clone(),
             value: ConstValue::Bool(true),
         });
+        func.blocks[0].terminator = Some(Terminator::Jump("loop_header".to_string()));
+
+        let mut header = BasicBlock::new("loop_header".to_string());
         header.terminator = Some(Terminator::Branch {
             cond,
             then_block: "loop_body".to_string(),
@@ -1557,7 +1892,13 @@ mod tests {
             .unwrap();
         assert_eq!(preheader.instructions.len(), 1);
         assert!(
-            matches!(&preheader.instructions[0], Instruction::BinOp { op: BinOpKind::Add, .. }),
+            matches!(
+                &preheader.instructions[0],
+                Instruction::BinOp {
+                    op: BinOpKind::Add,
+                    ..
+                }
+            ),
             "Expected hoisted BinOp(Add), got {:?}",
             &preheader.instructions[0]
         );

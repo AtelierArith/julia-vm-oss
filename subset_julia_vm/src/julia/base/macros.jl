@@ -28,8 +28,8 @@ end
 # @inbounds - Disable bounds checking (currently no-op, for compatibility)
 # =============================================================================
 # In full Julia, @inbounds disables bounds checking within the expression.
-# Here we just return the expression unchanged since SubsetJuliaVM always
-# performs bounds checking for safety.
+# Source lowering handles the supported call-context slice before macro
+# expansion reaches this fallback definition.
 macro inbounds(ex)
     esc(ex)
 end
@@ -55,10 +55,11 @@ macro simd(ex)
 end
 
 # =============================================================================
-# @boundscheck - Mark bounds-checking code (currently no-op, for compatibility)
+# @boundscheck - Mark bounds-checking code
 # =============================================================================
 # In full Julia, @boundscheck marks code that should be skipped when @inbounds
-# is active. Since we always check bounds, this is a no-op.
+# is active. Source lowering handles the supported runtime guard slice before
+# macro expansion reaches this fallback definition.
 macro boundscheck(ex)
     esc(ex)
 end
@@ -67,7 +68,8 @@ end
 # @propagate_inbounds - Propagate inbounds context (currently no-op, for compatibility)
 # =============================================================================
 # In full Julia, this is used to propagate @inbounds from caller to callee.
-# Since we always check bounds, this is a no-op.
+# SubsetJuliaVM currently parses it as a metadata compatibility wrapper; full
+# propagation metadata is tracked by Issue #4286.
 macro propagate_inbounds(ex)
     esc(ex)
 end
@@ -322,8 +324,19 @@ end
 # =============================================================================
 # @doc - Documentation macro (no-op; doc system not implemented)
 # =============================================================================
+macro doc(str)
+    nothing
+end
+
 macro doc(str, ex)
     esc(ex)
+end
+
+# =============================================================================
+# @__doc__ - Mark generated expression as docstring target (no-op)
+# =============================================================================
+macro __doc__(ex)
+    Expr(:block, Expr(:meta, :doc), esc(ex))
 end
 
 # =============================================================================
@@ -337,9 +350,12 @@ end
 # @generated - Generated functions (Phase 1: Fallback execution only)
 # =============================================================================
 # In Julia, @generated functions allow code generation based on argument types.
-# Since SubsetJuliaVM is an AOT compiler without JIT, we implement Phase 1:
+# Since SubsetJuliaVM is an AOT compiler without JIT, we implement a staged
+# compatibility subset:
 # - `if @generated ... else fallback end` pattern executes the fallback
-# - Pure `@generated function ... end` is not supported (requires JIT)
+# - full `@generated function ... end` syntax is accepted by lowering for
+#   representative type/value-parameter bodies; generated quote/JIT expansion
+#   remains unsupported
 #
 # This macro returns a special marker that lowering detects and handles.
 # The lowering phase will:
@@ -366,13 +382,11 @@ macro generated()
 end
 
 macro generated(f)
-    # Transform @generated function into if @generated ... else ... end pattern
-    # This is the full @generated function syntax:
-    #   @generated function f(x) ... end
-    #
-    # For Phase 1, we reject this syntax since it requires the generated code
-    # to actually run. Users should use the if @generated ... else ... end pattern.
-    error("@generated function syntax is not supported in SubsetJuliaVM Phase 1. Use `if @generated ... else fallback end` pattern instead.")
+    # Full @generated function syntax is intercepted by Rust lowering before
+    # this macro expansion path. If user macro expansion reaches here, keep the
+    # remaining generated-body machinery explicit instead of silently producing
+    # wrong code.
+    error("@generated function macro expansion is not supported in SubsetJuliaVM. Use direct @generated function definitions with supported type/value-parameter bodies.")
 end
 
 # =============================================================================
@@ -475,9 +489,22 @@ end
 #   x = 5
 #   @show(x)      # prints "x = 5" and returns 5
 
-# Helper function for @show macro
+# Helper function for @show macro.
+#
+# Issue #4865: emit the value in show-form, not print-form, so
+# `@show "positive"` prints `x = "positive"` (with quotes) and
+# `@show :foo` prints `x = :foo` (with the leading colon), matching
+# upstream Julia. Previously this routed through `println(..., value)`,
+# which uses print-form and stripped both delimiters.
+#
+# Mirrors upstream Julia's `@show` lowering (julia/base/show.jl:1283),
+# which expands to `println(EXPR_STR * " = ", repr(value))` per
+# argument. We route through `repr(value)` here for the same reason:
+# `repr` produces the show-form String once, which `println` then
+# emits verbatim (println uses print-form for String args, so the
+# embedded quotes / colon survive unchanged).
 function _do_show(expr_str::String, value)
-    println(expr_str, " = ", value)
+    println(expr_str, " = ", repr(value))
     value
 end
 
@@ -490,6 +517,16 @@ macro show(ex)
         _do_show($expr_str, $(esc(ex)))
     end
 end
+
+# Multi-argument @show (Issue #4868): `@show x y z` is handled by a
+# dedicated arm in the Rust macro-expansion lowering
+# (lowering/{stmt,expr}/macros/expand.rs). That arm builds a block of
+# `_do_show(<source text>, <arg>)` calls — one per argument — and
+# returns the value of the last one, mirroring upstream Julia's
+# `macro show(exs...)` in julia/base/show.jl. It is implemented in Rust
+# because the pure-Julia macro-substitution engine cannot iterate over a
+# varargs parameter to emit N separate statements; the single-argument
+# `macro show(ex)` above remains the Pure-Julia path for the common case.
 
 # =============================================================================
 # gensym - Generate unique symbol names (Rust builtin)

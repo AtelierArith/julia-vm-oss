@@ -1,0 +1,25 @@
+# Test manifest for AbstractAlgebra.jl support gates (Issue #7439)
+
+[[tests]]
+name = "abstract_algebra_phase0_parse_baseline_7486"
+file = "phase0_parse_baseline_7486.jl"
+expected = true
+description = "Phase 0 audit baseline: upstream AbstractAlgebra top-level @doc raw string plus early module/type skeleton parses through Meta.parse without bundling the package yet (Issue #7486)"
+
+[[tests]]
+name = "abstract_algebra_package_load_7487"
+file = "package_load_7487.jl"
+expected = true
+description = "Phase 1 package/dependency gate: using MacroTools; using AbstractAlgebra resolves via the bundled package loader and compatibility dependency shims (Issue #7487)"
+
+[[tests]]
+name = "abstract_algebra_phase2_driver_7723"
+file = "phase2_driver_7723.jl"
+expected = true
+description = "Phase 2 driver gate: AbstractAlgebra exports type aliases, macro-expanded UniversalRing, and macro imports through using AbstractAlgebra (Issues #7723/#7488)"
+
+[[tests]]
+name = "abstract_algebra_core_traits_7489_7490"
+file = "core_traits_7489_7490.jl"
+expected = true
+description = "Phase 3/4 seed gate: ZZ/QQ parent objects, core traits, exact integer/rational arithmetic, and AbstractAlgebra error display (Issues #7489/#7490)"

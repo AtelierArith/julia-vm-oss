@@ -6,14 +6,265 @@
 #![deny(clippy::expect_used)]
 
 use crate::builtins::BuiltinId;
+use crate::inference_core::CoreType;
+use crate::vm::value::is_native_array_value;
 
 use super::error::VmError;
 use super::stack_ops::StackOps;
-use super::type_utils::normalize_type_for_isa;
-use super::value::{ArrayData, DictKey, TupleValue, Value};
-use super::{new_array_ref, Vm};
+use super::type_objects::RuntimeTypeRegistry;
+use super::type_utils::{normalize_type_for_isa, type_values_subtype};
+use super::value::{
+    julia_array_type_for_ndims, native_array_value_ref, ArrayElementType, DictKey,
+    GeneratorCallable, MemoryValue, RuntimeTypeVarValue, SymbolValue, Value,
+};
+use super::Vm;
+
+/// Validate the argument count of a fixed-arity builtin, mirroring upstream
+/// Julia's `JL_NARGS(fname, min, max)` machinery (`julia/src/julia.h` /
+/// `julia/src/rtutils.c`). On a mismatch this raises a catchable
+/// `ArgumentError` whose message matches `jl_too_few_args` /
+/// `jl_too_many_args` exactly (Issue #5493). The message is carried via
+/// `VmError::TypeError` with the `ArgumentError:` prefix, the established
+/// convention for VM-surfaced `ArgumentError`s.
+fn check_builtin_arity(fname: &str, argc: usize, expected: usize) -> Result<(), VmError> {
+    if argc < expected {
+        Err(VmError::TypeError(format!(
+            "ArgumentError: {}: too few arguments (expected {})",
+            fname, expected
+        )))
+    } else if argc > expected {
+        Err(VmError::TypeError(format!(
+            "ArgumentError: {}: too many arguments (expected {})",
+            fname, expected
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn reflection_type_name(type_val: &Value) -> Option<String> {
+    match type_val {
+        Value::DataType(jt) => Some(jt.name().to_string()),
+        Value::Str(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn reflection_julia_type(type_name: &str) -> crate::types::JuliaType {
+    crate::types::JuliaType::from_name(type_name)
+        .unwrap_or_else(|| crate::types::JuliaType::Struct(type_name.to_string()))
+}
+
+/// Recover the type name an operand of `<:`/`>:` denotes.
+///
+/// Bare `Ref`/`RefValue` evaluate to their callable constructors rather than
+/// `DataType` values, so the abstract-type name must be recovered from the
+/// function name for `<:` to work (e.g. `Ref{Int} <: Ref`) (Issue #5130).
+/// Shared by the `<:` (Subtype) and `>:` (SupertypeOp) builtins (Issue #5115).
+fn subtype_operand_name(v: &Value) -> String {
+    match v {
+        Value::DataType(jt) => jt.name().to_string(),
+        Value::Str(s) => s.clone(),
+        Value::Struct(s) => s
+            .array_wrapper_julia_type()
+            .map(|jt| jt.name().to_string())
+            .unwrap_or_else(|| s.struct_name.to_string()),
+        Value::Function(f) if f.name == "Ref" || f.name == "RefValue" => f.name.clone(),
+        _ => format!("{:?}", v),
+    }
+}
+
+fn is_core_datatype_subtype_operand(ty: &crate::types::JuliaType) -> bool {
+    !matches!(
+        ty,
+        crate::types::JuliaType::Struct(_) | crate::types::JuliaType::AbstractUser(_, _)
+    )
+}
+
+fn core_datatype_typeintersect_subtype_result(
+    left: &Value,
+    right: &Value,
+) -> Option<crate::types::JuliaType> {
+    let (Value::DataType(left_ty), Value::DataType(right_ty)) = (left, right) else {
+        return None;
+    };
+    if !is_core_datatype_subtype_operand(left_ty) || !is_core_datatype_subtype_operand(right_ty) {
+        return None;
+    }
+
+    let left_core = CoreType::from(left_ty.as_ref());
+    let right_core = CoreType::from(right_ty.as_ref());
+    if left_core.is_subtype_of(&right_core) {
+        Some(*left_ty.clone())
+    } else if right_core.is_subtype_of(&left_core) {
+        Some(*right_ty.clone())
+    } else {
+        None
+    }
+}
+
+/// Issue #4694: walk a `JuliaType` looking for a `TypeVar` whose `name`
+/// matches `var_name`, also scanning embedded parametric type strings such
+/// as `"Vector{T}"` or `"Dict{K, V}"`. Used by the `UnionAll(var, body)`
+/// constructor to skip wrapping when the body does not reference the
+/// bound variable (matching upstream `jl_type_unionall`).
+fn julia_type_references_typevar(ty: &crate::types::JuliaType, var_name: &str) -> bool {
+    use crate::types::JuliaType;
+    match ty {
+        JuliaType::TypeVar(name, bound) => {
+            name == var_name
+                || bound
+                    .as_deref()
+                    .is_some_and(|bound| type_name_references_typevar(bound, var_name))
+        }
+        JuliaType::VectorOf(inner) | JuliaType::MatrixOf(inner) => {
+            julia_type_references_typevar(inner, var_name)
+        }
+        JuliaType::TypeOf(inner) => julia_type_references_typevar(inner, var_name),
+        JuliaType::TupleOf(elements) | JuliaType::Union(elements) => elements
+            .iter()
+            .any(|elem| julia_type_references_typevar(elem, var_name)),
+        JuliaType::UnionAll {
+            lower_bound,
+            var,
+            bound,
+            body,
+        } => {
+            // The inner UnionAll shadows the same-named variable; only
+            // recurse into its body when the names differ.
+            lower_bound
+                .as_deref()
+                .is_some_and(|lower| type_name_references_typevar(lower, var_name))
+                || bound
+                    .as_deref()
+                    .is_some_and(|upper| type_name_references_typevar(upper, var_name))
+                || (var != var_name && julia_type_references_typevar(body, var_name))
+        }
+        JuliaType::Struct(name) => type_name_references_typevar(name, var_name),
+        _ => false,
+    }
+}
+
+fn type_name_references_typevar(name: &str, var_name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx].is_ascii_alphanumeric() || bytes[idx] == b'_' {
+            let start = idx;
+            while idx < bytes.len() && (bytes[idx].is_ascii_alphanumeric() || bytes[idx] == b'_') {
+                idx += 1;
+            }
+            if &name[start..idx] == var_name {
+                return true;
+            }
+        } else {
+            idx += 1;
+        }
+    }
+    false
+}
+
+fn type_object_argument(value: Value) -> Result<crate::types::JuliaType, VmError> {
+    match value {
+        Value::DataType(jt) => Ok(*jt),
+        Value::RuntimeTypeVar(tv) => Ok(tv.projection()),
+        other => Err(VmError::TypeError(format!(
+            "TypeVar bound must be a Type or TypeVar, got {:?}",
+            other.value_type()
+        ))),
+    }
+}
+
+fn array_value_size_bytes(element_type: &ArrayElementType, shape: &[usize]) -> i64 {
+    let total_elems: i64 = shape.iter().map(|&d| d as i64).product();
+    array_element_type_size_bytes(element_type) * total_elems
+}
+
+fn array_element_type_size_bytes(element_type: &ArrayElementType) -> i64 {
+    match element_type {
+        ArrayElementType::F64 | ArrayElementType::I64 | ArrayElementType::U64 => 8,
+        ArrayElementType::F32 | ArrayElementType::I32 | ArrayElementType::U32 => 4,
+        ArrayElementType::I16 | ArrayElementType::U16 => 2,
+        ArrayElementType::I8 | ArrayElementType::U8 | ArrayElementType::Bool => 1,
+        ArrayElementType::Char => 4,
+        ArrayElementType::I128 | ArrayElementType::U128 | ArrayElementType::ComplexF64 => 16,
+        ArrayElementType::ComplexF32 => 8,
+        ArrayElementType::Nothing => 0,
+        ArrayElementType::String
+        | ArrayElementType::SubString
+        | ArrayElementType::Symbol
+        | ArrayElementType::Struct
+        | ArrayElementType::StructOf(_)
+        | ArrayElementType::StructInlineOf(_, _)
+        | ArrayElementType::Any
+        | ArrayElementType::TupleOf(_)
+        | ArrayElementType::UnionOf(_)
+        | ArrayElementType::Abstract(_) => 8,
+    }
+}
+
+fn memory_value_size_bytes(memory: &MemoryValue) -> i64 {
+    array_element_type_size_bytes(memory.element_type()) * memory.len() as i64
+}
+
+fn type_param_matches_memory_element(param: &str, element_type_name: &str) -> bool {
+    let normalized = normalize_type_for_isa(param);
+    let param = normalized.as_ref();
+    if let Some(bound) = param.strip_prefix("<:") {
+        let element_type = crate::types::JuliaType::from_name_or_struct(element_type_name);
+        let bound_type = crate::types::JuliaType::from_name_or_struct(bound.trim());
+        return type_values_subtype(&element_type, &bound_type);
+    }
+    param == element_type_name
+}
+
+fn memory_isa_target(memory: &MemoryValue, target_type_name: &str) -> bool {
+    let normalized_target = normalize_type_for_isa(target_type_name);
+    let target = normalized_target.as_ref();
+    let base = target.find('{').map_or(target, |idx| &target[..idx]);
+    let params = crate::vm::util::parse_parametric_params(target);
+    let element_type_name = memory.element_type().julia_type_name();
+
+    let element_param_matches = |idx: usize| {
+        params
+            .get(idx)
+            .is_some_and(|param| type_param_matches_memory_element(param, &element_type_name))
+    };
+    let rank_param_matches = |idx: usize| params.get(idx).is_none_or(|rank| *rank == "1");
+
+    match base {
+        "Any" | "Memory" => params.is_empty() || element_param_matches(0),
+        "GenericMemory" => {
+            params.is_empty()
+                || match params.len() {
+                    1 => element_param_matches(0),
+                    _ => {
+                        let kind_matches = params
+                            .first()
+                            .is_none_or(|kind| matches!(*kind, ":not_atomic" | "not_atomic"));
+                        kind_matches && element_param_matches(1)
+                    }
+                }
+        }
+        "AbstractArray" | "DenseArray" => {
+            params.is_empty() || (element_param_matches(0) && rank_param_matches(1))
+        }
+        "AbstractVector" | "DenseVector" => params.is_empty() || element_param_matches(0),
+        "Array" | "Vector" | "Matrix" | "AbstractMatrix" | "DenseMatrix" => false,
+        _ => false,
+    }
+}
 
 impl<R: crate::rng::RngLike> Vm<R> {
+    pub(in crate::vm) fn reflection_supertype_name(&self, type_name: &str) -> String {
+        RuntimeTypeRegistry::new_with_struct_defs(
+            self.compile_context.as_ref(),
+            &self.abstract_types,
+            &self.struct_defs,
+        )
+        .supertype_name(type_name)
+    }
+
     /// Execute type builtin functions.
     /// Returns `Ok(Some(()))` if handled, `Ok(None)` if not a type builtin.
     pub(super) fn execute_builtin_types(
@@ -29,188 +280,236 @@ impl<R: crate::rng::RngLike> Vm<R> {
         }
 
         match builtin {
+            BuiltinId::TypeVar => {
+                if argc != 1 && argc != 3 {
+                    return Err(VmError::TypeError(
+                        "TypeVar requires 1 or 3 arguments".to_string(),
+                    ));
+                }
+
+                let (name_val, lower_bound, upper_bound) = if argc == 1 {
+                    (
+                        self.stack.pop_value()?,
+                        crate::types::JuliaType::Bottom,
+                        crate::types::JuliaType::Any,
+                    )
+                } else {
+                    let upper = self.stack.pop_value()?;
+                    let lower = self.stack.pop_value()?;
+                    let name = self.stack.pop_value()?;
+                    (
+                        name,
+                        type_object_argument(lower)?,
+                        type_object_argument(upper)?,
+                    )
+                };
+
+                let name = match name_val {
+                    Value::Symbol(symbol) => symbol.into_string(),
+                    Value::QuoteNode(inner) => match *inner {
+                        Value::Symbol(symbol) => symbol.into_string(),
+                        other => {
+                            return Err(VmError::TypeError(format!(
+                                "TypeVar name must be a Symbol, got {:?}",
+                                other.value_type()
+                            )));
+                        }
+                    },
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "TypeVar name must be a Symbol, got {:?}",
+                            other.value_type()
+                        )));
+                    }
+                };
+
+                let id = self.runtime_typevar_counter;
+                self.runtime_typevar_counter += 1;
+                self.stack
+                    .push(Value::RuntimeTypeVar(Box::new(RuntimeTypeVarValue {
+                        id,
+                        name,
+                        lower_bound,
+                        upper_bound,
+                    })));
+            }
+
+            BuiltinId::UnionAll => {
+                // Issue #4694: UnionAll(var::TypeVar, body) constructs a
+                // `JuliaType::UnionAll` so Pure Julia helpers such as
+                // `Base.rewrap_unionall` and `Base.rename_unionall` can wrap a
+                // body back into a UnionAll after `unwrap_unionall` peeled the
+                // existing layers (Issue #3909).
+                if argc != 2 {
+                    return Err(VmError::TypeError(
+                        "UnionAll requires 2 arguments (var::TypeVar, body)".to_string(),
+                    ));
+                }
+                let body_val = self.stack.pop_value()?;
+                let var_val = self.stack.pop_value()?;
+
+                let (var_name, lower, bound) = match &var_val {
+                    Value::RuntimeTypeVar(tv) => {
+                        let bound = if matches!(tv.upper_bound, crate::types::JuliaType::Any) {
+                            None
+                        } else {
+                            Some(tv.upper_bound.name().to_string())
+                        };
+                        // A `Union{}` (Bottom) lower bound is the implicit default
+                        // and is not displayed; only a declared lower bound (e.g.
+                        // `where Int<:T`) is carried through (#5650).
+                        let lower = if matches!(tv.lower_bound, crate::types::JuliaType::Bottom) {
+                            None
+                        } else {
+                            Some(tv.lower_bound.name().to_string())
+                        };
+                        (tv.name.clone(), lower, bound)
+                    }
+                    Value::DataType(jt)
+                        if matches!(jt.as_ref(), crate::types::JuliaType::TypeVar(..)) =>
+                    {
+                        let crate::types::JuliaType::TypeVar(name, bound) = jt.as_ref() else {
+                            unreachable!()
+                        };
+                        (name.clone(), None, bound.clone())
+                    }
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "UnionAll var must be a TypeVar, got {:?}",
+                            other.value_type()
+                        )));
+                    }
+                };
+
+                let body = match body_val {
+                    Value::DataType(jt) => jt,
+                    Value::RuntimeTypeVar(tv) => Box::new(tv.projection()),
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "UnionAll body must be a Type, got {:?}",
+                            other.value_type()
+                        )));
+                    }
+                };
+
+                // Match upstream `jl_type_unionall`: if the body does not
+                // reference the bound variable, return the body unchanged.
+                // This keeps `rewrap_unionall(Int64, Vector) === Int64` and
+                // `UnionAll(T, Vector{Int64}) === Vector{Int64}` in agreement
+                // with Julia's `Vector{Int64}` (not a UnionAll).
+                let projection = if matches!(body.as_ref(), crate::types::JuliaType::TypeVar(name, _) if name == &var_name)
+                {
+                    // A bare bound variable body denotes its upper bound:
+                    // `T where T === Any`, `T where T<:Real === Real`
+                    // (Issue #5570).
+                    bound
+                        .as_deref()
+                        .map(crate::types::JuliaType::from_name_or_struct)
+                        .unwrap_or(crate::types::JuliaType::Any)
+                } else if julia_type_references_typevar(&body, &var_name) {
+                    crate::types::JuliaType::UnionAll {
+                        lower_bound: lower.map(Box::new),
+                        var: var_name,
+                        bound: bound.map(Box::new),
+                        body,
+                    }
+                } else {
+                    *body
+                };
+                self.stack.push(Value::DataType(Box::new(projection)));
+            }
+
             BuiltinId::TypeOf => {
                 let val = self.stack.pop_value()?;
 
                 // Check if this is a type name literal (from lowered ParametrizedTypeExpression)
                 if let Value::Str(type_name_str) = &val {
                     if let Some(parsed_type) = crate::types::JuliaType::from_name(type_name_str) {
-                        self.stack.push(Value::DataType(parsed_type));
+                        self.stack.push(Value::DataType(Box::new(parsed_type)));
                         return Ok(Some(()));
                     }
+                    // Parametric type-name literals start with an uppercase letter
+                    // (e.g. `Vector{Int64}`). The canonical named-tuple form
+                    // `@NamedTuple{a::Int64, b::String}` (emitted by the
+                    // `@NamedTuple` macro, Issue #5120) starts with `@` instead,
+                    // so accept that prefix explicitly.
                     if type_name_str.contains('{')
-                        && type_name_str
+                        && (type_name_str
                             .chars()
                             .next()
                             .is_some_and(|c| c.is_ascii_uppercase())
+                            || type_name_str.starts_with("@NamedTuple{"))
                     {
                         let parsed_type =
                             crate::types::JuliaType::from_name_or_struct(type_name_str);
-                        self.stack.push(Value::DataType(parsed_type));
+                        self.stack.push(Value::DataType(Box::new(parsed_type)));
                         return Ok(Some(()));
                     }
                 }
 
                 let julia_type = match &val {
+                    // Issue #5335: typeof(Union{...}) is `Union`, not `DataType`.
+                    // A union type object projects to the `Union` meta-type (which
+                    // renders as "Union"), matching upstream Julia.
+                    Value::DataType(jt)
+                        if matches!(jt.as_ref(), crate::types::JuliaType::Union(_)) =>
+                    {
+                        crate::types::JuliaType::Struct("Union".to_string())
+                    }
+                    Value::DataType(jt) => {
+                        let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                            self.compile_context.as_ref(),
+                            &self.abstract_types,
+                            &self.struct_defs,
+                        );
+                        registry.object(jt).runtime_type_projection()
+                    }
+                    Value::RuntimeTypeVar(_) => {
+                        crate::types::JuliaType::Struct("TypeVar".to_string())
+                    }
                     Value::StructRef(idx) => {
                         if let Some(s) = self.struct_heap.get(*idx) {
                             // Special case: Generator struct maps to Base.Generator type
-                            if s.struct_name == "Generator" {
+                            if let Some(array_type) = self.array_wrapper_julia_type_resolved(s) {
+                                array_type
+                            } else if &*s.struct_name == "Generator" {
                                 crate::types::JuliaType::Generator
                             } else {
-                                crate::types::JuliaType::Struct(s.struct_name.clone())
+                                crate::types::JuliaType::Struct(s.struct_name.to_string())
                             }
                         } else {
                             crate::types::JuliaType::Any
                         }
                     }
                     Value::Struct(s) => {
-                        if s.struct_name.is_empty() {
+                        if let Some(array_type) = self.array_wrapper_julia_type_resolved(s) {
+                            array_type
+                        } else if s.struct_name.is_empty() {
                             crate::types::JuliaType::Any
-                        } else if s.struct_name == "Generator" {
+                        } else if &*s.struct_name == "Generator" {
                             // Special case: Generator struct maps to Base.Generator type
                             crate::types::JuliaType::Generator
                         } else {
-                            crate::types::JuliaType::Struct(s.struct_name.clone())
+                            crate::types::JuliaType::Struct(s.struct_name.to_string())
                         }
                     }
-                    Value::Array(arr) => {
-                        let arr_borrow = arr.borrow();
-                        let elem_type = match arr_borrow.data.element_type() {
-                            super::value::ArrayElementType::F32 => crate::types::JuliaType::Float32,
-                            super::value::ArrayElementType::F64 => crate::types::JuliaType::Float64,
-                            super::value::ArrayElementType::ComplexF32 => {
-                                crate::types::JuliaType::Struct("Complex{Float32}".to_string())
+                    _ if is_native_array_value(&val) => match native_array_value_ref(&val) {
+                        Some(arr) => {
+                            let arr_borrow = arr.borrow();
+                            if let Some(container_type) = arr_borrow.array_type_override() {
+                                crate::types::JuliaType::Struct(container_type.to_string())
+                            } else {
+                                let elem_type =
+                                    self.array_value_declared_element_julia_type(&arr_borrow);
+                                julia_array_type_for_ndims(elem_type, arr_borrow.shape.len())
                             }
-                            super::value::ArrayElementType::ComplexF64 => {
-                                crate::types::JuliaType::Struct("Complex{Float64}".to_string())
-                            }
-                            super::value::ArrayElementType::I8 => crate::types::JuliaType::Int8,
-                            super::value::ArrayElementType::I16 => crate::types::JuliaType::Int16,
-                            super::value::ArrayElementType::I32 => crate::types::JuliaType::Int32,
-                            super::value::ArrayElementType::I64 => crate::types::JuliaType::Int64,
-                            super::value::ArrayElementType::U8 => crate::types::JuliaType::UInt8,
-                            super::value::ArrayElementType::U16 => crate::types::JuliaType::UInt16,
-                            super::value::ArrayElementType::U32 => crate::types::JuliaType::UInt32,
-                            super::value::ArrayElementType::U64 => crate::types::JuliaType::UInt64,
-                            super::value::ArrayElementType::Bool => crate::types::JuliaType::Bool,
-                            super::value::ArrayElementType::String => {
-                                crate::types::JuliaType::String
-                            }
-                            super::value::ArrayElementType::Char => crate::types::JuliaType::Char,
-                            super::value::ArrayElementType::StructOf(type_id) => {
-                                if let Some(def) = self.struct_defs.get(type_id) {
-                                    crate::types::JuliaType::Struct(def.name.clone())
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            super::value::ArrayElementType::StructInlineOf(type_id, _) => {
-                                if let Some(def) = self.struct_defs.get(type_id) {
-                                    crate::types::JuliaType::Struct(def.name.clone())
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            super::value::ArrayElementType::Struct => {
-                                if let ArrayData::StructRefs(ref struct_refs) = arr_borrow.data {
-                                    if let Some(&first_ref_idx) = struct_refs.first() {
-                                        if let Some(struct_instance) =
-                                            self.struct_heap.get(first_ref_idx)
-                                        {
-                                            crate::types::JuliaType::Struct(
-                                                struct_instance.struct_name.clone(),
-                                            )
-                                        } else {
-                                            crate::types::JuliaType::Any
-                                        }
-                                    } else {
-                                        crate::types::JuliaType::Any
-                                    }
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            super::value::ArrayElementType::Any => crate::types::JuliaType::Any,
-                            super::value::ArrayElementType::TupleOf(_) => {
-                                crate::types::JuliaType::Any
-                            }
-                        };
-                        match arr_borrow.shape.len() {
-                            1 => crate::types::JuliaType::VectorOf(Box::new(elem_type)),
-                            2 => crate::types::JuliaType::MatrixOf(Box::new(elem_type)),
-                            _ => crate::types::JuliaType::Array,
                         }
-                    }
-                    // Memory → Array (Issue #2764)
+                        None => val.runtime_type(),
+                    },
                     Value::Memory(mem) => {
-                        let arr = crate::vm::util::memory_to_array_ref(mem);
-                        let arr_borrow = arr.borrow();
-                        let elem_type = match arr_borrow.data.element_type() {
-                            super::value::ArrayElementType::F32 => crate::types::JuliaType::Float32,
-                            super::value::ArrayElementType::F64 => crate::types::JuliaType::Float64,
-                            super::value::ArrayElementType::ComplexF32 => {
-                                crate::types::JuliaType::Struct("Complex{Float32}".to_string())
-                            }
-                            super::value::ArrayElementType::ComplexF64 => {
-                                crate::types::JuliaType::Struct("Complex{Float64}".to_string())
-                            }
-                            super::value::ArrayElementType::I8 => crate::types::JuliaType::Int8,
-                            super::value::ArrayElementType::I16 => crate::types::JuliaType::Int16,
-                            super::value::ArrayElementType::I32 => crate::types::JuliaType::Int32,
-                            super::value::ArrayElementType::I64 => crate::types::JuliaType::Int64,
-                            super::value::ArrayElementType::U8 => crate::types::JuliaType::UInt8,
-                            super::value::ArrayElementType::U16 => crate::types::JuliaType::UInt16,
-                            super::value::ArrayElementType::U32 => crate::types::JuliaType::UInt32,
-                            super::value::ArrayElementType::U64 => crate::types::JuliaType::UInt64,
-                            super::value::ArrayElementType::Bool => crate::types::JuliaType::Bool,
-                            super::value::ArrayElementType::String => {
-                                crate::types::JuliaType::String
-                            }
-                            super::value::ArrayElementType::Char => crate::types::JuliaType::Char,
-                            super::value::ArrayElementType::StructOf(type_id) => {
-                                if let Some(def) = self.struct_defs.get(type_id) {
-                                    crate::types::JuliaType::Struct(def.name.clone())
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            super::value::ArrayElementType::StructInlineOf(type_id, _) => {
-                                if let Some(def) = self.struct_defs.get(type_id) {
-                                    crate::types::JuliaType::Struct(def.name.clone())
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            super::value::ArrayElementType::Struct => {
-                                if let ArrayData::StructRefs(ref struct_refs) = arr_borrow.data {
-                                    if let Some(&first_ref_idx) = struct_refs.first() {
-                                        if let Some(struct_instance) =
-                                            self.struct_heap.get(first_ref_idx)
-                                        {
-                                            crate::types::JuliaType::Struct(
-                                                struct_instance.struct_name.clone(),
-                                            )
-                                        } else {
-                                            crate::types::JuliaType::Any
-                                        }
-                                    } else {
-                                        crate::types::JuliaType::Any
-                                    }
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            super::value::ArrayElementType::Any => crate::types::JuliaType::Any,
-                            super::value::ArrayElementType::TupleOf(_) => {
-                                crate::types::JuliaType::Any
-                            }
-                        };
-                        match arr_borrow.shape.len() {
-                            1 => crate::types::JuliaType::VectorOf(Box::new(elem_type)),
-                            2 => crate::types::JuliaType::MatrixOf(Box::new(elem_type)),
-                            _ => crate::types::JuliaType::Array,
-                        }
+                        let mem = mem.borrow();
+                        let elem_type_name = self.memory_element_type_name(mem.element_type());
+                        crate::types::JuliaType::Struct(format!("Memory{{{}}}", elem_type_name))
                     }
                     Value::NamedTuple(nt) => {
                         // Julia shows @NamedTuple{a::T1, b::T2} (short form)
@@ -225,18 +524,71 @@ impl<R: crate::rng::RngLike> Vm<R> {
                             fields.join(", ")
                         ))
                     }
-                    Value::Dict(d) => {
-                        // Return Dict{K, V} with type parameters (Issue #2742)
-                        let k = d.key_type.as_deref().unwrap_or("Any");
-                        let v = d.value_type.as_deref().unwrap_or("Any");
-                        crate::types::JuliaType::Struct(format!("Dict{{{}, {}}}", k, v))
+                    Value::Pairs(p) => {
+                        crate::types::JuliaType::Struct(self.pairs_runtime_type_name(p))
+                    }
+                    Value::Tuple(t) => {
+                        let types = t
+                            .elements
+                            .iter()
+                            .map(|element| {
+                                let type_name = self.get_type_name(element);
+                                crate::types::JuliaType::from_name_or_struct(&type_name)
+                            })
+                            .collect();
+                        crate::types::JuliaType::TupleOf(types)
+                    }
+                    Value::Generator(g) => {
+                        let iter_type = self.get_type_name(g.iter.as_ref());
+                        let callable_type = match &g.callable {
+                            GeneratorCallable::TypeObject(jt) => {
+                                format!("Type{{{}}}", jt.name())
+                            }
+                            GeneratorCallable::TupleSplatTypeObject(jt) => {
+                                format!("Type{{{}}}", jt.name())
+                            }
+                            GeneratorCallable::FunctionIndex(func_index) => self
+                                .functions
+                                .get(*func_index)
+                                .map(|func| format!("typeof({})", func.name))
+                                .unwrap_or_else(|| "Function".to_string()),
+                            GeneratorCallable::FilteredFunctionIndex { .. } => {
+                                "Function".to_string()
+                            }
+                            GeneratorCallable::TupleSplatFunctionIndex(func_index) => self
+                                .functions
+                                .get(*func_index)
+                                .map(|func| format!("typeof({})", func.name))
+                                .unwrap_or_else(|| "Function".to_string()),
+                            GeneratorCallable::RuntimeValue(callable)
+                            | GeneratorCallable::TupleSplatRuntimeValue(callable) => {
+                                if let Value::Function(function) = callable.as_ref() {
+                                    format!("typeof({})", function.name)
+                                } else {
+                                    self.get_type_name(callable.as_ref())
+                                }
+                            }
+                            GeneratorCallable::Eager => "Any".to_string(),
+                        };
+                        crate::types::JuliaType::Struct(format!(
+                            "Base.Generator{{{}, {}}}",
+                            iter_type, callable_type
+                        ))
+                    }
+                    Value::Function(function) => {
+                        crate::types::JuliaType::Struct(format!("typeof({})", function.name))
                     }
                     _ => val.runtime_type(),
                 };
-                self.stack.push(Value::DataType(julia_type));
+                self.stack.push(Value::DataType(Box::new(julia_type)));
             }
 
             BuiltinId::Isa => {
+                // Upstream `jl_f_isa` validates `JL_NARGS(isa, 2, 2)` before
+                // touching its arguments (Issue #5493). Without this the
+                // immediate call path underflowed on `isa(x)` and silently
+                // ignored extras on `isa(x, T, extra)`.
+                check_builtin_arity("isa", argc, 2)?;
                 let type_val = self.stack.pop_value()?;
                 let val = self.stack.pop_value()?;
 
@@ -254,152 +606,72 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     }
                 };
 
+                // `isa(x, Type{B})` is true iff `x` is itself a type and `x`
+                // satisfies the `Type{B}` parameter: invariant `x === B` for a
+                // concrete `B`, covariant `x <: B` for the `Type{<:B}` spelling,
+                // and any type for the unbounded `Type{T} where T` ≡ `Type`
+                // (Issue #5068). A non-type value (e.g. the integer `3`) is never
+                // `isa` a `Type{...}`.
+                if let Some(crate::types::JuliaType::TypeOf(inner)) =
+                    crate::types::JuliaType::from_name(&target_type_name)
+                {
+                    let value_type_object = match &val {
+                        Value::DataType(jt) => Some(*jt.clone()),
+                        Value::RuntimeTypeVar(tv) => Some(tv.projection()),
+                        _ => None,
+                    };
+                    let is_match = value_type_object.is_some_and(|x| {
+                        let value_type = crate::types::JuliaType::TypeOf(Box::new(x)).name();
+                        let target_type = crate::types::JuliaType::TypeOf(inner.clone()).name();
+                        self.check_subtype(value_type.as_ref(), target_type.as_ref())
+                    });
+                    self.stack.push(Value::Bool(is_match));
+                    return Ok(Some(()));
+                }
+
                 let (struct_name_opt, resolved_val_type) = match &val {
+                    // Issue #3909: route type-object values through the runtime
+                    // type registry so the projected kind (DataType / UnionAll /
+                    // TypeVar) matches typeof(). Without this, isa(Vector,
+                    // UnionAll) would disagree with typeof(Vector) === UnionAll.
+                    Value::DataType(jt) => {
+                        let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                            self.compile_context.as_ref(),
+                            &self.abstract_types,
+                            &self.struct_defs,
+                        );
+                        (None, registry.object(jt).runtime_type_projection())
+                    }
                     Value::StructRef(idx) => {
                         if let Some(si) = self.struct_heap.get(*idx) {
-                            (
-                                Some(si.struct_name.clone()),
-                                crate::types::JuliaType::Struct(si.struct_name.clone()),
-                            )
+                            if let Some(array_type) = si.array_wrapper_julia_type() {
+                                (None, array_type)
+                            } else {
+                                (
+                                    Some(si.struct_name.to_string()),
+                                    crate::types::JuliaType::Struct(si.struct_name.to_string()),
+                                )
+                            }
                         } else {
                             (None, crate::types::JuliaType::Any)
                         }
                     }
-                    Value::Struct(si) => (
-                        Some(si.struct_name.clone()),
-                        crate::types::JuliaType::Struct(si.struct_name.clone()),
-                    ),
-                    Value::Array(arr) => {
-                        let arr_borrow = arr.borrow();
-                        let elem_type = match &arr_borrow.data {
-                            ArrayData::F32(_) => crate::types::JuliaType::Float32,
-                            ArrayData::F64(_) => crate::types::JuliaType::Float64,
-                            ArrayData::I8(_) => crate::types::JuliaType::Int8,
-                            ArrayData::I16(_) => crate::types::JuliaType::Int16,
-                            ArrayData::I32(_) => crate::types::JuliaType::Int32,
-                            ArrayData::I64(_) => crate::types::JuliaType::Int64,
-                            ArrayData::U8(_) => crate::types::JuliaType::UInt8,
-                            ArrayData::U16(_) => crate::types::JuliaType::UInt16,
-                            ArrayData::U32(_) => crate::types::JuliaType::UInt32,
-                            ArrayData::U64(_) => crate::types::JuliaType::UInt64,
-                            ArrayData::Bool(_) => crate::types::JuliaType::Bool,
-                            ArrayData::String(_) => crate::types::JuliaType::String,
-                            ArrayData::Char(_) => crate::types::JuliaType::Char,
-                            ArrayData::StructRefs(refs) => {
-                                if let Some(type_id) = arr_borrow.struct_type_id {
-                                    self.struct_defs
-                                        .get(type_id)
-                                        .map(|def| {
-                                            crate::types::JuliaType::Struct(def.name.clone())
-                                        })
-                                        .unwrap_or(crate::types::JuliaType::Any)
-                                } else if let Some(&first_ref_idx) = refs.first() {
-                                    self.struct_heap
-                                        .get(first_ref_idx)
-                                        .map(|s| {
-                                            crate::types::JuliaType::Struct(s.struct_name.clone())
-                                        })
-                                        .unwrap_or(crate::types::JuliaType::Any)
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            ArrayData::Any(values) => {
-                                if let Some(first) = values.first() {
-                                    match first {
-                                        Value::StructRef(idx) => self
-                                            .struct_heap
-                                            .get(*idx)
-                                            .map(|s| {
-                                                crate::types::JuliaType::Struct(
-                                                    s.struct_name.clone(),
-                                                )
-                                            })
-                                            .unwrap_or(crate::types::JuliaType::Any),
-                                        Value::Struct(s) => {
-                                            crate::types::JuliaType::Struct(s.struct_name.clone())
-                                        }
-                                        _ => crate::types::JuliaType::Any,
-                                    }
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                        };
-
-                        let array_type = match arr_borrow.shape.len() {
-                            1 => crate::types::JuliaType::VectorOf(Box::new(elem_type)),
-                            2 => crate::types::JuliaType::MatrixOf(Box::new(elem_type)),
-                            _ => crate::types::JuliaType::Array,
-                        };
-                        (None, array_type)
+                    Value::Struct(si) => {
+                        if let Some(array_type) = si.array_wrapper_julia_type() {
+                            (None, array_type)
+                        } else {
+                            (
+                                Some(si.struct_name.to_string()),
+                                crate::types::JuliaType::Struct(si.struct_name.to_string()),
+                            )
+                        }
                     }
-                    // Memory → Array (Issue #2764)
+                    _ if is_native_array_value(&val) => (None, self.get_value_julia_type(&val)),
                     Value::Memory(mem) => {
-                        let arr = crate::vm::util::memory_to_array_ref(mem);
-                        let arr_borrow = arr.borrow();
-                        let elem_type = match &arr_borrow.data {
-                            ArrayData::F32(_) => crate::types::JuliaType::Float32,
-                            ArrayData::F64(_) => crate::types::JuliaType::Float64,
-                            ArrayData::I8(_) => crate::types::JuliaType::Int8,
-                            ArrayData::I16(_) => crate::types::JuliaType::Int16,
-                            ArrayData::I32(_) => crate::types::JuliaType::Int32,
-                            ArrayData::I64(_) => crate::types::JuliaType::Int64,
-                            ArrayData::U8(_) => crate::types::JuliaType::UInt8,
-                            ArrayData::U16(_) => crate::types::JuliaType::UInt16,
-                            ArrayData::U32(_) => crate::types::JuliaType::UInt32,
-                            ArrayData::U64(_) => crate::types::JuliaType::UInt64,
-                            ArrayData::Bool(_) => crate::types::JuliaType::Bool,
-                            ArrayData::String(_) => crate::types::JuliaType::String,
-                            ArrayData::Char(_) => crate::types::JuliaType::Char,
-                            ArrayData::StructRefs(refs) => {
-                                if let Some(type_id) = arr_borrow.struct_type_id {
-                                    self.struct_defs
-                                        .get(type_id)
-                                        .map(|def| {
-                                            crate::types::JuliaType::Struct(def.name.clone())
-                                        })
-                                        .unwrap_or(crate::types::JuliaType::Any)
-                                } else if let Some(&first_ref_idx) = refs.first() {
-                                    self.struct_heap
-                                        .get(first_ref_idx)
-                                        .map(|s| {
-                                            crate::types::JuliaType::Struct(s.struct_name.clone())
-                                        })
-                                        .unwrap_or(crate::types::JuliaType::Any)
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                            ArrayData::Any(values) => {
-                                if let Some(first) = values.first() {
-                                    match first {
-                                        Value::StructRef(idx) => self
-                                            .struct_heap
-                                            .get(*idx)
-                                            .map(|s| {
-                                                crate::types::JuliaType::Struct(
-                                                    s.struct_name.clone(),
-                                                )
-                                            })
-                                            .unwrap_or(crate::types::JuliaType::Any),
-                                        Value::Struct(s) => {
-                                            crate::types::JuliaType::Struct(s.struct_name.clone())
-                                        }
-                                        _ => crate::types::JuliaType::Any,
-                                    }
-                                } else {
-                                    crate::types::JuliaType::Any
-                                }
-                            }
-                        };
-
-                        let array_type = match arr_borrow.shape.len() {
-                            1 => crate::types::JuliaType::VectorOf(Box::new(elem_type)),
-                            2 => crate::types::JuliaType::MatrixOf(Box::new(elem_type)),
-                            _ => crate::types::JuliaType::Array,
-                        };
-                        (None, array_type)
+                        let mem_ref = mem.borrow();
+                        self.stack
+                            .push(Value::Bool(memory_isa_target(&mem_ref, &target_type_name)));
+                        return Ok(Some(()));
                     }
                     Value::NamedTuple(nt) => {
                         // NamedTuple is a special type - use concrete type name
@@ -415,33 +687,124 @@ impl<R: crate::rng::RngLike> Vm<R> {
                             crate::types::JuliaType::Struct(type_name),
                         )
                     }
-                    // Ref: isa(Ref(x), Ref) should be true (Issue #2687)
-                    // runtime_type() returns inner type, so we need special handling
-                    Value::Ref(_) => (None, crate::types::JuliaType::Struct("Ref".to_string())),
+                    // Ref / RefValue: isa(Ref(x), Ref), isa(Ref(5), Ref{Int}) and
+                    // isa(Ref(5), Base.RefValue{Int}) should all be true (Issue #2687, #5130).
+                    // typeof() yields "Base.RefValue{T}"; reuse the dispatch matcher so the
+                    // element type and the Ref/RefValue alias are handled consistently.
+                    Value::Ref(_) => {
+                        let target = crate::types::JuliaType::Struct(target_type_name.clone());
+                        let is_match = self.value_matches_param(&val, &target);
+                        self.stack.push(Value::Bool(is_match));
+                        return Ok(Some(()));
+                    }
+                    // Core.SimpleVector: isa(<DataType>.parameters, Core.SimpleVector)
+                    // should be true (Issue #4722). Route through the struct-name
+                    // path so module-prefix normalization matches the target name.
+                    Value::SimpleVector(_) => (
+                        Some("Core.SimpleVector".to_string()),
+                        crate::types::JuliaType::Struct("Core.SimpleVector".to_string()),
+                    ),
+                    // Tuple values: build the value's full type name through the
+                    // VM context (`Tuple{Foo{Int64}}`, `Tuple{Dog}`, ...) so
+                    // user-defined struct elements keep their parametric name and
+                    // route the covariant comparison through the runtime
+                    // `check_subtype`, which knows the user abstract hierarchy
+                    // (`Dog <: Animal`) and the `Int`/`Int64` alias. The
+                    // context-free `Value::runtime_type()` reports `Any` for
+                    // `StructRef` tuple elements, breaking covariant Tuple `isa`
+                    // such as `(Foo(1),) isa Tuple{Foo{Int}}` (Issue #5064).
+                    Value::Tuple(_) => {
+                        let tuple_type_name = self.get_type_name(&val);
+                        let is_match = self.check_subtype(&tuple_type_name, &target_type_name);
+                        self.stack.push(Value::Bool(is_match));
+                        return Ok(Some(()));
+                    }
+                    // RNG values: route the concrete RNG type name through the
+                    // struct-name path so `check_subtype` resolves
+                    // `Xoshiro`/`StableRNG`/`TaskLocalRNG <: AbstractRNG`
+                    // (Issues #7230, #7231).
+                    Value::Rng(_) => {
+                        let rng_type_name = self.get_type_name(&val);
+                        (
+                            Some(rng_type_name.clone()),
+                            crate::types::JuliaType::Struct(rng_type_name),
+                        )
+                    }
+                    // StaticArray flat representations carry their concrete Julia
+                    // type; route through the struct-name path so abstract-type
+                    // checks (e.g. `v isa AbstractArray`) resolve via
+                    // `check_isa_with_abstract_resolved` (Issue #7964).
+                    Value::StaticArray(sv) => {
+                        let type_name = sv.julia_type_name().to_string();
+                        (
+                            Some(type_name.clone()),
+                            crate::types::JuliaType::Struct(type_name),
+                        )
+                    }
+                    Value::StaticArrayInline(sv) => {
+                        let type_name = sv.julia_type_name_owned().to_string();
+                        (
+                            Some(type_name.clone()),
+                            crate::types::JuliaType::Struct(type_name),
+                        )
+                    }
                     _ => (None, val.runtime_type()),
                 };
 
                 let normalized_target = normalize_type_for_isa(&target_type_name);
+
+                // A bare (unqualified) type name that resolves to a *builtin
+                // concrete* DataType (e.g. `Module`, `Int64`, `String`) binds to
+                // that builtin in the current scope. A user struct value is `isa`
+                // such a type only when its own concrete type matches — never via
+                // short-name family matching against a same-short-name
+                // module-local user type. Without this gate `Box() isa Module`
+                // (bare `Base.Module`) wrongly matched a module-local
+                // `TypeOwner7955.Module` abstract type, whose short name `Module`
+                // is also recorded as `Box`'s supertype in the struct hierarchy
+                // and the abstract-type index (Issue #7963). Qualified targets
+                // (`TypeOwner7955.Module`) keep the dot, so they skip this gate
+                // and still resolve through the family/abstract paths.
+                let target_is_bare_builtin_concrete = !target_type_name.contains('.')
+                    && crate::types::JuliaType::from_name(&target_type_name)
+                        .is_some_and(|t| CoreType::from(&t).is_builtin_concrete_datatype());
+
                 let is_match = if let Some(ref struct_name) = struct_name_opt {
                     let normalized_struct = normalize_type_for_isa(struct_name);
-                    if normalized_struct == normalized_target {
+                    if !target_is_bare_builtin_concrete
+                        && (normalized_struct == normalized_target
+                            || self.check_subtype(&normalized_struct, &normalized_target))
+                    {
                         true
                     } else {
-                        let is_abstract_type = self
-                            .abstract_type_name_index
-                            .contains_key(&target_type_name);
+                        let is_abstract_type = !target_is_bare_builtin_concrete
+                            && self
+                                .abstract_type_name_index
+                                .contains_key(&target_type_name);
 
                         if is_abstract_type {
                             self.check_isa_with_abstract_resolved(
                                 &struct_name_opt,
                                 &target_type_name,
                             )
+                        } else if self.struct_hierarchy.contains_name(&target_type_name) {
+                            // A registered struct/abstract target spelled without
+                            // parameters: `check_subtype` (consulted above with the
+                            // hierarchy + the typevar-vs-nominal classification, see
+                            // `classify_subtype_operand`) is authoritative for a
+                            // declared struct value, so its `false` is final here.
+                            // The permissive enum-only `type_values_subtype` residue
+                            // wrongly accepted `P{Int}() isa Q` for an unrelated
+                            // registered parametric struct `Q` because `from_name`
+                            // infers a free type variable for short uppercase[+digit]
+                            // names (#8092).
+                            false
                         } else {
                             let target_type = crate::types::JuliaType::from_name(&target_type_name)
                                 .unwrap_or_else(|| {
                                     crate::types::JuliaType::Struct(target_type_name.clone())
                                 });
-                            resolved_val_type.is_subtype_of(&target_type)
+                            type_values_subtype(&resolved_val_type, &target_type)
                         }
                     }
                 } else {
@@ -449,310 +812,267 @@ impl<R: crate::rng::RngLike> Vm<R> {
                         .unwrap_or_else(|| {
                             crate::types::JuliaType::Struct(target_type_name.clone())
                         });
-                    resolved_val_type.is_subtype_of(&target_type)
+                    type_values_subtype(&resolved_val_type, &target_type)
                 };
                 self.stack.push(Value::Bool(is_match));
             }
 
             BuiltinId::Subtype => {
+                // Upstream `jl_f_issubtype` validates `JL_NARGS(<:, 2, 2)`
+                // before touching its arguments (Issue #5493). Without this the
+                // immediate call path underflowed on `(<:)(A)` and silently
+                // ignored extras on `(<:)(A, B, extra)`.
+                check_builtin_arity("<:", argc, 2)?;
                 let right = self.stack.pop_value()?;
                 let left = self.stack.pop_value()?;
 
-                let left_type = match &left {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
-                    Value::Struct(s) => s.struct_name.clone(),
-                    _ => format!("{:?}", left),
-                };
-                let right_type = match &right {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
-                    Value::Struct(s) => s.struct_name.clone(),
-                    _ => format!("{:?}", right),
-                };
-
+                let left_type = subtype_operand_name(&left);
+                let right_type = subtype_operand_name(&right);
                 let is_subtype = self.check_subtype(&left_type, &right_type);
                 self.stack.push(Value::Bool(is_subtype));
             }
+            BuiltinId::SupertypeOp => {
+                // `A >: B` is the supertype operator, equivalent to `B <: A`
+                // (julia/base/operators.jl). Reachable when `>:` is used as a
+                // first-class function value, e.g. `(>:)(Number, Int)` or
+                // `f = (>:); f(Number, Int)` (Issue #5115). The binary infix
+                // `A >: B` is instead lowered to `BinaryOp::Subtype` with the
+                // operands swapped (lowering/expr/binary.rs).
+                //
+                // Unlike `<:`/`isa`, `>:` is an ordinary 2-arg Julia function
+                // (`>:(a, b) = (b <: a)`), not a builtin, so upstream raises a
+                // `MethodError` — not an `ArgumentError` — on the wrong arity
+                // (Issue #5493). Without this guard the immediate call path
+                // underflowed on `(>:)(A)` and silently ignored extras on
+                // `(>:)(A, B, extra)`.
+                if argc != 2 {
+                    let args = self.peek_stack_top(argc);
+                    let arg_type_names = args
+                        .iter()
+                        .map(|arg| self.get_type_name(arg))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(VmError::MethodError(format!(
+                        "no method matching >:({})",
+                        arg_type_names
+                    )));
+                }
+                let right = self.stack.pop_value()?;
+                let left = self.stack.pop_value()?;
+
+                // A >: B  ⟺  B <: A
+                let left_type = subtype_operand_name(&left);
+                let right_type = subtype_operand_name(&right);
+                let is_supertype = self.check_subtype(&right_type, &left_type);
+                self.stack.push(Value::Bool(is_supertype));
+            }
+            BuiltinId::_Typeintersect => {
+                // _typeintersect(a, b) - semantic type intersection for Pure Julia
+                // typeintersect(). User-defined hierarchy still uses the VM
+                // registry via check_subtype; structured built-ins use CoreType.
+                let right = self.stack.pop_value()?;
+                let left = self.stack.pop_value()?;
+                if let Some(result) = core_datatype_typeintersect_subtype_result(&left, &right) {
+                    self.stack.push(Value::DataType(Box::new(result)));
+                    return Ok(Some(()));
+                }
+                let Some(left_type) = reflection_type_name(&left) else {
+                    self.stack
+                        .push(Value::DataType(Box::new(crate::types::JuliaType::Bottom)));
+                    return Ok(Some(()));
+                };
+                let Some(right_type) = reflection_type_name(&right) else {
+                    self.stack
+                        .push(Value::DataType(Box::new(crate::types::JuliaType::Bottom)));
+                    return Ok(Some(()));
+                };
+
+                let result_name = if self.check_subtype(&left_type, &right_type) {
+                    left_type
+                } else if self.check_subtype(&right_type, &left_type) {
+                    right_type
+                } else if left_type.starts_with("Type{") || right_type.starts_with("Type{") {
+                    // Type{T} intersection is singleton-type sensitive; keep
+                    // unsupported non-subtype cases conservative for now.
+                    "Union{}".to_string()
+                } else if let (Value::DataType(left_ty), Value::DataType(right_ty)) =
+                    (&left, &right)
+                {
+                    CoreType::from(left_ty.as_ref())
+                        .type_intersect(&CoreType::from(right_ty.as_ref()))
+                        .to_julia_name()
+                } else {
+                    CoreType::from_julia_name(&left_type)
+                        .type_intersect(&CoreType::from_julia_name(&right_type))
+                        .to_julia_name()
+                };
+                self.stack
+                    .push(Value::DataType(Box::new(reflection_julia_type(
+                        &result_name,
+                    ))));
+            }
             BuiltinId::Sizeof => {
                 // sizeof(x) - return size of value in bytes
-                // For primitive types, return their actual byte size
-                // For composite types (structs, arrays), return approximate size
+                // For primitive types, use the shared CoreType layout table.
+                // For composite types (structs, arrays), return approximate size.
                 let val = self.stack.pop_value()?;
-                let size: i64 = match &val {
-                    Value::Bool(_) => 1,
-                    Value::I64(_) => 8,
-                    Value::F64(_) => 8,
-                    Value::Char(_) => 4, // Julia Char is 32-bit Unicode
-                    Value::Str(s) => s.len() as i64, // Number of bytes in UTF-8 encoding
-                    Value::Array(arr) => {
-                        let arr_ref = arr.borrow();
-                        let elem_size: i64 = match &arr_ref.data {
-                            ArrayData::F64(_) => 8,
-                            ArrayData::I64(_) => 8,
-                            ArrayData::F32(_) => 4,
-                            ArrayData::I32(_) => 4,
-                            ArrayData::I16(_) => 2,
-                            ArrayData::I8(_) => 1,
-                            ArrayData::U64(_) => 8,
-                            ArrayData::U32(_) => 4,
-                            ArrayData::U16(_) => 2,
-                            ArrayData::U8(_) => 1,
-                            ArrayData::Bool(_) => 1,
-                            ArrayData::Char(_) => 4,
-                            ArrayData::String(_) => 8,     // Pointer size
-                            ArrayData::StructRefs(_) => 8, // Pointer size
-                            ArrayData::Any(_) => 8,        // Pointer size
-                        };
-                        let total_elems: i64 = arr_ref.shape.iter().map(|&d| d as i64).product();
-                        elem_size * total_elems
-                    }
-                    // Memory → Array (Issue #2764)
-                    Value::Memory(mem) => {
-                        let arr = crate::vm::util::memory_to_array_ref(mem);
-                        let arr_ref = arr.borrow();
-                        let elem_size: i64 = match &arr_ref.data {
-                            ArrayData::F64(_) => 8,
-                            ArrayData::I64(_) => 8,
-                            ArrayData::F32(_) => 4,
-                            ArrayData::I32(_) => 4,
-                            ArrayData::I16(_) => 2,
-                            ArrayData::I8(_) => 1,
-                            ArrayData::U64(_) => 8,
-                            ArrayData::U32(_) => 4,
-                            ArrayData::U16(_) => 2,
-                            ArrayData::U8(_) => 1,
-                            ArrayData::Bool(_) => 1,
-                            ArrayData::Char(_) => 4,
-                            ArrayData::String(_) => 8,     // Pointer size
-                            ArrayData::StructRefs(_) => 8, // Pointer size
-                            ArrayData::Any(_) => 8,        // Pointer size
-                        };
-                        let total_elems: i64 = arr_ref.shape.iter().map(|&d| d as i64).product();
-                        elem_size * total_elems
-                    }
-                    Value::Tuple(t) => {
-                        // Sum of sizes of all elements
-                        t.elements.len() as i64 * 8 // Approximate: 8 bytes per element pointer
-                    }
-                    Value::Nothing => 0,
-                    Value::Missing => 0,
-                    Value::DataType(_) => 8, // Type pointer
-                    Value::StructRef(_) | Value::Struct(_) => 8, // Pointer/reference size
-                    _ => 8,                  // Default to pointer size for other types
-                };
+                let size: i64 =
+                    match &val {
+                        // Scalar bits-type values must report the logical TYPE
+                        // size (== sizeof(typeof(x))), NOT the boxed `Value`
+                        // representation size. Each narrow variant maps to its
+                        // own type so e.g. Int32(4) is 4, not 8 (Issue #6766).
+                        Value::Bool(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Bool")
+                            .unwrap_or(8) as i64,
+                        Value::I8(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Int8")
+                            .unwrap_or(1) as i64,
+                        Value::I16(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Int16")
+                            .unwrap_or(2) as i64,
+                        Value::I32(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Int32")
+                            .unwrap_or(4) as i64,
+                        Value::I64(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Int64")
+                            .unwrap_or(8) as i64,
+                        Value::I128(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Int128")
+                            .unwrap_or(16) as i64,
+                        Value::U8(_) => CoreType::builtin_sizeof_bytes_for_julia_name("UInt8")
+                            .unwrap_or(1) as i64,
+                        Value::U16(_) => CoreType::builtin_sizeof_bytes_for_julia_name("UInt16")
+                            .unwrap_or(2) as i64,
+                        Value::U32(_) => CoreType::builtin_sizeof_bytes_for_julia_name("UInt32")
+                            .unwrap_or(4) as i64,
+                        Value::U64(_) => CoreType::builtin_sizeof_bytes_for_julia_name("UInt64")
+                            .unwrap_or(8) as i64,
+                        Value::U128(_) => CoreType::builtin_sizeof_bytes_for_julia_name("UInt128")
+                            .unwrap_or(16) as i64,
+                        Value::F16(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Float16")
+                            .unwrap_or(2) as i64,
+                        Value::F32(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Float32")
+                            .unwrap_or(4) as i64,
+                        Value::F64(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Float64")
+                            .unwrap_or(8) as i64,
+                        Value::Char(_) => CoreType::builtin_sizeof_bytes_for_julia_name("Char")
+                            .unwrap_or(8) as i64,
+                        Value::Str(s) => s.len() as i64, // Number of bytes in UTF-8 encoding
+                        _ if is_native_array_value(&val) => match native_array_value_ref(&val) {
+                            Some(arr) => {
+                                let arr_ref = arr.borrow();
+                                array_value_size_bytes(&arr_ref.element_type(), &arr_ref.shape)
+                            }
+                            None => 8,
+                        },
+                        _ if self.array_wrapper_memory_and_shape(&val).is_some() => {
+                            match self.array_wrapper_memory_and_shape(&val) {
+                                Some((mem, shape)) => {
+                                    let mem_ref = mem.borrow();
+                                    array_value_size_bytes(mem_ref.element_type(), &shape)
+                                }
+                                None => 8,
+                            }
+                        }
+                        Value::Memory(mem) => {
+                            let mem_ref = mem.borrow();
+                            memory_value_size_bytes(&mem_ref)
+                        }
+                        Value::Tuple(t) => {
+                            // Sum of sizes of all elements
+                            t.elements.len() as i64 * 8 // Approximate: 8 bytes per element pointer
+                        }
+                        Value::Nothing => CoreType::builtin_sizeof_bytes_for_julia_name("Nothing")
+                            .unwrap_or(8) as i64,
+                        Value::Missing => CoreType::builtin_sizeof_bytes_for_julia_name("Missing")
+                            .unwrap_or(8) as i64,
+                        Value::DataType(jt) => {
+                            let registry = RuntimeTypeRegistry::new(
+                                self.compile_context.as_ref(),
+                                &self.abstract_types,
+                            );
+                            registry.object(jt).size_bytes().unwrap_or(8) as i64
+                        }
+                        Value::StructRef(_) | Value::Struct(_) => 8, // Pointer/reference size
+                        _ => 8, // Default to pointer size for other types
+                    };
                 self.stack.push(Value::I64(size));
             }
 
-            BuiltinId::Isbits => {
-                // isbits(x) - check if x is an instance of a bits type
-                // Bits types: Bool, Int*, UInt*, Float*, Char
-                // Non-bits types: String, Array, Struct, etc.
-                let val = self.stack.pop_value()?;
-                let is_bits = matches!(
-                    &val,
-                    Value::Bool(_)
-                        | Value::I64(_)
-                        | Value::F64(_)
-                        | Value::Char(_)
-                        | Value::Nothing
-                );
-                self.stack.push(Value::Bool(is_bits));
-            }
-
+            // BuiltinId::Isbits removed - pure Julia (Issue #6738)
             BuiltinId::Isbitstype => {
                 // isbitstype(T) - check if T is a bits type
-                // Bits types are immutable and contain no references
                 let type_val = self.stack.pop_value()?;
-                let type_name = match &type_val {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
+                let type_object = match &type_val {
+                    Value::DataType(jt) => jt.clone(),
+                    Value::Str(s) => Box::new(reflection_julia_type(s)),
                     _ => {
                         self.stack.push(Value::Bool(false));
                         return Ok(Some(()));
                     }
                 };
 
-                let is_bits = matches!(
-                    type_name.as_str(),
-                    "Bool"
-                        | "Int8"
-                        | "Int16"
-                        | "Int32"
-                        | "Int64"
-                        | "Int128"
-                        | "Int"
-                        | "UInt8"
-                        | "UInt16"
-                        | "UInt32"
-                        | "UInt64"
-                        | "UInt128"
-                        | "UInt"
-                        | "Float16"
-                        | "Float32"
-                        | "Float64"
-                        | "Char"
-                        | "Nothing"
-                );
+                let registry =
+                    RuntimeTypeRegistry::new(self.compile_context.as_ref(), &self.abstract_types);
+                let is_bits = registry.object(&type_object).is_bits_type();
                 self.stack.push(Value::Bool(is_bits));
             }
 
-            BuiltinId::Supertype => {
-                // supertype(T) - get parent type
+            BuiltinId::_Supertype => {
+                // _supertype(T) - get parent type for Pure Julia supertype().
                 let type_val = self.stack.pop_value()?;
-                let type_name = match &type_val {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
-                    _ => {
-                        // Return Any for non-type values
-                        self.stack
-                            .push(Value::DataType(crate::types::JuliaType::Any));
-                        return Ok(Some(()));
-                    }
+                let Some(type_name) = reflection_type_name(&type_val) else {
+                    self.stack
+                        .push(Value::DataType(Box::new(crate::types::JuliaType::Any)));
+                    return Ok(Some(()));
                 };
 
-                // Get supertype from the type hierarchy
-                let supertype = match type_name.as_str() {
-                    // Primitive types
-                    "Int8" | "Int16" | "Int32" | "Int64" | "Int128" => "Signed",
-                    "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" => "Unsigned",
-                    "Signed" | "Unsigned" => "Integer",
-                    "Integer" => "Real",
-                    "Float16" | "Float32" | "Float64" => "AbstractFloat",
-                    "AbstractFloat" | "Real" => "Number",
-                    "Number" => "Any",
-                    "Bool" => "Integer",
-                    "Char" => "AbstractChar",
-                    "AbstractChar" => "Any",
-                    "String" => "AbstractString",
-                    "AbstractString" => "Any",
-                    "Array" | "Vector" | "Matrix" => "DenseArray",
-                    "DenseArray" => "AbstractArray",
-                    "AbstractArray" => "Any",
-                    "Tuple" => "Any",
-                    "Nothing" => "Any",
-                    "Any" => "Any", // Any is its own supertype
-                    // User-defined structs - check abstract types
-                    _ => {
-                        // Look up in struct definitions for parent type
-                        if let Some(def) = self
-                            .struct_defs
-                            .iter()
-                            .find(|d| d.name == type_name.as_ref())
-                        {
-                            if let Some(ref parent) = def.parent_type {
-                                parent.as_str()
-                            } else {
-                                "Any"
-                            }
-                        } else if let Some(at) = self
-                            .abstract_type_name_index
-                            .get(&*type_name)
-                            .and_then(|&idx| self.abstract_types.get(idx))
-                        {
-                            if let Some(ref parent) = at.parent {
-                                parent.as_str()
-                            } else {
-                                "Any"
-                            }
-                        } else {
-                            "Any"
-                        }
-                    }
-                };
-
-                let super_jt = crate::types::JuliaType::from_name(supertype)
-                    .unwrap_or_else(|| crate::types::JuliaType::Struct(supertype.to_string()));
-                self.stack.push(Value::DataType(super_jt));
+                let supertype = self.reflection_supertype_name(&type_name);
+                self.stack
+                    .push(Value::DataType(Box::new(reflection_julia_type(&supertype))));
             }
 
-            BuiltinId::Supertypes => {
-                // supertypes(T) - tuple of all supertypes from T to Any
+            BuiltinId::_Typename => {
+                // _typename(T) - canonical TypeName symbol for Pure Julia
+                // nameof(::Type) / Base.typename (Issue #5106). Resolves the
+                // base name through the type registry, collapsing the `Array`
+                // display aliases (`Vector`/`Matrix`) onto the shared
+                // `TypeName` so `nameof(Vector{Int}) === :Array`.
                 let type_val = self.stack.pop_value()?;
-                let mut type_name = match &type_val {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
-                    _ => {
-                        // For non-type values, return empty tuple
-                        self.stack
-                            .push(Value::Tuple(TupleValue { elements: vec![] }));
-                        return Ok(Some(()));
+                let symbol = match &type_val {
+                    Value::DataType(jt) => {
+                        let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                            self.compile_context.as_ref(),
+                            &self.abstract_types,
+                            &self.struct_defs,
+                        );
+                        registry.object(jt).typename_symbol()
+                    }
+                    Value::RuntimeTypeVar(tv) => tv.name.clone(),
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "_typename expects a type, got {:?}",
+                            other
+                        )));
                     }
                 };
+                self.stack.push(Value::Symbol(SymbolValue::new(&symbol)));
+            }
 
-                // Build chain of supertypes by repeatedly calling supertype logic
-                let mut supertypes = vec![];
-
-                // Add the type itself
-                let jt = crate::types::JuliaType::from_name(&type_name)
-                    .unwrap_or_else(|| crate::types::JuliaType::Struct(type_name.clone()));
-                supertypes.push(Value::DataType(jt));
-
-                // Walk up the type hierarchy until we reach Any
-                loop {
-                    if type_name == "Any" {
-                        break;
+            BuiltinId::_FunctionName => {
+                // _function_name(f) - direct function-name symbol for Pure
+                // Julia nameof(::Function), avoiding string slicing of
+                // `string(f)` (Issue #5580).
+                let val = self.stack.pop_value()?;
+                let name = match &val {
+                    Value::Function(fv) => fv.name.clone(),
+                    Value::Closure(cv) => cv.name.clone(),
+                    Value::Str(s) => s.clone(),
+                    Value::Symbol(sym) => sym.as_str().to_string(),
+                    Value::DataType(jt) => jt.name().to_string(),
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "_function_name expects a function, got {:?}",
+                            other
+                        )));
                     }
-
-                    // Get supertype
-                    let supertype = match type_name.as_str() {
-                        // Primitive types
-                        "Int8" | "Int16" | "Int32" | "Int64" | "Int128" => "Signed",
-                        "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" => "Unsigned",
-                        "Signed" | "Unsigned" => "Integer",
-                        "Integer" => "Real",
-                        "Float16" | "Float32" | "Float64" => "AbstractFloat",
-                        "AbstractFloat" | "Real" => "Number",
-                        "Number" => "Any",
-                        "Bool" => "Integer",
-                        "Char" => "AbstractChar",
-                        "AbstractChar" => "Any",
-                        "String" => "AbstractString",
-                        "AbstractString" => "Any",
-                        "Array" | "Vector" | "Matrix" => "DenseArray",
-                        "DenseArray" => "AbstractArray",
-                        "AbstractArray" => "Any",
-                        "Tuple" => "Any",
-                        "Nothing" => "Any",
-                        "Any" => break, // Already at top
-                        // User-defined structs - check abstract types
-                        _ => {
-                            // Look up in struct definitions for parent type
-                            if let Some(def) = self
-                                .struct_defs
-                                .iter()
-                                .find(|d| d.name == type_name.as_ref())
-                            {
-                                if let Some(ref parent) = def.parent_type {
-                                    parent.as_str()
-                                } else {
-                                    "Any"
-                                }
-                            } else if let Some(at) = self
-                                .abstract_type_name_index
-                                .get(&*type_name)
-                                .and_then(|&idx| self.abstract_types.get(idx))
-                            {
-                                if let Some(ref parent) = at.parent {
-                                    parent.as_str()
-                                } else {
-                                    "Any"
-                                }
-                            } else {
-                                "Any"
-                            }
-                        }
-                    };
-
-                    type_name = supertype.to_string();
-                    let super_jt = crate::types::JuliaType::from_name(supertype)
-                        .unwrap_or_else(|| crate::types::JuliaType::Struct(supertype.to_string()));
-                    supertypes.push(Value::DataType(super_jt));
-                }
-
-                self.stack.push(Value::Tuple(TupleValue {
-                    elements: supertypes,
-                }));
+                };
+                self.stack.push(Value::Symbol(SymbolValue::new(&name)));
             }
 
             BuiltinId::Subtypes => {
@@ -763,293 +1083,43 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     Value::Str(s) => s.clone(),
                     _ => {
                         // For non-type values, return empty array
-                        let empty_array = ArrayData::Any(vec![]);
-                        let array_val = Value::Array(new_array_ref(super::value::ArrayValue {
-                            data: empty_array,
-                            shape: vec![0],
-                            struct_type_id: None,
-                            element_type_override: None,
-                        }));
-                        self.stack.push(array_val);
+                        self.push_array_value_as_wrapper(super::value::ArrayValue::any_vector(
+                            Vec::new(),
+                        ))?;
                         return Ok(Some(()));
                     }
                 };
 
-                let mut subtypes = vec![];
+                let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                    self.compile_context.as_ref(),
+                    &self.abstract_types,
+                    &self.struct_defs,
+                );
+                let subtypes: Vec<Value> = registry
+                    .direct_subtypes(&type_name)
+                    .into_iter()
+                    .map(|t| Value::DataType(Box::new(t)))
+                    .collect();
 
-                // Check all known types to find direct children
-                // Built-in type hierarchy
-                match type_name.as_str() {
-                    "Any" => {
-                        // Direct subtypes of Any
-                        subtypes.extend(vec![
-                            Value::DataType(crate::types::JuliaType::Number),
-                            Value::DataType(crate::types::JuliaType::AbstractString),
-                            Value::DataType(crate::types::JuliaType::AbstractChar),
-                            Value::DataType(crate::types::JuliaType::AbstractArray),
-                            Value::DataType(crate::types::JuliaType::Tuple),
-                            Value::DataType(crate::types::JuliaType::Nothing),
-                        ]);
-                    }
-                    "Number" => {
-                        subtypes.extend(vec![Value::DataType(crate::types::JuliaType::Real)]);
-                    }
-                    "Real" => {
-                        subtypes.extend(vec![
-                            Value::DataType(crate::types::JuliaType::AbstractFloat),
-                            Value::DataType(crate::types::JuliaType::Integer),
-                        ]);
-                    }
-                    "Integer" => {
-                        subtypes.extend(vec![
-                            Value::DataType(crate::types::JuliaType::Bool),
-                            Value::DataType(crate::types::JuliaType::Signed),
-                            Value::DataType(crate::types::JuliaType::Unsigned),
-                        ]);
-                    }
-                    "Signed" => {
-                        subtypes.extend(vec![
-                            Value::DataType(crate::types::JuliaType::Int8),
-                            Value::DataType(crate::types::JuliaType::Int16),
-                            Value::DataType(crate::types::JuliaType::Int32),
-                            Value::DataType(crate::types::JuliaType::Int64),
-                            Value::DataType(crate::types::JuliaType::Int128),
-                        ]);
-                    }
-                    "Unsigned" => {
-                        subtypes.extend(vec![
-                            Value::DataType(crate::types::JuliaType::UInt8),
-                            Value::DataType(crate::types::JuliaType::UInt16),
-                            Value::DataType(crate::types::JuliaType::UInt32),
-                            Value::DataType(crate::types::JuliaType::UInt64),
-                            Value::DataType(crate::types::JuliaType::UInt128),
-                        ]);
-                    }
-                    "AbstractFloat" => {
-                        subtypes.extend(vec![
-                            Value::DataType(crate::types::JuliaType::Float16),
-                            Value::DataType(crate::types::JuliaType::Float32),
-                            Value::DataType(crate::types::JuliaType::Float64),
-                        ]);
-                    }
-                    "AbstractString" => {
-                        subtypes.push(Value::DataType(crate::types::JuliaType::String));
-                    }
-                    "AbstractChar" => {
-                        subtypes.push(Value::DataType(crate::types::JuliaType::Char));
-                    }
-                    "AbstractArray" => {
-                        subtypes.push(Value::DataType(crate::types::JuliaType::Array));
-                    }
-                    _ => {
-                        // Check user-defined types
-                        // Find all struct defs that have this type as parent
-                        for def in &self.struct_defs {
-                            if let Some(ref parent) = def.parent_type {
-                                if parent == &type_name {
-                                    subtypes.push(Value::DataType(
-                                        crate::types::JuliaType::Struct(def.name.clone()),
-                                    ));
-                                }
-                            }
-                        }
-                        // Find all abstract types that have this type as parent
-                        for at in &self.abstract_types {
-                            if let Some(ref parent) = at.parent {
-                                if parent == &type_name {
-                                    subtypes.push(Value::DataType(
-                                        crate::types::JuliaType::Struct(at.name.clone()),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let len = subtypes.len();
-                let array_data = ArrayData::Any(subtypes);
-                let array_val = Value::Array(new_array_ref(super::value::ArrayValue {
-                    data: array_data,
-                    shape: vec![len],
-                    struct_type_id: None,
-                    element_type_override: None,
-                }));
-                self.stack.push(array_val);
+                self.push_array_value_as_wrapper(super::value::ArrayValue::any_vector(subtypes))?;
             }
 
-            BuiltinId::Typeintersect => {
-                // typeintersect(A, B) - compute type intersection
-                let type_b = self.stack.pop_value()?;
-                let type_a = self.stack.pop_value()?;
-
-                let type_a_name = match &type_a {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
-                    _ => {
-                        // For non-type values, return Union{} (bottom type)
-                        self.stack
-                            .push(Value::DataType(crate::types::JuliaType::Union(vec![])));
-                        return Ok(Some(()));
-                    }
-                };
-
-                let type_b_name = match &type_b {
-                    Value::DataType(jt) => jt.name().to_string(),
-                    Value::Str(s) => s.clone(),
-                    _ => {
-                        // For non-type values, return Union{} (bottom type)
-                        self.stack
-                            .push(Value::DataType(crate::types::JuliaType::Union(vec![])));
-                        return Ok(Some(()));
-                    }
-                };
-
-                // Helper function to check if type_a is a subtype of type_b
-                let is_subtype_of = |a: &str, b: &str| -> bool {
-                    if a == b {
-                        return true;
-                    }
-
-                    // Walk up the type hierarchy from a to see if we reach b
-                    let mut current = a.to_string();
-                    loop {
-                        if current == b {
-                            return true;
-                        }
-                        if current == "Any" {
-                            return false;
-                        }
-
-                        let supertype = match current.as_str() {
-                            "Int8" | "Int16" | "Int32" | "Int64" | "Int128" => "Signed",
-                            "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" => "Unsigned",
-                            "Signed" | "Unsigned" => "Integer",
-                            "Integer" => "Real",
-                            "Float16" | "Float32" | "Float64" => "AbstractFloat",
-                            "AbstractFloat" | "Real" => "Number",
-                            "Number" => "Any",
-                            "Bool" => "Integer",
-                            "Char" => "AbstractChar",
-                            "AbstractChar" => "Any",
-                            "String" => "AbstractString",
-                            "AbstractString" => "Any",
-                            "Array" | "Vector" | "Matrix" => "DenseArray",
-                            "DenseArray" => "AbstractArray",
-                            "AbstractArray" => "Any",
-                            "Tuple" => "Any",
-                            "Nothing" => "Any",
-                            "Any" => return false,
-                            _ => "Any",
-                        };
-                        current = supertype.to_string();
-                    }
-                };
-
-                // Compute intersection
-                let result_type = if type_a_name == type_b_name {
-                    // Same type - intersection is the type itself
-                    crate::types::JuliaType::from_name(&type_a_name)
-                        .unwrap_or_else(|| crate::types::JuliaType::Struct(type_a_name.clone()))
-                } else if is_subtype_of(&type_a_name, &type_b_name) {
-                    // A <: B, so intersection is A (the more specific type)
-                    crate::types::JuliaType::from_name(&type_a_name)
-                        .unwrap_or_else(|| crate::types::JuliaType::Struct(type_a_name.clone()))
-                } else if is_subtype_of(&type_b_name, &type_a_name) {
-                    // B <: A, so intersection is B (the more specific type)
-                    crate::types::JuliaType::from_name(&type_b_name)
-                        .unwrap_or_else(|| crate::types::JuliaType::Struct(type_b_name.clone()))
-                } else {
-                    // No subtype relationship - return Union{} (bottom type/empty union)
-                    crate::types::JuliaType::Union(vec![])
-                };
-
-                self.stack.push(Value::DataType(result_type));
-            }
-
-            // BuiltinId::Typejoin removed - now Pure Julia (base/reflection.jl)
+            // BuiltinId::Typeintersect/Typejoin removed - now Pure Julia (base/reflection.jl)
             // BuiltinId::Fieldcount removed - now Pure Julia (base/reflection.jl)
-            BuiltinId::Hasfield => {
-                // hasfield(T, name) - check if field exists
-                let name_val = self.stack.pop_value()?;
-                let type_val = self.stack.pop_value()?;
-
-                let field_name = match &name_val {
-                    Value::Str(s) => s.clone(),
-                    Value::Symbol(s) => s.as_str().to_string(),
-                    _ => {
-                        self.stack.push(Value::Bool(false));
-                        return Ok(Some(()));
-                    }
-                };
-
-                let has_field = match &type_val {
-                    Value::DataType(jt) => {
-                        let type_name = jt.name();
-                        self.struct_defs
-                            .iter()
-                            .find(|def| def.name == type_name.as_ref())
-                            .map(|def| def.fields.iter().any(|(name, _)| name == &field_name))
-                            .unwrap_or(false)
-                    }
-                    Value::Str(type_name) => self
-                        .struct_defs
-                        .iter()
-                        .find(|def| &def.name == type_name)
-                        .map(|def| def.fields.iter().any(|(name, _)| name == &field_name))
-                        .unwrap_or(false),
-                    Value::StructRef(idx) => {
-                        if let Some(si) = self.struct_heap.get(*idx) {
-                            self.struct_defs
-                                .iter()
-                                .find(|def| def.name == si.struct_name)
-                                .map(|def| def.fields.iter().any(|(name, _)| name == &field_name))
-                                .unwrap_or(false)
-                        } else {
-                            false
-                        }
-                    }
-                    Value::Struct(si) => self
-                        .struct_defs
-                        .iter()
-                        .find(|def| def.name == si.struct_name)
-                        .map(|def| def.fields.iter().any(|(name, _)| name == &field_name))
-                        .unwrap_or(false),
-                    Value::NamedTuple(nt) => nt.names.contains(&field_name),
-                    _ => false,
-                };
-                self.stack.push(Value::Bool(has_field));
-            }
+            // BuiltinId::Hasfield removed - pure Julia (Issue #6738)
 
             // BuiltinId::Isconcretetype, Isabstracttype, Isprimitivetype, Isstructtype
             // removed - now Pure Julia (base/reflection.jl) with internal intrinsics
             BuiltinId::_Isabstracttype => {
                 // _isabstracttype(T) - internal intrinsic: check if T is an abstract type
                 let type_val = self.stack.pop_value()?;
+                let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                    self.compile_context.as_ref(),
+                    &self.abstract_types,
+                    &self.struct_defs,
+                );
                 let is_abstract = match &type_val {
-                    Value::DataType(jt) => {
-                        let type_name = jt.name();
-                        let type_name_ref = type_name.as_ref();
-                        self.abstract_type_name_index.contains_key(type_name_ref)
-                            || matches!(
-                                type_name_ref,
-                                "Any"
-                                    | "Number"
-                                    | "Real"
-                                    | "Integer"
-                                    | "Signed"
-                                    | "Unsigned"
-                                    | "AbstractFloat"
-                                    | "AbstractString"
-                                    | "AbstractChar"
-                                    | "AbstractArray"
-                                    | "AbstractVector"
-                                    | "AbstractMatrix"
-                                    | "AbstractDict"
-                                    | "AbstractSet"
-                                    | "AbstractRange"
-                                    | "AbstractUnitRange"
-                            )
-                    }
+                    Value::DataType(jt) => registry.object(jt).is_abstract_type(),
                     _ => false,
                 };
                 self.stack.push(Value::Bool(is_abstract));
@@ -1058,93 +1128,72 @@ impl<R: crate::rng::RngLike> Vm<R> {
             BuiltinId::_Isconcretetype => {
                 // _isconcretetype(T) - internal intrinsic: check if T is a concrete type
                 let type_val = self.stack.pop_value()?;
+                let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                    self.compile_context.as_ref(),
+                    &self.abstract_types,
+                    &self.struct_defs,
+                );
                 let is_concrete = match &type_val {
-                    Value::DataType(jt) => {
-                        let type_name = jt.name();
-                        let type_name_ref = type_name.as_ref();
-                        let is_abstract = self.abstract_type_name_index.contains_key(type_name_ref);
-                        if is_abstract {
-                            false
-                        } else {
-                            matches!(
-                                type_name_ref,
-                                "Bool"
-                                    | "Int8"
-                                    | "Int16"
-                                    | "Int32"
-                                    | "Int64"
-                                    | "Int128"
-                                    | "UInt8"
-                                    | "UInt16"
-                                    | "UInt32"
-                                    | "UInt64"
-                                    | "UInt128"
-                                    | "Float16"
-                                    | "Float32"
-                                    | "Float64"
-                                    | "Char"
-                                    | "String"
-                                    | "Nothing"
-                                    | "Missing"
-                            ) || self.struct_defs.iter().any(|def| def.name == type_name_ref)
-                        }
-                    }
+                    Value::DataType(jt) => registry.object(jt).is_concrete_type(),
                     _ => false,
                 };
                 self.stack.push(Value::Bool(is_concrete));
             }
 
+            BuiltinId::_Isprimitivetype => {
+                // _isprimitivetype(T) - internal intrinsic: check if T is a primitive
+                // type (fixed bit-width, no fields). Mirrors upstream Julia's
+                // `isprimitivetype`, which `unwrap_unionall`s then flag-checks the
+                // DataType (`(t.flags & 0x0080) == 0x0080`). Routed through the
+                // runtime type registry so all five type predicates share one
+                // classification path (Issue #5102). CoreType owns the built-in
+                // primitive DataType set; in particular `String` is not primitive.
+                let type_val = self.stack.pop_value()?;
+                let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                    self.compile_context.as_ref(),
+                    &self.abstract_types,
+                    &self.struct_defs,
+                );
+                let is_primitive = match &type_val {
+                    Value::DataType(jt) => registry.object(jt).is_primitive_type(),
+                    _ => false,
+                };
+                self.stack.push(Value::Bool(is_primitive));
+            }
+
+            BuiltinId::_Isstructtype => {
+                // _isstructtype(T) - internal intrinsic: check Julia's DataType
+                // struct flag. CoreType owns built-in struct facts; VM registry
+                // supplies user-defined struct definitions.
+                let type_val = self.stack.pop_value()?;
+                let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                    self.compile_context.as_ref(),
+                    &self.abstract_types,
+                    &self.struct_defs,
+                );
+                let is_struct_type = match &type_val {
+                    Value::DataType(jt) => registry.object(jt).is_struct_type(),
+                    _ => false,
+                };
+                self.stack.push(Value::Bool(is_struct_type));
+            }
+
             BuiltinId::_Ismutabletype => {
                 // _ismutabletype(T) - internal intrinsic: check if T is a mutable type
                 let type_val = self.stack.pop_value()?;
+                let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                    self.compile_context.as_ref(),
+                    &self.abstract_types,
+                    &self.struct_defs,
+                );
                 let is_mutable_type = match &type_val {
-                    Value::DataType(jt) => {
-                        let type_name = jt.name();
-                        let type_name_ref = type_name.as_ref();
-                        matches!(type_name_ref, "Array" | "Vector" | "Matrix" | "Dict")
-                            || self
-                                .struct_defs
-                                .iter()
-                                .find(|def| def.name == type_name_ref)
-                                .map(|def| def.is_mutable)
-                                .unwrap_or(false)
-                    }
+                    Value::DataType(jt) => registry.object(jt).is_mutable_type(),
                     _ => false,
                 };
                 self.stack.push(Value::Bool(is_mutable_type));
             }
 
-            BuiltinId::Ismutable => {
-                // ismutable(x) - check if x is mutable
-                // In Julia: Arrays, Dicts, mutable structs are mutable
-                let val = self.stack.pop_value()?;
-                let is_mutable = match &val {
-                    Value::Array(_) | Value::Memory(_) | Value::Dict(_) => true, // Memory → Array (Issue #2764)
-                    Value::StructRef(idx) => {
-                        // Look up the struct from the heap and check if it's mutable
-                        self.struct_heap
-                            .get(*idx)
-                            .and_then(|s| {
-                                self.struct_defs
-                                    .iter()
-                                    .find(|def| def.name == s.struct_name)
-                                    .map(|def| def.is_mutable)
-                            })
-                            .unwrap_or(false)
-                    }
-                    Value::Struct(s) => {
-                        // Check if the struct is defined as mutable
-                        self.struct_defs
-                            .iter()
-                            .find(|def| def.name == s.struct_name)
-                            .map(|def| def.is_mutable)
-                            .unwrap_or(false)
-                    }
-                    // Primitive types are immutable
-                    _ => false,
-                };
-                self.stack.push(Value::Bool(is_mutable));
-            }
+            // BuiltinId::Ismutable removed - pure Julia (Issue #6738)
 
             // BuiltinId::Ismutabletype removed - now Pure Julia (base/reflection.jl)
             // BuiltinId::NameOf removed - now Pure Julia (base/reflection.jl)
@@ -1186,10 +1235,12 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     Value::Missing => {
                         "Missing".hash(&mut hasher);
                     }
-                    Value::Array(arr) => {
+                    _ if is_native_array_value(&val) => {
                         "Array".hash(&mut hasher);
                         // Use pointer-like identity for arrays (mutable objects)
-                        (arr.as_ptr() as usize).hash(&mut hasher);
+                        if let Some(arr) = native_array_value_ref(&val) {
+                            (arr.as_ptr() as usize).hash(&mut hasher);
+                        }
                     }
                     // Memory → Array (Issue #2764)
                     Value::Memory(mem) => {
@@ -1202,17 +1253,23 @@ impl<R: crate::rng::RngLike> Vm<R> {
                         s.struct_name.hash(&mut hasher);
                         s.type_id.hash(&mut hasher);
                     }
-                    Value::Dict(d) => {
-                        "Dict".hash(&mut hasher);
-                        d.identity_ptr().hash(&mut hasher);
-                    }
                     Value::Tuple(t) => {
                         "Tuple".hash(&mut hasher);
                         t.len().hash(&mut hasher);
                     }
                     Value::DataType(jt) => {
-                        "DataType".hash(&mut hasher);
-                        jt.name().hash(&mut hasher);
+                        let registry = RuntimeTypeRegistry::new_with_struct_defs(
+                            self.compile_context.as_ref(),
+                            &self.abstract_types,
+                            &self.struct_defs,
+                        );
+                        let object = registry.object(jt);
+                        object.kind().hash(&mut hasher);
+                        object.identity().stable_hash().hash(&mut hasher);
+                    }
+                    Value::RuntimeTypeVar(tv) => {
+                        "RuntimeTypeVar".hash(&mut hasher);
+                        tv.id.hash(&mut hasher);
                     }
                     _ => {
                         // For other types, use a simple discriminant
@@ -1232,7 +1289,7 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     Value::F64(f) => f.is_nan(),
                     Value::Missing => true,
                     // Complex with NaN components
-                    Value::Struct(s) if s.struct_name == "Complex" => s
+                    Value::Struct(s) if &*s.struct_name == "Complex" => s
                         .values
                         .iter()
                         .any(|v| matches!(v, Value::F64(f) if f.is_nan())),
@@ -1246,46 +1303,156 @@ impl<R: crate::rng::RngLike> Vm<R> {
                 let collection = self.stack.pop_value()?;
                 let element = self.stack.pop_value()?;
 
+                let heap = self.struct_heap.as_slice();
+
+                let complex_parts = |value: &Value| match value {
+                    Value::StructRef(idx) => heap.get(*idx).and_then(|s| s.as_complex_parts()),
+                    _ => value.as_complex_parts(),
+                };
+
+                // `as_complex_parts` also reports bare reals as `(v as f64, 0.0)`,
+                // so the complex branch below must only fire when at least one
+                // operand is GENUINELY complex; otherwise two reals would compare
+                // via the lossy `v as f64` instead of the value-based numeric arms
+                // (Issue #8187).
+                let is_complex = |value: &Value| match value {
+                    Value::StructRef(idx) => heap
+                        .get(*idx)
+                        .is_some_and(|s| s.as_complex_parts().is_some()),
+                    Value::Struct(s) => s.as_complex_parts().is_some(),
+                    _ => false,
+                };
+
+                #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+                enum NumericInteger {
+                    NonNegative(u128),
+                    Negative(i128),
+                }
+
+                let signed_integer_value = |value: i128| {
+                    if value >= 0 {
+                        NumericInteger::NonNegative(value.cast_unsigned())
+                    } else {
+                        NumericInteger::Negative(value)
+                    }
+                };
+
+                let integer_value = |value: &Value| match value {
+                    Value::I8(v) => Some(signed_integer_value(i128::from(*v))),
+                    Value::I16(v) => Some(signed_integer_value(i128::from(*v))),
+                    Value::I32(v) => Some(signed_integer_value(i128::from(*v))),
+                    Value::I64(v) => Some(signed_integer_value(i128::from(*v))),
+                    Value::I128(v) => Some(signed_integer_value(*v)),
+                    Value::U8(v) => Some(NumericInteger::NonNegative(u128::from(*v))),
+                    Value::U16(v) => Some(NumericInteger::NonNegative(u128::from(*v))),
+                    Value::U32(v) => Some(NumericInteger::NonNegative(u128::from(*v))),
+                    Value::U64(v) => Some(NumericInteger::NonNegative(u128::from(*v))),
+                    Value::U128(v) => Some(NumericInteger::NonNegative(*v)),
+                    _ => None,
+                };
+
                 // Helper function to compare two values for equality (like Julia's ==)
-                fn values_equal(a: &Value, b: &Value) -> bool {
+                let values_equal = |a: &Value, b: &Value| -> bool {
+                    if is_complex(a) || is_complex(b) {
+                        if let (Some((a_re, a_im)), Some((b_re, b_im))) =
+                            (complex_parts(a), complex_parts(b))
+                        {
+                            return a_re == b_re && a_im == b_im;
+                        }
+                    }
+
+                    if let (Some(a_int), Some(b_int)) = (integer_value(a), integer_value(b)) {
+                        return a_int == b_int;
+                    }
+
                     match (a, b) {
                         (Value::I64(x), Value::I64(y)) => x == y,
                         (Value::F64(x), Value::F64(y)) => x == y,
-                        (Value::I64(x), Value::F64(y)) => (*x as f64) == *y,
-                        (Value::F64(x), Value::I64(y)) => *x == (*y as f64),
+                        // Mixed integer/float `==` (membership uses `==`, not
+                        // `isequal`, so no sign-of-zero rule): value-based, no
+                        // rounding of the integer (Issue #8187, all widths #8199).
+                        (x, y)
+                            if crate::vm::numeric_identity::mixed_int_float_values_equal(x, y)
+                                .is_some() =>
+                        {
+                            crate::vm::numeric_identity::mixed_int_float_values_equal(x, y)
+                                .unwrap_or(false)
+                        }
                         (Value::Bool(x), Value::Bool(y)) => x == y,
                         (Value::Str(x), Value::Str(y)) => x == y,
                         (Value::Char(x), Value::Char(y)) => x == y,
                         (Value::Symbol(x), Value::Symbol(y)) => x == y,
                         (Value::Nothing, Value::Nothing) => true,
                         (Value::Missing, Value::Missing) => true,
-                        _ => false,
-                    }
-                }
-
-                let found = match &collection {
-                    Value::Array(arr) => {
-                        let arr_ref = arr.borrow();
-                        let len = arr_ref.len();
-                        let mut found = false;
-                        for i in 0..len {
-                            if let Some(v) = arr_ref.data.get_value(i) {
-                                if values_equal(&element, &v) {
-                                    found = true;
-                                    break;
-                                }
+                        // Ranges compare element-wise (`(1:3) in [1:3, 4:6]`,
+                        // Issue #5725). Two ranges are equal iff they produce the
+                        // same elements — including all empty ranges being equal.
+                        (Value::Range(x), Value::Range(y)) => x.to_vec() == y.to_vec(),
+                        // Type objects compare by canonical structural identity
+                        // so `Int in [Float64, Int]` works (Issue #5108). Route
+                        // both operands through the same DictKey canonicalization
+                        // used for type-keyed Dict/Set membership.
+                        (Value::DataType(_) | Value::RuntimeTypeVar(_), _)
+                        | (_, Value::DataType(_) | Value::RuntimeTypeVar(_)) => {
+                            match (DictKey::from_value(a), DictKey::from_value(b)) {
+                                (Ok(ka), Ok(kb)) => ka == kb,
+                                _ => false,
                             }
                         }
-                        found
+                        // Tuple / named-tuple / struct elements: the scalar arms
+                        // above cannot compare them, so route through the shared
+                        // `==` helper, which resolves heap struct refs and folds
+                        // `==` over elements (Issue #6691, builds on #6685). This
+                        // makes `(1, 2) in [(1, 2)]` and `(OneTo(3),) in [...]`
+                        // behave like upstream.
+                        _ => super::builtins_equality::values_equal_for_membership(a, b, heap),
                     }
-                    // Memory → Array (Issue #2764)
+                };
+
+                let found = match &collection {
+                    _ if is_native_array_value(&collection) => {
+                        match native_array_value_ref(&collection) {
+                            Some(arr) => {
+                                let arr_ref = arr.borrow();
+                                let len = arr_ref.element_count();
+                                let mut found = false;
+                                for i in 0..len {
+                                    let v = arr_ref.get_linear(i)?;
+                                    if values_equal(&element, &v) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                found
+                            }
+                            None => false,
+                        }
+                    }
+                    _ if self.array_wrapper_memory_and_shape(&collection).is_some() => {
+                        match self.array_wrapper_memory_and_shape(&collection) {
+                            Some((mem, shape)) => {
+                                let mem_ref = mem.borrow();
+                                let len = shape.iter().product::<usize>().min(mem_ref.len());
+                                let mut found = false;
+                                for i in 0..len {
+                                    if let Some(v) = mem_ref.data.get_value(i) {
+                                        if values_equal(&element, &v) {
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                found
+                            }
+                            None => false,
+                        }
+                    }
                     Value::Memory(mem) => {
-                        let arr = crate::vm::util::memory_to_array_ref(mem);
-                        let arr_ref = arr.borrow();
-                        let len = arr_ref.len();
+                        let mem_ref = mem.borrow();
+                        let len = mem_ref.len();
                         let mut found = false;
                         for i in 0..len {
-                            if let Some(v) = arr_ref.data.get_value(i) {
+                            if let Some(v) = mem_ref.data.get_value(i) {
                                 if values_equal(&element, &v) {
                                     found = true;
                                     break;
@@ -1303,25 +1470,8 @@ impl<R: crate::rng::RngLike> Vm<R> {
                             _ => false,
                         }
                     }
-                    Value::Dict(d) => {
-                        // Check if element is a key in the dict
-                        d.iter().any(|(k, _)| match (&element, k) {
-                            (Value::Str(s), DictKey::Str(ks)) => s == ks,
-                            (Value::I64(n), DictKey::I64(kn)) => n == kn,
-                            (Value::Symbol(sym), DictKey::Symbol(ks)) => sym.as_str() == ks,
-                            _ => false,
-                        })
-                    }
-                    Value::Set(s) => {
-                        // Check if element is in the set (elements are stored as DictKey)
-                        s.elements.iter().any(|k| match (&element, k) {
-                            (Value::I64(n), DictKey::I64(kn)) => n == kn,
-                            (Value::F64(n), DictKey::I64(kn)) => *n == (*kn as f64),
-                            (Value::Str(st), DictKey::Str(ks)) => st == ks,
-                            (Value::Symbol(sym), DictKey::Symbol(ks)) => sym.as_str() == ks,
-                            _ => false,
-                        })
-                    }
+                    // `x in start:step:stop` — membership in a range (Issue #5728).
+                    Value::Range(r) => r.contains_value(&element),
                     _ => {
                         return Err(VmError::TypeError(format!(
                             "in requires Array, Tuple, String, Dict, or Set, got {:?}",
@@ -1341,7 +1491,7 @@ impl<R: crate::rng::RngLike> Vm<R> {
 
                 let result_type = match &type_val {
                     Value::DataType(jt) => {
-                        match jt {
+                        match jt.as_ref() {
                             // If the type is Missing itself, return Bottom (Union{})
                             crate::types::JuliaType::Missing => crate::types::JuliaType::Bottom,
 
@@ -1411,11 +1561,72 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     }
                 };
 
-                self.stack.push(Value::DataType(result_type));
+                self.stack.push(Value::DataType(Box::new(result_type)));
             }
 
             _ => return Ok(None),
         }
         Ok(Some(()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::JuliaType;
+
+    #[test]
+    fn core_datatype_typeintersect_subtype_result_keeps_subtype_side() {
+        assert_eq!(
+            core_datatype_typeintersect_subtype_result(
+                &Value::DataType(Box::new(JuliaType::Int64)),
+                &Value::DataType(Box::new(JuliaType::Real)),
+            ),
+            Some(JuliaType::Int64)
+        );
+        assert_eq!(
+            core_datatype_typeintersect_subtype_result(
+                &Value::DataType(Box::new(JuliaType::Real)),
+                &Value::DataType(Box::new(JuliaType::Int64)),
+            ),
+            Some(JuliaType::Int64)
+        );
+    }
+
+    #[test]
+    fn core_datatype_typeintersect_subtype_result_defers_non_subtype_cases() {
+        assert_eq!(
+            core_datatype_typeintersect_subtype_result(
+                &Value::DataType(Box::new(JuliaType::String)),
+                &Value::DataType(Box::new(JuliaType::Number)),
+            ),
+            None
+        );
+        assert_eq!(
+            core_datatype_typeintersect_subtype_result(
+                &Value::DataType(Box::new(JuliaType::Struct("Dog".to_string()))),
+                &Value::DataType(Box::new(JuliaType::Any)),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn julia_type_references_typevar_scans_unionall_bounds_issue_7924() {
+        let ty = JuliaType::UnionAll {
+            lower_bound: None,
+            var: "S".to_string(),
+            bound: Some(Box::new("T".to_string())),
+            body: Box::new(JuliaType::TupleOf(vec![JuliaType::TypeVar(
+                "S".to_string(),
+                None,
+            )])),
+        };
+
+        assert!(julia_type_references_typevar(&ty, "T"));
+        assert!(julia_type_references_typevar(
+            &JuliaType::TypeVar("S".to_string(), Some("T".to_string())),
+            "T"
+        ));
     }
 }

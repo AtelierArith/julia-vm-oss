@@ -4,6 +4,7 @@
 //! during abstract interpretation, supporting array, tuple, and range iteration.
 
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
+use crate::inference_core::{CorePrimitive, CoreType};
 
 /// Extracts the element type from a parametric struct name.
 ///
@@ -40,21 +41,45 @@ fn extract_struct_element_type(name: &str) -> Option<ConcreteType> {
 /// Parses a type parameter string into a ConcreteType.
 fn parse_type_param(type_param: &str) -> Option<ConcreteType> {
     match type_param.trim() {
-        "Int8" => Some(ConcreteType::Int8),
-        "Int16" => Some(ConcreteType::Int16),
-        "Int32" => Some(ConcreteType::Int32),
-        "Int64" => Some(ConcreteType::Int64),
-        "Int128" => Some(ConcreteType::Int128),
-        "UInt8" => Some(ConcreteType::UInt8),
-        "UInt16" => Some(ConcreteType::UInt16),
-        "UInt32" => Some(ConcreteType::UInt32),
-        "UInt64" => Some(ConcreteType::UInt64),
-        "UInt128" => Some(ConcreteType::UInt128),
-        "Float32" => Some(ConcreteType::Float32),
-        "Float64" => Some(ConcreteType::Float64),
-        "Bool" => Some(ConcreteType::Bool),
-        "String" => Some(ConcreteType::String),
-        "Char" => Some(ConcreteType::Char),
+        "Int8" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8))),
+        "Int16" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int16,
+        ))),
+        "Int32" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int32,
+        ))),
+        "Int64" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        ))),
+        "Int128" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int128,
+        ))),
+        "UInt8" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt8,
+        ))),
+        "UInt16" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt16,
+        ))),
+        "UInt32" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt32,
+        ))),
+        "UInt64" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt64,
+        ))),
+        "UInt128" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt128,
+        ))),
+        "Float32" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float32,
+        ))),
+        "Float64" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        ))),
+        "Bool" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
+        "String" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        ))),
+        "Char" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
         _ => None, // Unknown type parameter
     }
 }
@@ -68,6 +93,7 @@ fn parse_type_param(type_param: &str) -> Option<ConcreteType> {
 ///
 /// - **Array{T}**: Returns T (the element type)
 /// - **Tuple{T1, T2, ...}**: Returns Union{T1, T2, ...} (union of all element types)
+/// - **NamedTuple{names, T1, T2, ...}**: Returns Union{T1, T2, ...} (iterates field values)
 /// - **UnitRange / StepRange**: Returns Int64 (ranges iterate over integers)
 /// - **String**: Returns Char (strings iterate over characters)
 /// - **Other**: Returns Top (unknown iteration type)
@@ -80,22 +106,22 @@ fn parse_type_param(type_param: &str) -> Option<ConcreteType> {
 ///
 /// // Array{Int64} -> Int64
 /// let array_ty = LatticeType::Concrete(ConcreteType::Array {
-///     element: Box::new(ConcreteType::Int64),
-/// });
+///     element: Box::new(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))),
+/// , ndims: None });
 /// assert_eq!(
 ///     element_type(&array_ty),
-///     LatticeType::Concrete(ConcreteType::Int64)
+///     LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)))
 /// );
 ///
 /// // Tuple{Int64, Float64} -> Union{Int64, Float64}
 /// let tuple_ty = LatticeType::Concrete(ConcreteType::Tuple {
-///     elements: vec![ConcreteType::Int64, ConcreteType::Float64],
+///     elements: vec![ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)), ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64))],
 /// });
 /// let result = element_type(&tuple_ty);
 /// match result {
 ///     LatticeType::Union(types) => {
-///         assert!(types.contains(&ConcreteType::Int64));
-///         assert!(types.contains(&ConcreteType::Float64));
+///         assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))));
+///         assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64))));
 ///     }
 ///     _ => panic!("Expected Union type"),
 /// }
@@ -106,7 +132,7 @@ pub fn element_type(iterable_ty: &LatticeType) -> LatticeType {
         LatticeType::Const(cv) => element_type(&LatticeType::Concrete(cv.to_concrete_type())),
 
         // Array{T} -> T
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(*element.clone())
         }
 
@@ -137,6 +163,55 @@ pub fn element_type(iterable_ty: &LatticeType) -> LatticeType {
             }
         }
 
+        // Tuple{T1, ..., Vararg{Tail}} -> Union(T1, ..., Tail) (Issue #3511)
+        LatticeType::Concrete(ConcreteType::TupleVararg { elements, tail }) => {
+            let mut unique: std::collections::BTreeSet<ConcreteType> =
+                elements.iter().cloned().collect();
+            unique.insert(*tail.clone());
+            if unique.is_empty() {
+                LatticeType::Concrete(*tail.clone())
+            } else if unique.len() == 1 {
+                LatticeType::Concrete(
+                    unique
+                        .into_iter()
+                        .next()
+                        .unwrap_or(ConcreteType::Core(CoreType::Any)),
+                )
+            } else {
+                LatticeType::Union(unique)
+            }
+        }
+
+        // NamedTuple{names, T1, T2, ...} -> Union{T1, T2, ...} (Issue #5082)
+        //
+        // Upstream `iterate(t::NamedTuple, ...)` yields the field *values* in
+        // declaration order (julia/base/namedtuple.jl), so the loop variable
+        // type is the union of the field value types — exactly the same shape
+        // as iterating the equivalent positional tuple. Previously this fell
+        // through to the `Top` catch-all, so every `for v in nt` body became
+        // fully dynamic.
+        LatticeType::Concrete(ConcreteType::NamedTuple { fields }) => {
+            if fields.is_empty() {
+                // Empty NamedTuple: no elements to iterate.
+                LatticeType::Bottom
+            } else {
+                let unique_types: std::collections::BTreeSet<_> =
+                    fields.iter().map(|(_, ty)| ty.clone()).collect();
+
+                if unique_types.len() == 1 {
+                    // All fields share the same value type.
+                    if let Some(ty) = unique_types.into_iter().next() {
+                        LatticeType::Concrete(ty)
+                    } else {
+                        LatticeType::Bottom
+                    }
+                } else {
+                    // Heterogeneous field value types -> union.
+                    LatticeType::Union(unique_types)
+                }
+            }
+        }
+
         // Range{T} -> T
         LatticeType::Concrete(ConcreteType::Range { element }) => {
             LatticeType::Concrete(*element.clone())
@@ -155,7 +230,9 @@ pub fn element_type(iterable_ty: &LatticeType) -> LatticeType {
         }
 
         // String -> Char
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Char),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        }
 
         // Union types: join all element types
         LatticeType::Union(types) => {
@@ -204,22 +281,32 @@ mod tests {
     #[test]
     fn test_element_type_array_int() {
         let array_ty = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         assert_eq!(
             element_type(&array_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
     #[test]
     fn test_element_type_array_float() {
         let array_ty = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         });
         assert_eq!(
             element_type(&array_ty),
-            LatticeType::Concrete(ConcreteType::Float64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
         );
     }
 
@@ -227,21 +314,26 @@ mod tests {
     fn test_element_type_tuple_homogeneous() {
         let tuple_ty = LatticeType::Concrete(ConcreteType::Tuple {
             elements: vec![
-                ConcreteType::Int64,
-                ConcreteType::Int64,
-                ConcreteType::Int64,
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
             ],
         });
         assert_eq!(
             element_type(&tuple_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
     #[test]
     fn test_element_type_tuple_heterogeneous() {
         let tuple_ty = LatticeType::Concrete(ConcreteType::Tuple {
-            elements: vec![ConcreteType::Int64, ConcreteType::Float64],
+            elements: vec![
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+            ],
         });
 
         let result = element_type(&tuple_ty);
@@ -252,19 +344,27 @@ mod tests {
         );
         if let LatticeType::Union(types) = result {
             assert_eq!(types.len(), 2);
-            assert!(types.contains(&ConcreteType::Int64));
-            assert!(types.contains(&ConcreteType::Float64));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            ))));
         }
     }
 
     #[test]
     fn test_element_type_tuple_single() {
         let tuple_ty = LatticeType::Concrete(ConcreteType::Tuple {
-            elements: vec![ConcreteType::String],
+            elements: vec![ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))],
         });
         assert_eq!(
             element_type(&tuple_ty),
-            LatticeType::Concrete(ConcreteType::String)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String
+            )))
         );
     }
 
@@ -276,10 +376,12 @@ mod tests {
 
     #[test]
     fn test_element_type_string() {
-        let string_ty = LatticeType::Concrete(ConcreteType::String);
+        let string_ty = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         assert_eq!(
             element_type(&string_ty),
-            LatticeType::Concrete(ConcreteType::Char)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
         );
     }
 
@@ -287,10 +389,16 @@ mod tests {
     fn test_element_type_union_arrays() {
         let mut union_types = BTreeSet::new();
         union_types.insert(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         union_types.insert(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         });
 
         let union_ty = LatticeType::Union(union_types);
@@ -302,8 +410,12 @@ mod tests {
             result
         );
         if let LatticeType::Union(types) = result {
-            assert!(types.contains(&ConcreteType::Int64));
-            assert!(types.contains(&ConcreteType::Float64));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            ))));
         }
     }
 
@@ -319,26 +431,36 @@ mod tests {
 
     #[test]
     fn test_element_type_non_iterable() {
-        let int_ty = LatticeType::Concrete(ConcreteType::Int64);
+        let int_ty = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
         assert_eq!(element_type(&int_ty), LatticeType::Top);
     }
 
     #[test]
     fn test_element_type_range() {
         let range_ty = LatticeType::Concrete(ConcreteType::Range {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         assert_eq!(
             element_type(&range_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
     #[test]
     fn test_element_type_dict() {
         let dict_ty = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         let result = element_type(&dict_ty);
         assert!(
@@ -348,19 +470,29 @@ mod tests {
         );
         if let LatticeType::Concrete(ConcreteType::Tuple { elements }) = result {
             assert_eq!(elements.len(), 2);
-            assert_eq!(elements[0], ConcreteType::String);
-            assert_eq!(elements[1], ConcreteType::Int64);
+            assert_eq!(
+                elements[0],
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))
+            );
+            assert_eq!(
+                elements[1],
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+            );
         }
     }
 
     #[test]
     fn test_element_type_set() {
         let set_ty = LatticeType::Concrete(ConcreteType::Set {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         assert_eq!(
             element_type(&set_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
@@ -372,7 +504,9 @@ mod tests {
         });
         assert_eq!(
             element_type(&linrange_ty),
-            LatticeType::Concrete(ConcreteType::Float64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
         );
     }
 
@@ -384,7 +518,9 @@ mod tests {
         });
         assert_eq!(
             element_type(&steprangelen_ty),
-            LatticeType::Concrete(ConcreteType::Float64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
         );
     }
 
@@ -396,7 +532,9 @@ mod tests {
         });
         assert_eq!(
             element_type(&unitrange_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
@@ -408,7 +546,9 @@ mod tests {
         });
         assert_eq!(
             element_type(&steprange_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
@@ -420,7 +560,9 @@ mod tests {
         });
         assert_eq!(
             element_type(&oneto_ty),
-            LatticeType::Concrete(ConcreteType::Int64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
     }
 
@@ -436,35 +578,114 @@ mod tests {
     #[test]
     fn test_element_type_generator() {
         let generator_ty = LatticeType::Concrete(ConcreteType::Generator {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         });
         assert_eq!(
             element_type(&generator_ty),
-            LatticeType::Concrete(ConcreteType::Float64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
         );
+    }
+
+    #[test]
+    fn test_element_type_namedtuple_homogeneous() {
+        // Issue #5082: iterating a NamedTuple yields its field values in
+        // order. For a homogeneous NamedTuple this collapses to the single
+        // field value type (not Top).
+        let nt_ty = LatticeType::Concrete(ConcreteType::NamedTuple {
+            fields: vec![
+                (
+                    "a".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "b".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+            ],
+        });
+        assert_eq!(
+            element_type(&nt_ty),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
+    }
+
+    #[test]
+    fn test_element_type_namedtuple_heterogeneous() {
+        // Issue #5082: a heterogeneous NamedTuple yields the union of its
+        // field value types, mirroring tuple iteration.
+        let nt_ty = LatticeType::Concrete(ConcreteType::NamedTuple {
+            fields: vec![
+                (
+                    "x".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "y".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+                ),
+            ],
+        });
+        let result = element_type(&nt_ty);
+        assert!(
+            matches!(&result, LatticeType::Union(_)),
+            "Expected Union type, got {:?}",
+            result
+        );
+        if let LatticeType::Union(types) = result {
+            assert_eq!(types.len(), 2);
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            ))));
+        }
+    }
+
+    #[test]
+    fn test_element_type_namedtuple_empty() {
+        // An empty NamedTuple has no elements to iterate.
+        let nt_ty = LatticeType::Concrete(ConcreteType::NamedTuple { fields: vec![] });
+        assert_eq!(element_type(&nt_ty), LatticeType::Bottom);
     }
 
     #[test]
     fn test_extract_struct_element_type() {
         assert_eq!(
             extract_struct_element_type("LinRange{Float64}"),
-            Some(ConcreteType::Float64)
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
         );
         assert_eq!(
             extract_struct_element_type("StepRangeLen{Int64}"),
-            Some(ConcreteType::Int64)
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
         assert_eq!(
             extract_struct_element_type("UnitRange{Int32}"),
-            Some(ConcreteType::Int32)
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32
+            )))
         );
         assert_eq!(
             extract_struct_element_type("StepRange{UInt64}"),
-            Some(ConcreteType::UInt64)
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt64
+            )))
         );
         assert_eq!(
             extract_struct_element_type("OneTo{Int64}"),
-            Some(ConcreteType::Int64)
+            Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
         );
         assert_eq!(extract_struct_element_type("MyCustomType"), None);
         assert_eq!(extract_struct_element_type("UnknownType{Float64}"), None);

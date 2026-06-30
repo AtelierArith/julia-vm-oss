@@ -17,6 +17,8 @@
     --success: #a6e22e;
     --string: #e6db74;
     --number: #ae81ff;
+    --tab-active: #66d9ef;
+    --tab-inactive: #75715e;
 }
 
 html, body {
@@ -27,196 +29,201 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
-    min-height: 100vh;
+    height: 100vh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
 }
 
-header {
-    padding: 1rem 2rem;
+/* Header */
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
     background: var(--bg-secondary);
     border-bottom: 1px solid #49483e;
+    flex-shrink: 0;
 }
 
-header h1 {
-    font-size: 1.5rem;
-    margin-bottom: 0.25rem;
+.app-header h1 {
+    font-size: 1rem;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-header p {
-    color: var(--text-secondary);
+.sample-select {
+    max-width: 180px;
+    padding: 0.45rem 0.75rem;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid #49483e;
+    border-radius: 6px;
     font-size: 0.875rem;
+    cursor: pointer;
+    min-height: 36px;
+    touch-action: manipulation;
 }
 
+/* Tab bar (mobile) */
+.tab-bar {
+    display: flex;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid #49483e;
+    flex-shrink: 0;
+}
+
+.tab {
+    flex: 1;
+    padding: 0.75rem;
+    background: transparent;
+    color: var(--tab-inactive);
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    min-height: 44px;
+    touch-action: manipulation;
+}
+
+.tab.active {
+    color: var(--tab-active);
+    border-bottom-color: var(--tab-active);
+}
+
+/* Workspace and panes */
 main {
     flex: 1;
     display: flex;
-    flex-direction: row;
-    padding: 1rem;
-    max-width: 1600px;
-    margin: 0 auto;
-    width: 100%;
+    flex-direction: column;
     min-height: 0;
     overflow: hidden;
 }
 
-@media (max-width: 900px) {
-    main {
-        flex-direction: column;
-        height: calc(100vh - 140px); /* Ensure height for vertical split */
-    }
-
-    .editor-container,
-    .output-container {
-        min-height: 0;
-        overflow: hidden;
-    }
-
-    .editor-wrapper {
-        min-height: 50px !important;
-        flex: 1;
-    }
-
-    #monaco-container {
-        min-height: 50px !important;
-    }
-}
-
-.editor-container,
-.output-container {
+.workspace {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    background: var(--bg-secondary);
-    border-radius: 8px;
-    overflow: hidden;
     min-height: 0;
-    min-width: 0;
-    /* Split.js will set width/height via style attribute */
+    overflow: hidden;
 }
 
-.toolbar {
+.pane {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.pane.active {
     display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.75rem 1rem;
+}
+
+/* Editor pane */
+.editor-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
     background: var(--bg-tertiary);
     border-bottom: 1px solid #49483e;
+    flex-shrink: 0;
     flex-wrap: wrap;
 }
 
-.toolbar select {
-    padding: 0.5rem;
+.editor-toolbar button,
+.output-header button {
+    padding: 0.5rem 0.875rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    min-height: 40px;
+    touch-action: manipulation;
     background: var(--bg-secondary);
     color: var(--text-primary);
-    border: 1px solid #49483e;
-    border-radius: 4px;
-    min-width: 200px;
 }
 
-.toolbar button {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: 500;
-}
-
-.toolbar button.primary {
+.editor-toolbar button.primary {
     background: var(--accent);
-    color: black;
+    color: #000;
 }
 
-.toolbar button.primary:hover {
-    background: #52b5d6;
+.editor-toolbar button:active,
+.output-header button:active {
+    opacity: 0.85;
 }
 
-.toolbar button:disabled {
+.editor-toolbar button:disabled,
+.output-header button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
-/* Share button style */
-#share-btn {
-    background: var(--accent-secondary);
-    color: var(--bg-primary);
-}
-
-#share-btn:hover {
-    background: #8bc624;
-}
-
-#share-btn.copied {
-    background: var(--success);
-    color: var(--bg-primary);
-}
-
-.toolbar label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-}
-
-.toolbar input[type="number"] {
-    width: 80px;
-    padding: 0.5rem;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid #49483e;
-    border-radius: 4px;
-}
-
 .editor-wrapper {
     flex: 1;
-    min-height: 400px;
+    min-height: 0;
+    overflow: hidden;
 }
 
-/* Monaco Editor Container */
 #monaco-container {
     width: 100%;
     height: 100%;
-    min-height: 400px;
+    min-height: 0;
+    overflow: hidden;
 }
 
+/* Output pane */
 .output-header {
     display: flex;
     justify-content: flex-start;
     align-items: center;
-    gap: 1rem;
+    gap: 0.75rem;
     padding: 0.75rem 1rem;
     background: var(--bg-tertiary);
     border-bottom: 1px solid #49483e;
+    flex-shrink: 0;
+    flex-wrap: wrap;
 }
 
 .output-header h2 {
     font-size: 1rem;
     margin: 0;
+    margin-right: auto;
 }
 
-#copy-btn,
-#clear-output-btn {
-    padding: 0.35rem 0.75rem;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid #49483e;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.8rem;
-    transition: background 0.2s, border-color 0.2s;
+#share-btn {
+    background: var(--accent-secondary);
+    color: var(--bg-primary);
 }
 
-#copy-btn:hover,
-#clear-output-btn:hover {
-    background: var(--bg-primary);
-    border-color: var(--accent);
+#share-btn:hover,
+#share-btn.copied {
+    background: #8bc624;
 }
 
+#copy-source-btn.copied,
 #copy-btn.copied,
 #clear-output-btn.copied {
     background: var(--success);
     color: var(--bg-primary);
-    border-color: var(--success);
+}
+
+.unsupported-notice {
+    padding: 0.75rem 1rem;
+    background: rgba(253, 151, 31, 0.15);
+    border: 1px solid #fd971f;
+    border-radius: 6px;
+    margin: 0.5rem;
+    color: #fd971f;
+    font-size: 13px;
+    flex-shrink: 0;
 }
 
 #output {
@@ -229,6 +236,43 @@ main {
     line-height: 1.5;
     overflow: auto;
     white-space: pre-wrap;
+    word-break: break-word;
+}
+
+#plot-output {
+    justify-content: center;
+    align-items: center;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    min-height: 300px;
+    width: 100%;
+}
+
+#plot-output:not(.hidden) {
+    display: flex;
+}
+
+#plot-output .plot-container,
+#plot-output .svg-container {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+#plot-output svg.main-svg {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100%;
+}
+
+/* JSXGraph board container (Issue #7286). JSXGraph draws on a light canvas, so
+   give it a white background regardless of the dark playground theme. */
+#plot-output #jxgbox {
+    width: 100%;
+    height: 100%;
+    max-width: 450px;
+    aspect-ratio: 1 / 1;
+    background: #ffffff;
+    border-radius: 4px;
 }
 
 #result {
@@ -237,30 +281,35 @@ main {
     border-top: 1px solid #49483e;
     font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
     color: var(--success);
+    flex-shrink: 0;
 }
 
 #error {
     padding: 0.75rem 1rem;
     background: rgba(249, 38, 114, 0.15);
     border: 1px solid var(--error);
-    border-radius: 4px;
+    border-radius: 6px;
     margin: 0.5rem;
     color: var(--error);
     font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
     font-size: 13px;
     white-space: pre-wrap;
     word-break: break-word;
+    flex-shrink: 0;
 }
 
 .hidden {
-    display: none;
+    display: none !important;
 }
 
+/* Footer */
 footer {
-    padding: 1rem 2rem;
+    padding: 0.75rem 1rem;
     background: var(--bg-secondary);
     border-top: 1px solid #49483e;
     text-align: center;
+    flex-shrink: 0;
+    font-size: 0.8125rem;
 }
 
 footer a {
@@ -274,27 +323,49 @@ footer a:hover {
 
 #version {
     color: var(--text-secondary);
-    font-size: 0.875rem;
 }
 
-/* Split.js gutter styles */
-.gutter {
-    background-color: var(--bg-tertiary);
-    background-repeat: no-repeat;
-    background-position: 50%;
-    transition: background-color 0.15s;
+/* Desktop layout */
+@media (min-width: 768px) {
+    .tab-bar {
+        display: none;
+    }
+
+    .workspace {
+        flex-direction: row;
+    }
+
+    .pane {
+        display: flex !important;
+    }
+
+    #edit-pane {
+        flex: 1.2;
+        border-right: 1px solid #49483e;
+    }
+
+    #output-pane {
+        flex: 1;
+    }
+
+    .sample-select {
+        max-width: 280px;
+    }
 }
 
-.gutter:hover {
-    background-color: var(--accent);
-}
+/* Small phone tweaks */
+@media (max-width: 380px) {
+    .app-header h1 {
+        font-size: 0.875rem;
+    }
 
-.gutter.gutter-horizontal {
-    cursor: col-resize;
-    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="30"><path d="M1 0v30M5 0v30" stroke="%2375715e" stroke-width="1"/></svg>');
-}
+    .sample-select {
+        max-width: 130px;
+    }
 
-.gutter.gutter-vertical {
-    cursor: row-resize;
-    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="6"><path d="M0 1h30M0 5h30" stroke="%2375715e" stroke-width="1"/></svg>');
+    .editor-toolbar button,
+    .output-header button {
+        padding: 0.5rem 0.625rem;
+        font-size: 0.8125rem;
+    }
 }

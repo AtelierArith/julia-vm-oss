@@ -41,10 +41,22 @@ expected = true
 description = "Int128 and BigInt literals for values exceeding Int64 range"
 
 [[tests]]
+name = "literals_boxed_instr_operands_5176"
+file = "boxed_instr_operands_5176.jl"
+expected = true
+description = "Boxed Instr operands (PushI128/MakeGenerator/dict StoreDict/kwargs-splat) behave identically (Issue #5176)"
+
+[[tests]]
 name = "literals_numeric"
 file = "numeric_literals.jl"
 expected = true
 description = "Comprehensive numeric literal tests (hex, binary, octal, Float32, hex float)"
+
+[[tests]]
+name = "literals_numeric_coefficient_power_8363"
+file = "numeric_coefficient_power_8363.jl"
+expected = true
+description = "Numeric literal coefficients bind looser than exponentiation, so 4n^2 parses as 4*(n^2) (Issue #8363)"
 
 [[tests]]
 name = "literals_octal_int"

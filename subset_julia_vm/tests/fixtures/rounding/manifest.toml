@@ -11,3 +11,9 @@ name = "rounding_functions"
 file = "rounding_functions.jl"
 expected = true
 description = "floor, ceil, round, trunc with Int conversion (Issue #3123)"
+
+[[tests]]
+name = "rounding_bankers_rounding"
+file = "rounding_bankers_rounding.jl"
+expected = true
+description = "round(x) with the default RoundNearest uses round-half-to-even (banker's rounding): round(2.5)==2.0, round(0.5)==0.0, round(4.5)==4.0, not half-away-from-zero. sjulia used Rust f64::round (half away from zero), now uses round_ties_even across the VM Round/RoundDigits/RoundSigDigits builtins, the dynamic round path, and the AoT constant-folding/codegen/runtime intrinsic. Covers ties (Float64 + Float32), non-ties, negatives, and digits/sigdigits forms. Verify with scripts/fixture_julia_parity.sh (the nextest harness only checks the final returned value)."

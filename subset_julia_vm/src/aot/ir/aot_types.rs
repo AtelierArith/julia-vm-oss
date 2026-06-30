@@ -4,7 +4,8 @@
 
 use super::super::types::StaticType;
 use super::ops::{AotBinOp, AotBuiltinOp, AotUnaryOp, CompoundAssignOp};
-use std::collections::HashMap;
+use crate::aot::abi::AotCallAbi;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 // Higher-Level AoT IR (for code generation)
@@ -134,6 +135,260 @@ impl AotProgram {
         func_dynamic + main_dynamic
     }
 
+    /// Remove functions that are unreachable from the program entry point.
+    ///
+    /// After AoT broadcast specialization and inlining, the program can retain
+    /// Base helper functions whose only callers were the `broadcast` / `collect`
+    /// calls that specialization replaced with concrete `__aot_broadcast_*`
+    /// helpers. Code generation emits every function in `functions`, so those now
+    /// dead helpers survive — frequently with type-erased `-> Value` signatures
+    /// because they are generic Base machinery (Issue #6629).
+    ///
+    /// Pruning runs only when the reachable closure contains no dynamic
+    /// (multiple-dispatch) call: a `CallDynamic` / `BinOpDynamic` resolves to a
+    /// method by runtime type, so when one is reachable we conservatively keep
+    /// every function (no regression for dynamic-dispatch programs). Fully static
+    /// programs — the case that regressed — prune cleanly. A bare reference to a
+    /// function name (a function used as a value, e.g. passed to a higher-order
+    /// helper) keeps that function reachable.
+    pub fn prune_unreachable_functions(&mut self) {
+        self.prune_unreachable_functions_with_roots(&[]);
+    }
+
+    /// Like [`Self::prune_unreachable_functions`], but also treats the supplied
+    /// function names as roots. This is used for C ABI exports: export candidates
+    /// may be uncalled from `main`, but still need to survive codegen.
+    pub fn prune_unreachable_functions_with_roots(&mut self, extra_roots: &[String]) {
+        let all_names: HashSet<String> = self.functions.iter().map(|f| f.name.clone()).collect();
+
+        let mut worklist: Vec<String> = Vec::new();
+        // Seed roots from the entry (main) block. A reachable dynamic call means
+        // we cannot know the full target set statically, so keep everything.
+        if Self::collect_reachable_refs_in_stmts(&self.main, &all_names, &mut worklist) {
+            return;
+        }
+        worklist.extend(
+            extra_roots
+                .iter()
+                .filter(|name| all_names.contains(*name))
+                .cloned(),
+        );
+
+        // name -> indices of its methods (a name may have several specializations).
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, f) in self.functions.iter().enumerate() {
+            by_name.entry(f.name.clone()).or_default().push(i);
+        }
+
+        let mut reachable: HashSet<String> = HashSet::new();
+        while let Some(name) = worklist.pop() {
+            if !reachable.insert(name.clone()) {
+                continue;
+            }
+            if let Some(indices) = by_name.get(&name) {
+                for &i in indices {
+                    if Self::collect_reachable_refs_in_stmts(
+                        &self.functions[i].body,
+                        &all_names,
+                        &mut worklist,
+                    ) {
+                        return; // dynamic dispatch reachable: keep everything.
+                    }
+                }
+            }
+        }
+
+        self.functions.retain(|f| reachable.contains(&f.name));
+    }
+
+    /// Walk `stmts`, pushing every referenced function name onto `worklist`.
+    /// Returns `true` if a dynamic (runtime-dispatched) call or binary op was
+    /// encountered anywhere in the walk (Issue #6629).
+    fn collect_reachable_refs_in_stmts(
+        stmts: &[AotStmt],
+        all_names: &HashSet<String>,
+        worklist: &mut Vec<String>,
+    ) -> bool {
+        let mut dynamic = false;
+        for stmt in stmts {
+            // Use non-short-circuiting `|` so every branch is walked for refs.
+            dynamic |= match stmt {
+                AotStmt::Let { value, .. } => {
+                    Self::collect_reachable_refs_in_expr(value, all_names, worklist)
+                }
+                AotStmt::Assign { target, value } => {
+                    Self::collect_reachable_refs_in_expr(target, all_names, worklist)
+                        | Self::collect_reachable_refs_in_expr(value, all_names, worklist)
+                }
+                AotStmt::CompoundAssign { target, value, .. } => {
+                    Self::collect_reachable_refs_in_expr(target, all_names, worklist)
+                        | Self::collect_reachable_refs_in_expr(value, all_names, worklist)
+                }
+                AotStmt::Expr(expr) => {
+                    Self::collect_reachable_refs_in_expr(expr, all_names, worklist)
+                }
+                AotStmt::Return(Some(expr)) => {
+                    Self::collect_reachable_refs_in_expr(expr, all_names, worklist)
+                }
+                AotStmt::Return(None) | AotStmt::Break | AotStmt::Continue => false,
+                AotStmt::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    Self::collect_reachable_refs_in_expr(condition, all_names, worklist)
+                        | Self::collect_reachable_refs_in_stmts(then_branch, all_names, worklist)
+                        | else_branch.as_ref().is_some_and(|e| {
+                            Self::collect_reachable_refs_in_stmts(e, all_names, worklist)
+                        })
+                }
+                AotStmt::While { condition, body } => {
+                    Self::collect_reachable_refs_in_expr(condition, all_names, worklist)
+                        | Self::collect_reachable_refs_in_stmts(body, all_names, worklist)
+                }
+                AotStmt::ForRange {
+                    start,
+                    stop,
+                    step,
+                    body,
+                    ..
+                } => {
+                    Self::collect_reachable_refs_in_expr(start, all_names, worklist)
+                        | Self::collect_reachable_refs_in_expr(stop, all_names, worklist)
+                        | step.as_ref().is_some_and(|s| {
+                            Self::collect_reachable_refs_in_expr(s, all_names, worklist)
+                        })
+                        | Self::collect_reachable_refs_in_stmts(body, all_names, worklist)
+                }
+                AotStmt::ForEach { iter, body, .. } => {
+                    Self::collect_reachable_refs_in_expr(iter, all_names, worklist)
+                        | Self::collect_reachable_refs_in_stmts(body, all_names, worklist)
+                }
+            };
+        }
+        dynamic
+    }
+
+    /// Walk an expression, pushing referenced function names onto `worklist`.
+    /// Returns `true` if a dynamic call / binary op was encountered.
+    fn collect_reachable_refs_in_expr(
+        expr: &AotExpr,
+        all_names: &HashSet<String>,
+        worklist: &mut Vec<String>,
+    ) -> bool {
+        let walk_all = |exprs: &[AotExpr], worklist: &mut Vec<String>| -> bool {
+            exprs.iter().fold(false, |d, e| {
+                d | Self::collect_reachable_refs_in_expr(e, all_names, worklist)
+            })
+        };
+        match expr {
+            // A bare reference to a function name (a function used as a value,
+            // e.g. passed to a higher-order helper) keeps that function alive.
+            AotExpr::Var { name, .. } => {
+                if all_names.contains(name) {
+                    worklist.push(name.clone());
+                }
+                false
+            }
+            AotExpr::CallStatic { function, args, .. } => {
+                if all_names.contains(function) {
+                    worklist.push(function.clone());
+                }
+                walk_all(args, worklist)
+            }
+            AotExpr::CallDynamic { function, args, .. } => {
+                if all_names.contains(function) {
+                    worklist.push(function.clone());
+                }
+                walk_all(args, worklist);
+                true
+            }
+            AotExpr::CallBuiltin { args, .. } => walk_all(args, worklist),
+            AotExpr::BinOpStatic { left, right, .. } => {
+                Self::collect_reachable_refs_in_expr(left, all_names, worklist)
+                    | Self::collect_reachable_refs_in_expr(right, all_names, worklist)
+            }
+            AotExpr::BinOpDynamic { left, right, .. } => {
+                Self::collect_reachable_refs_in_expr(left, all_names, worklist);
+                Self::collect_reachable_refs_in_expr(right, all_names, worklist);
+                true
+            }
+            AotExpr::UnaryOp { operand, .. } => {
+                Self::collect_reachable_refs_in_expr(operand, all_names, worklist)
+            }
+            AotExpr::ArrayLit { elements, .. }
+            | AotExpr::TupleLit { elements }
+            | AotExpr::StructNew {
+                fields: elements, ..
+            } => walk_all(elements, worklist),
+            AotExpr::SetFromIter { iter, .. } => {
+                Self::collect_reachable_refs_in_expr(iter, all_names, worklist)
+            }
+            AotExpr::NamedTupleLit { fields } => fields
+                .iter()
+                .any(|(_, expr)| Self::collect_reachable_refs_in_expr(expr, all_names, worklist)),
+            AotExpr::Comprehension {
+                body, iter, filter, ..
+            }
+            | AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::collect_reachable_refs_in_expr(iter, all_names, worklist)
+                    | filter.as_ref().is_some_and(|filter| {
+                        Self::collect_reachable_refs_in_expr(filter, all_names, worklist)
+                    })
+                    | Self::collect_reachable_refs_in_expr(body, all_names, worklist)
+            }
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                iterations.iter().any(|(_, iter)| {
+                    Self::collect_reachable_refs_in_expr(iter, all_names, worklist)
+                }) | filter.as_ref().is_some_and(|filter| {
+                    Self::collect_reachable_refs_in_expr(filter, all_names, worklist)
+                }) | Self::collect_reachable_refs_in_expr(body, all_names, worklist)
+            }
+            AotExpr::Index { array, indices, .. } => {
+                Self::collect_reachable_refs_in_expr(array, all_names, worklist)
+                    | walk_all(indices, worklist)
+            }
+            AotExpr::Range {
+                start, stop, step, ..
+            } => {
+                Self::collect_reachable_refs_in_expr(start, all_names, worklist)
+                    | Self::collect_reachable_refs_in_expr(stop, all_names, worklist)
+                    | step.as_ref().is_some_and(|s| {
+                        Self::collect_reachable_refs_in_expr(s, all_names, worklist)
+                    })
+            }
+            AotExpr::FieldAccess { object, .. } => {
+                Self::collect_reachable_refs_in_expr(object, all_names, worklist)
+            }
+            AotExpr::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::collect_reachable_refs_in_expr(condition, all_names, worklist)
+                    | Self::collect_reachable_refs_in_expr(then_expr, all_names, worklist)
+                    | Self::collect_reachable_refs_in_expr(else_expr, all_names, worklist)
+            }
+            AotExpr::Box(inner) => Self::collect_reachable_refs_in_expr(inner, all_names, worklist),
+            AotExpr::Unbox { value, .. } | AotExpr::Convert { value, .. } => {
+                Self::collect_reachable_refs_in_expr(value, all_names, worklist)
+            }
+            AotExpr::Lambda { body, .. } => {
+                Self::collect_reachable_refs_in_expr(body, all_names, worklist)
+            }
+            // Literals carry no references.
+            _ => false,
+        }
+    }
+
     /// Count dynamic calls in statements
     fn count_dynamic_in_stmts(stmts: &[AotStmt]) -> usize {
         let mut count = 0;
@@ -200,6 +455,38 @@ impl AotProgram {
             | AotExpr::StructNew {
                 fields: elements, ..
             } => elements.iter().map(Self::count_dynamic_in_expr).sum(),
+            AotExpr::SetFromIter { iter, .. } => Self::count_dynamic_in_expr(iter),
+            AotExpr::NamedTupleLit { fields } => fields
+                .iter()
+                .map(|(_, expr)| Self::count_dynamic_in_expr(expr))
+                .sum(),
+            AotExpr::Comprehension {
+                body, iter, filter, ..
+            }
+            | AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::count_dynamic_in_expr(iter)
+                    + filter
+                        .as_ref()
+                        .map_or(0, |filter| Self::count_dynamic_in_expr(filter))
+                    + Self::count_dynamic_in_expr(body)
+            }
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                iterations
+                    .iter()
+                    .map(|(_, iter)| Self::count_dynamic_in_expr(iter))
+                    .sum::<usize>()
+                    + filter
+                        .as_ref()
+                        .map_or(0, |filter| Self::count_dynamic_in_expr(filter))
+                    + Self::count_dynamic_in_expr(body)
+            }
             AotExpr::Index { array, indices, .. } => {
                 Self::count_dynamic_in_expr(array)
                     + indices
@@ -366,6 +653,40 @@ impl AotProgram {
                     Self::diagnose_dynamic_in_expr(elem, location, diagnostics);
                 }
             }
+            AotExpr::SetFromIter { iter, .. } => {
+                Self::diagnose_dynamic_in_expr(iter, location, diagnostics);
+            }
+            AotExpr::NamedTupleLit { fields } => {
+                for (_, elem) in fields {
+                    Self::diagnose_dynamic_in_expr(elem, location, diagnostics);
+                }
+            }
+            AotExpr::Comprehension {
+                body, iter, filter, ..
+            }
+            | AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::diagnose_dynamic_in_expr(iter, location, diagnostics);
+                if let Some(filter) = filter {
+                    Self::diagnose_dynamic_in_expr(filter, location, diagnostics);
+                }
+                Self::diagnose_dynamic_in_expr(body, location, diagnostics);
+            }
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                for (_, iter) in iterations {
+                    Self::diagnose_dynamic_in_expr(iter, location, diagnostics);
+                }
+                if let Some(filter) = filter {
+                    Self::diagnose_dynamic_in_expr(filter, location, diagnostics);
+                }
+                Self::diagnose_dynamic_in_expr(body, location, diagnostics);
+            }
             AotExpr::Index { array, indices, .. } => {
                 Self::diagnose_dynamic_in_expr(array, location, diagnostics);
                 for idx in indices {
@@ -447,6 +768,16 @@ pub struct AotFunction {
     pub body: Vec<AotStmt>,
     /// Whether this is a generic function (has Any-typed params)
     pub is_generic: bool,
+    /// Inline/noinline policy retained from Julia metadata annotations.
+    pub inline_policy: AotInlinePolicy,
+}
+
+/// AoT inlining policy derived from Julia metadata annotations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AotInlinePolicy {
+    Auto,
+    Always,
+    Never,
 }
 
 impl AotFunction {
@@ -459,12 +790,19 @@ impl AotFunction {
             return_type,
             body: Vec::new(),
             is_generic,
+            inline_policy: AotInlinePolicy::Auto,
         }
     }
 
     /// Check if this function is fully statically typed
     pub fn is_fully_static(&self) -> bool {
         self.params.iter().all(|(_, ty)| ty.is_fully_static()) && self.return_type.is_fully_static()
+    }
+
+    /// Build the backend-neutral call ABI for this inferred specialization.
+    pub fn call_abi(&self) -> AotCallAbi {
+        let params: Vec<_> = self.params.iter().map(|(_, ty)| ty.clone()).collect();
+        AotCallAbi::from_signature(&params, &self.return_type)
     }
 
     /// Get the mangled name for this function based on parameter types
@@ -590,6 +928,8 @@ impl AotGlobal {
 pub struct AotStruct {
     /// Struct name
     pub name: String,
+    /// Type parameter names for generic structs, e.g. `T` in `Box{T}`.
+    pub type_params: Vec<String>,
     /// Fields (name, type)
     pub fields: Vec<(String, StaticType)>,
     /// Whether this struct is mutable
@@ -601,9 +941,16 @@ impl AotStruct {
     pub fn new(name: String, is_mutable: bool) -> Self {
         Self {
             name,
+            type_params: Vec::new(),
             fields: Vec::new(),
             is_mutable,
         }
+    }
+
+    /// Set generic type parameter names for this struct.
+    pub fn with_type_params(mut self, type_params: Vec<String>) -> Self {
+        self.type_params = type_params;
+        self
     }
 
     /// Add a field to the struct
@@ -712,6 +1059,8 @@ pub enum AotExpr {
     LitChar(char),
     /// Nothing literal
     LitNothing,
+    /// Missing literal
+    LitMissing,
 
     // ========== Variables ==========
     /// Variable reference
@@ -744,6 +1093,7 @@ pub enum AotExpr {
         function: String,
         args: Vec<AotExpr>,
         return_ty: StaticType,
+        inline_policy: AotInlinePolicy,
     },
     /// Dynamic function call (requires multiple dispatch)
     CallDynamic {
@@ -773,8 +1123,38 @@ pub enum AotExpr {
         /// Shape of the array (e.g., [3] for 1D, [2, 3] for 2x3 matrix)
         shape: Vec<usize>,
     },
+    /// Set construction lowered to a native HashSet build from a static iterator.
+    SetFromIter {
+        iter: Box<AotExpr>,
+        elem_ty: StaticType,
+    },
     /// Tuple literal
     TupleLit { elements: Vec<AotExpr> },
+    /// NamedTuple literal, carried as a Rust tuple in field order.
+    NamedTupleLit { fields: Vec<(String, AotExpr)> },
+    /// Array comprehension lowered to a native Vec build.
+    Comprehension {
+        body: Box<AotExpr>,
+        var: String,
+        iter: Box<AotExpr>,
+        filter: Option<Box<AotExpr>>,
+        elem_ty: StaticType,
+    },
+    /// Multi-clause array comprehension lowered to nested native Vec loops.
+    MultiComprehension {
+        body: Box<AotExpr>,
+        iterations: Vec<(String, AotExpr)>,
+        filter: Option<Box<AotExpr>>,
+        elem_ty: StaticType,
+    },
+    /// Lazy generator expression lowered to a boxed Rust iterator.
+    Generator {
+        body: Box<AotExpr>,
+        var: String,
+        iter: Box<AotExpr>,
+        filter: Option<Box<AotExpr>>,
+        elem_ty: StaticType,
+    },
     /// Array/tuple indexing (supports 1D and multidimensional)
     ///
     /// # Examples
@@ -887,6 +1267,7 @@ impl AotExpr {
             AotExpr::LitStr(_) => StaticType::Str,
             AotExpr::LitChar(_) => StaticType::Char,
             AotExpr::LitNothing => StaticType::Nothing,
+            AotExpr::LitMissing => StaticType::Missing,
             AotExpr::Var { ty, .. } => ty.clone(),
             AotExpr::BinOpStatic { result_ty, .. } => result_ty.clone(),
             AotExpr::BinOpDynamic { .. } => StaticType::Any,
@@ -898,9 +1279,26 @@ impl AotExpr {
                 element: Box::new(elem_ty.clone()),
                 ndims: Some(shape.len()),
             },
+            AotExpr::SetFromIter { elem_ty, .. } => StaticType::Set {
+                element: Box::new(elem_ty.clone()),
+            },
             AotExpr::TupleLit { elements } => {
                 StaticType::Tuple(elements.iter().map(|e| e.get_type()).collect())
             }
+            AotExpr::NamedTupleLit { fields } => StaticType::NamedTuple(
+                fields
+                    .iter()
+                    .map(|(name, expr)| (name.clone(), expr.get_type()))
+                    .collect(),
+            ),
+            AotExpr::Comprehension { elem_ty, .. }
+            | AotExpr::MultiComprehension { elem_ty, .. } => StaticType::Array {
+                element: Box::new(elem_ty.clone()),
+                ndims: Some(1),
+            },
+            AotExpr::Generator { elem_ty, .. } => StaticType::Generator {
+                element: Box::new(elem_ty.clone()),
+            },
             AotExpr::Index { elem_ty, .. } => elem_ty.clone(),
             AotExpr::Range { elem_ty, .. } => StaticType::Range {
                 element: Box::new(elem_ty.clone()),
@@ -926,5 +1324,101 @@ impl AotExpr {
     /// Check if this expression has a fully static type
     pub fn is_fully_static(&self) -> bool {
         self.get_type().is_fully_static()
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    fn func_with_body(name: &str, body: Vec<AotStmt>) -> AotFunction {
+        let mut f = AotFunction::new(name.to_string(), vec![], StaticType::Nothing);
+        f.body = body;
+        f
+    }
+
+    fn call_static(function: &str, args: Vec<AotExpr>) -> AotExpr {
+        AotExpr::CallStatic {
+            function: function.to_string(),
+            args,
+            return_ty: StaticType::Nothing,
+            inline_policy: AotInlinePolicy::Auto,
+        }
+    }
+
+    fn names(program: &AotProgram) -> Vec<&str> {
+        program.functions.iter().map(|f| f.name.as_str()).collect()
+    }
+
+    #[test]
+    fn prune_removes_functions_unreachable_from_entry_issue_6629() {
+        // main -> foo -> bar; `dead` is referenced by nothing reachable.
+        let mut program = AotProgram::new();
+        program.functions.push(func_with_body(
+            "foo",
+            vec![AotStmt::Expr(call_static("bar", vec![]))],
+        ));
+        program.functions.push(func_with_body("bar", vec![]));
+        program.functions.push(func_with_body("dead", vec![]));
+        program.main = vec![AotStmt::Expr(call_static("foo", vec![]))];
+
+        program.prune_unreachable_functions();
+
+        let kept = names(&program);
+        assert!(kept.contains(&"foo"));
+        assert!(kept.contains(&"bar"));
+        assert!(
+            !kept.contains(&"dead"),
+            "unreachable `dead` should be pruned"
+        );
+    }
+
+    #[test]
+    fn prune_keeps_function_used_as_a_value_issue_6629() {
+        // main: foo(g) — `g` is passed as a value (a function reference), so it
+        // must stay reachable even though it is never directly called.
+        let mut program = AotProgram::new();
+        program.functions.push(func_with_body("foo", vec![]));
+        program.functions.push(func_with_body("g", vec![]));
+        program.functions.push(func_with_body("dead", vec![]));
+        program.main = vec![AotStmt::Expr(call_static(
+            "foo",
+            vec![AotExpr::Var {
+                name: "g".to_string(),
+                ty: StaticType::Any,
+            }],
+        ))];
+
+        program.prune_unreachable_functions();
+
+        let kept = names(&program);
+        assert!(kept.contains(&"foo"));
+        assert!(
+            kept.contains(&"g"),
+            "function passed as a value must be kept"
+        );
+        assert!(!kept.contains(&"dead"));
+    }
+
+    #[test]
+    fn prune_keeps_everything_when_dynamic_dispatch_is_reachable_issue_6629() {
+        // A reachable dynamic call can target any method by runtime type, so
+        // pruning is skipped entirely (no regression for dispatch programs).
+        let mut program = AotProgram::new();
+        program.functions.push(func_with_body("foo", vec![]));
+        program.functions.push(func_with_body("dead", vec![]));
+        program.main = vec![AotStmt::Expr(AotExpr::CallDynamic {
+            function: "foo".to_string(),
+            args: vec![],
+        })];
+
+        program.prune_unreachable_functions();
+
+        let kept = names(&program);
+        assert!(kept.contains(&"foo"));
+        assert!(
+            kept.contains(&"dead"),
+            "dynamic dispatch present: all functions must be kept"
+        );
     }
 }

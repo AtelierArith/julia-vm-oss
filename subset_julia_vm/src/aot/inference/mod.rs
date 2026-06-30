@@ -12,6 +12,7 @@ mod tests;
 pub mod types;
 
 // Re-export all public types
+pub(crate) use engine::collect_enum_defs_in_block;
 pub use engine::TypeInferenceEngine;
 pub use types::{
     CallSite, FunctionSignature, InferenceResult, StructTypeInfo, TypeEnv, TypedFunction,

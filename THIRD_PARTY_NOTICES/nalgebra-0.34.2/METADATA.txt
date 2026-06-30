@@ -1,0 +1,5 @@
+crate: nalgebra
+version: 0.34.2
+license: Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/dimforge/nalgebra

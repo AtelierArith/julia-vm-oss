@@ -1,8 +1,125 @@
 use super::*;
 
-pub(super) fn run_file(file_path: &str) {
+fn vm_profile_enabled() -> bool {
+    env::var("SJULIA_VM_PROFILE")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+fn begin_vm_profile_if_requested() -> bool {
+    if vm_profile_enabled() {
+        subset_julia_vm::vm::profiler::clear();
+        subset_julia_vm::vm::profiler::enable();
+        true
+    } else {
+        false
+    }
+}
+
+fn finish_vm_profile_if_enabled(enabled: bool) {
+    if enabled {
+        subset_julia_vm::vm::profiler::disable();
+        subset_julia_vm::vm::profiler::print_results();
+    }
+}
+
+fn parse_cli_program(
+    source: &str,
+    base_dir: Option<std::path::PathBuf>,
+) -> subset_julia_vm::ir::core::Program {
+    // Deserialize the Base cache on this thread NOW, while the background
+    // prefetch thread (spawned at the top of main) is still loading the
+    // prelude Program that parse_and_lower blocks on — the two largest
+    // warm-start deserializes overlap instead of running serially
+    // (Issue #6348).
+    subset_julia_vm::compile::cache::warm_base_cache();
+
+    subset_julia_vm::pipeline::parse_and_lower_with_base_dir(source, base_dir).unwrap_or_else(|e| {
+        eprintln!("Pipeline error: {e}");
+        std::process::exit(1);
+    })
+}
+
+fn flush_vm_output<R: subset_julia_vm::rng::RngLike>(vm: &Vm<R>) {
+    let output = vm.get_output();
+    if !output.is_empty() {
+        print!("{output}");
+    }
+    let stderr_output = vm.get_stderr_output();
+    if !stderr_output.is_empty() {
+        eprint!("{stderr_output}");
+    }
+}
+
+fn compile_and_run_program(program: subset_julia_vm::ir::core::Program) {
+    let compiled = subset_julia_vm::compile::compile_with_cache(&program).unwrap_or_else(|e| {
+        eprintln!("Compilation error: {e:?}");
+        std::process::exit(1);
+    });
+    run_compiled_program(compiled);
+}
+
+fn run_compiled_program(compiled: CompiledProgram) {
     const SEED: u64 = 42;
 
+    let profile_run = std::env::var_os("SJULIA_COMPILE_PROFILE").is_some();
+    let vm_start = std::time::Instant::now();
+    let mut vm = Vm::new_program(compiled, StableRng::new(SEED));
+    if profile_run {
+        eprintln!(
+            "[CompileProfile]   cli.vm_new                              {:>9.3} ms (immediate)",
+            vm_start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let vm_profile = begin_vm_profile_if_requested();
+    let run_start = std::time::Instant::now();
+
+    match vm.run() {
+        Ok(_) => {
+            if profile_run {
+                eprintln!(
+                    "[CompileProfile]   cli.vm_run                              {:>9.3} ms (immediate)",
+                    run_start.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+            // Match official Julia: scripts and `julia -e <code>` keep trailing
+            // values silent; only explicit prints reach stdout.
+            flush_vm_output(&vm);
+            finish_vm_profile_if_enabled(vm_profile);
+            // Match upstream Julia's exit code: a failing top-level `@testset`
+            // (or any failing `@test`) makes the process exit non-zero, so CI /
+            // `run.jl`-style scripts detect test failures (Issue #8191). sjulia
+            // records failures without throwing, so check the sticky flag here.
+            let exit_code = if vm.any_test_failed() { 1 } else { 0 };
+            // One-shot CLI runs exit here anyway; dropping the VM walks the
+            // multi-MB CompiledProgram + struct heap and costs several ms of
+            // warm-start latency. Flush std streams and exit without running
+            // destructors (Issue #6348).
+            fast_exit(exit_code);
+        }
+        Err(e) => {
+            flush_vm_output(&vm);
+            eprintln!("Runtime error: {e}");
+            finish_vm_profile_if_enabled(vm_profile);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Flush stdout/stderr and terminate without running destructors.
+///
+/// `std::process::exit` does not flush Rust's buffered stdout, so flush
+/// explicitly first. Skipping destructors avoids paying the deallocation walk
+/// of the ~14MB `CompiledProgram`/VM state on every one-shot script run
+/// (Issue #6348).
+fn fast_exit(code: i32) -> ! {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(code);
+}
+
+pub(super) fn run_file(file_path: &str) {
     // Check if file exists
     if !Path::new(file_path).exists() {
         eprintln!("Error: File '{}' not found", file_path);
@@ -14,349 +131,40 @@ pub(super) fn run_file(file_path: &str) {
         std::process::exit(1);
     });
 
-    // Parse using tree-sitter
-    let mut parser = Parser::new().unwrap_or_else(|e| {
-        eprintln!("Error: failed to create parser: {}", e);
+    let base_dir = Path::new(file_path).parent().map(Path::to_path_buf);
+    let program = parse_cli_program(&source, base_dir);
+    compile_and_run_program(program);
+}
+
+pub(super) fn run_ir_file(file_path: &str) {
+    if !Path::new(file_path).exists() {
+        eprintln!("Error: Core IR file '{}' not found", file_path);
         std::process::exit(1);
-    });
-
-    // Parse and lower prelude (base functions)
-    let prelude_src = base::get_prelude();
-    let prelude_outcome = parser.parse(&prelude_src).unwrap_or_else(|e| {
-        eprintln!("Error: failed to parse prelude: {:?}", e);
-        std::process::exit(1);
-    });
-    let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
-        eprintln!("Prelude lowering error: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Parse user source
-    let outcome = parser.parse(&source).unwrap_or_else(|e| {
-        eprintln!("Error: failed to parse source: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Lower to Core IR
-    let mut lowering = Lowering::new(&source);
-    let mut program = lowering.lower(outcome).unwrap_or_else(|e| {
-        eprintln!("Lowering error: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Merge prelude with user program
-    let user_func_names: HashSet<_> = program.functions.iter().map(|f| f.name.as_str()).collect();
-    let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
-
-    // Merge structs (prelude first, skip if user defines same name)
-    let mut all_structs: Vec<_> = prelude_program
-        .structs
-        .into_iter()
-        .filter(|s| !user_struct_names.contains(s.name.as_str()))
-        .collect();
-    all_structs.append(&mut program.structs);
-    program.structs = all_structs;
-
-    // Merge abstract types (prelude first, skip if user defines same name)
-    let user_abstract_names: HashSet<_> = program
-        .abstract_types
-        .iter()
-        .map(|a| a.name.as_str())
-        .collect();
-    let mut all_abstract_types: Vec<_> = prelude_program
-        .abstract_types
-        .into_iter()
-        .filter(|a| !user_abstract_names.contains(a.name.as_str()))
-        .collect();
-    all_abstract_types.append(&mut program.abstract_types);
-    program.abstract_types = all_abstract_types;
-
-    // Merge functions (prelude first, skip if user defines same name)
-    let mut all_functions: Vec<_> = prelude_program
-        .functions
-        .into_iter()
-        .filter(|f| !user_func_names.contains(f.name.as_str()))
-        .collect();
-    // Track base function count BEFORE adding user functions
-    let base_function_count = all_functions.len();
-    all_functions.append(&mut program.functions);
-    program.functions = all_functions;
-    program.base_function_count = base_function_count;
-
-    // Merge main blocks: prelude main block first (defines globals like RoundNearest, etc.)
-    // then user program main block follows.
-    // This ensures prelude const definitions are available to all functions.
-    let mut merged_main_stmts = prelude_program.main.stmts;
-    merged_main_stmts.extend(program.main.stmts);
-    program.main = subset_julia_vm::ir::core::Block {
-        stmts: merged_main_stmts,
-        span: program.main.span,
-    };
-
-    let existing_modules: HashSet<String> =
-        program.modules.iter().map(|m| m.name.clone()).collect();
-    // Skip relative imports (using .Module) - they refer to user-defined modules
-    // already in program.modules, not external packages
-    let usings_to_load: Vec<subset_julia_vm::ir::core::UsingImport> = program
-        .usings
-        .iter()
-        .filter(|u| !u.is_relative && !existing_modules.contains(&u.module))
-        .cloned()
-        .collect();
-
-    if !usings_to_load.is_empty() {
-        let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
-        let loaded_modules = package_loader
-            .load_for_usings(&usings_to_load)
-            .unwrap_or_else(|e| {
-                eprintln!("Load error: {}", e);
-                std::process::exit(1);
-            });
-
-        for module in loaded_modules {
-            if !existing_modules.contains(&module.name) {
-                program.modules.push(module);
-            }
-        }
     }
 
-    // Compile to bytecode
-    let compiled = compile_core_program(&program).unwrap_or_else(|e| {
-        eprintln!("Compilation error: {:?}", e);
+    let program = core_ir_file::load(file_path).unwrap_or_else(|e| {
+        eprintln!("Error loading Core IR file '{}': {}", file_path, e);
         std::process::exit(1);
     });
+    compile_and_run_program(program);
+}
 
-    // Run in VM
-    let mut vm = Vm::new_program(compiled, StableRng::new(SEED));
-
-    match vm.run() {
-        Ok(Value::I64(x)) => println!("result i64 = {}", x),
-        Ok(Value::F64(x)) => println!("result f64 = {:.17}", x),
-        // New numeric types
-        Ok(Value::I8(x)) => println!("result i8 = {}", x),
-        Ok(Value::I16(x)) => println!("result i16 = {}", x),
-        Ok(Value::I32(x)) => println!("result i32 = {}", x),
-        Ok(Value::I128(x)) => println!("result i128 = {}", x),
-        Ok(Value::U8(x)) => println!("result u8 = {}", x),
-        Ok(Value::U16(x)) => println!("result u16 = {}", x),
-        Ok(Value::U32(x)) => println!("result u32 = {}", x),
-        Ok(Value::U64(x)) => println!("result u64 = {}", x),
-        Ok(Value::U128(x)) => println!("result u128 = {}", x),
-        Ok(Value::F16(x)) => println!("result f16 = {}", x),
-        Ok(Value::F32(x)) => println!("result f32 = {}", x),
-        Ok(Value::Str(s)) => println!("result str = {}", s),
-        Ok(Value::Nothing) => println!("result nothing"),
-        Ok(Value::Missing) => println!("result missing"),
-        Ok(Value::Array(arr)) => println!("result array = {:?}", arr.borrow()),
-        Ok(ref val @ Value::Struct(_)) if val.is_complex() => {
-            if let Some((re, im)) = val.as_complex_parts() {
-                println!("result complex = {} + {}im", re, im);
-            }
-        }
-        Ok(Value::Struct(_)) => println!("result struct"),
-        Ok(Value::StructRef(_)) => println!("result struct_ref"),
-        Ok(Value::SliceAll) => println!("result slice_all"),
-        Ok(Value::Rng(_)) => println!("result rng"),
-        Ok(Value::Tuple(t)) => println!("result tuple = {:?}", t.elements),
-        Ok(Value::NamedTuple(nt)) => println!("result named_tuple = {:?}", nt.names),
-        Ok(Value::Dict(d)) => println!("result dict = {} pairs", d.len()),
-        Ok(Value::Range(r)) => {
-            if r.is_float {
-                if r.is_unit_range() {
-                    println!("result range = {}:{}", format_range_float(r.start), format_range_float(r.stop));
-                } else {
-                    println!("result range = {}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop));
-                }
-            } else if r.is_unit_range() {
-                println!("result range = {:.0}:{:.0}", r.start, r.stop);
-            } else {
-                println!("result range = {:.0}:{:.0}:{:.0}", r.start, r.step, r.stop);
-            }
-        }
-        Ok(Value::Ref(inner)) => println!("result ref = {:?}", inner),
-        Ok(Value::Char(c)) => println!("result char = '{}'", c),
-        Ok(Value::Generator(_)) => println!("result generator"),
-        Ok(Value::DataType(jt)) => println!("result datatype = {}", jt),
-        Ok(Value::Module(m)) => println!("result module = {}", m.name),
-        Ok(Value::Function(f)) => println!("result function = {}", f.name),
-        Ok(Value::BigInt(b)) => println!("result bigint = {}", b),
-        Ok(Value::BigFloat(b)) => println!("result bigfloat = {}", b),
-        Ok(Value::IO(_)) => println!("result io"),
-        Ok(Value::Undef) => println!("result #undef"),
-        Ok(Value::Bool(b)) => println!("result bool = {}", b),
-        Ok(Value::Symbol(s)) => println!("result symbol = :{}", s.as_str()),
-        Ok(Value::Expr(e)) => println!("result expr = Expr(:{}, ...)", e.head.as_str()),
-        Ok(Value::QuoteNode(_)) => println!("result quotenode"),
-        Ok(Value::LineNumberNode(ln)) => println!("result linenumber = {}", ln.line),
-        Ok(Value::GlobalRef(gr)) => {
-            println!("result globalref = {}:{}", gr.module, gr.name.as_str())
-        }
-        Ok(Value::ComposedFunction(cf)) => {
-            println!("result composed function = {:?} ∘ {:?}", cf.outer, cf.inner)
-        }
-        Ok(Value::Pairs(p)) => println!("result pairs = {} pairs", p.data.names.len()),
-        Ok(Value::Set(s)) => println!("result set = {} elements", s.elements.len()),
-        Ok(Value::Regex(r)) => println!("result regex = r\"{}\"", r.pattern),
-        Ok(Value::RegexMatch(m)) => println!("result regexmatch = RegexMatch(\"{}\")", m.match_str),
-        Ok(Value::Enum { type_name, value }) => println!("result enum = {}({})", type_name, value),
-        Ok(Value::Closure(c)) => println!("result closure = {}", c.name),
-        Ok(Value::Memory(mem)) => {
-            let mem = mem.borrow();
-            let type_name = mem.element_type().julia_type_name();
-            println!(
-                "result memory = {}-element Memory{{{}}}",
-                mem.len(),
-                type_name
-            );
-        }
-        Err(e) => {
-            eprintln!("Runtime error: {}", e);
-            std::process::exit(1);
-        }
+pub(super) fn run_vm_bytecode_file(file_path: &str) {
+    if !Path::new(file_path).exists() {
+        eprintln!("Error: VM bytecode file '{}' not found", file_path);
+        std::process::exit(1);
     }
 
-    // Print output (if any)
-    let output = vm.get_output();
-    if !output.is_empty() {
-        print!("{}", output);
-    }
+    let compiled = vm_bytecode_file::load(file_path).unwrap_or_else(|e| {
+        eprintln!("Error loading VM bytecode file '{}': {}", file_path, e);
+        std::process::exit(1);
+    });
+    run_compiled_program(compiled);
 }
 
 pub(super) fn run_code(source: &str) {
-    const SEED: u64 = 42;
-
-    // Parse using tree-sitter
-    let mut parser = Parser::new().unwrap_or_else(|e| {
-        eprintln!("Error: failed to create parser: {}", e);
-        std::process::exit(1);
-    });
-
-    // Parse and lower prelude (base functions)
-    let prelude_src = base::get_prelude();
-    let prelude_outcome = parser.parse(&prelude_src).unwrap_or_else(|e| {
-        eprintln!("Error: failed to parse prelude: {:?}", e);
-        std::process::exit(1);
-    });
-    let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
-        eprintln!("Prelude lowering error: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Parse user source
-    let outcome = parser.parse(source).unwrap_or_else(|e| {
-        eprintln!("Error: failed to parse source: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Lower to Core IR
-    let mut lowering = Lowering::new(source);
-    let mut program = lowering.lower(outcome).unwrap_or_else(|e| {
-        eprintln!("Lowering error: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Merge prelude with user program
-    let user_func_names: HashSet<_> = program.functions.iter().map(|f| f.name.as_str()).collect();
-    let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
-
-    // Merge structs (prelude first, skip if user defines same name)
-    let mut all_structs: Vec<_> = prelude_program
-        .structs
-        .into_iter()
-        .filter(|s| !user_struct_names.contains(s.name.as_str()))
-        .collect();
-    all_structs.append(&mut program.structs);
-    program.structs = all_structs;
-
-    // Merge abstract types (prelude first, skip if user defines same name)
-    let user_abstract_names: HashSet<_> = program
-        .abstract_types
-        .iter()
-        .map(|a| a.name.as_str())
-        .collect();
-    let mut all_abstract_types: Vec<_> = prelude_program
-        .abstract_types
-        .into_iter()
-        .filter(|a| !user_abstract_names.contains(a.name.as_str()))
-        .collect();
-    all_abstract_types.append(&mut program.abstract_types);
-    program.abstract_types = all_abstract_types;
-
-    // Merge functions (prelude first, skip if user defines same name)
-    let mut all_functions: Vec<_> = prelude_program
-        .functions
-        .into_iter()
-        .filter(|f| !user_func_names.contains(f.name.as_str()))
-        .collect();
-    // Track base function count BEFORE adding user functions
-    let base_function_count = all_functions.len();
-    all_functions.append(&mut program.functions);
-    program.functions = all_functions;
-    program.base_function_count = base_function_count;
-
-    // Merge main blocks: prelude main block first (defines globals like RoundNearest, etc.)
-    // then user program main block follows.
-    // This ensures prelude const definitions are available to all functions.
-    let mut merged_main_stmts = prelude_program.main.stmts;
-    merged_main_stmts.extend(program.main.stmts);
-    program.main = subset_julia_vm::ir::core::Block {
-        stmts: merged_main_stmts,
-        span: program.main.span,
-    };
-
-    let existing_modules: HashSet<String> =
-        program.modules.iter().map(|m| m.name.clone()).collect();
-    // Skip relative imports (using .Module) - they refer to user-defined modules
-    // already in program.modules, not external packages
-    let usings_to_load: Vec<subset_julia_vm::ir::core::UsingImport> = program
-        .usings
-        .iter()
-        .filter(|u| !u.is_relative && !existing_modules.contains(&u.module))
-        .cloned()
-        .collect();
-
-    if !usings_to_load.is_empty() {
-        let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
-        let loaded_modules = package_loader
-            .load_for_usings(&usings_to_load)
-            .unwrap_or_else(|e| {
-                eprintln!("Load error: {}", e);
-                std::process::exit(1);
-            });
-
-        for module in loaded_modules {
-            if !existing_modules.contains(&module.name) {
-                program.modules.push(module);
-            }
-        }
-    }
-
-    // Compile to bytecode
-    let compiled = compile_core_program(&program).unwrap_or_else(|e| {
-        eprintln!("Compilation error: {:?}", e);
-        std::process::exit(1);
-    });
-
-    // Run in VM
-    let mut vm = Vm::new_program(compiled, StableRng::new(SEED));
-
-    match vm.run() {
-        Ok(value) => {
-            // Print output first (if any)
-            let output = vm.get_output();
-            if !output.is_empty() {
-                print!("{}", output);
-            }
-            // Print result value
-            println!("{}", format_value(&value));
-        }
-        Err(e) => {
-            eprintln!("Runtime error: {}", e);
-            std::process::exit(1);
-        }
-    }
+    let program = parse_cli_program(source, None);
+    compile_and_run_program(program);
 }
 
 pub(super) fn run_repl() {
@@ -366,11 +174,11 @@ pub(super) fn run_repl() {
     println!("  SubsetJuliaVM v{} - Julia Subset REPL", VERSION);
     println!("  Type \"?\" for help, \"exit()\" to exit.\n");
 
-    let mut session = REPLSession::new(SEED);
+    let session = Rc::new(RefCell::new(REPLSession::new(SEED)));
 
     let config = Config::builder().bracketed_paste(true).build();
 
-    let helper = JuliaHelper::new();
+    let helper = JuliaHelper::new(Rc::clone(&session));
     let mut rl: Editor<JuliaHelper, DefaultHistory> =
         Editor::with_config(config).unwrap_or_else(|e| {
             eprintln!("Error: failed to create REPL editor: {}", e);
@@ -398,11 +206,12 @@ pub(super) fn run_repl() {
                         continue;
                     }
                     "reset()" => {
-                        session.reset();
+                        session.borrow_mut().reset();
                         println!("Session reset.\n");
                         continue;
                     }
                     "vars()" | "whos()" => {
+                        let session = session.borrow();
                         print_variables(&session);
                         continue;
                     }
@@ -411,7 +220,11 @@ pub(super) fn run_repl() {
 
                 let _ = rl.add_history_entry(&input);
 
-                if let Some(exprs) = session.split_expressions(&input) {
+                let split_exprs = {
+                    let session = session.borrow();
+                    session.split_expressions(&input)
+                };
+                if let Some(exprs) = split_exprs {
                     let is_single_line = input.lines().count() == 1;
                     let suppress_final = input.trim_end().ends_with(';');
 
@@ -428,7 +241,7 @@ pub(super) fn run_repl() {
                         let mut had_error = false;
 
                         for (_, _, expr_text) in exprs.iter() {
-                            let result = session.eval(expr_text);
+                            let result = session.borrow_mut().eval(expr_text);
 
                             if !result.output.is_empty() {
                                 all_output.push_str(&result.output);
@@ -464,6 +277,7 @@ pub(super) fn run_repl() {
                                 } else if let Some(struct_name) = extract_struct_name(&expr_text) {
                                     println!("{}", struct_name);
                                 } else if let Some(ref value) = result.value {
+                                    let session = session.borrow();
                                     println!(
                                         "{}",
                                         format_value_with_vm(
@@ -501,8 +315,9 @@ pub(super) fn run_repl() {
                         }
 
                         for (i, (_, _, expr_text)) in exprs.iter().enumerate() {
-                            let result = session.eval(expr_text);
-                            print_result_with_context(&result, Some(expr_text), &session);
+                            let result = session.borrow_mut().eval(expr_text);
+                            let session_ref = session.borrow();
+                            print_result_with_context(&result, Some(expr_text), &session_ref);
 
                             if !result.success {
                                 break;
@@ -521,7 +336,7 @@ pub(super) fn run_repl() {
                         }
                     }
                 } else {
-                    let result = session.eval(&input);
+                    let result = session.borrow_mut().eval(&input);
                     if input.trim_end().ends_with(';') {
                         if !result.output.is_empty() {
                             print!("{}", result.output);
@@ -536,6 +351,7 @@ pub(super) fn run_repl() {
                         }
                         println!();
                     } else {
+                        let session = session.borrow();
                         print_result_with_context(&result, Some(&input), &session);
                     }
                 }

@@ -14,46 +14,24 @@
 #![deny(clippy::expect_used)]
 
 use crate::rng::RngLike;
-use crate::vm::value::StructInstance;
 
 use super::super::error::VmError;
-use super::super::field_indices::{RATIONAL_DENOMINATOR_FIELD_INDEX, RATIONAL_NUMERATOR_FIELD_INDEX};
 use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
 use super::super::value::Value;
 use super::super::Vm;
+use super::DispatchAction;
 
-fn rational_field_as_i64(value: Option<&Value>) -> Option<i64> {
-    match value {
-        Some(Value::I64(v)) => Some(*v),
-        Some(Value::I32(v)) => Some(*v as i64),
-        Some(Value::I16(v)) => Some(*v as i64),
-        Some(Value::I8(v)) => Some(*v as i64),
-        Some(Value::Bool(v)) => Some(if *v { 1 } else { 0 }),
-        _ => None,
-    }
-}
-
-/// Extract a Rational struct's num/den fields as (f64, f64).
-/// Supports all integer field types: I64, I32, I16, I8, Bool.
-fn extract_rational_as_f64(s: &StructInstance) -> Option<(f64, f64)> {
-    let (num, den) = extract_rational_as_i64(s)?;
-    Some((num as f64, den as f64))
-}
-
-/// Extract a Rational struct's num/den fields as (i64, i64).
-/// Supports all integer field types: I64, I32, I16, I8, Bool.
-fn extract_rational_as_i64(s: &StructInstance) -> Option<(i64, i64)> {
-    let num = rational_field_as_i64(s.values.get(RATIONAL_NUMERATOR_FIELD_INDEX))?;
-    let den = rational_field_as_i64(s.values.get(RATIONAL_DENOMINATOR_FIELD_INDEX))?;
-    Some((num, den))
-}
+// Issue #5160: Rational numerator/denominator extraction is centralized on
+// `StructInstance` (`is_rational` / `as_rational_parts_i64` /
+// `as_rational_parts_f64`), mirroring the `is_complex` / `as_complex_parts`
+// helpers, instead of being duplicated inline in each conversion arm here.
 
 impl<R: RngLike> Vm<R> {
     /// Execute type conversion instructions.
     /// Returns `Some(())` if the instruction was handled, `None` otherwise.
     #[inline]
-    pub(super) fn execute_conversion(&mut self, instr: &Instr) -> Result<Option<()>, VmError> {
+    pub(super) fn execute_conversion(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::ToF64 => {
                 let val = self.stack.pop_value()?;
@@ -78,11 +56,8 @@ impl<R: RngLike> Vm<R> {
                         let f = b.to_f64().unwrap_or(f64::INFINITY);
                         self.stack.push(Value::F64(f));
                     }
-                    Value::Struct(ref s)
-                        if s.struct_name == "Rational"
-                            || s.struct_name.starts_with("Rational{") =>
-                    {
-                        if let Some((num, den)) = extract_rational_as_f64(s) {
+                    Value::Struct(ref s) if s.is_rational() => {
+                        if let Some((num, den)) = s.as_rational_parts_f64() {
                             self.stack.push(Value::F64(num / den));
                         } else {
                             return Err(VmError::type_error_expected(
@@ -94,11 +69,10 @@ impl<R: RngLike> Vm<R> {
                     }
                     Value::StructRef(idx) => {
                         if let Some(s) = self.struct_heap.get(idx) {
-                            if s.struct_name == "Rational" || s.struct_name.starts_with("Rational{")
-                            {
-                                if let Some((num, den)) = extract_rational_as_f64(s) {
+                            if s.is_rational() {
+                                if let Some((num, den)) = s.as_rational_parts_f64() {
                                     self.stack.push(Value::F64(num / den));
-                                    return Ok(Some(()));
+                                    return Ok(DispatchAction::Continue);
                                 }
                             }
                         }
@@ -108,7 +82,7 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::type_error_expected("ToF64", "numeric", &other));
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::ToI64 => {
@@ -133,7 +107,7 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::type_error_expected("ToI64", "numeric", &other));
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::BoolToI64 => {
@@ -149,7 +123,7 @@ impl<R: RngLike> Vm<R> {
                         ));
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::I64ToBool => {
@@ -165,17 +139,22 @@ impl<R: RngLike> Vm<R> {
                         ));
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::NotBool => {
                 match self.stack.pop_value()? {
                     Value::Bool(b) => self.stack.push(Value::Bool(!b)),
+                    // `!(missing) === missing` (Issue #5267). Tuple/named-tuple
+                    // `!=` lowers to `==` followed by `NotBool`; a `missing`
+                    // `==` result (e.g. `(1, missing) != (1, 2)`) must stay
+                    // `missing` rather than raising a type error.
+                    Value::Missing => self.stack.push(Value::Missing),
                     other => {
                         return Err(VmError::type_error_expected("NotBool", "Bool", &other));
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToBool => {
@@ -193,7 +172,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToF64 => {
@@ -226,9 +205,7 @@ impl<R: RngLike> Vm<R> {
                     }
                     // Complex: extract real part (like real() function)
                     // Handle both "Complex" and "Complex{Float64}" struct names
-                    Value::Struct(s)
-                        if s.struct_name == "Complex" || s.struct_name.starts_with("Complex{") =>
-                    {
+                    Value::Struct(s) if s.is_complex() => {
                         if let Some(Value::F64(re)) = s.values.first() {
                             self.stack.push(Value::F64(*re));
                         } else {
@@ -236,17 +213,20 @@ impl<R: RngLike> Vm<R> {
                         }
                     }
                     // Rational: convert to Float64 via num/den
-                    Value::Struct(s)
-                        if s.struct_name == "Rational"
-                            || s.struct_name.starts_with("Rational{") =>
-                    {
-                        if let Some((num, den)) = extract_rational_as_f64(&s) {
+                    Value::Struct(s) if s.is_rational() => {
+                        if let Some((num, den)) = s.as_rational_parts_f64() {
                             self.stack.push(Value::F64(num / den));
                         } else {
                             // INTERNAL: Rational struct with wrong field types — structural invariant.
                             return Err(VmError::InternalError(
                                 "DynamicToF64: invalid Rational struct fields".to_string(),
                             ));
+                        }
+                    }
+                    // Irrational singleton: convert to Float64 (Issue #5133)
+                    Value::Struct(s) if s.as_irrational_f64().is_some() => {
+                        if let Some(v) = s.as_irrational_f64() {
+                            self.stack.push(Value::F64(v));
                         }
                     }
                     // Dates module structs: convert value to F64
@@ -264,23 +244,24 @@ impl<R: RngLike> Vm<R> {
                     // StructRef: look up the struct on the heap and extract real part
                     Value::StructRef(idx) => {
                         let s = &self.struct_heap[idx];
-                        if s.struct_name == "Complex" || s.struct_name.starts_with("Complex{") {
+                        if s.is_complex() {
                             if let Some(Value::F64(re)) = s.values.first() {
                                 self.stack.push(Value::F64(*re));
                             } else {
                                 self.stack.push(Value::F64(0.0));
                             }
-                        } else if s.struct_name == "Rational"
-                            || s.struct_name.starts_with("Rational{")
-                        {
-                            if let Some((num, den)) = extract_rational_as_f64(s) {
+                        } else if s.is_rational() {
+                            if let Some((num, den)) = s.as_rational_parts_f64() {
                                 self.stack.push(Value::F64(num / den));
                             } else {
                                 // INTERNAL: Rational StructRef with wrong field types — structural invariant.
                                 return Err(VmError::InternalError(
-                                    "DynamicToF64: invalid Rational struct fields (StructRef)".to_string(),
+                                    "DynamicToF64: invalid Rational struct fields (StructRef)"
+                                        .to_string(),
                                 ));
                             }
+                        } else if let Some(v) = s.as_irrational_f64() {
+                            self.stack.push(Value::F64(v));
                         } else if Self::is_dates_struct(&s.struct_name) {
                             // Dates module structs: convert value to F64
                             if let Some(Value::I64(v)) = s.values.first() {
@@ -308,7 +289,7 @@ impl<R: RngLike> Vm<R> {
                         ));
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToF32 => {
@@ -329,6 +310,23 @@ impl<R: RngLike> Vm<R> {
                     Value::U128(v) => self.stack.push(Value::F32(v as f32)),
                     Value::F16(v) => self.stack.push(Value::F32(v.to_f32())),
                     Value::Bool(b) => self.stack.push(Value::F32(if b { 1.0 } else { 0.0 })),
+                    Value::Struct(s) if s.as_irrational_f64().is_some() => {
+                        if let Some(v) = s.as_irrational_f64() {
+                            self.stack.push(Value::F32(v as f32));
+                        }
+                    }
+                    Value::StructRef(idx) => {
+                        let s = &self.struct_heap[idx];
+                        if let Some(v) = s.as_irrational_f64() {
+                            self.stack.push(Value::F32(v as f32));
+                        } else {
+                            return Err(VmError::type_error_expected(
+                                "DynamicToF32",
+                                "numeric",
+                                &Value::StructRef(idx),
+                            ));
+                        }
+                    }
                     other => {
                         return Err(VmError::type_error_expected(
                             "DynamicToF32",
@@ -337,7 +335,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToF16 => {
@@ -370,7 +368,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToI64 => {
@@ -404,9 +402,7 @@ impl<R: RngLike> Vm<R> {
                         self.stack.push(Value::I64(i));
                     }
                     // Complex: extract real part and convert to I64 (like Int(real(z)))
-                    Value::Struct(s)
-                        if s.struct_name == "Complex" || s.struct_name.starts_with("Complex{") =>
-                    {
+                    Value::Struct(s) if s.is_complex() => {
                         if let Some(Value::F64(re)) = s.values.first() {
                             self.stack.push(Value::I64(*re as i64));
                         } else if let Some(Value::I64(re)) = s.values.first() {
@@ -416,11 +412,8 @@ impl<R: RngLike> Vm<R> {
                         }
                     }
                     // Rational: convert to I64 via num/den
-                    Value::Struct(s)
-                        if s.struct_name == "Rational"
-                            || s.struct_name.starts_with("Rational{") =>
-                    {
-                        if let Some((num, den)) = extract_rational_as_i64(&s) {
+                    Value::Struct(s) if s.is_rational() => {
+                        if let Some((num, den)) = s.as_rational_parts_i64() {
                             self.stack.push(Value::I64(num / den));
                         } else {
                             // INTERNAL: Rational struct with wrong field types — structural invariant.
@@ -445,7 +438,7 @@ impl<R: RngLike> Vm<R> {
                     // StructRef: look up the struct on the heap and convert
                     Value::StructRef(idx) => {
                         let s = &self.struct_heap[idx];
-                        if s.struct_name == "Complex" || s.struct_name.starts_with("Complex{") {
+                        if s.is_complex() {
                             if let Some(Value::F64(re)) = s.values.first() {
                                 self.stack.push(Value::I64(*re as i64));
                             } else if let Some(Value::I64(re)) = s.values.first() {
@@ -453,15 +446,14 @@ impl<R: RngLike> Vm<R> {
                             } else {
                                 self.stack.push(Value::I64(0));
                             }
-                        } else if s.struct_name == "Rational"
-                            || s.struct_name.starts_with("Rational{")
-                        {
-                            if let Some((num, den)) = extract_rational_as_i64(s) {
+                        } else if s.is_rational() {
+                            if let Some((num, den)) = s.as_rational_parts_i64() {
                                 self.stack.push(Value::I64(num / den));
                             } else {
                                 // INTERNAL: Rational StructRef with wrong field types — structural invariant.
                                 return Err(VmError::InternalError(
-                                    "DynamicToI64: invalid Rational struct fields (StructRef)".to_string(),
+                                    "DynamicToI64: invalid Rational struct fields (StructRef)"
+                                        .to_string(),
                                 ));
                             }
                         } else if Self::is_dates_struct(&s.struct_name) {
@@ -491,7 +483,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             // Small integer back-conversion instructions (Issue #2278)
@@ -511,7 +503,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToI16 => {
@@ -528,7 +520,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToI32 => {
@@ -545,7 +537,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToU8 => {
@@ -562,7 +554,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToU16 => {
@@ -579,7 +571,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToU32 => {
@@ -596,7 +588,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             Instr::DynamicToU64 => {
@@ -613,7 +605,7 @@ impl<R: RngLike> Vm<R> {
                         ))
                     }
                 }
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
             // Type checking
@@ -621,10 +613,10 @@ impl<R: RngLike> Vm<R> {
                 let val = self.stack.pop_value()?;
                 let is_nothing = matches!(val, Value::Nothing);
                 self.stack.push(Value::Bool(is_nothing));
-                Ok(Some(()))
+                Ok(DispatchAction::Continue)
             }
 
-            _ => Ok(None),
+            _ => Err(super::unhandled(instr)),
         }
     }
 

@@ -3,7 +3,6 @@
 //! This module provides various utility functions:
 //! - `value_type_name`: Get the Julia type name of a Value
 //! - `extract_cartesian_index_indices`: Extract indices from CartesianIndex
-//! - `pop_array_or_values`: Pop array from stack with type handling
 //! - `bind_value_to_frame`, `bind_value_to_slot`: Bind values to frame locals
 //! - Type variable utilities: `is_type_variable`, `has_type_variable_param`, etc.
 //!
@@ -11,21 +10,23 @@
 
 use super::error::VmError;
 use super::frame::{Frame, VarTypeTag};
-use super::stack_ops::StackOps;
-use super::value::{new_array_ref, ArrayRef, ArrayValue, StructInstance, Value, ValueType};
+use super::value::{StructInstance, Value, ValueType};
+use crate::inference_core::CoreType;
 #[allow(unused_imports)]
 use crate::rng::RngInstance;
+use crate::vm::value::is_native_array_value;
 
 // Re-export formatting functions for backwards compatibility
 pub(crate) use super::formatting::{
-    expr_to_julia_string, format_float_julia, format_sprintf, format_value, value_to_string,
+    expr_to_julia_string, format_float_julia, format_sprintf, format_value, format_value_print,
+    value_to_string,
 };
 
 /// Extract indices from a CartesianIndex struct, returning all indices from its tuple.
 /// Used by IndexLoad to support A[CartesianIndex((i, j))] == A[i, j].
 #[inline]
 pub(crate) fn extract_cartesian_index_indices(s: &StructInstance) -> Result<Vec<i64>, VmError> {
-    if s.struct_name != "CartesianIndex" {
+    if &*s.struct_name != "CartesianIndex" {
         return Err(VmError::TypeError(format!(
             "expected CartesianIndex, got {}",
             s.struct_name
@@ -54,6 +55,13 @@ pub(crate) fn extract_cartesian_index_indices(s: &StructInstance) -> Result<Vec<
 
 #[inline]
 pub(crate) fn value_type_name(v: &Value) -> &'static str {
+    // Route the legacy native-array carrier through the shared
+    // `native_array_value_ref` helper so the match below no longer holds a
+    // native-array arm (Issue #3908). Matches the prior semantics: returns
+    // "Array" for any native-array carrier value.
+    if is_native_array_value(v) {
+        return "Array";
+    }
     match v {
         Value::I8(_) => "Int8",
         Value::I16(_) => "Int16",
@@ -75,7 +83,6 @@ pub(crate) fn value_type_name(v: &Value) -> &'static str {
         Value::Char(_) => "Char",
         Value::Nothing => "Nothing",
         Value::Missing => "Missing",
-        Value::Array(_) => "Array",
         Value::Range(_) => "Range",
         Value::SliceAll => "Colon",
         Value::Struct(s) if s.is_complex() => "Complex", // Complex is now a Pure Julia struct
@@ -84,11 +91,11 @@ pub(crate) fn value_type_name(v: &Value) -> &'static str {
         Value::Rng(_) => "Rng",
         Value::Tuple(_) => "Tuple",
         Value::NamedTuple(_) => "NamedTuple",
-        Value::Dict(_) => "Dict",
-        Value::Set(_) => "Set",
         Value::Ref(_) => "Ref",
         Value::Generator(_) => "Base.Generator",
         Value::DataType(_) => "DataType",
+        Value::RuntimeTypeVar(_) => "TypeVar",
+        Value::RuntimeTypeName(_) => "Core.TypeName",
         Value::Module(_) => "Module",
         Value::Function(_) => "Function",
         Value::Closure(_) => "Function", // Closures are Functions
@@ -110,122 +117,12 @@ pub(crate) fn value_type_name(v: &Value) -> &'static str {
         Value::Enum { .. } => "Enum",
         // Memory type
         Value::Memory(_) => "Memory",
-    }
-}
-
-/// Convert a Memory value to a 1-D Array reference (Issue #2764).
-/// Memory{T} is stored as ArrayValue with shape=[length].
-pub(crate) fn memory_to_array_ref(mem: &super::value::MemoryRef) -> ArrayRef {
-    let borrowed = mem.borrow();
-    new_array_ref(ArrayValue::new(borrowed.data.clone(), vec![borrowed.len()]))
-}
-
-/// Result of popping an array that may contain struct elements
-pub(crate) enum PopArrayResult {
-    /// F64 array (can be used with legacy HOF path)
-    F64Array(ArrayRef),
-    /// Value array with shape (for struct arrays, use value-based HOF path)
-    Values {
-        values: Vec<Value>,
-        shape: Vec<usize>,
-    },
-}
-
-/// Pop an array from the stack, preserving struct elements as Values
-/// Returns either an F64Array or a Values result for struct arrays
-pub(crate) fn pop_array_or_values(st: &mut Vec<Value>) -> Result<PopArrayResult, VmError> {
-    use super::value::ArrayData;
-
-    /// Macro to reduce duplication for numeric ArrayData → f64 conversion arms.
-    /// Converts each element via `as f64`, clones shape, drops borrow.
-    macro_rules! numeric_to_f64 {
-        ($v:expr, $arr_borrow:expr) => {{
-            let data: Vec<f64> = $v.iter().map(|&x| x as f64).collect();
-            let shape = $arr_borrow.shape.clone();
-            drop($arr_borrow);
-            Ok(PopArrayResult::F64Array(new_array_ref(
-                ArrayValue::from_f64(data, shape),
-            )))
-        }};
-    }
-
-    match st.pop_value()? {
-        Value::Array(arr) => {
-            let arr_borrow = arr.borrow();
-            match &arr_borrow.data {
-                // For F64 arrays, return as-is
-                ArrayData::F64(_) => {
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::F64Array(arr))
-                }
-                // StructRefs need value-based processing
-                ArrayData::StructRefs(refs) => {
-                    let values: Vec<Value> =
-                        refs.iter().map(|&idx| Value::StructRef(idx)).collect();
-                    let shape = arr_borrow.shape.clone();
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::Values { values, shape })
-                }
-                // Any array with values
-                ArrayData::Any(v) => {
-                    let values = v.clone();
-                    let shape = arr_borrow.shape.clone();
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::Values { values, shape })
-                }
-                // String/Char arrays are not supported for HOF
-                ArrayData::String(_) | ArrayData::Char(_) => Err(VmError::TypeError(
-                    "String/Char arrays not supported for map/filter".to_string(),
-                )),
-                // Convert I64 to Values (preserving integer type)
-                ArrayData::I64(v) => {
-                    let values: Vec<Value> = v.iter().map(|&x| Value::I64(x)).collect();
-                    let shape = arr_borrow.shape.clone();
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::Values { values, shape })
-                }
-                // Other numeric types - convert to f64 array
-                ArrayData::F32(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::I8(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::I16(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::I32(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::U8(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::U16(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::U32(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::U64(v) => numeric_to_f64!(v, arr_borrow),
-                ArrayData::Bool(v) => {
-                    let data: Vec<f64> = v.iter().map(|&x| if x { 1.0 } else { 0.0 }).collect();
-                    let shape = arr_borrow.shape.clone();
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::F64Array(new_array_ref(
-                        ArrayValue::from_f64(data, shape),
-                    )))
-                }
-            }
-        }
-        // Memory → Array conversion (Issue #2764)
-        Value::Memory(mem) => {
-            let arr = memory_to_array_ref(&mem);
-            let arr_borrow = arr.borrow();
-            match &arr_borrow.data {
-                ArrayData::F64(_) => {
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::F64Array(arr))
-                }
-                _ => {
-                    let values: Vec<Value> = (0..arr_borrow.len())
-                        .filter_map(|i| arr_borrow.data.get_value(i))
-                        .collect();
-                    let shape = arr_borrow.shape.clone();
-                    drop(arr_borrow);
-                    Ok(PopArrayResult::Values { values, shape })
-                }
-            }
-        }
-        other => Err(VmError::TypeError(format!(
-            "expected Array, got {:?}",
-            value_type_name(&other)
-        ))),
+        Value::MemoryRef(_) => "MemoryRef",
+        // The legacy native-array carrier is filtered out by the early-return
+        // above (Issue #3908). This wildcard satisfies Rust's exhaustiveness
+        // checking and provides a safe default for any future `Value` variant:
+        // return "Any".
+        _ => "Any",
     }
 }
 
@@ -238,53 +135,61 @@ pub(crate) fn bind_value_to_frame(
     val: Value,
     struct_heap: &mut Vec<StructInstance>,
 ) {
+    // Route the legacy native-array carrier through the shared
+    // `native_array_value_ref` helper so the match below no longer holds a
+    // native-array arm (Issue #3908). The native-array case stores into
+    // `locals_any` with `VarTypeTag::Any`, identical to the other "any"
+    // arms in the match.
+    if is_native_array_value(&val) {
+        frame.locals_any.insert(name.to_string(), val);
+        frame.var_types.insert(name.to_string(), VarTypeTag::Any);
+        return;
+    }
     let tag = match &val {
         Value::I64(v) => {
-            frame.locals_i64.insert(name.to_string(), *v);
+            frame.locals_any.insert(name.to_string(), Value::I64(*v));
             VarTypeTag::I64
         }
         Value::F64(v) => {
-            frame.locals_f64.insert(name.to_string(), *v);
+            frame.locals_any.insert(name.to_string(), Value::F64(*v));
             VarTypeTag::F64
         }
-        Value::Array(a) => {
-            frame.locals_array.insert(name.to_string(), a.clone());
-            VarTypeTag::Array
-        }
         Value::Tuple(t) => {
-            frame.locals_tuple.insert(name.to_string(), t.clone());
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::Tuple(t.clone()));
             VarTypeTag::Tuple
         }
         Value::NamedTuple(nt) => {
             frame
-                .locals_named_tuple
-                .insert(name.to_string(), nt.clone());
+                .locals_any
+                .insert(name.to_string(), Value::NamedTuple(nt.clone()));
             VarTypeTag::NamedTuple
         }
-        Value::Dict(d) => {
-            frame.locals_dict.insert(name.to_string(), d.clone());
-            VarTypeTag::Dict
-        }
-        Value::Set(_) => {
-            frame.locals_any.insert(name.to_string(), val);
-            VarTypeTag::Any
-        }
         Value::Rng(r) => {
-            frame.locals_rng.insert(name.to_string(), r.clone());
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::Rng(r.clone()));
             VarTypeTag::Rng
         }
         Value::Str(s) => {
-            frame.locals_str.insert(name.to_string(), s.clone());
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::Str(s.clone()));
             VarTypeTag::Str
         }
         Value::Struct(s) => {
             let idx = struct_heap.len();
             struct_heap.push(s.clone());
-            frame.locals_struct.insert(name.to_string(), idx);
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::StructRef(idx));
             VarTypeTag::Struct
         }
         Value::StructRef(idx) => {
-            frame.locals_struct.insert(name.to_string(), *idx);
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::StructRef(*idx));
             VarTypeTag::Struct
         }
         Value::Function(_)
@@ -292,16 +197,17 @@ pub(crate) fn bind_value_to_frame(
         | Value::ComposedFunction(_)
         | Value::Module(_)
         | Value::DataType(_)
+        | Value::RuntimeTypeVar(_)
         | Value::Ref(_) => {
             frame.locals_any.insert(name.to_string(), val);
             VarTypeTag::Any
         }
         Value::Char(c) => {
-            frame.locals_char.insert(name.to_string(), *c);
+            frame.locals_any.insert(name.to_string(), Value::Char(*c));
             VarTypeTag::Char
         }
         Value::Nothing => {
-            frame.locals_nothing.insert(name.to_string());
+            frame.locals_any.insert(name.to_string(), Value::Nothing);
             VarTypeTag::Nothing
         }
         Value::Missing => {
@@ -309,11 +215,15 @@ pub(crate) fn bind_value_to_frame(
             VarTypeTag::Any
         }
         Value::Range(r) => {
-            frame.locals_range.insert(name.to_string(), r.clone());
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::Range(r.clone()));
             VarTypeTag::Range
         }
         Value::Generator(g) => {
-            frame.locals_generator.insert(name.to_string(), g.clone());
+            frame
+                .locals_any
+                .insert(name.to_string(), Value::Generator(g.clone()));
             VarTypeTag::Generator
         }
         Value::BigInt(_) | Value::BigFloat(_) | Value::IO(_) => {
@@ -321,15 +231,15 @@ pub(crate) fn bind_value_to_frame(
             VarTypeTag::Any
         }
         Value::F32(v) => {
-            frame.locals_f32.insert(name.to_string(), *v);
+            frame.locals_any.insert(name.to_string(), Value::F32(*v));
             VarTypeTag::F32
         }
         Value::F16(v) => {
-            frame.locals_f16.insert(name.to_string(), *v);
+            frame.locals_any.insert(name.to_string(), Value::F16(*v));
             VarTypeTag::F16
         }
         Value::Bool(b) => {
-            frame.locals_bool.insert(name.to_string(), *b);
+            frame.locals_any.insert(name.to_string(), Value::Bool(*b));
             VarTypeTag::Bool
         }
         Value::I8(_)
@@ -341,18 +251,18 @@ pub(crate) fn bind_value_to_frame(
         | Value::U32(_)
         | Value::U64(_)
         | Value::U128(_) => {
-            frame.locals_narrow_int.insert(name.to_string(), val);
+            frame.locals_any.insert(name.to_string(), val);
             VarTypeTag::NarrowInt
         }
         Value::Undef | Value::SliceAll => {
             frame.locals_any.insert(name.to_string(), val);
             VarTypeTag::Any
         }
-        Value::Symbol(_)
-        | Value::Expr(_)
-        | Value::QuoteNode(_)
-        | Value::LineNumberNode(_)
-        | Value::GlobalRef(_) => {
+        Value::Symbol(_) => {
+            frame.locals_any.insert(name.to_string(), val);
+            VarTypeTag::Symbol
+        }
+        Value::Expr(_) | Value::QuoteNode(_) | Value::LineNumberNode(_) | Value::GlobalRef(_) => {
             frame.locals_any.insert(name.to_string(), val);
             VarTypeTag::Any
         }
@@ -368,11 +278,22 @@ pub(crate) fn bind_value_to_frame(
             frame.locals_any.insert(name.to_string(), val);
             VarTypeTag::Any
         }
-        Value::Memory(mem) => {
-            frame
-                .locals_array
-                .insert(name.to_string(), memory_to_array_ref(mem));
-            VarTypeTag::Array
+        Value::Memory(_) => {
+            frame.locals_any.insert(name.to_string(), val);
+            VarTypeTag::Any
+        }
+        Value::MemoryRef(_) => {
+            frame.locals_any.insert(name.to_string(), val);
+            VarTypeTag::Any
+        }
+        // The legacy native-array carrier is filtered out by the early-return
+        // at the top of this function (Issue #3908). This wildcard satisfies
+        // Rust's exhaustiveness checking and provides a safe default for any
+        // future Value variant: store as `Any` in `locals_any`, matching the
+        // sibling "any" arms above.
+        _ => {
+            frame.locals_any.insert(name.to_string(), val);
+            VarTypeTag::Any
         }
     };
     frame.var_types.insert(name.to_string(), tag);
@@ -394,9 +315,7 @@ pub(crate) fn bind_value_to_slot(
         // This is intentional: only Struct needs heap allocation for local slot storage
         other => other,
     };
-    if let Some(slot_ref) = frame.locals_slots.get_mut(slot) {
-        *slot_ref = Some(val);
-    }
+    frame.set_slot_value(slot, val);
     // Note: slot out of bounds is silently ignored here since this function
     // doesn't return Result. Callers should validate slot indices.
 }
@@ -447,17 +366,9 @@ pub(crate) fn is_type_variable(param: &str) -> bool {
 /// Check if a parametric type pattern has a type variable as its parameter.
 /// e.g., "Complex{T}" returns true, "Complex{Float64}" returns false
 pub(crate) fn has_type_variable_param(type_str: &str) -> bool {
-    if let Some(start) = type_str.find('{') {
-        if let Some(end) = type_str.rfind('}') {
-            let param = &type_str[start + 1..end];
-            // Handle multiple type params like "Tuple{T, S}" - check if any is a type variable
-            param.split(',').any(|p| is_type_variable(p.trim()))
-        } else {
-            false
-        }
-    } else {
-        false
-    }
+    parse_parametric_params(type_str)
+        .iter()
+        .any(|p| is_type_variable(p.trim()))
 }
 
 /// Infer the type parameter from a Value (for runtime struct type inference).
@@ -513,32 +424,12 @@ pub(crate) fn resolve_any_type_param(struct_name: &str, values: &[Value]) -> Opt
 /// Check if a Value is a builtin numeric type that should be handled by
 /// the builtin binary operator path rather than method dispatch.
 ///
-/// This is the runtime counterpart of `JuliaType::is_builtin_numeric()` in types.rs.
-/// Both functions must cover the same set of types — when adding new numeric
-/// `Value` variants, update both this function and `JuliaType::is_builtin_numeric()`.
-///
 /// Used by `CallDynamicBinaryBoth` (call_dynamic.rs) to skip user-defined method
 /// dispatch for same-type primitive operations during nary operator reduction.
 /// (Issue #2437, #2439)
 #[inline]
 pub(crate) fn is_builtin_numeric_value(v: &Value) -> bool {
-    matches!(
-        v,
-        Value::I64(_)
-            | Value::F64(_)
-            | Value::F32(_)
-            | Value::F16(_)
-            | Value::Bool(_)
-            | Value::I8(_)
-            | Value::I16(_)
-            | Value::I32(_)
-            | Value::I128(_)
-            | Value::U8(_)
-            | Value::U16(_)
-            | Value::U32(_)
-            | Value::U64(_)
-            | Value::U128(_)
-    )
+    CoreType::from_julia_name(value_type_name(v)).is_primitive_numeric()
 }
 
 /// Extract the base type name from a possibly-parametric type string.
@@ -554,92 +445,37 @@ pub(crate) fn extract_base_type(s: &str) -> &str {
     }
 }
 
-/// Score how well an expected type pattern matches an actual type.
-///
-/// Returns a priority score used by all `CallDynamic*` dispatch handlers to select
-/// the most specific matching method. Higher scores = more specific match.
-///
-/// **Score values:**
-/// - `4` — Exact match: `"Rational{Int64}"` == `"Rational{Int64}"`
-/// - `3` — Type variable parametric match: `"Rational{T}"` matches `"Rational{Int64}"`
-/// - `2` — Non-parametric base match: `"Rational"` matches `"Rational{Int64}"`
-/// - `2` — Array family match: `"Array"` matches `"Vector"`, `"Matrix"`, `"Array"`
-/// - `0` — No match (caller should try `check_subtype` and assign score `1` if it matches)
-///
-/// **Note:** Subtype checking (score 1) is not done here because it requires `&self` (VM state).
-/// Callers should fall back to `check_subtype()` when this function returns 0.
-///
-/// # Arguments
-/// * `expected` — The candidate method's declared parameter type (e.g., `"Rational{T}"`)
-/// * `actual` — The runtime argument's type name (e.g., `"Rational{BigInt}"`)
-/// * `actual_base` — Pre-computed base of `actual` via `extract_base_type()` (e.g., `"Rational"`)
 #[inline]
-pub(crate) fn score_type_match(expected: &str, actual: &str, actual_base: &str) -> u32 {
-    if expected == actual {
-        4 // Exact match (highest priority)
-    } else {
-        let expected_base = extract_base_type(expected);
-        if expected_base == actual_base {
-            if !expected.contains('{') {
-                2 // Non-parametric base match: "Rational" matches "Rational{Int64}"
-            } else if expected_base == "Tuple" {
-                // Tuple covariance (Issue #2524): Tuple{Any} matches Tuple{Int64}
-                // Check if arity matches and all expected params are "Any"
-                tuple_covariant_score(expected, actual).unwrap_or_default()
-            } else if has_type_variable_param(expected) {
-                3 // Type variable pattern: "Rational{T}" matches "Rational{Int64}"
-            } else {
-                0 // Concrete parametric mismatch: "Rational{Int64}" != "Rational{BigInt}"
-            }
-        } else if expected == "Array"
-            && (actual_base == "Vector" || actual_base == "Matrix" || actual_base == "Array")
-        {
-            2 // Array family match
-        } else {
-            0 // No match — caller should try check_subtype for score 1
-        }
-    }
+pub(crate) fn strip_module_prefix(name: &str) -> &str {
+    name.rfind('.').map_or(name, |idx| &name[idx + 1..])
 }
 
-/// Check if a Value::Dict (Rust-backed) should be excluded from matching
-/// a parametric Dict{K,V} type annotation.
-///
-/// Value::Dict (Rust-backed) should NOT be dispatched to Pure Julia Dict functions
-/// that expect StructRef with field access (.slots, .keys, etc.).
-/// This prevents "GetFieldByName: expected struct, got Dict" errors.
-/// (Issue #2748)
 #[inline]
-pub(crate) fn is_rust_dict_parametric_mismatch(value: &Value, expected_type: &str) -> bool {
-    if !matches!(value, Value::Dict(_)) {
-        return false;
-    }
-    let expected_base = extract_base_type(expected_type);
-    expected_base == "Dict" && expected_type.contains('{')
+pub(crate) fn is_dict_type_name(type_name: &str) -> bool {
+    strip_module_prefix(extract_base_type(type_name)) == "Dict"
 }
 
-/// Score Tuple covariant matching (Issue #2524).
-/// Tuple is covariant: Tuple{Int64} <: Tuple{Any}, Tuple{Int64} <: Tuple{Number}.
-/// Returns Some(score) if arity matches, None otherwise.
-fn tuple_covariant_score(expected: &str, actual: &str) -> Option<u32> {
-    let expected_params = parse_parametric_params(expected);
-    let actual_params = parse_parametric_params(actual);
+/// Carrier-removal stub (Issue #6731). `Value::Dict` no longer exists, so no
+/// value is ever a Rust dict carrier that must be excluded from matching a
+/// parametric `Dict{K,V}` annotation — this always returns `false`. Kept so the
+/// binary-dispatch filters that combine it with [`is_struct_dict_bare_mismatch`]
+/// need no structural change.
+#[inline]
+pub(crate) fn is_rust_dict_parametric_mismatch(_value: &Value, _expected_type: &str) -> bool {
+    false
+}
 
-    // Arity must match for parametric Tuple matching
-    if expected_params.len() != actual_params.len() {
-        return None;
-    }
-
-    // Check if all expected params are "Any" → score 3 (like type variable match)
-    if expected_params.iter().all(|p| *p == "Any") {
-        return Some(3);
-    }
-
-    // Check if expected has type variable params → score 3
-    if expected_params.iter().any(|p| is_type_variable(p)) {
-        return Some(3);
-    }
-
-    None // Concrete param mismatch — caller should try check_subtype for score 1
+/// Carrier-removal stub (Issue #7632). Pure Julia `Dict{K,V}` is now the only
+/// public Dict carrier, so a bare `::Dict` annotation is the upstream UnionAll
+/// family and must match StructRef-backed Dict values. Kept so dynamic and
+/// binary dispatch filters need no structural change.
+#[inline]
+pub(crate) fn is_struct_dict_bare_mismatch(
+    _value: &Value,
+    _expected_type: &str,
+    _struct_heap: &[StructInstance],
+) -> bool {
+    false
 }
 
 /// Parse type parameters from a parametric type string.
@@ -659,15 +495,35 @@ pub(crate) fn parse_parametric_params(type_str: &str) -> Vec<&str> {
     if inner.is_empty() {
         return vec![];
     }
-    // Split by comma, respecting nested braces
+    // Split by comma, respecting nested braces and value-parameter syntax.
     let mut result = Vec::new();
-    let mut depth = 0;
+    let mut brace_depth = 0;
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
     let mut last_start = 0;
     for (i, c) in inner.char_indices() {
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == q {
+                quote = None;
+            }
+            continue;
+        }
+
         match c {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            ',' if depth == 0 => {
+            '\'' | '"' => quote = Some(c),
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            ',' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
                 result.push(inner[last_start..i].trim());
                 last_start = i + 1;
             }
@@ -739,6 +595,17 @@ mod tests {
         assert!(has_type_variable_param("Array{Float64, N}"));
     }
 
+    #[test]
+    fn test_parse_parametric_params_preserves_tuple_value_param() {
+        assert_eq!(parse_parametric_params("Val{(1, 2)}"), vec!["(1, 2)"]);
+        assert_eq!(
+            parse_parametric_params("Tuple{Val{(1, 2)}, Int64}"),
+            vec!["Val{(1, 2)}", "Int64"]
+        );
+        assert!(!has_type_variable_param("Val{(1, 2)}"));
+        assert!(has_type_variable_param("Val{N}"));
+    }
+
     /// Verify is_builtin_numeric_value covers all expected Value variants.
     /// This test ensures the runtime check (Value-based) stays in sync with
     /// the compile-time check (JuliaType::is_builtin_numeric in types.rs).
@@ -756,13 +623,19 @@ mod tests {
         assert!(is_builtin_numeric_value(&Value::I8(0)));
         assert!(is_builtin_numeric_value(&Value::I16(0)));
         assert!(is_builtin_numeric_value(&Value::I32(0)));
+        assert!(is_builtin_numeric_value(&Value::I128(0)));
         assert!(is_builtin_numeric_value(&Value::U8(0)));
         assert!(is_builtin_numeric_value(&Value::U16(0)));
         assert!(is_builtin_numeric_value(&Value::U32(0)));
         assert!(is_builtin_numeric_value(&Value::U64(0)));
+        assert!(is_builtin_numeric_value(&Value::U128(0)));
 
         // Non-numeric values should return false
         assert!(!is_builtin_numeric_value(&Value::Nothing));
+        assert!(!is_builtin_numeric_value(&Value::BigInt(
+            num_bigint::BigInt::from(0).into()
+        )));
+        assert!(!is_builtin_numeric_value(&Value::bigfloat_from_f64(0.0)));
         assert!(!is_builtin_numeric_value(&Value::Str("x".to_string())));
         assert!(!is_builtin_numeric_value(&Value::Char('a')));
     }
@@ -777,78 +650,29 @@ mod tests {
         assert_eq!(extract_base_type("Rational{T}"), "Rational");
     }
 
-    #[test]
-    fn test_score_type_match() {
-        // Exact match → 4
-        assert_eq!(
-            score_type_match("Rational{Int64}", "Rational{Int64}", "Rational"),
-            4
-        );
-        assert_eq!(score_type_match("Int64", "Int64", "Int64"), 4);
-
-        // Type variable parametric → 3
-        assert_eq!(
-            score_type_match("Rational{T}", "Rational{Int64}", "Rational"),
-            3
-        );
-        assert_eq!(
-            score_type_match("Complex{T}", "Complex{Float64}", "Complex"),
-            3
-        );
-
-        // Non-parametric base → 2
-        assert_eq!(
-            score_type_match("Rational", "Rational{Int64}", "Rational"),
-            2
-        );
-        assert_eq!(
-            score_type_match("Complex", "Complex{Float64}", "Complex"),
-            2
-        );
-
-        // Array family → 2
-        assert_eq!(score_type_match("Array", "Vector{Int64}", "Vector"), 2);
-        assert_eq!(score_type_match("Array", "Matrix{Float64}", "Matrix"), 2);
-        assert_eq!(score_type_match("Array", "Array{Int64}", "Array"), 2);
-
-        // Concrete parametric mismatch → 0
-        assert_eq!(
-            score_type_match("Rational{Int64}", "Rational{BigInt}", "Rational"),
-            0
-        );
-        assert_eq!(
-            score_type_match("Complex{Float64}", "Complex{Int64}", "Complex"),
-            0
-        );
-
-        // Unrelated types → 0
-        assert_eq!(score_type_match("String", "Int64", "Int64"), 0);
-        assert_eq!(
-            score_type_match("Float64", "Rational{Int64}", "Rational"),
-            0
-        );
-    }
-
-    /// Verify that bind_value_to_frame routes F32/F16/Bool to their dedicated
-    /// typed locals maps (not locals_any). This prevents the regression where
-    /// parameter binding used locals_any while StoreAny used typed maps. (Issue #3322)
+    /// Verify that bind_value_to_frame routes typed scalar locals consistently.
+    /// This prevents the regression where parameter binding and StoreAny chose
+    /// different maps for the same value type. (Issue #3322)
     #[test]
     fn test_bind_value_to_frame_typed_locals_routing() {
         let mut heap = vec![];
 
-        // F32 → locals_f32
+        // F32 → locals_any with an F32 tag
         let mut frame = Frame::new();
-        bind_value_to_frame(&mut frame, "x", ValueType::F32, Value::F32(1.5_f32), &mut heap);
-        assert!(
-            frame.locals_f32.contains_key("x"),
-            "F32 should be in locals_f32 after bind"
+        bind_value_to_frame(
+            &mut frame,
+            "x",
+            ValueType::F32,
+            Value::F32(1.5_f32),
+            &mut heap,
         );
         assert!(
-            !frame.locals_any.contains_key("x"),
-            "F32 should NOT be in locals_any after bind"
+            frame.locals_any.contains_key("x"),
+            "F32 should be in locals_any after bind"
         );
+        assert_eq!(frame.var_types.get("x"), Some(&VarTypeTag::F32));
 
-        // F16 → locals_f16
+        // F16 → locals_any with an F16 tag
         bind_value_to_frame(
             &mut frame,
             "y",
@@ -857,15 +681,12 @@ mod tests {
             &mut heap,
         );
         assert!(
-            frame.locals_f16.contains_key("y"),
-            "F16 should be in locals_f16 after bind"
+            frame.locals_any.contains_key("y"),
+            "F16 should be in locals_any after bind"
         );
-        assert!(
-            !frame.locals_any.contains_key("y"),
-            "F16 should NOT be in locals_any after bind"
-        );
+        assert_eq!(frame.var_types.get("y"), Some(&VarTypeTag::F16));
 
-        // Bool → locals_bool
+        // Bool → locals_any with a Bool tag
         bind_value_to_frame(
             &mut frame,
             "z",
@@ -874,40 +695,85 @@ mod tests {
             &mut heap,
         );
         assert!(
-            frame.locals_bool.contains_key("z"),
-            "Bool should be in locals_bool after bind"
+            frame.locals_any.contains_key("z"),
+            "Bool should be in locals_any after bind"
         );
-        assert!(
-            !frame.locals_any.contains_key("z"),
-            "Bool should NOT be in locals_any after bind"
-        );
+        assert_eq!(frame.var_types.get("z"), Some(&VarTypeTag::Bool));
 
-        // I64 → locals_i64 (sanity check for core type)
-        bind_value_to_frame(&mut frame, "n", ValueType::I64, Value::I64(42), &mut heap);
-        assert!(
-            frame.locals_i64.contains_key("n"),
-            "I64 should be in locals_i64 after bind"
-        );
-        assert!(
-            !frame.locals_any.contains_key("n"),
-            "I64 should NOT be in locals_any after bind"
-        );
-
-        // F64 → locals_f64 (sanity check for core type)
+        // Char → locals_any with a Char tag
         bind_value_to_frame(
             &mut frame,
-            "d",
-            ValueType::F64,
-            Value::F64(2.5),
+            "ch",
+            ValueType::Char,
+            Value::Char('x'),
             &mut heap,
         );
         assert!(
-            frame.locals_f64.contains_key("d"),
-            "F64 should be in locals_f64 after bind"
+            frame.locals_any.contains_key("ch"),
+            "Char should be in locals_any after bind"
         );
+        assert_eq!(frame.var_types.get("ch"), Some(&VarTypeTag::Char));
+
+        // I64 → locals_any with an I64 tag
+        bind_value_to_frame(&mut frame, "n", ValueType::I64, Value::I64(42), &mut heap);
         assert!(
-            !frame.locals_any.contains_key("d"),
-            "F64 should NOT be in locals_any after bind"
+            frame.locals_any.contains_key("n"),
+            "I64 should be in locals_any after bind"
+        );
+        assert_eq!(frame.var_types.get("n"), Some(&VarTypeTag::I64));
+
+        // F64 → locals_any with an F64 tag
+        bind_value_to_frame(&mut frame, "d", ValueType::F64, Value::F64(2.5), &mut heap);
+        assert!(
+            frame.locals_any.contains_key("d"),
+            "F64 should be in locals_any after bind"
+        );
+        assert_eq!(frame.var_types.get("d"), Some(&VarTypeTag::F64));
+
+        bind_value_to_frame(
+            &mut frame,
+            "sym",
+            ValueType::Symbol,
+            Value::Symbol(crate::vm::value::SymbolValue::new("legacy")),
+            &mut heap,
+        );
+        assert_eq!(frame.var_types.get("sym"), Some(&VarTypeTag::Symbol));
+        assert!(
+            matches!(frame.get_local("sym"), Some(Value::Symbol(sym)) if sym.as_str() == "legacy")
+        );
+    }
+
+    // Note (Issue #6733): test_pop_array_or_values_* was removed along with the
+    // pop_array_or_values helper and PopArrayResult enum (orphaned by the removal
+    // of the legacy reducer HOF VM instructions).
+
+    #[test]
+    fn test_bind_value_to_frame_memory_stays_in_any_storage() {
+        use crate::vm::value::{new_memory_ref, ArrayData, ArrayElementType, MemoryValue};
+
+        let mut frame = Frame::new();
+        let mut heap = vec![];
+        let mem = new_memory_ref(MemoryValue::new(
+            ArrayData::I64(vec![1, 2]),
+            ArrayElementType::I64,
+            2,
+        ));
+
+        bind_value_to_frame(
+            &mut frame,
+            "m",
+            ValueType::MemoryOf(ArrayElementType::I64),
+            Value::Memory(mem.clone()),
+            &mut heap,
+        );
+
+        assert!(matches!(
+            frame.locals_any.get("m"),
+            Some(Value::Memory(stored)) if std::rc::Rc::ptr_eq(stored, &mem)
+        ));
+        assert_eq!(frame.var_types.get("m"), Some(&VarTypeTag::Any));
+        assert!(
+            matches!(frame.get_local("m"), Some(Value::Memory(stored)) if std::rc::Rc::ptr_eq(&stored, &mem))
         );
     }
 }

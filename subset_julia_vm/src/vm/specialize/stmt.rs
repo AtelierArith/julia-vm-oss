@@ -4,20 +4,42 @@ use std::collections::HashMap;
 
 use crate::builtins::BuiltinId;
 use crate::ir::core::{BinaryOp, Block, Expr, Stmt};
-use crate::vm::{Instr, ValueType};
+use crate::vm::{ArrayElementType, Instr, ValueType};
 
 use super::helpers::stmt_variant_name;
 use super::{FunctionSpecializer, SpecializationError};
 
-impl FunctionSpecializer {
-    pub(super) fn new(locals: HashMap<String, ValueType>) -> Self {
+impl<'a> FunctionSpecializer<'a> {
+    pub(super) fn new(
+        locals: HashMap<String, ValueType>,
+        struct_defs: &'a [crate::vm::StructDefInfo],
+        type_object_names: &'a std::collections::HashSet<String>,
+        module_path: Option<&'a str>,
+    ) -> Self {
         Self {
             code: Vec::new(),
             locals,
             current_return_type: ValueType::Nothing,
             break_positions: Vec::new(),
             continue_positions: Vec::new(),
+            struct_defs,
+            current_module_path: module_path.map(str::to_string),
+            tuple_element_types: HashMap::new(),
+            type_object_names,
+            module_path,
+            disable_array_index_fast_path: false,
+            disable_field_access: false,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_for_tests(
+        locals: HashMap<String, ValueType>,
+        struct_defs: &'a [crate::vm::StructDefInfo],
+    ) -> Self {
+        static TYPE_OBJECT_NAMES: std::sync::LazyLock<std::collections::HashSet<String>> =
+            std::sync::LazyLock::new(std::collections::HashSet::new);
+        Self::new(locals, struct_defs, &TYPE_OBJECT_NAMES, None)
     }
 
     pub(super) fn emit(&mut self, instr: Instr) {
@@ -42,7 +64,10 @@ impl FunctionSpecializer {
     /// When the last statement is an `if` block, we delegate to
     /// [`compile_if_with_implicit_return`] so that each branch emits a `Return`
     /// instruction instead of a `Jump` to end.
-    pub(super) fn compile_function_body(&mut self, block: &Block) -> Result<(), SpecializationError> {
+    pub(super) fn compile_function_body(
+        &mut self,
+        block: &Block,
+    ) -> Result<(), SpecializationError> {
         let stmts = &block.stmts;
 
         if stmts.is_empty() {
@@ -89,6 +114,9 @@ impl FunctionSpecializer {
             } => {
                 // If statement as last statement - each branch should return
                 self.compile_if_with_implicit_return(condition, then_branch, else_branch.as_ref())?;
+            }
+            Stmt::Block(block) => {
+                self.compile_block_with_implicit_return(block)?;
             }
             _ => {
                 // Other statements - compile normally and return nothing
@@ -198,6 +226,9 @@ impl FunctionSpecializer {
                 // Nested if - recursively handle
                 self.compile_if_with_implicit_return(condition, then_branch, else_branch.as_ref())?;
             }
+            Stmt::Block(block) => {
+                self.compile_block_with_implicit_return(block)?;
+            }
             _ => {
                 // Other statements - compile normally and return nothing
                 self.compile_stmt(last_stmt)?;
@@ -213,6 +244,27 @@ impl FunctionSpecializer {
     pub(super) fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), SpecializationError> {
         match stmt {
             Stmt::Assign { var, value, .. } => {
+                // Issue #6561: a tuple-literal temporary (`__tuple_tmp = (b, a % b)`,
+                // the desugared form of a self-referential destructuring swap)
+                // records the specialized type of every element so a later
+                // constant index `temp[k]` can stay type-stable. Storing the
+                // tuple itself as `Any` matches `compile_tuple`'s convention.
+                if let Expr::TupleLiteral { elements, .. } = value {
+                    let mut elem_types = Vec::with_capacity(elements.len());
+                    for elem in elements {
+                        elem_types.push(self.compile_expr(elem)?);
+                    }
+                    self.emit(Instr::NewTuple(elements.len()));
+                    self.locals.insert(var.clone(), ValueType::Tuple);
+                    self.emit(Instr::StoreAny(var.to_string()));
+                    self.tuple_element_types.insert(var.clone(), elem_types);
+                    return Ok(());
+                }
+                // Any non-tuple assignment to `var` invalidates a previously
+                // tracked tuple binding so a stale element-type table can never
+                // sharpen a later `var[k]` read incorrectly.
+                self.tuple_element_types.remove(var);
+
                 // Check for self-referential assignments that might change type
                 // e.g., result = result * arr[i] where arr[i] returns Any
                 let is_self_referential_any = if let Expr::BinaryOp { left, right, .. } = value {
@@ -252,7 +304,24 @@ impl FunctionSpecializer {
                     }
                 } else {
                     let ty = self.compile_expr(value)?;
-                    self.locals.insert(var.clone(), ty.clone());
+                    // Widen the slot's recorded type to `Any` when the
+                    // variable was previously bound to a different
+                    // concrete type — for example, `x = "init"` followed
+                    // by `x = 42` inside a `for i in 1:n` body where the
+                    // initial String binding survives when the loop runs
+                    // zero iterations. Without this, later reads of `x`
+                    // emit `LoadI64` (from the body's I64 store) and
+                    // crash with `LoadSlotI64: expected numeric` when the
+                    // slot actually holds the surviving String. The
+                    // typed `Store*` for this assignment is still safe:
+                    // the slot holds the new value with its concrete
+                    // tag, and `LoadAny` / `LoadSlot` accept any tag.
+                    // (Issue #4688)
+                    let recorded_ty = match self.locals.get(var) {
+                        Some(prev) if *prev != ty && *prev != ValueType::Any => ValueType::Any,
+                        _ => ty.clone(),
+                    };
+                    self.locals.insert(var.clone(), recorded_ty);
                     self.emit_store(var, ty);
                 }
             }
@@ -275,6 +344,22 @@ impl FunctionSpecializer {
                     self.locals.insert(var.clone(), result_ty.clone());
                     self.emit_store(var, result_ty);
                 }
+            }
+            Stmt::IndexAssign {
+                array,
+                indices,
+                value,
+                ..
+            } => {
+                self.compile_index_assign(array, indices, value)?;
+            }
+            Stmt::FieldAssign {
+                object,
+                field,
+                value,
+                ..
+            } => {
+                self.compile_field_assign(object, field, value)?;
             }
             Stmt::Return {
                 value: Some(expr), ..
@@ -443,8 +528,24 @@ impl FunctionSpecializer {
         let jump_end_pos = self.code.len();
         self.emit(Instr::JumpIfZero(0)); // Will be patched
 
+        // Save the outer loop's pending break/continue jumps so nested
+        // `Stmt::Break`/`Stmt::Continue` patches targeting an enclosing
+        // loop are not retargeted to this loop's exit. Inside the body
+        // we only see breaks/continues that belong to this loop; we
+        // restore the enclosing list after patching. (Issue #4684)
+        let outer_break = std::mem::take(&mut self.break_positions);
+        let outer_continue = std::mem::take(&mut self.continue_positions);
+
         // Compile body
         self.compile_block(body)?;
+
+        // Continue target: increment + back-edge. Continue statements
+        // inside the body should jump here, NOT to `loop_start`, so the
+        // step still runs once before the next iteration.
+        let continue_target = self.code.len();
+        for pos in std::mem::take(&mut self.continue_positions) {
+            self.code[pos] = Instr::Jump(continue_target);
+        }
 
         // Increment
         self.emit(Instr::LoadI64(var.to_string()));
@@ -464,10 +565,27 @@ impl FunctionSpecializer {
         let end_pos = self.code.len();
         self.code[jump_end_pos] = Instr::JumpIfZero(end_pos);
 
+        // Patch break jumps from the body to the loop exit. Without this,
+        // `Stmt::Break` left a placeholder `Jump(0)` that, after the call
+        // site's `entry_point` relocation, jumped to the start of the
+        // specialized function and caused an infinite loop on parametric
+        // ranges. (Issue #4684)
+        for pos in std::mem::take(&mut self.break_positions) {
+            self.code[pos] = Instr::Jump(end_pos);
+        }
+
+        // Restore the enclosing loop's pending patches.
+        self.break_positions = outer_break;
+        self.continue_positions = outer_continue;
+
         Ok(())
     }
 
-    pub(super) fn compile_while(&mut self, condition: &Expr, body: &Block) -> Result<(), SpecializationError> {
+    pub(super) fn compile_while(
+        &mut self,
+        condition: &Expr,
+        body: &Block,
+    ) -> Result<(), SpecializationError> {
         // Loop start
         let loop_start = self.code.len();
 
@@ -478,8 +596,21 @@ impl FunctionSpecializer {
         let jump_end_pos = self.code.len();
         self.emit(Instr::JumpIfZero(0)); // Will be patched
 
+        // Save outer pending break/continue patches so nested loops
+        // dispatch their own break/continue to the correct target.
+        // (Issue #4684)
+        let outer_break = std::mem::take(&mut self.break_positions);
+        let outer_continue = std::mem::take(&mut self.continue_positions);
+
         // Compile body
         self.compile_block(body)?;
+
+        // Continue jumps target the condition check at `loop_start`,
+        // matching upstream Julia's `while` semantics where `continue`
+        // re-tests the condition.
+        for pos in std::mem::take(&mut self.continue_positions) {
+            self.code[pos] = Instr::Jump(loop_start);
+        }
 
         // Jump back to loop start
         self.emit(Instr::Jump(loop_start));
@@ -487,6 +618,15 @@ impl FunctionSpecializer {
         // Patch jump to end
         let end_pos = self.code.len();
         self.code[jump_end_pos] = Instr::JumpIfZero(end_pos);
+
+        // Patch break jumps to the loop exit. (Issue #4684)
+        for pos in std::mem::take(&mut self.break_positions) {
+            self.code[pos] = Instr::Jump(end_pos);
+        }
+
+        // Restore enclosing loop's pending patches.
+        self.break_positions = outer_break;
+        self.continue_positions = outer_continue;
 
         Ok(())
     }
@@ -498,8 +638,194 @@ impl FunctionSpecializer {
             ValueType::F32 => self.emit(Instr::StoreF32(var.to_string())),
             ValueType::F16 => self.emit(Instr::StoreF16(var.to_string())),
             ValueType::Str => self.emit(Instr::StoreStr(var.to_string())),
+            ValueType::Array | ValueType::ArrayOf(_, _) => {
+                self.emit(Instr::StoreArray(var.to_string()))
+            }
             _ => self.emit(Instr::StoreAny(var.to_string())),
         }
+    }
+
+    fn compile_index_assign(
+        &mut self,
+        array: &str,
+        indices: &[Expr],
+        value: &Expr,
+    ) -> Result<(), SpecializationError> {
+        if indices.len() != 1 {
+            return Err(SpecializationError::Unsupported(
+                "IndexAssign specialization supports only one-dimensional arrays".to_string(),
+            ));
+        }
+
+        let Some(ValueType::ArrayOf(elem_ty @ (ArrayElementType::I64 | ArrayElementType::F64), _)) =
+            self.locals.get(array).cloned()
+        else {
+            return Err(SpecializationError::Unsupported(format!(
+                "IndexAssign specialization requires Vector{{Int64}} or Vector{{Float64}}, got {:?}",
+                self.locals.get(array)
+            )));
+        };
+
+        self.emit(Instr::LoadArray(array.to_string()));
+        let index_ty = self.compile_expr(&indices[0])?;
+        if index_ty != ValueType::I64 {
+            return Err(SpecializationError::Unsupported(format!(
+                "IndexAssign specialization requires Int64 index, got {:?}",
+                index_ty
+            )));
+        }
+
+        let value_ty = self.compile_expr(value)?;
+        let expected_ty = elem_ty.to_value_type();
+        if value_ty != expected_ty {
+            return Err(SpecializationError::Unsupported(format!(
+                "IndexAssign specialization requires {:?} value for {:?}, got {:?}",
+                expected_ty, elem_ty, value_ty
+            )));
+        }
+
+        self.emit(Instr::IndexStoreTyped(indices.len()));
+        self.emit(Instr::StoreArray(array.to_string()));
+        Ok(())
+    }
+
+    /// Resolve a struct field's `(index, ValueType)` from the borrowed
+    /// `struct_defs`. Returns `Unsupported` (so the caller falls back to the
+    /// interpreter) when the `type_id` or field name is unknown. (Issue #6346)
+    pub(super) fn resolve_struct_field(
+        &self,
+        type_id: usize,
+        field: &str,
+    ) -> Result<(usize, ValueType), SpecializationError> {
+        let def = self.struct_defs.get(type_id).ok_or_else(|| {
+            SpecializationError::Unsupported(format!(
+                "struct type_id {} not found in specialization context",
+                type_id
+            ))
+        })?;
+        def.fields
+            .iter()
+            .enumerate()
+            .find(|(_, (name, _))| name == field)
+            .map(|(idx, (_, ty))| (idx, ty.clone()))
+            .ok_or_else(|| {
+                SpecializationError::Unsupported(format!(
+                    "struct '{}' has no field '{}'",
+                    def.name, field
+                ))
+            })
+    }
+
+    /// Compile `object.field = value` for a *mutable* struct (Issue #6346).
+    ///
+    /// Mirrors the interpreter's `Stmt::FieldAssign` typed-struct path:
+    /// `LoadStruct` → coerce the value to the statically-known field type →
+    /// `SetField(idx)` → `StoreStruct`. Immutable structs, unknown
+    /// fields/structs, non-struct operands, and value types whose coercion is
+    /// not in the parity-safe subset of `compile_expr_as` all fall back to the
+    /// interpreter via `Unsupported`.
+    fn compile_field_assign(
+        &mut self,
+        object: &str,
+        field: &str,
+        value: &Expr,
+    ) -> Result<(), SpecializationError> {
+        let type_id = match self.locals.get(object).cloned() {
+            Some(ValueType::Struct(type_id)) => type_id,
+            other => {
+                return Err(SpecializationError::Unsupported(format!(
+                    "FieldAssign specialization requires a known struct variable, got {:?}",
+                    other
+                )));
+            }
+        };
+
+        // The typed `SetField` fast path mutates in place and is only valid for
+        // mutable structs; immutable field assignment is an interpreter-side
+        // error path, so leave it to the fallback. A missing `struct_defs` entry
+        // also lands here (`unwrap_or(false)`).
+        let is_mutable = self
+            .struct_defs
+            .get(type_id)
+            .map(|def| def.is_mutable)
+            .unwrap_or(false);
+        if !is_mutable {
+            return Err(SpecializationError::Unsupported(format!(
+                "FieldAssign specialization requires a mutable struct (type_id {})",
+                type_id
+            )));
+        }
+
+        let (idx, field_ty) = self.resolve_struct_field(type_id, field)?;
+
+        self.emit(Instr::LoadStruct(object.to_string()));
+        self.compile_expr_coerced(value, &field_ty)?;
+        self.emit(Instr::SetField(idx));
+        self.emit(Instr::StoreStruct(object.to_string()));
+        Ok(())
+    }
+
+    /// Compile `expr` and coerce its specialized value to `target`, emitting the
+    /// exact same instruction as the interpreter's `compile_expr_as` for the
+    /// parity-safe numeric subset. Any coercion outside that subset returns
+    /// `Unsupported` so the whole function falls back to the interpreter.
+    /// (Issue #6346)
+    fn compile_expr_coerced(
+        &mut self,
+        expr: &Expr,
+        target: &ValueType,
+    ) -> Result<(), SpecializationError> {
+        let actual = self.compile_expr(expr)?;
+        if actual == *target {
+            return Ok(());
+        }
+        let narrow_numeric = |ty: &ValueType| {
+            matches!(
+                ty,
+                ValueType::I8
+                    | ValueType::I16
+                    | ValueType::I32
+                    | ValueType::I128
+                    | ValueType::U8
+                    | ValueType::U16
+                    | ValueType::U32
+                    | ValueType::U64
+                    | ValueType::U128
+                    | ValueType::F32
+                    | ValueType::F16
+            )
+        };
+        match (&actual, target) {
+            (ValueType::I64, ValueType::F64) => self.emit(Instr::ToF64),
+            (ValueType::F64, ValueType::I64) => self.emit(Instr::ToI64),
+            (a, ValueType::F64) if narrow_numeric(a) || *a == ValueType::Any => {
+                self.emit(Instr::DynamicToF64)
+            }
+            (a, ValueType::I64) if narrow_numeric(a) || *a == ValueType::Any => {
+                self.emit(Instr::DynamicToI64)
+            }
+            (a, ValueType::F32)
+                if narrow_numeric(a)
+                    || matches!(a, ValueType::I64 | ValueType::F64)
+                    || *a == ValueType::Any =>
+            {
+                self.emit(Instr::DynamicToF32)
+            }
+            (a, ValueType::F16)
+                if narrow_numeric(a)
+                    || matches!(a, ValueType::I64 | ValueType::F64)
+                    || *a == ValueType::Any =>
+            {
+                self.emit(Instr::DynamicToF16)
+            }
+            _ => {
+                return Err(SpecializationError::Unsupported(format!(
+                    "FieldAssign value type {:?} is not coercible to field type {:?} in specializer",
+                    actual, target
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn emit_return(&mut self, ty: ValueType) {
@@ -559,8 +885,20 @@ impl FunctionSpecializer {
         self.emit(Instr::StoreAny(var.to_string()));
         self.locals.insert(var.to_string(), ValueType::Any);
 
+        // Save outer pending break/continue patches so nested loops
+        // dispatch their own break/continue to the correct target.
+        // (Issue #4684)
+        let outer_break = std::mem::take(&mut self.break_positions);
+        let outer_continue = std::mem::take(&mut self.continue_positions);
+
         // Compile body
         self.compile_block(body)?;
+
+        // Continue target: index increment + back-edge.
+        let continue_target = self.code.len();
+        for pos in std::mem::take(&mut self.continue_positions) {
+            self.code[pos] = Instr::Jump(continue_target);
+        }
 
         // Increment index
         self.emit(Instr::LoadI64(idx_var.clone()));
@@ -574,6 +912,15 @@ impl FunctionSpecializer {
         // Patch jump to end
         let end_pos = self.code.len();
         self.code[jump_end_pos] = Instr::JumpIfZero(end_pos);
+
+        // Patch break jumps to the loop exit. (Issue #4684)
+        for pos in std::mem::take(&mut self.break_positions) {
+            self.code[pos] = Instr::Jump(end_pos);
+        }
+
+        // Restore enclosing loop's pending patches.
+        self.break_positions = outer_break;
+        self.continue_positions = outer_continue;
 
         Ok(())
     }

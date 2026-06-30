@@ -22,7 +22,7 @@ fn run_core_program(src: &str, seed: u64) -> Result<Value, String> {
 
 // ==================== Type System Tests ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_julia_type_subtype_int64() {
     // Int64 <: Integer <: Real <: Number <: Any
     assert!(JuliaType::Int64.is_subtype_of(&JuliaType::Int64));
@@ -32,7 +32,7 @@ fn test_julia_type_subtype_int64() {
     assert!(JuliaType::Int64.is_subtype_of(&JuliaType::Any));
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_julia_type_subtype_float64() {
     // Float64 <: AbstractFloat <: Real <: Number <: Any
     assert!(JuliaType::Float64.is_subtype_of(&JuliaType::Float64));
@@ -42,7 +42,7 @@ fn test_julia_type_subtype_float64() {
     assert!(JuliaType::Float64.is_subtype_of(&JuliaType::Any));
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_julia_type_not_subtype() {
     // Int64 is not a subtype of Float64
     assert!(!JuliaType::Int64.is_subtype_of(&JuliaType::Float64));
@@ -52,7 +52,7 @@ fn test_julia_type_not_subtype() {
     assert!(!JuliaType::String.is_subtype_of(&JuliaType::Number));
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_julia_type_specificity() {
     // Concrete types are more specific than abstract types
     assert!(JuliaType::Int64.specificity() > JuliaType::Integer.specificity());
@@ -61,10 +61,15 @@ fn test_julia_type_specificity() {
     assert!(JuliaType::Number.specificity() > JuliaType::Any.specificity());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_julia_type_from_name() {
     assert_eq!(JuliaType::from_name("Int64"), Some(JuliaType::Int64));
-    assert_eq!(JuliaType::from_name("Int"), Some(JuliaType::Int64));
+    let native_int = if usize::BITS == 32 {
+        JuliaType::Int32
+    } else {
+        JuliaType::Int64
+    };
+    assert_eq!(JuliaType::from_name("Int"), Some(native_int));
     assert_eq!(JuliaType::from_name("Float64"), Some(JuliaType::Float64));
     assert_eq!(JuliaType::from_name("Number"), Some(JuliaType::Number));
     assert_eq!(JuliaType::from_name("Any"), Some(JuliaType::Any));
@@ -73,7 +78,7 @@ fn test_julia_type_from_name() {
 
 // ==================== Basic Core Pipeline Tests ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_core_simple_return() {
     let src = "42";
     let result = run_core_program(src, 0);
@@ -84,7 +89,7 @@ fn test_core_simple_return() {
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_core_simple_arithmetic() {
     let src = "1 + 2 * 3";
     let result = run_core_program(src, 0);
@@ -95,7 +100,7 @@ fn test_core_simple_arithmetic() {
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_core_function_definition_and_call() {
     let src = r#"
 function add(x, y)
@@ -113,7 +118,7 @@ add(3, 4)
 
 // ==================== Typed Parameter Tests ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_typed_parameter_int64() {
     let src = r#"
 function double(x::Int64)
@@ -129,7 +134,7 @@ double(21)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_typed_parameter_float64() {
     let src = r#"
 function half(x::Float64)
@@ -147,7 +152,7 @@ half(10.0)
 
 // ==================== Multiple Dispatch Tests ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_multiple_dispatch_same_name_different_types() {
     let src = r#"
 function add(x::Int64, y::Int64)
@@ -168,7 +173,7 @@ add(3, 4)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_multiple_dispatch_with_abstract_type() {
     let src = r#"
 function process(x::Number)
@@ -190,7 +195,39 @@ process(5)
     }
 }
 
-#[test]
+#[allow(dead_code)]
+fn test_vararg_dispatch_prefers_type_prefix_method() {
+    let src = r#"
+function f(dims::Tuple)
+    return 10
+end
+
+function f(dims::Int64...)
+    return 11
+end
+
+function f(::Type{T}, dims::Tuple) where T
+    return 20
+end
+
+function f(::Type{T}, dims::Int64...) where T
+    return 21
+end
+
+f(Int32, 2)
+"#;
+    let result = run_core_program(src, 0);
+    assert!(result.is_ok(), "Failed: {:?}", result);
+    match result.unwrap() {
+        Value::I64(v) => assert_eq!(v, 21),
+        other => panic!(
+            "Expected I64 from Type-prefix vararg method, got {:?}",
+            other
+        ),
+    }
+}
+
+#[allow(dead_code)]
 fn test_any_type_as_fallback() {
     let src = r#"
 function identity(x)
@@ -209,7 +246,7 @@ identity(42)
 
 // ==================== Runtime Type Tests ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_value_runtime_type() {
     assert_eq!(Value::I64(42).runtime_type(), JuliaType::Int64);
     let pi_approx = 314.0 / 100.0;
@@ -228,7 +265,7 @@ fn test_value_runtime_type() {
 // ==================== Operator Overloading Tests ====================
 
 // ignore this test for now
-#[test]
+#[allow(dead_code)]
 fn test_operator_function_definition_parses() {
     // Test that operator function definitions are accepted by the parser and lowering
     let src = r#"
@@ -246,7 +283,7 @@ end
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_primitive_operators_use_user_defined() {
     // Known limitation (Issue #1915, #2233): In Julia, user-defined +(::Int64, ::Int64)
     // shadows the builtin +. In SubsetJuliaVM, the is_builtin_numeric guard (Issue #2203)
@@ -274,7 +311,7 @@ end
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_multiple_operators_defined() {
     // Known limitation (Issue #1915, #2233): User-defined operators for primitive types
     // (e.g., +(::Int64, ::Int64)) do NOT shadow builtins in the current architecture.
@@ -315,7 +352,7 @@ end
 
 // ==================== Struct Operator Overloading Tests ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_struct_operator_overload_add() {
     // Test operator overloading for user-defined structs.
     // When user defines +(::Point, ::Point), it shadows the builtin +.
@@ -343,7 +380,7 @@ p3.x
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_base_method_definition_does_not_shadow_builtin() {
     // Test that using `function Base.:+(...)` syntax does NOT shadow builtin +
     // This is Julia's way to extend Base operators without breaking primitives.
@@ -368,7 +405,7 @@ end
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_base_extension_field_access_addition() {
     // Test that field access + works inside Base.:+ methods
     // This is a simpler version of the iOS operator overload test
@@ -396,7 +433,7 @@ p3.x
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_base_extension_chained_ops() {
     // Test chained operations with Base extension
     let src = r#"
@@ -424,7 +461,7 @@ p5.x
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_operator_overload_sample() {
     // Test the exact iOS app sample code for operator overloading
     let src = r#"
@@ -479,7 +516,7 @@ p3.x + p3.y
 // These tests ensure that type conversions for F32/F16 narrowing work correctly.
 // Regression tests for Issue #1689: dispatch_tests fail with Cannot convert F64/I64 to F32
 
-#[test]
+#[allow(dead_code)]
 fn test_float32_struct_i64_conversion() {
     // Test I64 -> F32 conversion in struct constructor
     // This triggered "Cannot convert I64 to F32" before the fix
@@ -499,7 +536,7 @@ Float64(p.x) + Float64(p.y)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_float32_struct_f64_conversion() {
     // Test F64 -> F32 narrowing conversion in struct constructor
     // This triggered "Cannot convert F64 to F32" before the fix
@@ -518,7 +555,7 @@ Float64(p.x)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_float32_arithmetic_mixed() {
     // Test mixed Float32/Float64 arithmetic
     // Ensures type promotion works correctly
@@ -536,7 +573,7 @@ z
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_complex_float32_construction() {
     // Test Complex{Float32} construction with various input types
     // This is a common use case that triggered the original bug
@@ -557,7 +594,7 @@ Float64(z.re) + Float64(z.im)
 // These tests ensure that all numeric type conversions to F32/F16 work correctly.
 // Regression prevention for Issue #1689.
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_i64_to_f32() {
     // Test explicit Int64 -> Float32 conversion
     let src = r#"
@@ -573,7 +610,7 @@ Float64(y)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_f64_to_f32() {
     // Test explicit Float64 -> Float32 narrowing conversion
     let src = r#"
@@ -585,14 +622,19 @@ Float64(y)
     match result {
         Ok(Value::F64(v)) => {
             let expected = 314_159.0 / 100_000.0;
-            assert!((v - expected).abs() < 1e-4, "Expected ~{}, got {}", expected, v)
+            assert!(
+                (v - expected).abs() < 1e-4,
+                "Expected ~{}, got {}",
+                expected,
+                v
+            )
         }
         Ok(other) => panic!("Expected F64, got {:?}", other),
         Err(e) => panic!("F64 to F32 conversion failed: {}", e),
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_f32_to_f64() {
     // Test Float32 -> Float64 widening conversion
     let src = r#"
@@ -608,7 +650,7 @@ y
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_f32_struct_field_assignment() {
     // Test Float32 struct field with various input types (comprehensive)
     let src = r#"
@@ -630,7 +672,7 @@ Float64(t.a) + Float64(t.b) + Float64(t.c)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_f32_operator_return() {
     // Test that user-defined operators returning different types work with F32 context
     let src = r#"
@@ -655,7 +697,7 @@ Float64(v2.x) + Float64(v2.y)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_array_to_f32_element() {
     // Test that array elements can be converted to Float32
     let src = r#"
@@ -671,7 +713,7 @@ Float64(x)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_type_conversion_f32_in_function_args() {
     // Test Float32 type annotation in function parameters
     let src = r#"
@@ -689,4 +731,67 @@ result
         Ok(other) => panic!("Expected F64, got {:?}", other),
         Err(e) => panic!("F32 function arg conversion failed: {}", e),
     }
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_julia_type_subtype_int64();
+    test_julia_type_subtype_float64();
+    test_julia_type_not_subtype();
+    test_julia_type_specificity();
+    test_julia_type_from_name();
+}
+
+#[test]
+fn chunk_001() {
+    test_core_simple_return();
+    test_core_simple_arithmetic();
+    test_core_function_definition_and_call();
+    test_typed_parameter_int64();
+    test_typed_parameter_float64();
+}
+
+#[test]
+fn chunk_002() {
+    test_multiple_dispatch_same_name_different_types();
+    test_multiple_dispatch_with_abstract_type();
+    test_vararg_dispatch_prefers_type_prefix_method();
+    test_any_type_as_fallback();
+    test_value_runtime_type();
+}
+
+#[test]
+fn chunk_003() {
+    test_operator_function_definition_parses();
+    test_primitive_operators_use_user_defined();
+    test_multiple_operators_defined();
+    test_struct_operator_overload_add();
+    test_base_method_definition_does_not_shadow_builtin();
+}
+
+#[test]
+fn chunk_004() {
+    test_base_extension_field_access_addition();
+    test_base_extension_chained_ops();
+    test_ios_operator_overload_sample();
+    test_float32_struct_i64_conversion();
+    test_float32_struct_f64_conversion();
+}
+
+#[test]
+fn chunk_005() {
+    test_float32_arithmetic_mixed();
+    test_complex_float32_construction();
+    test_type_conversion_i64_to_f32();
+    test_type_conversion_f64_to_f32();
+    test_type_conversion_f32_to_f64();
+}
+
+#[test]
+fn chunk_006() {
+    test_type_conversion_f32_struct_field_assignment();
+    test_type_conversion_f32_operator_return();
+    test_type_conversion_array_to_f32_element();
+    test_type_conversion_f32_in_function_args();
 }

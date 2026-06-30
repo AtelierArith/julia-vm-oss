@@ -1,0 +1,8 @@
+package: Plots
+version: 0.1.0
+local_uuid: 91a5bcdd-55d7-5caf-9e0b-520d859cae80
+registry_uuid: 91a5bcdd-55d7-5caf-9e0b-520d859cae80
+repository: https://github.com/JuliaPlots/Plots.jl
+registry_subdir: Plots
+license: MIT
+license_source: LICENSE.md at ref v0.1.0

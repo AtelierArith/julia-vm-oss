@@ -1,20 +1,26 @@
 [package]
 name = "subset_julia_vm"
-version = "0.6.6"
+version = "0.9.4"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 [lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [features]
 default = []
 wasm = ["dep:js-sys"]
-repl = ["dep:rustyline"]
+# `profiling` arms the per-instruction VM profiler (Issue #5090). When OFF (the
+# default for library/iOS/wasm builds), `profiler::record`/`record_event` compile
+# down to nothing, so the hot interpreter dispatch loop pays zero overhead. The
+# `repl` binary opts in so its `SJULIA_VM_PROFILE` env switch keeps working.
+profiling = []
+repl = ["dep:rustyline", "profiling"]
 aot = ["dep:subset_julia_vm_runtime", "dep:thiserror"]
-cranelift = ["aot", "dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cranelift-module", "dep:cranelift-jit", "dep:target-lexicon"]
+cranelift = ["aot", "dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cranelift-module", "dep:cranelift-jit", "dep:cranelift-object", "dep:gimli", "dep:object", "dep:target-lexicon"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 subset_julia_vm_parser = { path = "../subset_julia_vm_parser" }
 sha2 = "0.10"
@@ -29,6 +35,9 @@ cranelift-codegen = { version = "0.115", optional = true }
 cranelift-frontend = { version = "0.115", optional = true }
 cranelift-module = { version = "0.115", optional = true }
 cranelift-jit = { version = "0.115", optional = true }
+cranelift-object = { version = "0.115", optional = true }
+gimli = { version = "0.31", optional = true, features = ["write"] }
+object = { version = "0.36", optional = true, default-features = false, features = ["read", "write"] }
 target-lexicon = { version = "0.12", optional = true }
 num-bigint = "0.4"
 num-integer = "0.1"
@@ -42,6 +51,7 @@ nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
@@ -57,8 +67,120 @@ name = "bundle"
 required-features = ["tempfile"]
 
 [[bin]]
-name = "juliar"
+name = "juliars"
+path = "src/bin/juliars.rs"
+required-features = ["aot"]
+
+[[bin]]
+name = "aot"
 path = "src/bin/aot.rs"
+required-features = ["aot"]
+
+[[test]]
+name = "sjulia_cli_stdin_tests"
+required-features = ["repl"]
+
+[[test]]
+name = "sjulia_cli_stderr_tests"
+required-features = ["repl"]
+
+[[test]]
+name = "sjulia_cli_dump_bytecode_tests"
+required-features = ["repl"]
+
+[[test]]
+name = "sjulia_precompile_determinism_tests"
+required-features = ["repl"]
+
+[[test]]
+name = "sjulia_cli_vm_bytecode_tests"
+required-features = ["repl"]
+
+[[bench]]
+name = "vm_benchmark"
+harness = false
+
+[[bench]]
+name = "detailed_benchmark"
+harness = false
+
+[[bench]]
+name = "compile_profiling"
+harness = false
+
+[[bench]]
+name = "calc_pi_benchmark"
+harness = false
+
+[[bench]]
+name = "hot_paths_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_mandelbrot_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_field_update_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_struct_copy_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_swap_accumulate_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_dict_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_array_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_dynamic_dispatch_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_where_specialization_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_exp_real_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_broadcast_mixed_float_int_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_aizawa_plot_push_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_ode_tsit5_lorenz_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_staticarrays_matvec_benchmark"
+harness = false
+
+[[bench]]
+name = "inference_specialization_counters"
+harness = false
+required-features = ["profiling"]
+
+[[bench]]
+name = "widening_threshold_metrics"
+harness = false
+required-features = ["profiling"]
+
+[[bench]]
+name = "aot_optimizer_benchmark"
+harness = false
 required-features = ["aot"]
 
 [lints.clippy]

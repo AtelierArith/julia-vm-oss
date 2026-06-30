@@ -30,11 +30,16 @@ end
 
 @testset "range(start; step=S, length=N)" begin
     r = range(1, step=2, length=5)
+    # Issue #5135: integer step/length must preserve Int64 (StepRange), not
+    # float-promote to a StepRangeLen{Float64}.
+    @test r isa StepRange
+    @test eltype(r) == Int64
     c = collect(r)
     @test length(c) == 5
-    @test c[1] == 1.0
-    @test c[2] == 3.0
-    @test c[5] == 9.0
+    @test eltype(c) == Int64
+    @test c[1] === 1
+    @test c[2] === 3
+    @test c[5] === 9
 end
 
 @testset "range(start; length=N) - UnitRange" begin

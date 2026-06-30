@@ -18,7 +18,93 @@ impl ArrayValue {
     /// For Tuple arrays, unpacks AoS storage into Tuple
     pub fn get(&self, indices: &[i64]) -> Result<Value, VmError> {
         let linear = self.linear_index(indices)?;
+        if let Some(parent) = &self.shared_parent {
+            return parent
+                .borrow()
+                .get_linear_value(linear, indices, &self.shape);
+        }
 
+        self.get_linear_value(linear, indices, &self.shape)
+    }
+
+    /// Get element by zero-based Julia linear storage index.
+    ///
+    /// This preserves reshape shared-backing semantics for VM consumers that
+    /// need elementwise reads but do not have multidimensional indices.
+    pub(crate) fn get_linear(&self, linear: usize) -> Result<Value, VmError> {
+        if linear >= self.element_count() {
+            return Err(VmError::IndexOutOfBounds {
+                indices: vec![(linear + 1) as i64],
+                shape: self.shape.clone(),
+            });
+        }
+        let indices = [(linear + 1) as i64];
+        if let Some(parent) = &self.shared_parent {
+            return parent
+                .borrow()
+                .get_linear_value(linear, &indices, &self.shape);
+        }
+
+        self.get_linear_value(linear, &indices, &self.shape)
+    }
+
+    /// Get a logical linear element after the compiler has proved the index is
+    /// within the array axes. This skips the explicit `element_count` guard but
+    /// still lets the storage accessor report a BoundsError if an upstream proof
+    /// is invalid, keeping Rust memory access safe.
+    pub(crate) fn get_linear_inbounds(&self, linear: usize) -> Result<Value, VmError> {
+        let indices = [(linear + 1) as i64];
+        if let Some(parent) = &self.shared_parent {
+            return parent
+                .borrow()
+                .get_linear_value(linear, &indices, &self.shape);
+        }
+
+        self.get_linear_value(linear, &indices, &self.shape)
+    }
+
+    /// Read a logical linear element as f64, following reshape shared backing.
+    pub(crate) fn get_linear_f64(&self, linear: usize) -> Result<f64, VmError> {
+        match self.get_linear(linear)? {
+            Value::F64(v) => Ok(v),
+            Value::F32(v) => Ok(v as f64),
+            Value::F16(v) => Ok(v.to_f64()),
+            Value::I64(v) => Ok(v as f64),
+            Value::I32(v) => Ok(v as f64),
+            Value::I16(v) => Ok(v as f64),
+            Value::I8(v) => Ok(v as f64),
+            Value::U64(v) => Ok(v as f64),
+            Value::U32(v) => Ok(v as f64),
+            Value::U16(v) => Ok(v as f64),
+            Value::U8(v) => Ok(v as f64),
+            Value::Bool(v) => Ok(if v { 1.0 } else { 0.0 }),
+            other => Err(VmError::TypeError(format!(
+                "expected numeric array element, got {:?}",
+                other.value_type()
+            ))),
+        }
+    }
+
+    /// Convert logical elements to Values, following reshape shared backing.
+    pub(crate) fn to_logical_value_vec(&self) -> Result<Vec<Value>, VmError> {
+        (0..self.element_count())
+            .map(|i| self.get_linear(i))
+            .collect()
+    }
+
+    /// Convert logical elements to f64 values, following reshape shared backing.
+    pub(crate) fn to_logical_f64_vec(&self) -> Result<Vec<f64>, VmError> {
+        (0..self.element_count())
+            .map(|i| self.get_linear_f64(i))
+            .collect()
+    }
+
+    fn get_linear_value(
+        &self,
+        linear: usize,
+        indices: &[i64],
+        error_shape: &[usize],
+    ) -> Result<Value, VmError> {
         // Handle complex/tuple arrays with special storage
         if let Some(ref elem_type) = self.element_type_override {
             match elem_type {
@@ -34,18 +120,21 @@ impl ArrayValue {
                         _ => None,
                     };
                     if let (Some(re), Some(im)) = (re, im) {
-                        // Construct a Complex{Float64} struct
-                        // Complex has fields [re, im] in order
-                        // Use stored struct_type_id for correct runtime type_id lookup
-                        return Ok(Value::Struct(StructInstance {
-                            type_id: self.complex_type_id(),
-                            struct_name: "Complex{Float64}".to_string(),
-                            values: vec![Value::F64(re), Value::F64(im)],
-                        }));
+                        // Construct a Complex{Float64} struct (fields [re, im] in
+                        // order). Use the stored struct_type_id for the correct
+                        // runtime type_id; derive the struct name from the element
+                        // type's own Julia name instead of a string literal so the
+                        // name has a single source of truth (Issue #5152).
+                        return Ok(Value::Struct(StructInstance::complex_from_storage(
+                            self.complex_type_id(),
+                            elem_type.julia_type_name(),
+                            Value::F64(re),
+                            Value::F64(im),
+                        )));
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 ArrayElementType::ComplexF32 => {
@@ -60,17 +149,20 @@ impl ArrayValue {
                         _ => None,
                     };
                     if let (Some(re), Some(im)) = (re, im) {
-                        // Construct a Complex{Float32} struct
-                        // Use stored struct_type_id for correct runtime type_id lookup
-                        return Ok(Value::Struct(StructInstance {
-                            type_id: self.complex_type_id(),
-                            struct_name: "Complex{Float32}".to_string(),
-                            values: vec![Value::F32(re), Value::F32(im)],
-                        }));
+                        // Construct a Complex{Float32} struct. Use the stored
+                        // struct_type_id for the correct runtime type_id; derive
+                        // the struct name from the element type's own Julia name
+                        // instead of a string literal (Issue #5152).
+                        return Ok(Value::Struct(StructInstance::complex_from_storage(
+                            self.complex_type_id(),
+                            elem_type.julia_type_name(),
+                            Value::F32(re),
+                            Value::F32(im),
+                        )));
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 ArrayElementType::TupleOf(ref field_types) => {
@@ -86,7 +178,7 @@ impl ArrayValue {
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 ArrayElementType::StructInlineOf(type_id, field_count) => {
@@ -102,7 +194,7 @@ impl ArrayValue {
                     }
                     return Err(VmError::IndexOutOfBounds {
                         indices: indices.to_vec(),
-                        shape: self.shape.clone(),
+                        shape: error_shape.to_vec(),
                     });
                 }
                 _ => {} // Fall through to normal get
@@ -113,7 +205,7 @@ impl ArrayValue {
             .get_value(linear)
             .ok_or(VmError::IndexOutOfBounds {
                 indices: indices.to_vec(),
-                shape: self.shape.clone(),
+                shape: error_shape.to_vec(),
             })
     }
 
@@ -238,6 +330,9 @@ impl ArrayValue {
             ArrayData::U16(v) => Ok(v.iter().map(|&x| x as f64).collect()),
             ArrayData::U8(v) => Ok(v.iter().map(|&x| x as f64).collect()),
             ArrayData::Bool(v) => Ok(v.iter().map(|&x| if x { 1.0 } else { 0.0 }).collect()),
+            ArrayData::BitPackedBool(v) => {
+                Ok(v.iter().map(|x| if x { 1.0 } else { 0.0 }).collect())
+            }
             _ => Err(VmError::TypeError(format!(
                 "cannot convert {:?} array to f64",
                 self.data.element_type()

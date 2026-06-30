@@ -53,27 +53,152 @@ pub enum ParsedInt {
     BigInt(String),
 }
 
+/// Width tag for typed integer literals (hex `0x…`, binary `0b…`, octal `0o…`).
+///
+/// In Julia these literal forms produce unsigned integers whose bit width is
+/// determined by the literal's *digit count* (hex/binary) or *bits required*
+/// (octal). Decimal literals carry no width tag — they default to `Int64`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypedIntKind {
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    UInt128,
+}
+
+impl TypedIntKind {
+    /// Constructor function name to call when lowering this typed literal.
+    pub fn constructor_name(self) -> &'static str {
+        match self {
+            TypedIntKind::UInt8 => "UInt8",
+            TypedIntKind::UInt16 => "UInt16",
+            TypedIntKind::UInt32 => "UInt32",
+            TypedIntKind::UInt64 => "UInt64",
+            TypedIntKind::UInt128 => "UInt128",
+        }
+    }
+}
+
+/// Result of parsing an integer literal, including the typed-int width tag
+/// for hex / binary / octal literals.
+#[derive(Debug, Clone)]
+pub struct ParsedIntWithKind {
+    pub value: ParsedInt,
+    /// `Some(kind)` for hex/binary/octal literals; `None` for decimal.
+    pub kind: Option<TypedIntKind>,
+}
+
+/// Untyped integer-literal parser. Kept for the in-module test suite
+/// that asserts the `ParsedInt` variant directly; production lowering
+/// uses `parse_int_typed` (Issue #4927) to preserve hex/binary/octal
+/// type tags.
+#[cfg(test)]
 pub fn parse_int(text: &str) -> Option<ParsedInt> {
+    parse_int_typed(text).map(|p| p.value)
+}
+
+/// Parse an integer literal, preserving the typed-integer width tag for
+/// hex / binary / octal forms (Issue #3559).
+///
+/// Width rules (matching `julia 1.12`):
+/// - **Hex** (`0x…`): width by hex-digit count (excluding underscores). 1–2 → `UInt8`,
+///   3–4 → `UInt16`, 5–8 → `UInt32`, 9–16 → `UInt64`, 17–32 → `UInt128`.
+/// - **Binary** (`0b…`): width by bit count. 1–8 → `UInt8`, 9–16 → `UInt16`,
+///   17–32 → `UInt32`, 33–64 → `UInt64`, 65–128 → `UInt128`.
+/// - **Octal** (`0o…`): width by total bits encoded (3 × digit count, but
+///   capped at the *minimum bits needed* for the leading digit so e.g. `0o000`
+///   is `UInt8` even though 3 × 3 = 9). We compute the bit width as
+///   `3 * (digits - 1) + leading_bits` where `leading_bits` is the bit width
+///   of the leading nonzero digit (0 for all-zero literals).
+/// - Decimal literals return `kind = None`.
+pub fn parse_int_typed(text: &str) -> Option<ParsedIntWithKind> {
     let cleaned = text.replace('_', "");
     if let Some(hex) = cleaned
         .strip_prefix("0x")
         .or_else(|| cleaned.strip_prefix("0X"))
     {
-        parse_int_radix(hex, 16)
+        let value = parse_int_radix(hex, 16)?;
+        let kind = hex_width_from_digits(hex.len());
+        Some(ParsedIntWithKind { value, kind })
     } else if let Some(bin) = cleaned
         .strip_prefix("0b")
         .or_else(|| cleaned.strip_prefix("0B"))
     {
-        parse_int_radix(bin, 2)
+        let value = parse_int_radix(bin, 2)?;
+        let kind = binary_width_from_digits(bin.len());
+        Some(ParsedIntWithKind { value, kind })
     } else if let Some(oct) = cleaned
         .strip_prefix("0o")
         .or_else(|| cleaned.strip_prefix("0O"))
     {
-        parse_int_radix(oct, 8)
+        let value = parse_int_radix(oct, 8)?;
+        let kind = octal_width_from_digits(oct);
+        Some(ParsedIntWithKind { value, kind })
     } else {
-        parse_int_decimal(&cleaned)
+        let value = parse_int_decimal(&cleaned)?;
+        Some(ParsedIntWithKind { value, kind: None })
     }
 }
+
+/// Hex digit count → typed width (Julia rule).
+fn hex_width_from_digits(ndigits: usize) -> Option<TypedIntKind> {
+    match ndigits {
+        0 => None,
+        1..=2 => Some(TypedIntKind::UInt8),
+        3..=4 => Some(TypedIntKind::UInt16),
+        5..=8 => Some(TypedIntKind::UInt32),
+        9..=16 => Some(TypedIntKind::UInt64),
+        17..=32 => Some(TypedIntKind::UInt128),
+        // > 32 hex digits is not a valid typed literal in Julia — fall back
+        // to default (no width tag).
+        _ => None,
+    }
+}
+
+/// Binary digit count → typed width (Julia rule).
+fn binary_width_from_digits(ndigits: usize) -> Option<TypedIntKind> {
+    match ndigits {
+        0 => None,
+        1..=8 => Some(TypedIntKind::UInt8),
+        9..=16 => Some(TypedIntKind::UInt16),
+        17..=32 => Some(TypedIntKind::UInt32),
+        33..=64 => Some(TypedIntKind::UInt64),
+        65..=128 => Some(TypedIntKind::UInt128),
+        _ => None,
+    }
+}
+
+/// Octal digit count → typed width (Julia rule).
+///
+/// Julia's octal width is computed from the *bits actually needed* by the
+/// leading digit, not a flat 3 bits per digit: `0o000` is `UInt8` even though
+/// 3×3=9, because the leading 0 contributes 0 bits. We compute
+/// `3 * (digits-1) + leading_bits` where `leading_bits` is `ceil(log2(d+1))`
+/// for the leading digit `d`.
+fn octal_width_from_digits(text: &str) -> Option<TypedIntKind> {
+    if text.is_empty() {
+        return None;
+    }
+    let leading = text.chars().next()?;
+    let leading_value = leading.to_digit(8)?;
+    let leading_bits = if leading_value == 0 {
+        0
+    } else {
+        // 1 → 1, 2..3 → 2, 4..7 → 3
+        32 - leading_value.leading_zeros()
+    } as usize;
+    let total_bits = 3 * (text.len() - 1) + leading_bits;
+    match total_bits {
+        0..=8 => Some(TypedIntKind::UInt8),
+        9..=16 => Some(TypedIntKind::UInt16),
+        17..=32 => Some(TypedIntKind::UInt32),
+        33..=64 => Some(TypedIntKind::UInt64),
+        65..=128 => Some(TypedIntKind::UInt128),
+        _ => None,
+    }
+}
+
 fn parse_int_radix(text: &str, radix: u32) -> Option<ParsedInt> {
     if let Ok(v) = i64::from_str_radix(text, radix) {
         return Some(ParsedInt::I64(v));
@@ -194,31 +319,198 @@ fn parse_string_literal(text: &str) -> String {
     process_escape_sequences(content)
 }
 
-/// Process escape sequences in a string
-fn process_escape_sequences(content: &str) -> String {
+/// Process escape sequences in a string.
+///
+/// Supports all of Julia's string escape sequences:
+/// - `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\$` — simple character escapes
+/// - `\a`, `\b`, `\f`, `\v`, `\e`, `\0` — control character escapes
+/// - `\xNN` — 1-2 hex digits, codepoint U+0000..U+00FF
+/// - `\uNNNN` — 1-4 hex digits, Unicode codepoint
+/// - `\UNNNNNNNN` — 1-8 hex digits, Unicode codepoint
+/// - `\NNN` — 1-3 octal digits (first digit `0`-`3` if 3 digits), codepoint U+0000..U+00FF
+pub(crate) fn process_escape_sequences(content: &str) -> String {
+    let bytes = content.as_bytes();
     let mut result = String::with_capacity(content.len());
-    let mut chars = content.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('n') => result.push('\n'),
-                Some('t') => result.push('\t'),
-                Some('r') => result.push('\r'),
-                Some('\\') => result.push('\\'),
-                Some('"') => result.push('"'),
-                Some('$') => result.push('$'),
-                Some(other) => {
-                    // Unknown escape sequence, keep as-is
-                    result.push('\\');
-                    result.push(other);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            match next {
+                b'n' => {
+                    result.push('\n');
+                    i += 2;
                 }
-                None => result.push('\\'),
+                b't' => {
+                    result.push('\t');
+                    i += 2;
+                }
+                b'r' => {
+                    result.push('\r');
+                    i += 2;
+                }
+                b'\\' => {
+                    result.push('\\');
+                    i += 2;
+                }
+                b'"' => {
+                    result.push('"');
+                    i += 2;
+                }
+                b'\'' => {
+                    result.push('\'');
+                    i += 2;
+                }
+                b'$' => {
+                    result.push('$');
+                    i += 2;
+                }
+                b'a' => {
+                    result.push('\x07');
+                    i += 2;
+                }
+                b'b' => {
+                    result.push('\x08');
+                    i += 2;
+                }
+                b'f' => {
+                    result.push('\x0c');
+                    i += 2;
+                }
+                b'v' => {
+                    result.push('\x0b');
+                    i += 2;
+                }
+                b'e' => {
+                    result.push('\x1b');
+                    i += 2;
+                }
+                b'x' => {
+                    // Hex escape: \xNN — 1-2 hex digits, greedy
+                    let start = i + 2;
+                    let mut end = start;
+                    while end < bytes.len() && end - start < 2 && bytes[end].is_ascii_hexdigit() {
+                        end += 1;
+                    }
+                    if end > start {
+                        let hex = &content[start..end];
+                        if let Ok(n) = u32::from_str_radix(hex, 16) {
+                            if let Some(ch) = char::from_u32(n) {
+                                result.push(ch);
+                                i = end;
+                                continue;
+                            }
+                        }
+                    }
+                    // Invalid hex escape — keep as-is
+                    result.push('\\');
+                    result.push('x');
+                    i += 2;
+                }
+                b'u' => {
+                    // Unicode escape: \uNNNN — 1-4 hex digits, greedy
+                    let start = i + 2;
+                    let mut end = start;
+                    while end < bytes.len() && end - start < 4 && bytes[end].is_ascii_hexdigit() {
+                        end += 1;
+                    }
+                    if end > start {
+                        let hex = &content[start..end];
+                        if let Ok(n) = u32::from_str_radix(hex, 16) {
+                            if let Some(ch) = char::from_u32(n) {
+                                result.push(ch);
+                                i = end;
+                                continue;
+                            }
+                        }
+                    }
+                    // Invalid unicode escape — keep as-is
+                    result.push('\\');
+                    result.push('u');
+                    i += 2;
+                }
+                b'U' => {
+                    // Unicode escape: \UNNNNNNNN — 1-8 hex digits, greedy
+                    let start = i + 2;
+                    let mut end = start;
+                    while end < bytes.len() && end - start < 8 && bytes[end].is_ascii_hexdigit() {
+                        end += 1;
+                    }
+                    if end > start {
+                        let hex = &content[start..end];
+                        if let Ok(n) = u32::from_str_radix(hex, 16) {
+                            if let Some(ch) = char::from_u32(n) {
+                                result.push(ch);
+                                i = end;
+                                continue;
+                            }
+                        }
+                    }
+                    // Invalid unicode escape — keep as-is
+                    result.push('\\');
+                    result.push('U');
+                    i += 2;
+                }
+                b'0'..=b'7' => {
+                    // Octal escape: \NNN — 1-3 octal digits, greedy
+                    let start = i + 1;
+                    let mut end = start;
+                    while end < bytes.len()
+                        && end - start < 3
+                        && (b'0'..=b'7').contains(&bytes[end])
+                    {
+                        end += 1;
+                    }
+                    if end > start {
+                        let oct = &content[start..end];
+                        if let Ok(n) = u32::from_str_radix(oct, 8) {
+                            if let Some(ch) = char::from_u32(n) {
+                                result.push(ch);
+                                i = end;
+                                continue;
+                            }
+                        }
+                    }
+                    // Shouldn't be reachable, but keep as-is on failure
+                    result.push('\\');
+                    i += 1;
+                }
+                _ => {
+                    // Unknown escape sequence — keep as-is
+                    result.push('\\');
+                    result.push(next as char);
+                    i += 2;
+                }
             }
         } else {
-            result.push(c);
+            // Push the next char (handles multi-byte UTF-8 properly via char iteration)
+            // Find char boundary
+            let ch_start = i;
+            // Advance i by the char's UTF-8 length
+            let ch_len = utf8_char_len(b);
+            let ch_end = (ch_start + ch_len).min(bytes.len());
+            // Use the substring as &str safely (assuming valid UTF-8 input)
+            result.push_str(&content[ch_start..ch_end]);
+            i = ch_end;
         }
     }
     result
+}
+
+/// Return the UTF-8 byte length of the character starting with the given lead byte.
+fn utf8_char_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b < 0xC0 {
+        // Continuation byte — shouldn't be a leading byte; fall back to 1.
+        1
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    }
 }
 
 /// Lower character literal: 'a', '\n', '\u0041'
@@ -255,63 +547,95 @@ pub fn lower_char_literal<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerRe
 }
 
 /// Parse the content of a character literal, handling escape sequences.
+///
+/// Supports the same escape forms as string literals (greedy hex/unicode/octal).
 fn parse_char_content(content: &str) -> Option<char> {
-    let mut chars = content.chars();
-    let first = chars.next()?;
+    let bytes = content.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
 
-    if first == '\\' {
-        // Escape sequence
-        let escaped = chars.next()?;
-        match escaped {
-            'n' => Some('\n'),
-            'r' => Some('\r'),
-            't' => Some('\t'),
-            '\\' => Some('\\'),
-            '\'' => Some('\''),
-            '"' => Some('"'),
-            '0' => Some('\0'),
-            'a' => Some('\x07'), // Bell
-            'b' => Some('\x08'), // Backspace
-            'f' => Some('\x0c'), // Form feed
-            'v' => Some('\x0b'), // Vertical tab
-            'e' => Some('\x1b'), // Escape
-            'x' => {
-                // Hex escape: \xNN
-                let hex: String = chars.take(2).collect();
-                if hex.len() == 2 {
-                    u8::from_str_radix(&hex, 16).ok().map(|b| b as char)
-                } else {
-                    None
-                }
-            }
-            'u' => {
-                // Unicode escape: \uNNNN
-                let hex: String = chars.take(4).collect();
-                if hex.len() == 4 {
-                    u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
-                } else {
-                    None
-                }
-            }
-            'U' => {
-                // Unicode escape: \UNNNNNNNN
-                let hex: String = chars.take(8).collect();
-                if hex.len() == 8 {
-                    u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
-                } else {
-                    None
-                }
-            }
-            _ => None, // Invalid escape
+    if bytes[0] != b'\\' {
+        // Non-escape: must be exactly one character (possibly multi-byte UTF-8)
+        let mut chars = content.chars();
+        let first = chars.next()?;
+        if chars.next().is_some() {
+            return None;
         }
-    } else if chars.next().is_none() {
-        // Single character (no more chars after first)
-        Some(first)
-    } else {
-        // Multi-character literal without escape - check if it's a multi-byte UTF-8 char
-        // Actually, we should return the first char if the remaining are empty
-        // But we already checked chars.next().is_none() above
-        None
+        return Some(first);
+    }
+
+    if bytes.len() < 2 {
+        return None;
+    }
+
+    let next = bytes[1];
+    match next {
+        b'n' if bytes.len() == 2 => Some('\n'),
+        b'r' if bytes.len() == 2 => Some('\r'),
+        b't' if bytes.len() == 2 => Some('\t'),
+        b'\\' if bytes.len() == 2 => Some('\\'),
+        b'\'' if bytes.len() == 2 => Some('\''),
+        b'"' if bytes.len() == 2 => Some('"'),
+        b'a' if bytes.len() == 2 => Some('\x07'),
+        b'b' if bytes.len() == 2 => Some('\x08'),
+        b'f' if bytes.len() == 2 => Some('\x0c'),
+        b'v' if bytes.len() == 2 => Some('\x0b'),
+        b'e' if bytes.len() == 2 => Some('\x1b'),
+        b'$' if bytes.len() == 2 => Some('$'),
+        b'x' => {
+            // Hex escape: \xNN — 1-2 hex digits, greedy
+            let hex_part = &content[2..];
+            if hex_part.is_empty() || hex_part.len() > 2 {
+                return None;
+            }
+            if !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            u32::from_str_radix(hex_part, 16)
+                .ok()
+                .and_then(char::from_u32)
+        }
+        b'u' => {
+            // Unicode escape: \uNNNN — 1-4 hex digits, greedy
+            let hex_part = &content[2..];
+            if hex_part.is_empty() || hex_part.len() > 4 {
+                return None;
+            }
+            if !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            u32::from_str_radix(hex_part, 16)
+                .ok()
+                .and_then(char::from_u32)
+        }
+        b'U' => {
+            // Unicode escape: \UNNNNNNNN — 1-8 hex digits, greedy
+            let hex_part = &content[2..];
+            if hex_part.is_empty() || hex_part.len() > 8 {
+                return None;
+            }
+            if !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            u32::from_str_radix(hex_part, 16)
+                .ok()
+                .and_then(char::from_u32)
+        }
+        b'0'..=b'7' => {
+            // Octal escape: \NNN — 1-3 octal digits
+            let oct_part = &content[1..];
+            if oct_part.is_empty() || oct_part.len() > 3 {
+                return None;
+            }
+            if !oct_part.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
+                return None;
+            }
+            u32::from_str_radix(oct_part, 8)
+                .ok()
+                .and_then(char::from_u32)
+        }
+        _ => None,
     }
 }
 
@@ -467,11 +791,133 @@ mod tests {
         assert!(matches!(parse_int(large), Some(ParsedInt::I128(_))));
     }
 
+    // ── parse_int_typed (Issue #3559) ─────────────────────────────────────────
+
+    #[test]
+    fn test_parse_int_typed_decimal_has_no_kind() {
+        let parsed = parse_int_typed("42").expect("should parse");
+        assert!(matches!(parsed.value, ParsedInt::I64(42)));
+        assert_eq!(parsed.kind, None);
+    }
+
+    #[test]
+    fn test_parse_int_typed_hex_widths() {
+        // 1-2 hex digits → UInt8
+        assert_eq!(
+            parse_int_typed("0x1").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        assert_eq!(
+            parse_int_typed("0xff").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        // 3-4 hex digits → UInt16
+        assert_eq!(
+            parse_int_typed("0x100").unwrap().kind,
+            Some(TypedIntKind::UInt16)
+        );
+        assert_eq!(
+            parse_int_typed("0xffff").unwrap().kind,
+            Some(TypedIntKind::UInt16)
+        );
+        // 5-8 hex digits → UInt32
+        assert_eq!(
+            parse_int_typed("0x10000").unwrap().kind,
+            Some(TypedIntKind::UInt32)
+        );
+        assert_eq!(
+            parse_int_typed("0xffffffff").unwrap().kind,
+            Some(TypedIntKind::UInt32)
+        );
+        // 9-16 hex digits → UInt64
+        assert_eq!(
+            parse_int_typed("0x100000000").unwrap().kind,
+            Some(TypedIntKind::UInt64),
+        );
+        // 17-32 hex digits → UInt128
+        assert_eq!(
+            parse_int_typed("0x10000000000000000").unwrap().kind,
+            Some(TypedIntKind::UInt128),
+        );
+    }
+
+    #[test]
+    fn test_parse_int_typed_binary_widths() {
+        // 1-8 bits → UInt8
+        assert_eq!(
+            parse_int_typed("0b1").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        assert_eq!(
+            parse_int_typed("0b11111111").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        // 9-16 bits → UInt16
+        assert_eq!(
+            parse_int_typed("0b100000000").unwrap().kind,
+            Some(TypedIntKind::UInt16),
+        );
+        // 17-32 bits → UInt32
+        assert_eq!(
+            parse_int_typed("0b10000000000000000").unwrap().kind,
+            Some(TypedIntKind::UInt32),
+        );
+    }
+
+    #[test]
+    fn test_parse_int_typed_octal_widths() {
+        // Leading zero(s) keep the typed-width small.
+        assert_eq!(
+            parse_int_typed("0o0").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        assert_eq!(
+            parse_int_typed("0o000").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        assert_eq!(
+            parse_int_typed("0o377").unwrap().kind,
+            Some(TypedIntKind::UInt8)
+        );
+        // 0o400 = 256, leading digit 4 → 3 bits, total = 3*2+3 = 9 → UInt16
+        assert_eq!(
+            parse_int_typed("0o400").unwrap().kind,
+            Some(TypedIntKind::UInt16)
+        );
+    }
+
+    #[test]
+    fn test_parse_int_typed_underscore_separator_ignored_in_width() {
+        // Underscores must be stripped before width is computed.
+        // `0b1_00000000` is 9 binary digits → UInt16.
+        assert_eq!(
+            parse_int_typed("0b1_00000000").unwrap().kind,
+            Some(TypedIntKind::UInt16),
+        );
+        // `0x00_00` is still 4 hex digits → UInt16.
+        assert_eq!(
+            parse_int_typed("0x00_00").unwrap().kind,
+            Some(TypedIntKind::UInt16),
+        );
+    }
+
+    #[test]
+    fn test_parse_int_typed_max_uint128_hex_uses_bigint_value() {
+        // 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF overflows i128 and lands in
+        // BigInt; the width tag should still be UInt128.
+        let parsed = parse_int_typed("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").expect("parse");
+        assert!(matches!(parsed.value, ParsedInt::BigInt(_)));
+        assert_eq!(parsed.kind, Some(TypedIntKind::UInt128));
+    }
+
     // ── parse_float ───────────────────────────────────────────────────────────
 
     #[test]
     fn test_parse_float_standard() {
-        assert!(matches!(parse_float("1.5"), Some(ParsedFloat::F64(_))), "Expected F64(1.5)");
+        assert!(
+            matches!(parse_float("1.5"), Some(ParsedFloat::F64(_))),
+            "Expected F64(1.5)"
+        );
         if let Some(ParsedFloat::F64(v)) = parse_float("1.5") {
             assert!((v - 1.5).abs() < 1e-10);
         }
@@ -479,7 +925,10 @@ mod tests {
 
     #[test]
     fn test_parse_float_scientific_notation() {
-        assert!(matches!(parse_float("1e3"), Some(ParsedFloat::F64(_))), "Expected F64(1000.0)");
+        assert!(
+            matches!(parse_float("1e3"), Some(ParsedFloat::F64(_))),
+            "Expected F64(1000.0)"
+        );
         if let Some(ParsedFloat::F64(v)) = parse_float("1e3") {
             assert!((v - 1000.0).abs() < 1e-6);
         }
@@ -493,7 +942,10 @@ mod tests {
 
     #[test]
     fn test_parse_float_with_underscore() {
-        assert!(matches!(parse_float("1_000.0"), Some(ParsedFloat::F64(_))), "Expected F64(1000.0)");
+        assert!(
+            matches!(parse_float("1_000.0"), Some(ParsedFloat::F64(_))),
+            "Expected F64(1000.0)"
+        );
         if let Some(ParsedFloat::F64(v)) = parse_float("1_000.0") {
             assert!((v - 1000.0).abs() < 1e-6);
         }
@@ -502,7 +954,10 @@ mod tests {
     #[test]
     fn test_parse_float_hex() {
         // 0x1.8p3 = (1 + 8/16) * 2^3 = 1.5 * 8 = 12.0
-        assert!(matches!(parse_float("0x1.8p3"), Some(ParsedFloat::F64(_))), "Expected F64(12.0)");
+        assert!(
+            matches!(parse_float("0x1.8p3"), Some(ParsedFloat::F64(_))),
+            "Expected F64(12.0)"
+        );
         if let Some(ParsedFloat::F64(v)) = parse_float("0x1.8p3") {
             assert!((v - 12.0).abs() < 1e-10);
         }

@@ -7,6 +7,12 @@ expected = true
 description = "Vector{Complex{Float64}} creation and indexing"
 
 [[tests]]
+name = "arrays_parametric_eltype_empty_vector_6768"
+file = "parametric_eltype_empty_vector_6768.jl"
+expected = true
+description = "Empty typed Vector with a concrete PARAMETRIC element type (UnitRange{Int64}, Vector{Int}) keeps its eltype after push! instead of widening to Vector{Any}; Vector{T}() and T[] forms; Int64/Complex regressions (Issue #6768)"
+
+[[tests]]
 name = "arrays_repeat"
 file = "repeat.jl"
 expected = true
@@ -85,6 +91,12 @@ expected = true
 description = "ndims - get number of dimensions"
 
 [[tests]]
+name = "arrays_ndims_type_5118"
+file = "test_ndims_type_5118.jl"
+expected = true
+description = "ndims type-level: ndims(Array{T,N})===N and ndims(::Type{<:Number})===0 (Issue #5118)"
+
+[[tests]]
 name = "arrays_string_array_ops"
 file = "string_array_ops.jl"
 expected = true
@@ -101,6 +113,18 @@ name = "arrays_deleteat_basic"
 file = "deleteat_basic.jl"
 expected = true
 description = "deleteat!(a, i): delete element at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_deleteat_multi_index"
+file = "deleteat_multi_index.jl"
+expected = true
+description = "deleteat!(a, inds): delete elements at a Vector/Range of indices (Issue #5738)"
+
+[[tests]]
+name = "arrays_mutate_copy_collect_result_5721"
+file = "mutate_copy_collect_result_5721.jl"
+expected = true
+description = "insert!/deleteat!/pushfirst! work on copy()/collect() results (Memory-backed Array wrappers), matching push! (Issue #5721)"
 
 [[tests]]
 name = "arrays_append_prepend"
@@ -138,3 +162,122 @@ file = "findnext_findprev.jl"
 expected = true
 description = "findnext(f, A, start) and findprev(f, A, start) with predicate (Issue #2860)"
 
+[[tests]]
+name = "arrays_rng_range_memory_first_3908"
+file = "rng_range_memory_first_3908.jl"
+expected = true
+description = "RNG and legacy range array outputs remain Julia-visible after Memory-first materialization (Issue #3908)"
+
+[[tests]]
+name = "arrays_bitarray_alias_surface_5498"
+file = "bitarray_alias_surface_5498.jl"
+expected = true
+description = "BitArray aliases, higher-rank trues/falses, copy/similar, typed similar, and Bool broadcast type projection (Issue #5498)"
+
+[[tests]]
+name = "arrays_wrapper_compact_typeinfo_prefix_5774"
+file = "wrapper_compact_typeinfo_prefix_5774.jl"
+expected = true
+description = "Array wrapper (zeros/fill/ones) compact display emits the T[...] typeinfo prefix for non-implicit scalar eltypes (Int8/Float32/ComplexF64/Bool/2D), implicit (Int64/Float64) and Tuple eltypes stay bare (Issue #5774)"
+
+[[tests]]
+name = "arrays_2d_view_linear_setindex_5816"
+file = "arrays_2d_view_linear_setindex_5816.jl"
+expected = true
+description = "Linear getindex/setindex! on a 2D view (SubArray) reads/writes the column-major element through the view's per-dimension indices and parent, not the 1D-contiguous offset+i. v[1]=100 sets A[1,2]; the routed pure-Julia setindex! returns the collection so the post-IndexStore StoreBack does not clobber the view binding; values stay Int. 1D view + Float 2D view regression (Issue #5816)."
+
+[[tests]]
+name = "arrays_index_assign_specialized_6346"
+file = "index_assign_specialized_6346.jl"
+expected = true
+description = "1D Vector{Int64}/Vector{Float64} setindex! loops remain compatible while lazy specialization emits a typed IndexAssign fast path (Issue #6346)"
+
+[[tests]]
+name = "arrays_index_assign_multidim_fallback_6346"
+file = "index_assign_multidim_fallback_6346.jl"
+expected = true
+description = "Multi-dimensional IndexAssign keeps using the generic fallback path outside the 1D typed lazy-specialization shape (Issue #6346)"
+
+[[tests]]
+name = "arrays_rank1_wrapper_index_untyped_param_6806"
+file = "rank1_wrapper_index_untyped_param_6806.jl"
+expected = true
+description = "Indexing a rank-1 Array{T} wrapper through an untyped parameter (raw IndexLoad) reads the element directly from the MemoryRef-backed storage instead of dispatching getindex per index. Characterization of value and bounds semantics across the #6806 PR B fast path; verified against upstream Julia (Issue #6806)."
+
+[[tests]]
+name = "arrays_multidim_wrapper_index_untyped_param_6806"
+file = "multidim_wrapper_index_untyped_param_6806.jl"
+expected = true
+description = "Indexing a MemoryRef-backed Array{T,N} wrapper through an untyped parameter (raw IndexLoad) reads the element directly from storage for both linear-index and full per-dimension index modes, extending the #6806 PR B fast path to multi-dimensional reads. Verified against upstream Julia (Issue #6806)."
+
+[[tests]]
+name = "arrays_setindex_wrapper_untyped_param_6806"
+file = "setindex_wrapper_untyped_param_6806.jl"
+expected = true
+description = "Writing into a numeric Array{T} wrapper through an untyped parameter (a[i]=v, raw IndexStore) writes directly into MemoryRef-backed storage instead of dispatching setindex! per write. Characterizes value, Int->Float coercion, aliasing, linear matrix write, and bounds semantics; verified against upstream Julia (Issue #6806)."
+
+[[tests]]
+name = "arrays_build_buffer_devariant_6807"
+file = "build_buffer_devariant_6807.jl"
+expected = true
+description = "The incremental array build buffer (NewArray*/PushElem*/Finalize*), emitted by the lazy specializer for typed array literals and the empty Vector{String} constants, produces arrays with identical value, element-type, ordering, mutation and special-layout semantics after being de-varianted onto the Value::Memory representation (the last live producer of the legacy Value::ExprArgs carrier). Verified against upstream Julia (Issue #6807)."
+
+[[tests]]
+name = "arrays_constructor_producers_wrapper_6807"
+file = "constructor_producers_wrapper_6807.jl"
+expected = true
+description = "VM-level array producers — range materialization (MakeRange/MakeRangeF64), RNG arrays (rand/randn), and matrix ops — emit the MemoryRef-backed Array{T,N} wrapper instead of the legacy Value::ExprArgs carrier, and the wrapper behaves identically through length/eltype/indexing/sum/map. Verified against upstream Julia (Issue #6807)."
+
+[[tests]]
+name = "arrays_literal_native_finalize_elemtypes_6846"
+file = "literal_native_finalize_elemtypes_6846.jl"
+expected = true
+description = "Array literals finalize Memory into the Array{T,N} wrapper natively across element types (complex/struct/primitive/mixed/multidim/empty) (Issue #6846)"
+
+[[tests]]
+name = "arrays_type_name_memoization_6846"
+file = "type_name_memoization_6846.jl"
+expected = true
+description = "Array wrapper type identity (typeof/isa/eltype/ndims/dispatch) is stable across diverse element types and ndims under the memoized CoreType::from_julia_name parse and the cheap array_wrapper_julia_type derivation (Issue #6846)"
+
+[[tests]]
+name = "arrays_growth_amortized_6873"
+file = "growth_amortized_6873.jl"
+expected = true
+description = "Appending to an Array{T} wrapper grows the backing Memory in place via amortized (geometric) Vec growth instead of exact-size realloc + copy-all per push (which made comprehensions / push! loops O(n^2)). Values, ordering, element type, mixed push!/index-mutate, and `c = d` aliasing all survive the internal reallocations. Verified against upstream Julia 1.12 (Issue #6873, found via Issue #6846)."
+
+[[tests]]
+name = "arrays_slice_producers_wrapper_6807"
+file = "slice_producers_wrapper_6807.jl"
+expected = true
+description = "Array-slice producers (a[range]/a[idxvec]/m[rows,cols]/n-dim) emit the MemoryRef-backed Array{T,N} wrapper; slices are fresh, independently-mutable arrays (Issue #6807)"
+
+[[tests]]
+name = "arrays_nested_array_wrapper_typeinfo_prefix_6882"
+file = "nested_array_wrapper_typeinfo_prefix_6882.jl"
+expected = true
+description = "A Vector of Memory-backed Array{T,N} wrapper elements prints bare ([[1],[2]]) for an implicit inner eltype instead of a spurious Array{T,N}[...] typeinfo prefix (Issue #6882)"
+
+[[tests]]
+name = "arrays_zeros_alloc_not_cse_7176"
+file = "zeros_alloc_not_cse_7176.jl"
+expected = true
+description = "Issue #7176: allocating calls (zeros/ones/fill/copy/collect) return fresh arrays, not CSE-merged"
+
+[[tests]]
+name = "arrays_matrix_literal_negative_element_7196"
+file = "matrix_literal_negative_element_7196.jl"
+expected = true
+description = "Issue #7196: in a whitespace-separated matrix/hcat row a space-before-but-not-after `-`/`+` (e.g. [0.20 -0.26; 0.23 0.22], [1 -2]) starts a new unary-signed element, while [1 - 2] stays binary subtraction; comma vectors, `*`, and ordinary subtraction are unaffected"
+
+[[tests]]
+name = "arrays_hcat_vcat_flatten_elements_7203"
+file = "hcat_vcat_flatten_elements_7203.jl"
+expected = true
+description = "Issue #7203: matrix/hcat/vcat literals with array or range row elements ([g 4], [1:2 3:4], [[1 2] [3 4]], [g; row], [A B; C D]) flatten/materialize those elements column-/row-wise like upstream Julia instead of boxing them as Any elements (or crashing); all-scalar literals keep the direct fast path"
+
+[[tests]]
+name = "arrays_typed_array_literal_uint_convert_7953"
+file = "typed_array_literal_uint_convert_7953.jl"
+expected = true
+description = "Issue #7953: a typed array literal T[elems...] converts each element to the declared element type T (Int[0x30, 0x39] == [48, 57], UInt8[1, 2], Float64[0x30], Int[..;..] matrices) instead of failing to store UInt-family hex literals; out-of-range elements raise InexactError like upstream"

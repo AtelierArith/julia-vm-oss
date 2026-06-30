@@ -43,6 +43,12 @@ expected = true
 description = "rethrow() function - re-throws current exception from catch blocks (Issue #448)"
 
 [[tests]]
+name = "exceptions_rethrow_nested_8435"
+file = "rethrow_nested_8435.jl"
+expected = true
+description = "Nested rethrow() propagates from an inner catch to the surrounding catch instead of silently returning (Issue #8435)"
+
+[[tests]]
 name = "systemerror_function"
 file = "systemerror.jl"
 expected = true
@@ -55,6 +61,12 @@ expected = true
 description = "ExponentialBackOff iterator for retry with exponential delays (Issue #448)"
 
 [[tests]]
+name = "retry_8371"
+file = "retry_8371.jl"
+expected = true
+description = "Base.retry returns a wrapper function that retries after exceptions, honors check=false, and forwards positional/keyword arguments (Issue #8371)"
+
+[[tests]]
 name = "backtrace_stubs"
 file = "backtrace_stubs.jl"
 expected = true
@@ -65,3 +77,33 @@ name = "try_block_return"
 file = "try_block_return.jl"
 expected = true
 description = "Return from inside try block (Issue #1447)"
+
+[[tests]]
+name = "try_catch_expression_4784"
+file = "try_catch_expression_4784.jl"
+expected = true
+description = "try/catch/end works as a first-class expression (assignment RHS, inside arithmetic, with named catch var). Lowering rewrites the last Stmt::Expr of each branch to assign into a fresh result variable and wraps the whole thing in an Expr::LetBlock (Issue #4784)"
+
+[[tests]]
+name = "nested_try_catch_expression_4833"
+file = "nested_try_catch_expression_4833.jl"
+expected = true
+description = "Nested try-as-expression: inner try's last expression propagates back to outer result variable. assign_last_value now recurses when the last stmt of a branch is itself a Stmt::Try (Issue #4833, follow-up to #4784)"
+
+[[tests]]
+name = "try_implicit_return_6223"
+file = "try_implicit_return_6223.jl"
+expected = true
+description = "try/catch[/else/finally] in tail (implicit-return) position returns the executed branch's value instead of the return type default. The compile-layer implicit-return path converts the tail Stmt::Try into the same value-producing Expr::LetBlock used in expression position via shared try_stmt_into_value_expr (Issue #6223)"
+
+[[tests]]
+name = "exceptions_catchable_methoderror_exception_types_5648"
+file = "catchable_methoderror_exception_types_5648.jl"
+expected = true
+description = "Runtime MethodError (dispatch failure) is catchable (not an uncatchable abort), and Rust-raised exceptions (DomainError/BoundsError/DivideError) are caught with their proper type, not String (Issue #5648)"
+
+[[tests]]
+name = "exceptions_catchable_inexact_error_8212"
+file = "catchable_inexact_error_8212.jl"
+expected = true
+description = "A failed convert(T, x) (direct call, typed local, or `for i::T in itr`) raises an InexactError exception object, so catch binds typeof(e) == InexactError / isa(e, InexactError) instead of a bare String (Issue #8212)"

@@ -2,8 +2,8 @@
 
 use crate::rng::RngLike;
 
+use super::state::SprintState;
 use crate::vm::error::VmError;
-use crate::vm::frame::{Frame, SprintState};
 use crate::vm::util::bind_value_to_slot;
 use crate::vm::value::{IORef, Value};
 use crate::vm::Vm;
@@ -32,7 +32,7 @@ impl<R: RngLike> Vm<R> {
         let entry = func.entry;
 
         // Create a new frame for the function
-        let mut frame = Frame::new_with_slots(local_slot_count, Some(func_index));
+        let mut frame = self.acquire_frame(local_slot_count, Some(func_index));
 
         // Bind the IOBuffer as the first parameter (same IORef for interior mutability)
         if let Some(&slot) = param_slots.first() {
@@ -49,7 +49,7 @@ impl<R: RngLike> Vm<R> {
 
         // Push return IP and frame
         self.return_ips.push(self.ip);
-        self.frames.push(frame);
+        self.try_push_call_frame(frame)?;
         self.ip = entry;
         Ok(())
     }
@@ -75,7 +75,7 @@ impl<R: RngLike> Vm<R> {
         })?;
 
         // Pop the function's frame and return IP
-        self.frames.pop();
+        self.pop_call_frame();
         self.return_ips.pop();
 
         // Extract the string from the IOBuffer (using interior mutability)

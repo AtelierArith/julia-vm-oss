@@ -109,6 +109,8 @@ pub enum Intrinsic {
     CeilLlvm,
     /// trunc_llvm(x) -> trunc(x) - round toward zero
     TruncLlvm,
+    /// rint_llvm(x) -> round(x) to nearest, ties to even (banker's rounding)
+    RintLlvm,
     /// abs_float(x) -> |x|
     AbsFloat,
     /// copysign_float(a, b) -> copy sign of b to a
@@ -167,6 +169,8 @@ pub enum Intrinsic {
     MulBigFloat,
     /// div_bigfloat(a, b) -> a / b
     DivBigFloat,
+    /// rem_bigfloat(a, b) -> a % b (remainder, sign of `a`; a % 0 -> NaN)
+    RemBigFloat,
     /// abs_bigfloat(x) -> |x|
     AbsBigFloat,
 
@@ -195,228 +199,119 @@ pub enum Intrinsic {
     BigFloatToString,
 }
 
+/// Generates `Intrinsic::name` and `Intrinsic::from_name` from a single table so
+/// the two directions cannot drift out of sync (Issue #6831). Each row is
+/// `Variant: "name" => ["from_name", ...]`. Discriminant order is fixed by the
+/// hand-written `enum Intrinsic` above (bincode cache compatibility), not by this
+/// table.
+macro_rules! define_intrinsic_table {
+    ( $( $variant:ident : $canon:literal => [ $( $alias:literal ),* $(,)? ] ),* $(,)? ) => {
+        impl Intrinsic {
+            /// Get the intrinsic from a function name.
+            ///
+            /// # Examples
+            /// ```
+            /// use subset_julia_vm::intrinsics::Intrinsic;
+            /// assert_eq!(Intrinsic::from_name("add_int"), Some(Intrinsic::AddInt));
+            /// assert_eq!(Intrinsic::from_name("sqrt_llvm"), Some(Intrinsic::SqrtLlvm));
+            /// ```
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name {
+                    $( $( $alias => Some(Self::$variant), )* )*
+                    _ => None,
+                }
+            }
+
+            /// Get the function name for this intrinsic.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $( Self::$variant => $canon, )*
+                }
+            }
+        }
+    };
+}
+
+define_intrinsic_table! {
+    NegInt: "neg_int" => ["neg_int"],
+    AddInt: "add_int" => ["add_int"],
+    SubInt: "sub_int" => ["sub_int"],
+    MulInt: "mul_int" => ["mul_int"],
+    SdivInt: "sdiv_int" => ["sdiv_int"],
+    SremInt: "srem_int" => ["srem_int"],
+    NegFloat: "neg_float" => ["neg_float"],
+    NegAny: "neg_any" => ["neg_any"],
+    AddFloat: "add_float" => ["add_float"],
+    SubFloat: "sub_float" => ["sub_float"],
+    MulFloat: "mul_float" => ["mul_float"],
+    DivFloat: "div_float" => ["div_float"],
+    PowFloat: "pow_float" => ["pow_float"],
+    EqInt: "eq_int" => ["eq_int"],
+    NeInt: "ne_int" => ["ne_int"],
+    SltInt: "slt_int" => ["slt_int"],
+    SleInt: "sle_int" => ["sle_int"],
+    SgtInt: "sgt_int" => ["sgt_int"],
+    SgeInt: "sge_int" => ["sge_int"],
+    EqFloat: "eq_float" => ["eq_float"],
+    NeFloat: "ne_float" => ["ne_float"],
+    LtFloat: "lt_float" => ["lt_float"],
+    LeFloat: "le_float" => ["le_float"],
+    GtFloat: "gt_float" => ["gt_float"],
+    GeFloat: "ge_float" => ["ge_float"],
+    AndInt: "and_int" => ["and_int"],
+    OrInt: "or_int" => ["or_int"],
+    XorInt: "xor_int" => ["xor_int"],
+    NotInt: "not_int" => ["not_int"],
+    ShlInt: "shl_int" => ["shl_int"],
+    LshrInt: "lshr_int" => ["lshr_int"],
+    AshrInt: "ashr_int" => ["ashr_int"],
+    Sitofp: "sitofp" => ["sitofp"],
+    Fptosi: "fptosi" => ["fptosi"],
+    SqrtLlvm: "sqrt_llvm" => ["sqrt_llvm"],
+    FloorLlvm: "floor_llvm" => ["floor_llvm"],
+    CeilLlvm: "ceil_llvm" => ["ceil_llvm"],
+    TruncLlvm: "trunc_llvm" => ["trunc_llvm"],
+    RintLlvm: "rint_llvm" => ["rint_llvm"],
+    AbsFloat: "abs_float" => ["abs_float"],
+    CopysignFloat: "copysign_float" => ["copysign_float"],
+    NegBigInt: "neg_bigint" => ["neg_bigint"],
+    AddBigInt: "add_bigint" => ["add_bigint"],
+    SubBigInt: "sub_bigint" => ["sub_bigint"],
+    MulBigInt: "mul_bigint" => ["mul_bigint"],
+    DivBigInt: "div_bigint" => ["div_bigint"],
+    RemBigInt: "rem_bigint" => ["rem_bigint"],
+    AbsBigInt: "abs_bigint" => ["abs_bigint"],
+    PowBigInt: "pow_bigint" => ["pow_bigint"],
+    EqBigInt: "eq_bigint" => ["eq_bigint"],
+    NeBigInt: "ne_bigint" => ["ne_bigint"],
+    LtBigInt: "lt_bigint" => ["lt_bigint"],
+    LeBigInt: "le_bigint" => ["le_bigint"],
+    GtBigInt: "gt_bigint" => ["gt_bigint"],
+    GeBigInt: "ge_bigint" => ["ge_bigint"],
+    I64ToBigInt: "i64_to_bigint" => ["i64_to_bigint"],
+    BigIntToI64: "bigint_to_i64" => ["bigint_to_i64"],
+    StringToBigInt: "string_to_bigint" => ["string_to_bigint"],
+    BigIntToString: "bigint_to_string" => ["bigint_to_string"],
+    NegBigFloat: "neg_bigfloat" => ["neg_bigfloat"],
+    AddBigFloat: "add_bigfloat" => ["add_bigfloat"],
+    SubBigFloat: "sub_bigfloat" => ["sub_bigfloat"],
+    MulBigFloat: "mul_bigfloat" => ["mul_bigfloat"],
+    DivBigFloat: "div_bigfloat" => ["div_bigfloat"],
+    RemBigFloat: "rem_bigfloat" => ["rem_bigfloat"],
+    AbsBigFloat: "abs_bigfloat" => ["abs_bigfloat"],
+    EqBigFloat: "eq_bigfloat" => ["eq_bigfloat"],
+    NeBigFloat: "ne_bigfloat" => ["ne_bigfloat"],
+    LtBigFloat: "lt_bigfloat" => ["lt_bigfloat"],
+    LeBigFloat: "le_bigfloat" => ["le_bigfloat"],
+    GtBigFloat: "gt_bigfloat" => ["gt_bigfloat"],
+    GeBigFloat: "ge_bigfloat" => ["ge_bigfloat"],
+    F64ToBigFloat: "f64_to_bigfloat" => ["f64_to_bigfloat"],
+    BigFloatToF64: "bigfloat_to_f64" => ["bigfloat_to_f64"],
+    StringToBigFloat: "string_to_bigfloat" => ["string_to_bigfloat"],
+    BigFloatToString: "bigfloat_to_string" => ["bigfloat_to_string"],
+}
+
 impl Intrinsic {
-    /// Get the intrinsic from a function name.
-    ///
-    /// # Examples
-    /// ```
-    /// use subset_julia_vm::intrinsics::Intrinsic;
-    /// assert_eq!(Intrinsic::from_name("add_int"), Some(Intrinsic::AddInt));
-    /// assert_eq!(Intrinsic::from_name("sqrt_llvm"), Some(Intrinsic::SqrtLlvm));
-    /// ```
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            // Integer arithmetic
-            "neg_int" => Some(Self::NegInt),
-            "add_int" => Some(Self::AddInt),
-            "sub_int" => Some(Self::SubInt),
-            "mul_int" => Some(Self::MulInt),
-            "sdiv_int" => Some(Self::SdivInt),
-            "srem_int" => Some(Self::SremInt),
-
-            // Float arithmetic
-            "neg_float" => Some(Self::NegFloat),
-            // Runtime-dispatched
-            "neg_any" => Some(Self::NegAny),
-            "add_float" => Some(Self::AddFloat),
-            "sub_float" => Some(Self::SubFloat),
-            "mul_float" => Some(Self::MulFloat),
-            "div_float" => Some(Self::DivFloat),
-            "pow_float" => Some(Self::PowFloat),
-
-            // Integer comparisons
-            "eq_int" => Some(Self::EqInt),
-            "ne_int" => Some(Self::NeInt),
-            "slt_int" => Some(Self::SltInt),
-            "sle_int" => Some(Self::SleInt),
-            "sgt_int" => Some(Self::SgtInt),
-            "sge_int" => Some(Self::SgeInt),
-
-            // Float comparisons
-            "eq_float" => Some(Self::EqFloat),
-            "ne_float" => Some(Self::NeFloat),
-            "lt_float" => Some(Self::LtFloat),
-            "le_float" => Some(Self::LeFloat),
-            "gt_float" => Some(Self::GtFloat),
-            "ge_float" => Some(Self::GeFloat),
-
-            // Bitwise
-            "and_int" => Some(Self::AndInt),
-            "or_int" => Some(Self::OrInt),
-            "xor_int" => Some(Self::XorInt),
-            "not_int" => Some(Self::NotInt),
-            "shl_int" => Some(Self::ShlInt),
-            "lshr_int" => Some(Self::LshrInt),
-            "ashr_int" => Some(Self::AshrInt),
-
-            // Type conversions
-            "sitofp" => Some(Self::Sitofp),
-            "fptosi" => Some(Self::Fptosi),
-
-            // Low-level math
-            "sqrt_llvm" => Some(Self::SqrtLlvm),
-            "floor_llvm" => Some(Self::FloorLlvm),
-            "ceil_llvm" => Some(Self::CeilLlvm),
-            "trunc_llvm" => Some(Self::TruncLlvm),
-            "abs_float" => Some(Self::AbsFloat),
-            "copysign_float" => Some(Self::CopysignFloat),
-
-            // BigInt arithmetic
-            "neg_bigint" => Some(Self::NegBigInt),
-            "add_bigint" => Some(Self::AddBigInt),
-            "sub_bigint" => Some(Self::SubBigInt),
-            "mul_bigint" => Some(Self::MulBigInt),
-            "div_bigint" => Some(Self::DivBigInt),
-            "rem_bigint" => Some(Self::RemBigInt),
-            "abs_bigint" => Some(Self::AbsBigInt),
-            "pow_bigint" => Some(Self::PowBigInt),
-
-            // BigInt comparisons
-            "eq_bigint" => Some(Self::EqBigInt),
-            "ne_bigint" => Some(Self::NeBigInt),
-            "lt_bigint" => Some(Self::LtBigInt),
-            "le_bigint" => Some(Self::LeBigInt),
-            "gt_bigint" => Some(Self::GtBigInt),
-            "ge_bigint" => Some(Self::GeBigInt),
-
-            // BigInt conversions
-            "i64_to_bigint" => Some(Self::I64ToBigInt),
-            "bigint_to_i64" => Some(Self::BigIntToI64),
-            "string_to_bigint" => Some(Self::StringToBigInt),
-            "bigint_to_string" => Some(Self::BigIntToString),
-
-            // BigFloat arithmetic
-            "neg_bigfloat" => Some(Self::NegBigFloat),
-            "add_bigfloat" => Some(Self::AddBigFloat),
-            "sub_bigfloat" => Some(Self::SubBigFloat),
-            "mul_bigfloat" => Some(Self::MulBigFloat),
-            "div_bigfloat" => Some(Self::DivBigFloat),
-            "abs_bigfloat" => Some(Self::AbsBigFloat),
-
-            // BigFloat comparisons
-            "eq_bigfloat" => Some(Self::EqBigFloat),
-            "ne_bigfloat" => Some(Self::NeBigFloat),
-            "lt_bigfloat" => Some(Self::LtBigFloat),
-            "le_bigfloat" => Some(Self::LeBigFloat),
-            "gt_bigfloat" => Some(Self::GtBigFloat),
-            "ge_bigfloat" => Some(Self::GeBigFloat),
-
-            // BigFloat conversions
-            "f64_to_bigfloat" => Some(Self::F64ToBigFloat),
-            "bigfloat_to_f64" => Some(Self::BigFloatToF64),
-            "string_to_bigfloat" => Some(Self::StringToBigFloat),
-            "bigfloat_to_string" => Some(Self::BigFloatToString),
-
-            _ => None,
-        }
-    }
-
-    /// Get the function name for this intrinsic.
-    pub fn name(&self) -> &'static str {
-        match self {
-            // Integer arithmetic
-            Self::NegInt => "neg_int",
-            Self::AddInt => "add_int",
-            Self::SubInt => "sub_int",
-            Self::MulInt => "mul_int",
-            Self::SdivInt => "sdiv_int",
-            Self::SremInt => "srem_int",
-
-            // Float arithmetic
-            Self::NegFloat => "neg_float",
-            // Runtime-dispatched
-            Self::NegAny => "neg_any",
-            Self::AddFloat => "add_float",
-            Self::SubFloat => "sub_float",
-            Self::MulFloat => "mul_float",
-            Self::DivFloat => "div_float",
-            Self::PowFloat => "pow_float",
-
-            // Integer comparisons
-            Self::EqInt => "eq_int",
-            Self::NeInt => "ne_int",
-            Self::SltInt => "slt_int",
-            Self::SleInt => "sle_int",
-            Self::SgtInt => "sgt_int",
-            Self::SgeInt => "sge_int",
-
-            // Float comparisons
-            Self::EqFloat => "eq_float",
-            Self::NeFloat => "ne_float",
-            Self::LtFloat => "lt_float",
-            Self::LeFloat => "le_float",
-            Self::GtFloat => "gt_float",
-            Self::GeFloat => "ge_float",
-
-            // Bitwise
-            Self::AndInt => "and_int",
-            Self::OrInt => "or_int",
-            Self::XorInt => "xor_int",
-            Self::NotInt => "not_int",
-            Self::ShlInt => "shl_int",
-            Self::LshrInt => "lshr_int",
-            Self::AshrInt => "ashr_int",
-
-            // Type conversions
-            Self::Sitofp => "sitofp",
-            Self::Fptosi => "fptosi",
-
-            // Low-level math
-            Self::SqrtLlvm => "sqrt_llvm",
-            Self::FloorLlvm => "floor_llvm",
-            Self::CeilLlvm => "ceil_llvm",
-            Self::TruncLlvm => "trunc_llvm",
-            Self::AbsFloat => "abs_float",
-            Self::CopysignFloat => "copysign_float",
-
-            // BigInt arithmetic
-            Self::NegBigInt => "neg_bigint",
-            Self::AddBigInt => "add_bigint",
-            Self::SubBigInt => "sub_bigint",
-            Self::MulBigInt => "mul_bigint",
-            Self::DivBigInt => "div_bigint",
-            Self::RemBigInt => "rem_bigint",
-            Self::AbsBigInt => "abs_bigint",
-            Self::PowBigInt => "pow_bigint",
-
-            // BigInt comparisons
-            Self::EqBigInt => "eq_bigint",
-            Self::NeBigInt => "ne_bigint",
-            Self::LtBigInt => "lt_bigint",
-            Self::LeBigInt => "le_bigint",
-            Self::GtBigInt => "gt_bigint",
-            Self::GeBigInt => "ge_bigint",
-
-            // BigInt conversions
-            Self::I64ToBigInt => "i64_to_bigint",
-            Self::BigIntToI64 => "bigint_to_i64",
-            Self::StringToBigInt => "string_to_bigint",
-            Self::BigIntToString => "bigint_to_string",
-
-            // BigFloat arithmetic
-            Self::NegBigFloat => "neg_bigfloat",
-            Self::AddBigFloat => "add_bigfloat",
-            Self::SubBigFloat => "sub_bigfloat",
-            Self::MulBigFloat => "mul_bigfloat",
-            Self::DivBigFloat => "div_bigfloat",
-            Self::AbsBigFloat => "abs_bigfloat",
-
-            // BigFloat comparisons
-            Self::EqBigFloat => "eq_bigfloat",
-            Self::NeBigFloat => "ne_bigfloat",
-            Self::LtBigFloat => "lt_bigfloat",
-            Self::LeBigFloat => "le_bigfloat",
-            Self::GtBigFloat => "gt_bigfloat",
-            Self::GeBigFloat => "ge_bigfloat",
-
-            // BigFloat conversions
-            Self::F64ToBigFloat => "f64_to_bigfloat",
-            Self::BigFloatToF64 => "bigfloat_to_f64",
-            Self::StringToBigFloat => "string_to_bigfloat",
-            Self::BigFloatToString => "bigfloat_to_string",
-        }
-    }
-
     /// Get the number of arguments for this intrinsic.
     pub fn arity(&self) -> usize {
         match self {

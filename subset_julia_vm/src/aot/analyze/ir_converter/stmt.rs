@@ -12,7 +12,13 @@ impl<'a> IrConverter<'a> {
     /// statement list.
     pub(crate) fn convert_stmt_expanded(&mut self, stmt: &Stmt) -> AotResult<Vec<AotStmt>> {
         match stmt {
+            Stmt::Meta { .. } => Ok(vec![]),
             Stmt::Timed { body, .. } => self.convert_block(body),
+            Stmt::Assign {
+                var,
+                value: Expr::LetBlock { bindings, body, .. },
+                ..
+            } => self.convert_let_block_assignment(var, bindings, body),
             Stmt::Expr {
                 expr: Expr::LetBlock { bindings, body, .. },
                 ..
@@ -32,11 +38,10 @@ impl<'a> IrConverter<'a> {
     ) -> AotResult<Vec<AotStmt>> {
         let mut out = Vec::new();
 
-        // Keep explicit non-temporary bindings.
+        // Keep bindings, including compiler-generated temporaries, because
+        // later side-effecting statements in the let-block may depend on them
+        // (for example the lowered form of `@time`).
         for (name, value) in bindings {
-            if name.starts_with('#') {
-                continue;
-            }
             let synthetic = Stmt::Assign {
                 var: name.clone(),
                 value: value.clone(),
@@ -73,18 +78,23 @@ impl<'a> IrConverter<'a> {
                         continue;
                     }
 
-                    if var.starts_with('#') {
-                        continue;
-                    }
-
-                    out.push(self.convert_stmt(stmt)?);
+                    out.extend(self.convert_stmt_expanded(stmt)?);
                 }
-                // Drop temporary-value passthrough (`#result`) but keep any other effects.
+                // Drop a bare trailing variable reference. This is the lowered
+                // form's value passthrough — e.g. `@time`'s final `result` (the
+                // macro's return value), or a `#`-prefixed compiler temporary.
+                // The enclosing let-block is in statement (value-discarded)
+                // position, and reading a variable has no side effect, so this
+                // would otherwise emit a dead Rust path statement (`result;`)
+                // that fails `-D warnings` (path_statements lint) — top-level
+                // `@time <expr>` did exactly this (Issue #8150). Side-effecting
+                // forms such as `println(#elapsed_s, " seconds")` are
+                // `Expr::Call`, not `Expr::Var`, so the `_` arm below still keeps
+                // them.
                 Stmt::Expr {
-                    expr: Expr::Var(name, _),
+                    expr: Expr::Var(_, _),
                     ..
-                } if name.starts_with('#') => {}
-                Stmt::Expr { expr, .. } if Self::expr_uses_temporary(expr) => {}
+                } => {}
                 _ => out.extend(self.convert_stmt_expanded(stmt)?),
             }
         }
@@ -92,114 +102,107 @@ impl<'a> IrConverter<'a> {
         Ok(out)
     }
 
-    /// Detect whether an expression references compiler-generated temporary names (`#...`).
-    fn expr_uses_temporary(expr: &Expr) -> bool {
-        match expr {
-            Expr::Var(name, _) => name.starts_with('#'),
-            Expr::BinaryOp { left, right, .. } => {
-                Self::expr_uses_temporary(left) || Self::expr_uses_temporary(right)
-            }
-            Expr::UnaryOp { operand, .. } => Self::expr_uses_temporary(operand),
-            Expr::Call { args, kwargs, .. } => {
-                args.iter().any(Self::expr_uses_temporary)
-                    || kwargs.iter().any(|(_, v)| Self::expr_uses_temporary(v))
-            }
-            Expr::Builtin { args, .. } => args.iter().any(Self::expr_uses_temporary),
-            Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => {
-                elements.iter().any(Self::expr_uses_temporary)
-            }
-            Expr::Index { array, indices, .. } => {
-                Self::expr_uses_temporary(array) || indices.iter().any(Self::expr_uses_temporary)
-            }
-            Expr::Range {
-                start, step, stop, ..
-            } => {
-                Self::expr_uses_temporary(start)
-                    || step.as_ref().is_some_and(|s| Self::expr_uses_temporary(s))
-                    || Self::expr_uses_temporary(stop)
-            }
-            Expr::FieldAccess { object, .. } => Self::expr_uses_temporary(object),
-            Expr::NamedTupleLiteral { fields, .. } => {
-                fields.iter().any(|(_, v)| Self::expr_uses_temporary(v))
-            }
-            Expr::DictLiteral { pairs, .. } => pairs
-                .iter()
-                .any(|(k, v)| Self::expr_uses_temporary(k) || Self::expr_uses_temporary(v)),
-            Expr::Comprehension {
-                body, iter, filter, ..
-            } => {
-                Self::expr_uses_temporary(body)
-                    || Self::expr_uses_temporary(iter)
-                    || filter
-                        .as_ref()
-                        .is_some_and(|f| Self::expr_uses_temporary(f))
-            }
-            Expr::MultiComprehension {
-                body,
-                iterations,
-                filter,
-                ..
-            } => {
-                Self::expr_uses_temporary(body)
-                    || iterations
-                        .iter()
-                        .any(|(_, it)| Self::expr_uses_temporary(it))
-                    || filter
-                        .as_ref()
-                        .is_some_and(|f| Self::expr_uses_temporary(f))
-            }
-            Expr::Generator {
-                body, iter, filter, ..
-            } => {
-                Self::expr_uses_temporary(body)
-                    || Self::expr_uses_temporary(iter)
-                    || filter
-                        .as_ref()
-                        .is_some_and(|f| Self::expr_uses_temporary(f))
-            }
-            Expr::Ternary {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                Self::expr_uses_temporary(condition)
-                    || Self::expr_uses_temporary(then_expr)
-                    || Self::expr_uses_temporary(else_expr)
-            }
-            Expr::StringConcat { parts, .. } => parts.iter().any(Self::expr_uses_temporary),
-            Expr::ModuleCall { args, kwargs, .. } => {
-                args.iter().any(Self::expr_uses_temporary)
-                    || kwargs.iter().any(|(_, v)| Self::expr_uses_temporary(v))
-            }
-            Expr::New { args, .. } => args.iter().any(Self::expr_uses_temporary),
-            Expr::DynamicTypeConstruct { type_args, .. } => {
-                type_args.iter().any(Self::expr_uses_temporary)
-            }
-            Expr::QuoteLiteral { constructor, .. } => Self::expr_uses_temporary(constructor),
-            Expr::LetBlock { bindings, body, .. } => {
-                bindings.iter().any(|(_, v)| Self::expr_uses_temporary(v))
-                    || body.stmts.iter().any(|stmt| match stmt {
-                        Stmt::Expr { expr, .. } => Self::expr_uses_temporary(expr),
-                        Stmt::Assign { value, .. } => Self::expr_uses_temporary(value),
-                        Stmt::AddAssign { value, .. } => Self::expr_uses_temporary(value),
-                        _ => false,
-                    })
-            }
-            Expr::AssignExpr { value, .. } => Self::expr_uses_temporary(value),
-            Expr::ReturnExpr { value, .. } => {
-                value.as_ref().is_some_and(|v| Self::expr_uses_temporary(v))
-            }
-            Expr::Pair { key, value, .. } => {
-                Self::expr_uses_temporary(key) || Self::expr_uses_temporary(value)
-            }
-            Expr::Literal(_, _)
-            | Expr::TypedEmptyArray { .. }
-            | Expr::SliceAll { .. }
-            | Expr::FunctionRef { .. }
-            | Expr::BreakExpr { .. }
-            | Expr::ContinueExpr { .. } => false,
+    /// Convert `target = let ... end` / `target = @elapsed ...` forms by keeping
+    /// all let-body side effects and assigning the block's final expression to
+    /// the outer target.
+    fn convert_let_block_assignment(
+        &mut self,
+        target: &str,
+        bindings: &[(String, Expr)],
+        body: &Block,
+    ) -> AotResult<Vec<AotStmt>> {
+        let mut out = Vec::new();
+
+        for (name, value) in bindings {
+            let synthetic = Stmt::Assign {
+                var: name.clone(),
+                value: value.clone(),
+                span: value.span(),
+            };
+            out.push(self.convert_stmt(&synthetic)?);
         }
+
+        let Some((last, prefix)) = body.stmts.split_last() else {
+            let synthetic = Stmt::Assign {
+                var: target.to_string(),
+                value: Expr::Literal(Literal::Nothing, body.span),
+                span: body.span,
+            };
+            out.push(self.convert_stmt(&synthetic)?);
+            return Ok(out);
+        };
+
+        for stmt in prefix {
+            match stmt {
+                Stmt::Assign { var, value, span } => {
+                    if let Expr::AssignExpr {
+                        var: inner_var,
+                        value: inner_value,
+                        ..
+                    } = value
+                    {
+                        let synthetic = Stmt::Assign {
+                            var: inner_var.clone(),
+                            value: (*inner_value.clone()),
+                            span: *span,
+                        };
+                        out.push(self.convert_stmt(&synthetic)?);
+
+                        if !var.starts_with('#') {
+                            let alias = Stmt::Assign {
+                                var: var.clone(),
+                                value: Expr::Var(inner_var.clone(), *span),
+                                span: *span,
+                            };
+                            out.push(self.convert_stmt(&alias)?);
+                        }
+                        continue;
+                    }
+
+                    out.extend(self.convert_stmt_expanded(stmt)?);
+                }
+                Stmt::Expr {
+                    expr: Expr::Var(name, _),
+                    ..
+                } if name.starts_with('#') => {}
+                _ => out.extend(self.convert_stmt_expanded(stmt)?),
+            }
+        }
+
+        match last {
+            Stmt::Expr {
+                expr: Expr::LetBlock { bindings, body, .. },
+                ..
+            } => out.extend(self.convert_let_block_assignment(target, bindings, body)?),
+            Stmt::Expr { expr, span } => {
+                let synthetic = Stmt::Assign {
+                    var: target.to_string(),
+                    value: expr.clone(),
+                    span: *span,
+                };
+                out.extend(self.convert_stmt_expanded(&synthetic)?);
+            }
+            Stmt::Assign { var, span, .. } => {
+                out.extend(self.convert_stmt_expanded(last)?);
+                let synthetic = Stmt::Assign {
+                    var: target.to_string(),
+                    value: Expr::Var(var.clone(), *span),
+                    span: *span,
+                };
+                out.push(self.convert_stmt(&synthetic)?);
+            }
+            _ => {
+                out.extend(self.convert_stmt_expanded(last)?);
+                let synthetic = Stmt::Assign {
+                    var: target.to_string(),
+                    value: Expr::Literal(Literal::Nothing, last.span()),
+                    span: last.span(),
+                };
+                out.push(self.convert_stmt(&synthetic)?);
+            }
+        }
+
+        Ok(out)
     }
 
     /// Convert a single lowered statement to exactly **one** AoT statement.
@@ -225,24 +228,40 @@ impl<'a> IrConverter<'a> {
                 // First convert the expression, then get its type from the AotExpr
                 // This ensures user-defined function return types are correctly inferred
                 let aot_value = self.convert_expr(value)?;
-                let ty = aot_value.get_type();
-
+                let value_ty = aot_value.get_type();
                 if self.declared_locals.contains(var) {
+                    let slot_ty = self
+                        .engine
+                        .env
+                        .get(var)
+                        .cloned()
+                        .unwrap_or_else(|| value_ty.clone());
                     // Reassignment
                     Ok(AotStmt::Assign {
                         target: AotExpr::Var {
                             name: var.clone(),
-                            ty: ty.clone(),
+                            ty: slot_ty,
                         },
                         value: aot_value,
                     })
                 } else {
+                    let slot_ty = match self.engine.env.get(var) {
+                        Some(inferred_ty)
+                            if matches!(
+                                inferred_ty,
+                                StaticType::Any | StaticType::Union { .. }
+                            ) || matches!(value_ty, StaticType::Any) =>
+                        {
+                            inferred_ty.clone()
+                        }
+                        _ => value_ty.clone(),
+                    };
                     // New variable declaration
                     self.declared_locals.insert(var.clone());
-                    self.engine.env.insert(var.clone(), ty.clone());
+                    self.engine.env.insert(var.clone(), slot_ty.clone());
                     Ok(AotStmt::Let {
                         name: var.clone(),
-                        ty,
+                        ty: slot_ty,
                         value: aot_value,
                         is_mutable: true, // All Julia variables are mutable by default
                     })
@@ -263,9 +282,11 @@ impl<'a> IrConverter<'a> {
                         if let Some(ref return_ty) = self.current_return_type {
                             let expr_ty = expr.get_type();
                             // Only coerce if types differ and both are known
+                            let return_needs_value =
+                                AotAbiValue::from_static_type(return_ty).needs_runtime_value();
                             if expr_ty != *return_ty
                                 && expr_ty != StaticType::Any
-                                && *return_ty != StaticType::Any
+                                && (return_needs_value || *return_ty != StaticType::Any)
                             {
                                 Ok(AotExpr::Convert {
                                     value: Box::new(expr),
@@ -370,6 +391,17 @@ impl<'a> IrConverter<'a> {
 
             Stmt::Continue { .. } => Ok(AotStmt::Continue),
 
+            Stmt::Global { names, span } => Err(AotError::UnsupportedInstruction(
+                UnsupportedInstructionDiagnostic::new(format!(
+                    "AoT codegen does not support mutable global state via `global {}` inside functions yet (Issue #7061)",
+                    names.join(", ")
+                ))
+                .with_span(*span)
+                .with_workaround(
+                    "pass state as function arguments and return updated values, or run mutable-global code on the VM",
+                ),
+            )),
+
             Stmt::Block(block) => {
                 // `begin...end` blocks are normally intercepted by `convert_stmt_expanded`
                 // and flattened into the surrounding statement list.  This arm is a fallback
@@ -435,10 +467,10 @@ impl<'a> IrConverter<'a> {
                     .unwrap_or(StaticType::Any);
 
                 // Get element type
-                let elem_ty = if let StaticType::Array { element, .. } = &arr_ty {
-                    (**element).clone()
-                } else {
-                    StaticType::Any
+                let elem_ty = match &arr_ty {
+                    StaticType::Array { element, .. } => (**element).clone(),
+                    StaticType::Dict { value, .. } => value.as_ref().clone(),
+                    _ => StaticType::Any,
                 };
 
                 let aot_array = AotExpr::Var {
@@ -463,6 +495,34 @@ impl<'a> IrConverter<'a> {
                         is_tuple: false,
                     },
                     value: aot_value,
+                })
+            }
+
+            Stmt::DictAssign {
+                dict, key, value, ..
+            } => {
+                let dict_ty = self
+                    .engine
+                    .env
+                    .get(dict)
+                    .cloned()
+                    .unwrap_or(StaticType::Any);
+                let elem_ty = match &dict_ty {
+                    StaticType::Dict { value, .. } => value.as_ref().clone(),
+                    _ => StaticType::Any,
+                };
+                let aot_dict = AotExpr::Var {
+                    name: dict.clone(),
+                    ty: dict_ty,
+                };
+                Ok(AotStmt::Assign {
+                    target: AotExpr::Index {
+                        array: Box::new(aot_dict),
+                        indices: vec![self.convert_expr(key)?],
+                        elem_ty,
+                        is_tuple: false,
+                    },
+                    value: self.convert_expr(value)?,
                 })
             }
 

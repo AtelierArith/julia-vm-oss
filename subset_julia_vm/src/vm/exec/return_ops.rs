@@ -13,32 +13,128 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use super::DispatchAction;
 use crate::rng::RngLike;
 
 use super::super::error::VmError;
+use super::super::hof_exec::state::{GeneratorIterateKind, GeneratorIterateState};
 use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
-use super::super::util;
-use super::super::value::Value;
+use super::super::value::{TupleValue, Value};
 use super::super::Vm;
 
-/// Result of executing a return instruction.
-pub(super) enum ReturnResult {
-    /// Instruction not handled by this module
-    NotHandled,
-    /// Instruction handled, continue execution (internal return)
+/// Result of routing a generic return value through the shared continuation
+/// machinery (HOF value mode, generator-iterate continuations, composed calls,
+/// and the normal caller-frame return). Used by the typed-return handlers
+/// (`ReturnTuple`, `ReturnDict`, `ReturnNamedTuple`, ...) so a non-scalar value
+/// returned from a `map`/`filter`/generator closure is collected correctly
+/// instead of leaking past the HOF driver (Issue #5231).
+pub(in crate::vm) enum ValueReturnRouting {
+    /// Value was consumed by a continuation (HOF/generator/composed/normal
+    /// return); keep running.
     Handled,
-    /// Error was raised and caught by handler, continue to next iteration
-    Continue,
-    /// Exit run loop with this value (final return)
+    /// No continuation matched and there is no caller frame: this is the final
+    /// return value of the program.
     Exit(Value),
 }
 
 impl<R: RngLike> Vm<R> {
+    pub(in crate::vm) fn handle_generator_iterate_return(
+        &mut self,
+        result: Value,
+    ) -> Result<bool, VmError> {
+        // Only the innermost (top-of-stack) pending continuation can match the
+        // current frame depth: a generator's mapping function may itself iterate
+        // another generator, so the continuations form a nested stack (Issue
+        // #5229). We pop the top entry iff it belongs to the frame that is
+        // returning right now.
+        let should_handle = self
+            .generator_iterate_state
+            .last()
+            .map(|state| self.frames.len() == state.call_frame_depth)
+            .unwrap_or(false);
+        if !should_handle {
+            return Ok(false);
+        }
+
+        let state = self.generator_iterate_state.pop().ok_or_else(|| {
+            VmError::InternalError(
+                "generator iterate return state disappeared during handling".to_string(),
+            )
+        })?;
+
+        match state.kind {
+            GeneratorIterateKind::Map | GeneratorIterateKind::FilterMap => {
+                self.return_ips.pop();
+                self.pop_call_frame();
+                self.ip = state.return_ip;
+                self.stack.push(Value::Tuple(TupleValue {
+                    elements: vec![result, state.next_state],
+                }));
+            }
+            GeneratorIterateKind::FilterPredicate {
+                map_func_index,
+                predicate_func_index,
+                iter,
+                input_value,
+            } => {
+                self.return_ips.pop();
+                self.pop_call_frame();
+                let is_truthy = match &result {
+                    Value::Bool(b) => *b,
+                    Value::I64(v) => *v != 0,
+                    Value::F64(v) => *v != 0.0,
+                    Value::Nothing => false,
+                    _ => true,
+                };
+
+                if is_truthy {
+                    self.call_function_with_value(map_func_index, input_value)?;
+                    self.generator_iterate_state.push(GeneratorIterateState {
+                        next_state: state.next_state,
+                        return_ip: state.return_ip,
+                        call_frame_depth: self.frames.len(),
+                        kind: GeneratorIterateKind::FilterMap,
+                    });
+                } else {
+                    let next = self.iterate_next(&iter, &state.next_state)?;
+                    let Value::Tuple(tuple) = next else {
+                        self.ip = state.return_ip;
+                        self.stack.push(next);
+                        return Ok(true);
+                    };
+                    if tuple.elements.len() != 2 {
+                        return Err(VmError::TypeError(format!(
+                            "Generator iterate expected a 2-element tuple, got {} elements",
+                            tuple.elements.len()
+                        )));
+                    }
+
+                    let input_value = tuple.elements[0].clone();
+                    let next_state = tuple.elements[1].clone();
+                    self.call_function_with_value(predicate_func_index, input_value.clone())?;
+                    self.generator_iterate_state.push(GeneratorIterateState {
+                        next_state,
+                        return_ip: state.return_ip,
+                        call_frame_depth: self.frames.len(),
+                        kind: GeneratorIterateKind::FilterPredicate {
+                            map_func_index,
+                            predicate_func_index,
+                            iter,
+                            input_value,
+                        },
+                    });
+                }
+            }
+        }
+        Ok(true)
+    }
+
     /// Execute return instructions.
     /// Returns the execution result.
-    #[inline]
-    pub(super) fn execute_return(&mut self, instr: &Instr) -> Result<ReturnResult, VmError> {
+    // Hot dispatch handler: front-loaded in `dispatch_instr` (Issue #5175).
+    #[inline(always)]
+    pub(super) fn execute_return(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::ReturnF64 => {
                 let x = self.pop_f64_or_i64()?;
@@ -46,31 +142,32 @@ impl<R: RngLike> Vm<R> {
                 // Check if we're in HOF/broadcast mode AND this is the HOF function returning
                 // (not a nested function call within the HOF function body)
                 let (is_hof_return, is_value_mode) = self
-                    .broadcast_state
-                    .as_ref()
+                    .broadcast_state()
                     .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
                     .unwrap_or((false, false));
 
-                if is_hof_return {
+                if self.handle_composed_call_return(Value::F64(x))? {
+                    Ok(DispatchAction::Continue)
+                } else if is_hof_return {
                     if is_value_mode {
                         self.handle_hof_return_value(Value::F64(x))?;
                     } else {
                         self.handle_hof_return(x)?;
                     }
-                    Ok(ReturnResult::Handled)
-                } else if self.handle_composed_call_return(Value::F64(x))? {
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
+                } else if self.handle_generator_iterate_return(Value::F64(x))? {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     // Pop any exception handlers from try blocks in this function
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(Value::F64(x));
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     // Final return - also pop handlers
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(Value::F64(x)))
+                    Ok(DispatchAction::Exit(Value::F64(x)))
                 }
             }
 
@@ -78,12 +175,13 @@ impl<R: RngLike> Vm<R> {
                 let val = self.stack.pop_value()?;
 
                 let (is_hof_return, is_value_mode) = self
-                    .broadcast_state
-                    .as_ref()
+                    .broadcast_state()
                     .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
                     .unwrap_or((false, false));
 
-                if is_hof_return {
+                if self.handle_composed_call_return(val.clone())? {
+                    Ok(DispatchAction::Continue)
+                } else if is_hof_return {
                     if is_value_mode {
                         self.handle_hof_return_value(val)?;
                     } else {
@@ -94,18 +192,18 @@ impl<R: RngLike> Vm<R> {
                         };
                         self.handle_hof_return(f)?;
                     }
-                    Ok(ReturnResult::Handled)
-                } else if self.handle_composed_call_return(val.clone())? {
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
+                } else if self.handle_generator_iterate_return(val.clone())? {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(val);
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(val))
+                    Ok(DispatchAction::Exit(val))
                 }
             }
 
@@ -129,10 +227,7 @@ impl<R: RngLike> Vm<R> {
                     Value::U128(v) => (*v as i64, val),
                     // BigInt is a valid integer type — may reach ReturnI64 when a function
                     // compiled for Int64 is called with BigInt via runtime dispatch (Issue #2508)
-                    Value::BigInt(v) => {
-                        use num_traits::ToPrimitive;
-                        (v.to_i64().unwrap_or(0), val)
-                    }
+                    Value::BigInt(v) => (v.to_i64().unwrap_or(0), val),
                     _ => {
                         // INTERNAL: ReturnI64 is emitted only for integer-returning functions; wrong return type is a compiler bug
                         return Err(VmError::InternalError(format!(
@@ -145,31 +240,32 @@ impl<R: RngLike> Vm<R> {
                 // Check if we're in HOF/broadcast mode AND this is the HOF function returning
                 // (not a nested function call within the HOF function body)
                 let (is_hof_return, is_value_mode) = self
-                    .broadcast_state
-                    .as_ref()
+                    .broadcast_state()
                     .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
                     .unwrap_or((false, false));
 
-                if is_hof_return {
+                if self.handle_composed_call_return(preserved_val.clone())? {
+                    Ok(DispatchAction::Continue)
+                } else if is_hof_return {
                     if is_value_mode {
                         self.handle_hof_return_value(preserved_val)?;
                     } else {
                         self.handle_hof_return(x as f64)?;
                     }
-                    Ok(ReturnResult::Handled)
-                } else if self.handle_composed_call_return(preserved_val.clone())? {
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
+                } else if self.handle_generator_iterate_return(preserved_val.clone())? {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     // Pop any exception handlers from try blocks in this function
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(preserved_val);
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     // Final return - also pop handlers
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(preserved_val))
+                    Ok(DispatchAction::Exit(preserved_val))
                 }
             }
 
@@ -178,33 +274,91 @@ impl<R: RngLike> Vm<R> {
                 let val = self.stack.pop_value()?;
                 match val {
                     // Memory is also a valid array-like return type (Issue #2764)
-                    Value::Array(_) | Value::Memory(_) => {
-                        if let Some(return_ip) = self.return_ips.pop() {
+                    val if super::super::value::is_native_array_value(&val)
+                        || matches!(val, Value::Memory(_)) =>
+                    {
+                        let (is_hof_return, is_value_mode) = self
+                            .broadcast_state()
+                            .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
+                            .unwrap_or((false, false));
+                        if is_hof_return && is_value_mode {
+                            self.handle_hof_return_value(val)?;
+                            Ok(DispatchAction::Continue)
+                        } else if self.handle_generator_iterate_return(val.clone())? {
+                            Ok(DispatchAction::Continue)
+                        } else if let Some(return_ip) = self.return_ips.pop() {
                             // Pop any exception handlers from try blocks in this function
                             self.pop_handlers_for_return();
-                            self.frames.pop();
+                            self.pop_call_frame();
                             self.ip = return_ip;
                             self.stack.push(val);
-                            Ok(ReturnResult::Handled)
+                            Ok(DispatchAction::Continue)
                         } else {
                             // Final return - also pop handlers
                             self.pop_handlers_for_return();
-                            Ok(ReturnResult::Exit(val))
+                            Ok(DispatchAction::Exit(val))
+                        }
+                    }
+                    Value::StructRef(idx)
+                        if self.struct_heap.get(idx).is_some_and(|s| {
+                            &*s.struct_name == "Array" || s.struct_name.starts_with("Array{")
+                        }) =>
+                    {
+                        let (is_hof_return, is_value_mode) = self
+                            .broadcast_state()
+                            .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
+                            .unwrap_or((false, false));
+                        if is_hof_return && is_value_mode {
+                            self.handle_hof_return_value(Value::StructRef(idx))?;
+                            Ok(DispatchAction::Continue)
+                        } else if self.handle_generator_iterate_return(Value::StructRef(idx))? {
+                            Ok(DispatchAction::Continue)
+                        } else if let Some(return_ip) = self.return_ips.pop() {
+                            self.pop_handlers_for_return();
+                            self.pop_call_frame();
+                            self.ip = return_ip;
+                            self.stack.push(Value::StructRef(idx));
+                            Ok(DispatchAction::Continue)
+                        } else {
+                            self.pop_handlers_for_return();
+                            Ok(DispatchAction::Exit(Value::StructRef(idx)))
+                        }
+                    }
+                    Value::Struct(s)
+                        if &*s.struct_name == "Array" || s.struct_name.starts_with("Array{") =>
+                    {
+                        let (is_hof_return, is_value_mode) = self
+                            .broadcast_state()
+                            .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
+                            .unwrap_or((false, false));
+                        if is_hof_return && is_value_mode {
+                            self.handle_hof_return_value(Value::Struct(s))?;
+                            Ok(DispatchAction::Continue)
+                        } else if self.handle_generator_iterate_return(Value::Struct(s.clone()))? {
+                            Ok(DispatchAction::Continue)
+                        } else if let Some(return_ip) = self.return_ips.pop() {
+                            self.pop_handlers_for_return();
+                            self.pop_call_frame();
+                            self.ip = return_ip;
+                            self.stack.push(Value::Struct(s));
+                            Ok(DispatchAction::Continue)
+                        } else {
+                            self.pop_handlers_for_return();
+                            Ok(DispatchAction::Exit(Value::Struct(s)))
                         }
                     }
                     other => {
-                        let err = VmError::TypeError(format!(
-                            "ReturnArray: expected Array or TypedArray, got {:?}",
-                            util::value_type_name(&other)
-                        ));
-                        match self.try_or_handle::<()>(Err(err))? {
-                            Some(_) => {
-                                Err(VmError::InternalError(
-                                    "ReturnArray error handling returned unexpected value"
-                                        .to_string(),
-                                ))
-                            }
-                            None => Ok(ReturnResult::Continue),
+                        // `ReturnArray` is a compile-time return-type hint, not a
+                        // runtime guarantee: a `map`/`filter`/generator closure
+                        // inferred to return an `Array` may at runtime yield a
+                        // non-array value (e.g. a Dict, Set, Tuple, or struct).
+                        // Rather than hard-erroring, route the value through the
+                        // shared continuation machinery so HOF/generator drivers
+                        // collect it and ordinary returns propagate it, matching
+                        // the dynamic `ReturnAny` path (Issue #5231).
+                        match self.route_value_return(other)? {
+                            ValueReturnRouting::Handled => Ok(DispatchAction::Continue),
+                            ValueReturnRouting::Exit(v) => Ok(DispatchAction::Exit(v)),
                         }
                     }
                 }
@@ -213,45 +367,9 @@ impl<R: RngLike> Vm<R> {
             Instr::ReturnAny => {
                 // Dynamic return - pops and returns whatever is on stack
                 let val = self.stack.pop_value()?;
-
-                // Check if we're in HOF/broadcast mode AND this is the HOF function returning
-                // (not a nested function call within the HOF function body)
-                let (is_hof_return, is_value_mode) = self
-                    .broadcast_state
-                    .as_ref()
-                    .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
-                    .unwrap_or((false, false));
-
-                if is_hof_return {
-                    if is_value_mode {
-                        // Value mode: handle any value type
-                        self.handle_hof_return_value(val)?;
-                    } else {
-                        // Legacy f64 mode
-                        match &val {
-                            Value::I64(x) => self.handle_hof_return(*x as f64)?,
-                            Value::F64(x) => self.handle_hof_return(*x)?,
-                            Value::Bool(b) => self.handle_hof_return(if *b { 1.0 } else { 0.0 })?,
-                            _ => {} // Non-scalar values don't participate in legacy HOF
-                        }
-                    }
-                    Ok(ReturnResult::Handled)
-                } else if self.handle_sprint_return()? {
-                    // Sprint function call just returned - string is already pushed
-                    Ok(ReturnResult::Handled)
-                } else if self.handle_composed_call_return(val.clone())? {
-                    Ok(ReturnResult::Handled)
-                } else if let Some(return_ip) = self.return_ips.pop() {
-                    // Pop any exception handlers from try blocks in this function
-                    self.pop_handlers_for_return();
-                    self.frames.pop();
-                    self.ip = return_ip;
-                    self.stack.push(val);
-                    Ok(ReturnResult::Handled)
-                } else {
-                    // Final return - also pop handlers
-                    self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(val))
+                match self.route_value_return(val)? {
+                    ValueReturnRouting::Handled => Ok(DispatchAction::Continue),
+                    ValueReturnRouting::Exit(v) => Ok(DispatchAction::Exit(v)),
                 }
             }
 
@@ -259,95 +377,161 @@ impl<R: RngLike> Vm<R> {
                 // Check for sprint return first
                 if self.handle_sprint_return()? {
                     // Sprint function call just returned - string is already pushed
-                    return Ok(ReturnResult::Handled);
+                    return Ok(DispatchAction::Continue);
                 }
 
                 // Check if we're in HOF/broadcast mode AND this is the HOF function returning
                 let (is_hof_return, is_value_mode) = self
-                    .broadcast_state
-                    .as_ref()
+                    .broadcast_state()
                     .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
                     .unwrap_or((false, false));
 
-                if is_hof_return {
+                if self.handle_composed_call_return(Value::Nothing)? {
+                    Ok(DispatchAction::Continue)
+                } else if is_hof_return {
                     if is_value_mode {
                         self.handle_hof_return_value(Value::Nothing)?;
                     } else {
                         // For f64 path, Nothing is treated as 0.0
                         self.handle_hof_return(0.0)?;
                     }
-                    Ok(ReturnResult::Handled)
-                } else if self.handle_composed_call_return(Value::Nothing)? {
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
+                } else if self.handle_generator_iterate_return(Value::Nothing)? {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     // Pop any exception handlers from try blocks in this function
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(Value::Nothing);
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     // Final return - also pop handlers
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(Value::Nothing))
+                    Ok(DispatchAction::Exit(Value::Nothing))
                 }
             }
 
             Instr::ReturnRng => {
                 let val = self.stack.pop().unwrap_or(Value::Nothing);
-                if self.handle_composed_call_return(val.clone())? {
-                    Ok(ReturnResult::Handled)
+                if self.handle_generator_iterate_return(val.clone())?
+                    || self.handle_composed_call_return(val.clone())?
+                {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     // Pop any exception handlers from try blocks in this function
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(val);
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     // Final return - also pop handlers
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(val))
+                    Ok(DispatchAction::Exit(val))
                 }
             }
 
             Instr::ReturnRange => {
                 let val = self.stack.pop().unwrap_or(Value::Nothing);
-                if self.handle_composed_call_return(val.clone())? {
-                    Ok(ReturnResult::Handled)
+                if self.handle_generator_iterate_return(val.clone())?
+                    || self.handle_composed_call_return(val.clone())?
+                {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     // Pop any exception handlers from try blocks in this function
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(val);
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     // Final return - also pop handlers
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(val))
+                    Ok(DispatchAction::Exit(val))
                 }
             }
 
             Instr::ReturnRef => {
                 let val = self.stack.pop().unwrap_or(Value::Nothing);
-                if self.handle_composed_call_return(val.clone())? {
-                    Ok(ReturnResult::Handled)
+                if self.handle_generator_iterate_return(val.clone())?
+                    || self.handle_composed_call_return(val.clone())?
+                {
+                    Ok(DispatchAction::Continue)
                 } else if let Some(return_ip) = self.return_ips.pop() {
                     // Pop any exception handlers from try blocks in this function
                     self.pop_handlers_for_return();
-                    self.frames.pop();
+                    self.pop_call_frame();
                     self.ip = return_ip;
                     self.stack.push(val);
-                    Ok(ReturnResult::Handled)
+                    Ok(DispatchAction::Continue)
                 } else {
                     // Final return - also pop handlers
                     self.pop_handlers_for_return();
-                    Ok(ReturnResult::Exit(val))
+                    Ok(DispatchAction::Exit(val))
                 }
             }
 
-            _ => Ok(ReturnResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
+        }
+    }
+
+    /// Route a generic return `val` through every continuation the dynamic
+    /// `ReturnAny` path honours, in the same order:
+    ///   1. composed-call (`∘`) chaining,
+    ///   2. HOF/broadcast value mode (and the legacy f64 mode),
+    ///   3. generator-iterate continuations (`map`/`filter` over generators),
+    ///   4. `sprint` returns,
+    ///   5. the normal caller-frame return,
+    ///   6. otherwise the program's final return value.
+    ///
+    /// The typed-return handlers (`ReturnAny`, `ReturnArray` non-array fallback,
+    /// `ReturnTuple`, `ReturnDict`, `ReturnNamedTuple`) all funnel through here
+    /// so a non-scalar value returned from a HOF/generator closure is collected
+    /// by the driver instead of leaking past it (Issue #5231).
+    pub(in crate::vm) fn route_value_return(
+        &mut self,
+        val: Value,
+    ) -> Result<ValueReturnRouting, VmError> {
+        // Check if we're in HOF/broadcast mode AND this is the HOF function
+        // returning (not a nested call within the HOF function body).
+        let (is_hof_return, is_value_mode) = self
+            .broadcast_state()
+            .map(|bc| (self.frames.len() == bc.hof_frame_depth, bc.is_value_mode))
+            .unwrap_or((false, false));
+
+        if self.handle_composed_call_return(val.clone())? {
+            Ok(ValueReturnRouting::Handled)
+        } else if is_hof_return {
+            if is_value_mode {
+                // Value mode: handle any value type
+                self.handle_hof_return_value(val)?;
+            } else {
+                // Legacy f64 mode
+                match &val {
+                    Value::I64(x) => self.handle_hof_return(*x as f64)?,
+                    Value::F64(x) => self.handle_hof_return(*x)?,
+                    Value::Bool(b) => self.handle_hof_return(if *b { 1.0 } else { 0.0 })?,
+                    _ => {} // Non-scalar values don't participate in legacy HOF
+                }
+            }
+            Ok(ValueReturnRouting::Handled)
+        } else if self.handle_generator_iterate_return(val.clone())? {
+            Ok(ValueReturnRouting::Handled)
+        } else if self.handle_sprint_return()? {
+            // Sprint function call just returned - string is already pushed
+            Ok(ValueReturnRouting::Handled)
+        } else if let Some(return_ip) = self.return_ips.pop() {
+            // Pop any exception handlers from try blocks in this function
+            self.pop_handlers_for_return();
+            self.pop_call_frame();
+            self.ip = return_ip;
+            self.stack.push(val);
+            Ok(ValueReturnRouting::Handled)
+        } else {
+            // Final return - also pop handlers
+            self.pop_handlers_for_return();
+            Ok(ValueReturnRouting::Exit(val))
         }
     }
 
@@ -355,7 +539,10 @@ impl<R: RngLike> Vm<R> {
     /// If we're in a composed call and the inner function just returned,
     /// call the next outer function with the result.
     /// Returns true if this was a composed call return that was handled.
-    fn handle_composed_call_return(&mut self, result: Value) -> Result<bool, VmError> {
+    pub(in crate::vm) fn handle_composed_call_return(
+        &mut self,
+        result: Value,
+    ) -> Result<bool, VmError> {
         // Check if we're in a composed call and at the right frame depth
         // Note: The inner function's frame is still on the stack, so we compare to call_frame_depth + 1
         let should_call_next = self
@@ -375,66 +562,96 @@ impl<R: RngLike> Vm<R> {
 
         // Pop the current function's frame and return IP
         self.return_ips.pop();
-        self.frames.pop();
+        self.pop_call_frame();
 
-        // Pop the next function to call from the pending stack
-        let next_func = state.pending_outers.pop().ok_or_else(|| {
-            VmError::TypeError("Empty pending_outers in composed call".to_string())
-        })?;
-
-        // Check if there are more functions pending after this one
-        let has_more_pending = !state.pending_outers.is_empty();
-
-        // Resolve function name and optional captures from the callable value
-        let (func_name, captures) = match &next_func {
-            Value::Function(fv) => (fv.name.clone(), vec![]),
-            Value::Closure(cv) => (cv.name.clone(), cv.captures.clone()),
-            _ => {
-                // INTERNAL: composed call pending_outers can only contain Function/Closure; other type is a compiler bug
-                return Err(VmError::InternalError(format!(
-                    "Expected Function or Closure in composed call, got {:?}",
-                    next_func
-                )));
-            }
-        };
-
-        // Find function by name and call it
-        let func_index = self
-            .functions
-            .iter()
-            .position(|f| f.name == func_name)
-            .ok_or_else(|| {
-                VmError::TypeError(format!(
-                    "Function '{}' not found in composed call",
-                    func_name
-                ))
+        let mut result = result;
+        loop {
+            // Pop the next function to call from the pending stack.
+            let next_func = state.pending_outers.pop().ok_or_else(|| {
+                VmError::TypeError("Empty pending_outers in composed call".to_string())
             })?;
 
-        let func = self.get_function_checked(func_index)?.clone();
+            let has_more_pending = !state.pending_outers.is_empty();
 
-        // Create frame with captures (empty vec for regular functions)
-        let mut frame = super::super::frame::Frame::new_with_captures(
-            func.local_slot_count,
-            Some(func_index),
-            captures,
-        );
+            if let Value::Function(fv) = &next_func {
+                if fv.name == "!" {
+                    result = match result {
+                        Value::Bool(b) => Value::Bool(!b),
+                        Value::Missing => Value::Missing,
+                        other => return Err(VmError::type_error_expected("!", "Bool", &other)),
+                    };
 
-        // Bind result to first parameter slot
-        if let Some(slot) = func.param_slots.first() {
-            super::util::bind_value_to_slot(&mut frame, *slot, result, &mut self.struct_heap);
+                    if has_more_pending {
+                        continue;
+                    }
+
+                    let route_to_runtime_hof = self
+                        .broadcast_state()
+                        .map(|bc| {
+                            bc.runtime_callable.is_some()
+                                && bc.hof_frame_depth == state.call_frame_depth + 1
+                        })
+                        .unwrap_or(false);
+                    if route_to_runtime_hof {
+                        self.handle_runtime_hof_immediate_value(result)?;
+                    } else {
+                        self.ip = state.return_ip;
+                        self.stack.push(result);
+                    }
+                    return Ok(true);
+                }
+            }
+
+            // Resolve function name and optional captures from the callable value.
+            // Issue #5189: borrow the closure's frozen capture set (shared behind an
+            // `Rc`) as a slice instead of deep-cloning the whole `Vec`.
+            let (func_name, captures): (String, &[(String, Value)]) = match &next_func {
+                Value::Function(fv) => (fv.name.clone(), &[]),
+                Value::Closure(cv) => (cv.name.clone(), cv.captures.as_slice()),
+                _ => {
+                    // INTERNAL: composed call pending_outers can only contain Function/Closure; other type is a compiler bug
+                    return Err(VmError::InternalError(format!(
+                        "Expected Function or Closure in composed call, got {:?}",
+                        next_func
+                    )));
+                }
+            };
+
+            // Find function by name and call it
+            let func_index = self
+                .functions
+                .iter()
+                .position(|f| f.name == func_name)
+                .ok_or_else(|| {
+                    VmError::TypeError(format!(
+                        "Function '{}' not found in composed call",
+                        func_name
+                    ))
+                })?;
+
+            let func = self.get_function_checked(func_index)?.clone();
+
+            // Create frame with captures (empty vec for regular functions)
+            let mut frame =
+                self.acquire_frame_with_captures(func.local_slot_count, Some(func_index), captures);
+
+            // Bind result to first parameter slot
+            if let Some(slot) = func.param_slots.first() {
+                super::util::bind_value_to_slot(&mut frame, *slot, result, &mut self.struct_heap);
+            }
+
+            if has_more_pending {
+                // More functions to call - restore state and continue
+                self.composed_call_state = Some(state);
+                self.return_ips.push(self.ip); // Will be handled by next composed return
+            } else {
+                // This is the last function - use original return_ip
+                self.return_ips.push(state.return_ip);
+            }
+
+            self.try_push_call_frame(frame)?;
+            self.ip = func.entry;
+            return Ok(true);
         }
-
-        if has_more_pending {
-            // More functions to call - restore state and continue
-            self.composed_call_state = Some(state);
-            self.return_ips.push(self.ip); // Will be handled by next composed return
-        } else {
-            // This is the last function - use original return_ip
-            self.return_ips.push(state.return_ip);
-        }
-
-        self.frames.push(frame);
-        self.ip = func.entry;
-        Ok(true)
     }
 }

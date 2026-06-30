@@ -1,0 +1,17 @@
+[[tests]]
+name = "loops_for_loop_typed"
+file = "for_loop_typed.jl"
+expected = "true\ntrue\n"
+description = "Typed for loops over integer ranges compute correct sums"
+
+[[tests]]
+name = "loops_for_loop_untyped_arg"
+file = "for_loop_untyped_arg.jl"
+expected = "true\n500.0\ntrue\n"
+description = "Untyped-arg F64 for-loop runtime-specializes to the same result as its typed twin (Issue #8205): the specialized body is peephole-fused"
+
+[[tests]]
+name = "loops_for_loop_typed_variable"
+file = "for_loop_typed_variable.jl"
+expected = "10\n15\n(6.0, Float64)\n6\n9.0\n"
+description = "A `::T` annotation on a single loop variable `for i::T in itr` types/converts each iterate value to T (Issue #8208), across range/`=`/array-iterable/cartesian forms"

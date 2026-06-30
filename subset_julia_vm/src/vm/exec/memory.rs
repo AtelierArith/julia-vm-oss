@@ -16,39 +16,38 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use super::DispatchAction;
 use crate::rng::RngLike;
 
 use super::super::error::VmError;
 use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
-use super::super::value::{new_memory_ref, MemoryValue, Value};
+use super::super::value::{new_memory_ref, ArrayElementType, MemoryValue, Value};
 use super::super::Vm;
-
-/// Result of executing a Memory instruction.
-pub(super) enum MemoryResult {
-    /// Instruction not handled by this module
-    NotHandled,
-    /// Instruction handled successfully
-    Handled,
-    /// Return with value (exit run loop)
-    Return(Value),
-}
+use super::array_basic::array_element_type_from_julia_type_resolved;
 
 impl<R: RngLike> Vm<R> {
     /// Execute Memory instructions.
     /// Returns the execution result.
     #[inline]
-    pub(super) fn execute_memory(&mut self, instr: &Instr) -> Result<MemoryResult, VmError> {
+    pub(super) fn execute_memory(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::NewMemory(elem_type, length) => {
                 let mem = MemoryValue::undef_typed(elem_type, *length);
                 self.stack.push(Value::Memory(new_memory_ref(mem)));
-                Ok(MemoryResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::NewMemoryDynamic(elem_type) => {
                 let length = match self.stack.pop_value()? {
-                    Value::I64(n) => n as usize,
+                    Value::I64(n) if n >= 0 => n as usize,
+                    Value::I64(n) => {
+                        self.raise(VmError::TypeError(format!(
+                            "ArgumentError: invalid Memory length: {}",
+                            n
+                        )))?;
+                        return Ok(DispatchAction::Continue);
+                    }
                     Value::U64(n) => n as usize,
                     other => {
                         // INTERNAL: NewMemoryDynamic size is compiler-emitted; integer type on stack is a compiler invariant
@@ -60,7 +59,42 @@ impl<R: RngLike> Vm<R> {
                 };
                 let mem = MemoryValue::undef_typed(elem_type, length);
                 self.stack.push(Value::Memory(new_memory_ref(mem)));
-                Ok(MemoryResult::Handled)
+                Ok(DispatchAction::Continue)
+            }
+
+            Instr::NewMemoryDynamicTyped => {
+                let length = match self.stack.pop_value()? {
+                    Value::I64(n) if n >= 0 => n as usize,
+                    Value::I64(n) => {
+                        self.raise(VmError::TypeError(format!(
+                            "ArgumentError: invalid Memory length: {}",
+                            n
+                        )))?;
+                        return Ok(DispatchAction::Continue);
+                    }
+                    Value::U64(n) => n as usize,
+                    other => {
+                        // INTERNAL: NewMemoryDynamicTyped size is compiler-emitted; integer type on stack is a compiler invariant
+                        return Err(VmError::InternalError(format!(
+                            "Memory size must be an integer, got {:?}",
+                            other
+                        )));
+                    }
+                };
+                let type_val = self.stack.pop_value()?;
+                let elem_type = match type_val {
+                    // Resolve a user-struct element type to a `StructOf` tag so
+                    // `Memory{T}(n)` (and thus `Vector{T}(undef, n)` /
+                    // `similar(Array{T}, dims)`) keeps the concrete eltype
+                    // instead of widening to `Any` (Issue #7304).
+                    Value::DataType(jt) => {
+                        array_element_type_from_julia_type_resolved(&jt, &self.struct_defs)
+                    }
+                    _ => ArrayElementType::Any,
+                };
+                let mem = MemoryValue::undef_typed(&elem_type, length);
+                self.stack.push(Value::Memory(new_memory_ref(mem)));
+                Ok(DispatchAction::Continue)
             }
 
             Instr::MemoryGet => {
@@ -89,7 +123,7 @@ impl<R: RngLike> Vm<R> {
                     VmError::TypeError(format!("BoundsError: Memory access error: {}", e))
                 })?;
                 self.stack.push(value);
-                Ok(MemoryResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::MemorySet => {
@@ -119,7 +153,7 @@ impl<R: RngLike> Vm<R> {
                     VmError::TypeError(format!("BoundsError: Memory access error: {}", e))
                 })?;
                 self.stack.push(Value::Memory(mem));
-                Ok(MemoryResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::MemoryLength => {
@@ -135,18 +169,18 @@ impl<R: RngLike> Vm<R> {
                 };
                 let len = mem.borrow().len();
                 self.stack.push(Value::I64(len as i64));
-                Ok(MemoryResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::LoadMemory(ref name) => {
                 if let Some(frame) = self.frames.last() {
                     if let Some(Value::Memory(m)) = self.load_slot_value_by_name(frame, name) {
                         self.stack.push(Value::Memory(m));
-                        return Ok(MemoryResult::Handled);
+                        return Ok(DispatchAction::Continue);
                     }
                     if let Some(Value::Memory(m)) = frame.locals_any.get(name) {
                         self.stack.push(Value::Memory(m.clone()));
-                        return Ok(MemoryResult::Handled);
+                        return Ok(DispatchAction::Continue);
                     }
                 }
                 // Search global frame
@@ -154,11 +188,11 @@ impl<R: RngLike> Vm<R> {
                     if let Some(frame) = self.frames.first() {
                         if let Some(Value::Memory(m)) = self.load_slot_value_by_name(frame, name) {
                             self.stack.push(Value::Memory(m));
-                            return Ok(MemoryResult::Handled);
+                            return Ok(DispatchAction::Continue);
                         }
                         if let Some(Value::Memory(m)) = frame.locals_any.get(name) {
                             self.stack.push(Value::Memory(m.clone()));
-                            return Ok(MemoryResult::Handled);
+                            return Ok(DispatchAction::Continue);
                         }
                     }
                 }
@@ -171,18 +205,16 @@ impl<R: RngLike> Vm<R> {
             Instr::StoreMemory(name) => {
                 if let Some(Value::Memory(m)) = self.stack.pop() {
                     if let Some(frame) = self.frames.last_mut() {
-                        frame
-                            .locals_any
-                            .insert(name.clone(), Value::Memory(m));
+                        frame.locals_any.insert(name.clone(), Value::Memory(m));
                     }
                 }
-                Ok(MemoryResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::ReturnMemory => {
                 let val = self.stack.pop_value()?;
                 match val {
-                    Value::Memory(_) => Ok(MemoryResult::Return(val)),
+                    Value::Memory(_) => Ok(DispatchAction::Exit(val)),
                     other => Err(VmError::TypeError(format!(
                         "Expected Memory for return, got {:?}",
                         other
@@ -190,7 +222,7 @@ impl<R: RngLike> Vm<R> {
                 }
             }
 
-            _ => Ok(MemoryResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

@@ -123,6 +123,10 @@ pub const ACCUMULATE_JL: &str = include_str!("accumulate.jl");
 /// Combinatorial functions (binomial)
 pub const COMBINATORICS_JL: &str = include_str!("combinatorics.jl");
 
+/// Ordering types and helpers (Base.Order.Forward/Reverse, lt, ord)
+/// Based on Julia's base/ordering.jl
+pub const ORDERING_JL: &str = include_str!("ordering.jl");
+
 /// Sorting algorithms (sort, sortperm, searchsorted, etc.)
 pub const SORT_JL: &str = include_str!("sort.jl");
 
@@ -252,6 +256,13 @@ pub const TASK_JL: &str = include_str!("task.jl");
 /// Based on Julia's base/channels.jl
 pub const CHANNELS_JL: &str = include_str!("channels.jl");
 
+/// asyncmap (Issue #3500) — async/parallel version of map
+/// Based on Julia's base/asyncmap.jl
+/// In SubsetJuliaVM's cooperative single-threaded task model this is
+/// functionally equivalent to `map` but exercises the Task plumbing.
+// Workaround: sequential approximation of asyncmap pending real Task scheduler (Issue #3500)
+pub const ASYNCMAP_JL: &str = include_str!("asyncmap.jl");
+
 /// String to number parsing (parse, tryparse for Int64)
 /// Based on Julia's base/parse.jl
 /// Note: Float64 parsing remains as Rust intrinsic.
@@ -263,12 +274,16 @@ pub const PARSE_JL: &str = include_str!("parse.jl");
 /// Phase 3-4: Indexing + Materialization (Issue #2537-#2543)
 pub const BROADCAST_JL: &str = include_str!("broadcast.jl");
 
+/// Array arithmetic helpers (+, -, etc.)
+/// Based on Julia's base/arraymath.jl
+pub const ARRAYMATH_JL: &str = include_str!("arraymath.jl");
+
 /// Get the complete Base source code.
 /// This concatenates all Julia source files in the correct order.
 /// Order matters: abstract type hierarchy first, then basic types, math, arrays, and higher-order functions.
 pub fn get_base() -> String {
     format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         BOOT_JL,              // 1. Intrinsics + abstract types + Val
         ERROR_JL,             // 2. Exceptions
         PROMOTION_JL,         // 3. Type promotion
@@ -297,19 +312,21 @@ pub fn get_base() -> String {
         GENERICMEMORY_JL,     // 22a. Memory{T} buffer
         RANGE_JL,             // 23. Range
         GENERATOR_JL,         // 24. Generator + traits
-        ITERATORS_JL,         // 25. Iterators
-        ABSTRACTARRAY_JL,     // 26. Abstract array utils (foreach)
+        PAIR_JL,              // 25. Pair
+        ITERATORS_JL,         // 26. Iterators
+        ABSTRACTARRAY_JL,     // 27. Abstract array utils (foreach)
         REDUCE_JL,            // 27. Reductions (+ any/all)
         ACCUMULATE_JL,        // 28. cumsum/cumprod
         COMBINATORICS_JL,     // 29. Combinatorics
+        ORDERING_JL,          // 29a. Base.Order ordering helpers
         SORT_JL,              // 30. Sort
         STRINGS_BASIC_JL,     // 31. Char functions
         STRINGS_SEARCH_JL,    // 32. String search
         STRINGS_UTIL_JL,      // 33. String utils
         STRINGS_UNICODE_JL,   // 33a. Unicode (uppercase, lowercase)
         TUPLE_JL,             // 34. Tuple
-        SET_JL,               // 35. Set
-        DICT_JL,              // 36. Dict
+        DICT_JL,              // 35. Dict (must precede SET_JL: Set{T} wraps Dict{T,Nothing})
+        SET_JL,               // 36. Set (pure-Julia Dict{T,Nothing} wrapper, Issue #6721)
         MACROS_JL,            // 37. Macros
         TIMING_JL,            // 38. Timing macros
         PRINTF_JL,            // 39. Printf macros
@@ -322,7 +339,6 @@ pub fn get_base() -> String {
         REFLECTION_JL,        // 46. Reflection
         RUNTIME_INTERNALS_JL, // 47. Runtime
         VERSION_JL,           // 48. Version
-        PAIR_JL,              // 49. Pair
         PATH_JL,              // 50. Path
         UTIL_JL,              // 51. Util
         DOCS_UTILS_JL,        // 52. Docs
@@ -331,6 +347,8 @@ pub fn get_base() -> String {
         CHANNELS_JL,          // 55. Channel type
         PARSE_JL,             // 56. Parse/tryparse for Int64
         BROADCAST_JL,         // 57. Broadcast infrastructure
+        ARRAYMATH_JL,         // 58. Array arithmetic
+        ASYNCMAP_JL,          // 59. asyncmap (Issue #3500)
     )
 }
 
@@ -451,10 +469,11 @@ mod tests {
 
     #[test]
     fn test_mathconstants() {
-        // Mathematical constants as Float64 values
-        assert!(MATHCONSTANTS_JL.contains("const π = 3.141592653589793"));
+        // Mathematical constants as Julia-compatible Irrational singletons
+        assert!(MATHCONSTANTS_JL.contains("const π = Irrational{:π}()"));
         assert!(MATHCONSTANTS_JL.contains("const pi = π"));
-        assert!(MATHCONSTANTS_JL.contains("const ℯ = 2.718281828459045"));
+        assert!(MATHCONSTANTS_JL.contains("const ℯ = Irrational{:ℯ}()"));
+        assert!(MATHCONSTANTS_JL.contains("module MathConstants"));
         assert!(MATHCONSTANTS_JL.contains("const e = ℯ"));
     }
 
@@ -500,21 +519,20 @@ mod tests {
 
     #[test]
     fn test_array_functions() {
-        // Array{T} Pure Julia struct definition (Issue #2760)
-        // Fields are untyped due to type coercion limitations with parametric field types
-        assert!(ARRAY_JL.contains("mutable struct Array{T}"));
-        assert!(ARRAY_JL.contains("_mem"));
-        assert!(ARRAY_JL.contains("_size"));
+        // Array{T,N} Pure Julia struct definition (Issues #2760/#6648)
+        assert!(ARRAY_JL.contains("mutable struct Array{T,N} <: DenseArray{T,N}"));
+        assert!(ARRAY_JL.contains("ref::MemoryRef{T}"));
+        assert!(ARRAY_JL.contains("size::NTuple{N,Int}"));
         assert!(ARRAY_JL.contains("function prod"));
         assert!(ARRAY_JL.contains("function minimum"));
         assert!(ARRAY_JL.contains("function maximum"));
         assert!(ARRAY_JL.contains("function cat"));
         assert!(ARRAY_JL.contains("function mapslices"));
         // dims keyword argument support (merged into single functions)
-        assert!(ARRAY_JL.contains("function sum(arr; dims=0)"));
-        assert!(ARRAY_JL.contains("function prod(arr; dims=0)"));
-        assert!(ARRAY_JL.contains("function minimum(arr; dims=0)"));
-        assert!(ARRAY_JL.contains("function maximum(arr; dims=0)"));
+        assert!(ARRAY_JL.contains("function sum(arr; dims=0, init=nothing)"));
+        assert!(ARRAY_JL.contains("function prod(arr; dims=0, init=nothing)"));
+        assert!(ARRAY_JL.contains("function minimum(arr; dims=0, init=nothing)"));
+        assert!(ARRAY_JL.contains("function maximum(arr; dims=0, init=nothing)"));
         assert!(ARRAY_JL.contains("function sortslices"));
         // In-place reduction functions (Issue #1964)
         assert!(ARRAY_JL.contains("function sum!"));
@@ -561,6 +579,12 @@ mod tests {
     }
 
     #[test]
+    fn test_arraymath_functions() {
+        assert!(ARRAYMATH_JL.contains("function Base.:+(A::Vector, B::Vector)"));
+        assert!(ARRAYMATH_JL.contains("function Base.:-(A::Vector, B::Vector)"));
+    }
+
+    #[test]
     fn test_combinatorics_functions() {
         assert!(COMBINATORICS_JL.contains("function binomial"));
         // fibonacci, catalan, stirling2, bell were removed - not in Julia Base
@@ -585,6 +609,8 @@ mod tests {
         assert!(ITERATORS_JL.contains("struct Take"));
         assert!(ITERATORS_JL.contains("struct Drop"));
         assert!(ITERATORS_JL.contains("struct EachSlice"));
+        assert!(ITERATORS_JL.contains("module Iterators"));
+        assert!(ITERATORS_JL.contains("const Rest = Base.Rest"));
         assert!(ITERATORS_JL.contains("function collect"));
     }
 
@@ -646,6 +672,62 @@ mod tests {
         assert!(SET_JL.contains("function setdiff"));
         assert!(SET_JL.contains("function issubset"));
         assert!(SET_JL.contains("function symdiff"));
+
+        // Pure Julia Set{T} struct over Dict{T,Nothing} (Issue #6721). Pins the
+        // upstream layering and the Dict-delegating core ops so a future
+        // rename/move fails here instead of silently routing Set construction or
+        // operations back through the legacy native Value::Set carrier. See
+        // docs/vm/BUILTIN_REMOVAL.md "Set → Pure Julia Dict{T,Nothing} Wrapper".
+        assert!(SET_JL.contains("struct Set{T} <: AbstractSet{T}"));
+        assert!(SET_JL.contains("dict::Dict{T,Nothing}"));
+        assert!(SET_JL.contains("push!(s::Set, x) = (s.dict[x] = nothing; s)"));
+        assert!(SET_JL.contains("in(x, s::Set) = haskey(s.dict, x)"));
+        assert!(SET_JL.contains("length(s::Set) = length(s.dict)"));
+        assert!(SET_JL.contains("iterate(s::Set) = iterate(KeySet(s.dict))"));
+        // _set_* HashSet intrinsics are fully removed from the Pure Julia source.
+        assert!(!SET_JL.contains("_set_push!"));
+        assert!(!SET_JL.contains("_set_delete!"));
+        assert!(!SET_JL.contains("_set_length"));
+    }
+
+    #[test]
+    fn test_dict_functions() {
+        // Signature smoke-test for the Dict surface. Pins the bare-vs-parametric
+        // method split that the #6571 migration is reconciling: bare `::Dict`
+        // wrappers serve the Rust-backed Value::Dict, parametric `Dict{K,V}`
+        // methods serve the pure Julia StructRef. Future migration PRs that
+        // rename/move these will fail here instead of silently regressing
+        // dispatch. See docs/vm/BUILTIN_REMOVAL.md "Dict → Pure Julia Migration
+        // Audit (Issue #6571)".
+
+        // Pure Julia Dict{K,V} struct + AbstractDict supertype.
+        assert!(DICT_JL.contains("mutable struct Dict{K,V} <: AbstractDict{K,V}"));
+        assert!(DICT_JL.contains("slots::Memory{UInt8}"));
+        assert!(DICT_JL.contains("keys::Memory{K}"));
+        assert!(DICT_JL.contains("vals::Memory{V}"));
+        assert!(DICT_JL.contains("function _dict_pair_splat_eltypes(ps)"));
+        assert!(DICT_JL.contains("function _dict_iterable_eltypes(kv)"));
+
+        // Bare ::Dict helpers with no parametric counterpart (Issue #6731): the
+        // `_dict_*` carrier wrappers were removed when `Value::Dict` was retired;
+        // the remaining bare helpers are pure and shadowed by `Dict{K,V}` methods.
+        assert!(DICT_JL.contains("pairs(d::Dict) = d"));
+        assert!(DICT_JL.contains("copy(d::Dict) = merge(d, Dict())"));
+        assert!(!DICT_JL.contains("_dict_haskey(d, key)"));
+        assert!(!DICT_JL.contains("_dict_empty!(d)"));
+
+        // Non-literal outer constructors (#6531 surface; #6571 keeps them).
+        assert!(DICT_JL.contains("function Dict(ps::Pair...)"));
+        assert!(DICT_JL.contains("function Dict(kv)"));
+
+        // Parametric Dict{K,V} methods (serve the pure Julia StructRef).
+        assert!(DICT_JL.contains("function setindex!(h::Dict{K,V}, v, key) where {K,V}"));
+        assert!(DICT_JL.contains("function getindex(h::Dict{K,V}, key) where {K,V}"));
+        assert!(DICT_JL.contains("function delete!(h::Dict{K,V}, key) where {K,V}"));
+        assert!(DICT_JL.contains("function empty!(h::Dict{K,V}) where {K,V}"));
+        assert!(DICT_JL.contains("function iterate(h::Dict{K,V}) where {K,V}"));
+        assert!(DICT_JL.contains("keytype(::Type{Dict{K,V}}) where {K,V} = K"));
+        assert!(DICT_JL.contains("valtype(::Type{Dict{K,V}}) where {K,V} = V"));
     }
 
     #[test]
@@ -737,7 +819,9 @@ mod tests {
     fn test_essentials_functions() {
         // Essential functions
         assert!(ESSENTIALS_JL.contains("function ifelse"));
-        assert!(ESSENTIALS_JL.contains("function oftype"));
+        // `oftype` uses the upstream short-form definition with a trailing
+        // `::typeof(x)` type assertion (Issue #5193 / #5109).
+        assert!(ESSENTIALS_JL.contains("oftype(x, y) ="));
     }
 
     #[test]
@@ -793,9 +877,20 @@ mod tests {
     }
 
     #[test]
+    fn test_asyncmap_functions() {
+        // asyncmap (Issue #3500)
+        assert!(ASYNCMAP_JL.contains("function asyncmap(f, a;"));
+        assert!(ASYNCMAP_JL.contains("function asyncmap(f, a, b;"));
+        assert!(ASYNCMAP_JL.contains("ntasks=0"));
+        assert!(ASYNCMAP_JL.contains("batch_size=nothing"));
+    }
+
+    #[test]
     fn test_channel_types() {
-        // Channel type and functions (simplified without type parameters)
-        assert!(CHANNELS_JL.contains("mutable struct Channel"));
+        // Channel{T} parametric mutable struct (Issue #3450)
+        assert!(CHANNELS_JL.contains("mutable struct Channel{T}"));
+        // pending_puts overflow queue for cooperative blocking (Issue #3451)
+        assert!(CHANNELS_JL.contains("pending_puts::Vector{Any}"));
         assert!(CHANNELS_JL.contains("isopen(c::Channel)"));
         assert!(CHANNELS_JL.contains("isbuffered(c::Channel)"));
         assert!(CHANNELS_JL.contains("isfull(c::Channel)"));
@@ -804,13 +899,21 @@ mod tests {
         assert!(CHANNELS_JL.contains("function put!(c::Channel, v)"));
         assert!(CHANNELS_JL.contains("function take!(c::Channel)"));
         assert!(CHANNELS_JL.contains("function fetch(c::Channel)"));
+        assert!(CHANNELS_JL.contains("function empty!(c::Channel)"));
+        assert!(CHANNELS_JL.contains("function bind(c::Channel, task::Task)"));
+        assert!(CHANNELS_JL.contains("function Channel(func::Function"));
     }
 
     #[test]
     fn test_genericmemory_functions() {
         // Memory{T} is now a native Rust primitive type (no struct definition)
         // Only Pure Julia functions that build on top of the native type remain
-        assert!(GENERICMEMORY_JL.contains("function copy(m::Memory)"));
+        assert!(GENERICMEMORY_JL.contains("function size(m::Memory)"));
+        assert!(GENERICMEMORY_JL.contains("function ndims(m::Memory)"));
+        assert!(GENERICMEMORY_JL.contains("function similar(m::Memory{T}) where T"));
+        assert!(GENERICMEMORY_JL.contains("function unsafe_copyto!(dest::Memory"));
+        assert!(GENERICMEMORY_JL.contains("function copy(m::Memory{T}) where T"));
+        assert!(GENERICMEMORY_JL.contains("function copyto!(dest::Memory"));
     }
 
     /// Test that all .jl files in src/julia/base/ are either loaded or explicitly excluded.
@@ -839,6 +942,8 @@ mod tests {
             "abstractarray.jl",
             "accumulate.jl",
             "array.jl",
+            "arraymath.jl",
+            "asyncmap.jl",
             "bool.jl",
             "boot.jl",
             "broadcast.jl",
@@ -870,6 +975,7 @@ mod tests {
             "multimedia.jl",
             "number.jl",
             "operators.jl",
+            "ordering.jl",
             "pair.jl",
             "parse.jl",
             "path.jl",
@@ -947,7 +1053,7 @@ mod tests {
         // This catches typos in the loaded_files list
         assert_eq!(
             loaded_files.len(),
-            62,
+            65,
             "loaded_files count mismatch - update test when adding new files"
         );
     }

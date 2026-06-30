@@ -40,9 +40,16 @@ pub enum DiagnosticReason {
     /// Contains the complexity level.
     UnionTooComplex(usize),
 
+    /// Union-split method-call enumeration exceeded the inference budget.
+    /// Contains (expanded variants, maximum variants).
+    UnionSplitTooLarge { variants: usize, max: usize },
+
     /// Recursive function cycle detected during interprocedural analysis.
     /// Contains the function name(s) involved in the cycle.
     RecursiveCycle(Vec<String>),
+
+    /// Inference result was returned with limited accuracy.
+    LimitedAccuracy { function: String, reason: String },
 
     /// Fixed-point divergence: IPO iterations didn't converge.
     /// Contains the number of iterations before giving up.
@@ -91,8 +98,18 @@ impl std::fmt::Display for DiagnosticReason {
                     n, MAX_UNION_COMPLEXITY
                 )
             }
+            DiagnosticReason::UnionSplitTooLarge { variants, max } => {
+                write!(
+                    f,
+                    "union split would enumerate {} variants (max {})",
+                    variants, max
+                )
+            }
             DiagnosticReason::RecursiveCycle(names) => {
                 write!(f, "recursive cycle: {}", names.join(" -> "))
+            }
+            DiagnosticReason::LimitedAccuracy { function, reason } => {
+                write!(f, "limited accuracy for '{}': {}", function, reason)
             }
             DiagnosticReason::FixedPointDivergence(iters) => {
                 write!(
@@ -259,11 +276,32 @@ pub fn emit_union_widened(reason: DiagnosticReason) {
     DiagnosticsCollector::emit(TypeInferenceDiagnostic::new(reason).with_widened_to("Any"));
 }
 
+/// Helper function to emit a union-splitting bailout diagnostic.
+pub fn emit_union_split_bailout(variants: usize, max: usize, context: impl Into<String>) {
+    DiagnosticsCollector::emit(
+        TypeInferenceDiagnostic::new(DiagnosticReason::UnionSplitTooLarge { variants, max })
+            .with_context(context)
+            .with_widened_to("Any"),
+    );
+}
+
 /// Helper function to emit a recursive cycle diagnostic.
 pub fn emit_recursive_cycle(function_names: Vec<String>) {
     DiagnosticsCollector::emit(TypeInferenceDiagnostic::new(
         DiagnosticReason::RecursiveCycle(function_names),
     ));
+}
+
+/// Helper function to emit a limited-accuracy diagnostic.
+pub fn emit_limited_accuracy(function_name: &str, reason: &str, widened_to: &str) {
+    DiagnosticsCollector::emit(
+        TypeInferenceDiagnostic::new(DiagnosticReason::LimitedAccuracy {
+            function: function_name.to_string(),
+            reason: reason.to_string(),
+        })
+        .with_context(format!("call to {}", function_name))
+        .with_widened_to(widened_to),
+    );
 }
 
 /// Helper function to emit a fixed-point divergence diagnostic.
@@ -353,6 +391,14 @@ mod tests {
         assert_eq!(
             DiagnosticReason::RecursiveCycle(vec!["a".to_string(), "b".to_string()]).to_string(),
             "recursive cycle: a -> b"
+        );
+        assert_eq!(
+            DiagnosticReason::LimitedAccuracy {
+                function: "f".to_string(),
+                reason: "iteration limit".to_string(),
+            }
+            .to_string(),
+            "limited accuracy for 'f': iteration limit"
         );
     }
 

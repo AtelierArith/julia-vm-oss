@@ -182,7 +182,7 @@ impl CallGraph {
 }
 
 /// Extract all function names called within a block of code.
-fn extract_called_functions(block: &Block) -> HashSet<String> {
+pub(crate) fn extract_called_functions(block: &Block) -> HashSet<String> {
     let mut called = HashSet::new();
     for stmt in &block.stmts {
         extract_calls_from_stmt(stmt, &mut called);
@@ -340,7 +340,11 @@ fn extract_calls_from_stmt(stmt: &Stmt, called: &mut HashSet<String>) {
             extract_calls_from_expr(key, called);
             extract_calls_from_expr(value, called);
         }
-        Stmt::Using { .. } | Stmt::Export { .. } | Stmt::FunctionDef { .. } => {
+        Stmt::Using { .. }
+        | Stmt::Export { .. }
+        | Stmt::FunctionDef { .. }
+        | Stmt::EvalFunctionDef { .. }
+        | Stmt::Meta { .. } => {
             // These don't contain expression calls in the same sense
         }
         Stmt::Label { .. } | Stmt::Goto { .. } => {
@@ -348,6 +352,9 @@ fn extract_calls_from_stmt(stmt: &Stmt, called: &mut HashSet<String>) {
         }
         Stmt::EnumDef { .. } => {
             // Enum definitions don't contain function calls
+        }
+        Stmt::Global { .. } => {
+            // `global x` declarations don't contain function calls
         }
     }
 }
@@ -505,7 +512,14 @@ fn extract_calls_from_expr(expr: &Expr, called: &mut HashSet<String>) {
                 extract_calls_from_expr(arg, called);
             }
         }
-        Expr::DynamicTypeConstruct { type_args, .. } => {
+        Expr::DynamicTypeConstruct {
+            base_expr,
+            type_args,
+            ..
+        } => {
+            if let Some(base_expr) = base_expr {
+                extract_calls_from_expr(base_expr, called);
+            }
             // Type args may contain function calls like promote_type(T, S)
             for arg in type_args {
                 extract_calls_from_expr(arg, called);
@@ -556,6 +570,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         }
     }
@@ -575,6 +590,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         }
     }

@@ -18,6 +18,7 @@ pub(super) fn stmt_variant_name(stmt: &Stmt) -> &'static str {
         Stmt::Try { .. } => "Try",
         Stmt::Return { .. } => "Return",
         Stmt::Expr { .. } => "Expr",
+        Stmt::Meta { .. } => "Meta",
         Stmt::Timed { .. } => "Timed",
         Stmt::Test { .. } => "Test",
         Stmt::TestSet { .. } => "TestSet",
@@ -29,9 +30,11 @@ pub(super) fn stmt_variant_name(stmt: &Stmt) -> &'static str {
         Stmt::Using { .. } => "Using",
         Stmt::Export { .. } => "Export",
         Stmt::FunctionDef { .. } => "FunctionDef",
+        Stmt::EvalFunctionDef { .. } => "EvalFunctionDef",
         Stmt::Label { .. } => "Label",
         Stmt::Goto { .. } => "Goto",
         Stmt::EnumDef { .. } => "EnumDef",
+        Stmt::Global { .. } => "Global",
     }
 }
 

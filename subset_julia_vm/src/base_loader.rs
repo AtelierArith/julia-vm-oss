@@ -16,8 +16,8 @@ use std::sync::RwLock;
 static BASE_MACROS: Lazy<RwLock<HashMap<String, Vec<StoredMacroDef>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-fn base_macros_write(
-) -> std::sync::RwLockWriteGuard<'static, HashMap<String, Vec<StoredMacroDef>>> {
+fn base_macros_write() -> std::sync::RwLockWriteGuard<'static, HashMap<String, Vec<StoredMacroDef>>>
+{
     BASE_MACROS
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -62,6 +62,9 @@ fn register_base_macros(program: &Program) {
             param_types,
             has_varargs: macro_def.has_varargs,
             body: macro_def.body.clone(),
+            expansion_functions: vec![],
+            expansion_structs: vec![],
+            hygiene: None,
             span: macro_def.span,
         };
         registry
@@ -83,7 +86,10 @@ pub fn has_base_macro(name: &str) -> bool {
 pub fn get_base_macro(name: &str) -> Option<StoredMacroDef> {
     // Ensure base program is loaded (which populates the registry)
     let _ = get_base_program();
-    base_macros_read().get(name).and_then(|v| v.first()).cloned()
+    base_macros_read()
+        .get(name)
+        .and_then(|v| v.first())
+        .cloned()
 }
 
 /// Get a macro from the Base registry by name and arity.
@@ -116,6 +122,30 @@ mod tests {
     #[test]
     fn test_base_program_loads() {
         let program = get_base_program();
+        if program.is_none() {
+            // Show the actual lowering error for debugging
+            let source = crate::base::get_base();
+            use crate::lowering::Lowering;
+            use crate::parser::Parser;
+            let mut parser = Parser::new().expect("parser init");
+            let parse_outcome = parser.parse(&source).expect("parse failed");
+            let mut lowering = Lowering::new(&source);
+            let result = lowering.lower(parse_outcome);
+            match result {
+                Ok(_) => println!("Lowering succeeded but static cache failed"),
+                Err(e) => {
+                    println!("Lowering error: {:?}", e);
+                    // Print source context around the error
+                    let start = e.span.start.saturating_sub(200);
+                    let end = (e.span.end + 200).min(source.len());
+                    let ctx = &source[start..end];
+                    println!(
+                        "Source context (chars {}-{}):\n---\n{}\n---",
+                        start, end, ctx
+                    );
+                }
+            }
+        }
         assert!(program.is_some(), "Base program should load");
     }
 

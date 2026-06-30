@@ -10,6 +10,9 @@ using Test
     @assert isbits(true)
     @assert isbits('a')
     @assert isbits(nothing)
+    @assert isbits(missing)
+    @assert isbits(UInt8(1))
+    @assert isbits(Float16(1))
 
     # isbits returns false for non-bits values
     @assert !isbits("hello")
@@ -21,10 +24,17 @@ using Test
     @assert isbitstype(Bool)
     @assert isbitstype(Char)
     @assert isbitstype(Nothing)
+    @assert isbitstype(Missing)
+    @assert isbitstype(UInt8)
+    @assert isbitstype(Int128)
+    @assert isbitstype(Float16)
 
     # isbitstype returns false for non-bits types
     @assert !isbitstype(String)
     @assert !isbitstype(Array)
+    @assert !isbitstype(Symbol)
+    @assert !isbitstype(BigInt)
+    @assert !isbitstype(BigFloat)
 
     @test (true)
 end

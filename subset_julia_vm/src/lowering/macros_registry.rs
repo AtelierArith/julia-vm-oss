@@ -1,4 +1,6 @@
-use crate::ir::core::Block;
+use std::collections::HashSet;
+
+use crate::ir::core::{Block, Function, StructDef};
 use crate::parser::cst::{CstWalker, Node, NodeKind};
 use crate::span::Span;
 
@@ -15,6 +17,14 @@ pub enum MacroParamType {
     LineNumberNode,
 }
 
+/// Module metadata needed when expanding a module-defined macro.
+#[derive(Debug, Clone)]
+pub struct MacroHygieneInfo {
+    pub module: String,
+    pub members: HashSet<String>,
+    pub exports: HashSet<String>,
+}
+
 /// Stored macro definition for expansion during lowering.
 #[derive(Debug, Clone)]
 pub struct StoredMacroDef {
@@ -22,6 +32,9 @@ pub struct StoredMacroDef {
     pub param_types: Vec<MacroParamType>,
     pub has_varargs: bool,
     pub body: Block,
+    pub expansion_functions: Vec<Function>,
+    pub expansion_structs: Vec<StructDef>,
+    pub hygiene: Option<MacroHygieneInfo>,
     pub span: Span,
 }
 

@@ -26,6 +26,13 @@ using Test
 
     # Check struct type
     @test typeof(v1) == VersionNumber
+
+    # VersionNumber comparison (Issue #7529)
+    @test v"1.2.3" == VersionNumber(1, 2, 3)
+    @test v"1.2.3" < v"1.2.4"
+    @test v"1.2.3" <= v"1.2.3"
+    @test v"1.3.0" > v"1.2.9"
+    @test VERSION >= v"0.1.0"
 end
 
 true

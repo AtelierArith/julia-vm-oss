@@ -6,21 +6,64 @@
 
 use crate::rng::RngInstance;
 use half::f16;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-use super::array_element::ArrayElementType;
-use super::container::{
-    ComposedFunctionValue, DictValue, ExprValue, GeneratorValue, NamedTupleValue, PairsValue,
-    SetValue,
+use super::array_element::{
+    array_element_type_to_julia_type, julia_array_type_for_ndims, ArrayElementType,
 };
+use super::composed_function::ComposedFunctionValue;
+use super::expr::ExprValue;
+use super::generator::GeneratorValue;
 use super::io::IORef;
 use super::macro_::{GlobalRefValue, LineNumberNodeValue, SymbolValue};
-use super::memory_value::MemoryRef;
+use super::memory_value::{MemoryRef, MemoryRefValue};
 use super::metadata::{ClosureValue, FunctionValue, ModuleValue};
-use super::range::RangeValue;
+use super::named_tuple::NamedTupleValue;
+use super::pairs::PairsValue;
+use super::range::{RangeElementType, RangeValue};
 use super::regex::{RegexMatchValue, RegexValue};
+use super::static_real::StaticRealValue;
 use super::struct_instance::StructInstance;
 use super::tuple::TupleValue;
 use super::{ArrayRef, RustBigFloat, RustBigInt, BIGFLOAT_PRECISION};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RuntimeTypeVarValue {
+    pub id: u64,
+    pub name: String,
+    pub lower_bound: crate::types::JuliaType,
+    pub upper_bound: crate::types::JuliaType,
+}
+
+impl RuntimeTypeVarValue {
+    pub fn projection(&self) -> crate::types::JuliaType {
+        let upper = if matches!(self.upper_bound, crate::types::JuliaType::Any) {
+            None
+        } else {
+            Some(self.upper_bound.name().to_string())
+        };
+        crate::types::JuliaType::TypeVar(self.name.clone(), upper)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RuntimeTypeNameValue {
+    pub name: String,
+}
+
+/// Interior-mutable reference cell backing `Base.RefValue{T}` (Issue #5130).
+///
+/// `Rc<RefCell<Value>>` gives `Ref` proper reference semantics: `r[] = v`
+/// mutates the boxed value in place, and aliases observe the update — matching
+/// upstream Julia's mutable single-element `RefValue` container. It also keeps
+/// serving as the broadcast scalar wrapper (`isa(x, Ref)` is true).
+pub type RefCellRef = Rc<RefCell<Value>>;
+
+/// Construct a fresh `Ref` value wrapping `inner` (Issue #5130).
+pub fn new_ref(inner: Value) -> Value {
+    Value::Ref(Rc::new(RefCell::new(inner)))
+}
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -46,30 +89,41 @@ pub enum Value {
     BigFloat(RustBigFloat), // Arbitrary precision float
     // String types
     Str(String),
-    Char(char),                        // Julia's Char type (32-bit Unicode codepoint)
-    Nothing,                           // Julia's `nothing` value (singleton of type Nothing)
-    Missing,                           // Julia's `missing` value (singleton of type Missing)
-    Undef,                             // Julia's #undef - uninitialized field value
-    Array(ArrayRef),                   // N-dimensional array (shared, mutable)
-    Memory(MemoryRef),                 // Flat typed memory buffer (Memory{T})
-    Range(RangeValue),                 // Lazy range (start:step:stop)
-    SliceAll,                          // ':' slice marker for indexing
-    Struct(StructInstance),            // User-defined struct (immutable), also Complex numbers
-    StructRef(usize),                  // Mutable struct reference (heap index)
-    Rng(RngInstance),                  // RNG instance (StableRNG/Xoshiro)
-    Tuple(TupleValue),                 // Immutable tuple
-    NamedTuple(NamedTupleValue),       // Named tuple
-    Pairs(PairsValue),                 // Base.Pairs (for kwargs...)
-    Dict(Box<DictValue>),               // Dictionary (boxed: 144->8 bytes)
-    Set(SetValue),                     // Set (unique elements)
-    Ref(Box<Value>), // Ref wrapper - protects value from broadcasting (treated as scalar)
-    Generator(GeneratorValue), // Lazy generator (Julia-compatible)
-    DataType(crate::types::JuliaType), // DataType - the type of types (returned by typeof)
-    Module(Box<ModuleValue>), // Julia module (boxed: 72->8 bytes)
-    Function(FunctionValue), // Julia function object
-    Closure(ClosureValue), // Julia closure with captured variables
-    ComposedFunction(ComposedFunctionValue), // Composed function (f ∘ g)
-    IO(IORef),       // IO stream for print/show operations (interior mutability)
+    Char(char), // Julia's Char type (32-bit Unicode codepoint)
+    Nothing,    // Julia's `nothing` value (singleton of type Nothing)
+    Missing,    // Julia's `missing` value (singleton of type Missing)
+    Undef,      // Julia's #undef - uninitialized field value
+    // Reference-counted (`Rc<RefCell<ArrayValue>>`) mutable array carrier. Its
+    // sole runtime origin is `expr.args` — the mutable `Vector{Any}` AST args of
+    // an `Expr`, which need auto-freed reference semantics (`struct_heap` has no
+    // per-value GC, so a heap-`StructRef` wrapper would leak one slot per
+    // transient `Expr` node). All *general* array values are the MemoryRef-backed
+    // pure-Julia `Array{T,N}` wrapper; this carrier is confined to the `expr.args`
+    // representation (and the generic array ops a `Vector{Any}` flows through).
+    // Accessed via the `native_array_*` carrier helpers in `value/array_value`.
+    // (Renamed from `NativeArray`, Issue #6807.)
+    ExprArgs(ArrayRef),
+    Memory(MemoryRef),                      // Flat typed memory buffer (Memory{T})
+    MemoryRef(Box<MemoryRefValue>),         // Offset reference into Memory{T} (MemoryRef{T})
+    Range(RangeValue),                      // Lazy range (start:step:stop)
+    SliceAll,                               // ':' slice marker for indexing
+    Struct(StructInstance),                 // User-defined struct (immutable), also Complex numbers
+    StructRef(usize),                       // Mutable struct reference (heap index)
+    Rng(RngInstance),                       // RNG instance (StableRNG/Xoshiro/MersenneTwister)
+    Tuple(TupleValue),                      // Immutable tuple
+    SimpleVector(TupleValue), // Core.SimpleVector (svec) - returned by <DataType>.parameters (Issue #4722)
+    NamedTuple(NamedTupleValue), // Named tuple
+    Pairs(PairsValue),        // Base.Pairs (for kwargs...)
+    Ref(RefCellRef), // Base.RefValue{T} - mutable single-element box (Issue #5130); also protects value from broadcasting (treated as scalar)
+    Generator(Box<GeneratorValue>), // Lazy generator (boxed: 104->8 bytes, Issue #5171)
+    DataType(Box<crate::types::JuliaType>), // DataType (boxed: 56->8 bytes, Issue #7977/#7966)
+    RuntimeTypeVar(Box<RuntimeTypeVarValue>), // Fresh TypeVar object with identity
+    RuntimeTypeName(Box<RuntimeTypeNameValue>), // TypeName identity exposed by DataType.name (Issue #8451)
+    Module(Box<ModuleValue>),                   // Julia module (boxed: 72->8 bytes)
+    Function(FunctionValue),                    // Julia function object
+    Closure(ClosureValue),                      // Julia closure with captured variables
+    ComposedFunction(ComposedFunctionValue),    // Composed function (f ∘ g)
+    IO(IORef), // IO stream for print/show operations (interior mutability)
     // Macro system types
     Symbol(SymbolValue),   // Julia Symbol (:foo) - quoted identifier
     Expr(ExprValue),       // Julia Expr - AST node for metaprogramming
@@ -77,13 +131,21 @@ pub enum Value {
     LineNumberNode(LineNumberNodeValue), // LineNumberNode - source location debug info
     GlobalRef(GlobalRefValue), // GlobalRef - reference to global variable in a module
     // Regex types
-    Regex(RegexValue), // Julia Regex - compiled regular expression pattern
+    Regex(Box<RegexValue>), // Julia Regex (boxed: 56->8 bytes, Issue #7966)
     RegexMatch(Box<RegexMatchValue>), // Julia RegexMatch (boxed: 80->8 bytes)
     // Enum type (from @enum macro)
     Enum {
         type_name: String, // The enum type (e.g., "Color")
         value: i64,        // The integer value
     },
+    // Flat representation for small SVector{N,T} / SMatrix{M,N,T}
+    // (Issue #7964 Phase 1). Eliminates heap Vec<Value> tuple boxing and
+    // struct_heap growth in hot loops.
+    StaticArray(Box<StaticRealValue>),
+    // Zero-allocation inline storage for small N≤4 StaticArrays (Issue #7964
+    // Phase 3). `StaticArrayInlineData` is `Copy` (40-byte payload), so no
+    // heap allocation occurs on push/pop. Supersedes `StaticArray` for N≤4.
+    StaticArrayInline(crate::vm::value::static_real::StaticArrayInlineData),
 }
 
 /// Helper enum for serializing the subset of Value variants that are serializable.
@@ -183,6 +245,17 @@ impl<'de> serde::Deserialize<'de> for Value {
 impl Value {
     /// Get the runtime type of this value as a JuliaType.
     pub fn runtime_type(&self) -> crate::types::JuliaType {
+        // Route the legacy native-array carrier through the shared
+        // `super::array_value::native_array_value_ref` helper so the match
+        // below no longer holds a native-array arm (Issue #3908).
+        if let Some(arr_ref) = super::array_value::native_array_value_ref(self) {
+            let arr = arr_ref.borrow();
+            if let Some(container_type) = arr.array_type_override() {
+                return crate::types::JuliaType::Struct(container_type.to_string());
+            }
+            let elem_type = array_element_type_to_julia_type(&arr.element_type());
+            return julia_array_type_for_ndims(elem_type, arr.shape.len());
+        }
         match self {
             // Signed integers
             Value::I8(_) => crate::types::JuliaType::Int8,
@@ -209,106 +282,103 @@ impl Value {
             Value::Nothing => crate::types::JuliaType::Nothing,
             Value::Missing => crate::types::JuliaType::Missing,
             Value::Undef => crate::types::JuliaType::Any, // #undef has no type
-            Value::Array(arr) => {
-                let arr = arr.borrow();
-                // Determine element type
-                let elem_type = match arr.element_type() {
-                    ArrayElementType::F32 => crate::types::JuliaType::Float32,
-                    ArrayElementType::F64 => crate::types::JuliaType::Float64,
-                    ArrayElementType::ComplexF32 => {
-                        crate::types::JuliaType::Struct("Complex{Float32}".to_string())
-                    }
-                    ArrayElementType::ComplexF64 => {
-                        crate::types::JuliaType::Struct("Complex{Float64}".to_string())
-                    }
-                    ArrayElementType::I8 => crate::types::JuliaType::Int8,
-                    ArrayElementType::I16 => crate::types::JuliaType::Int16,
-                    ArrayElementType::I32 => crate::types::JuliaType::Int32,
-                    ArrayElementType::I64 => crate::types::JuliaType::Int64,
-                    ArrayElementType::U8 => crate::types::JuliaType::UInt8,
-                    ArrayElementType::U16 => crate::types::JuliaType::UInt16,
-                    ArrayElementType::U32 => crate::types::JuliaType::UInt32,
-                    ArrayElementType::U64 => crate::types::JuliaType::UInt64,
-                    ArrayElementType::Bool => crate::types::JuliaType::Bool,
-                    ArrayElementType::String => crate::types::JuliaType::String,
-                    ArrayElementType::Char => crate::types::JuliaType::Char,
-                    ArrayElementType::StructOf(_type_id) => {
-                        // For StructOf arrays, we need to get the struct name from struct_defs
-                        // However, runtime_type() doesn't have access to struct_defs
-                        // So we return Any here - typeof() in builtins_exec.rs will handle it correctly
-                        crate::types::JuliaType::Any
-                    }
-                    ArrayElementType::StructInlineOf(_type_id, _) => {
-                        // For isbits struct arrays, same handling as StructOf
-                        crate::types::JuliaType::Any
-                    }
-                    ArrayElementType::Struct => crate::types::JuliaType::Any, // Struct arrays have dynamic element type
-                    ArrayElementType::Any => crate::types::JuliaType::Any,
-                    ArrayElementType::TupleOf(ref field_types) => {
-                        // Convert field types to Julia types for Tuple type representation
-                        let type_names: Vec<String> = field_types
-                            .iter()
-                            .map(|ft| match ft {
-                                ArrayElementType::I64 => "Int64".to_string(),
-                                ArrayElementType::F64 => "Float64".to_string(),
-                                ArrayElementType::Bool => "Bool".to_string(),
-                                ArrayElementType::String => "String".to_string(),
-                                ArrayElementType::Char => "Char".to_string(),
-                                _ => "Any".to_string(),
-                            })
-                            .collect();
-                        crate::types::JuliaType::Struct(format!(
-                            "Tuple{{{}}}",
-                            type_names.join(", ")
-                        ))
-                    }
-                };
-                // Determine array type based on dimensionality
-                match arr.shape.len() {
-                    1 => crate::types::JuliaType::VectorOf(Box::new(elem_type)),
-                    2 => crate::types::JuliaType::MatrixOf(Box::new(elem_type)),
-                    _ => crate::types::JuliaType::Array, // 3D+ arrays remain as Array
-                }
-            }
             Value::Memory(mem) => {
                 let mem = mem.borrow();
                 let elem_type_name = mem.element_type().julia_type_name();
                 crate::types::JuliaType::Struct(format!("Memory{{{}}}", elem_type_name))
             }
+            Value::MemoryRef(memref) => crate::types::JuliaType::Struct(memref.julia_type_name()),
             Value::Range(r) => {
-                if r.is_float {
-                    crate::types::JuliaType::Struct("StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}".to_string())
+                // Issue #3550: report `UnitRange{T}` / `StepRange{T,T}` parametric
+                // types when the range carries a typed element tag, matching
+                // official Julia.
+                let elem_name = match r.element_type {
+                    RangeElementType::Default => {
+                        if r.is_float {
+                            "Float64"
+                        } else {
+                            "Int64"
+                        }
+                    }
+                    other => other.julia_type_name(),
+                };
+                let is_explicit_float = matches!(
+                    r.element_type,
+                    RangeElementType::Float32 | RangeElementType::Float64
+                ) || (matches!(r.element_type, RangeElementType::Default)
+                    && r.is_float);
+                if is_explicit_float {
+                    crate::types::JuliaType::Struct(format!(
+                        "StepRangeLen{{{e}, Base.TwicePrecision{{{e}}}, Base.TwicePrecision{{{e}}}, Int64}}",
+                        e = elem_name
+                    ))
+                } else if matches!(r.element_type, RangeElementType::Char) {
+                    // Char ranges in upstream Julia are always
+                    // `StepRange{Char, Int64}` (never `UnitRange{Char}`),
+                    // because `:` over non-numeric types defaults to the
+                    // explicit-step form and Char arithmetic uses Int
+                    // steps (Char + Int = Char). Reporting
+                    // `UnitRange{Char}` for the step-1 case caused
+                    // `repr('a':'e')` to dispatch to `show(::UnitRange)`
+                    // and emit `'a':'e'` instead of `'a':1:'e'`
+                    // (Issue #4830, follow-up to #4795).
+                    crate::types::JuliaType::Struct("StepRange{Char, Int64}".to_string())
                 } else if r.is_unit_range() {
-                    crate::types::JuliaType::UnitRange
+                    crate::types::JuliaType::Struct(format!("UnitRange{{{}}}", elem_name))
                 } else {
-                    crate::types::JuliaType::StepRange
+                    crate::types::JuliaType::Struct(format!(
+                        "StepRange{{{}, {}}}",
+                        elem_name, elem_name
+                    ))
                 }
             }
             Value::SliceAll => crate::types::JuliaType::Any,
             Value::Struct(s) => {
                 // Complex numbers are now Pure Julia structs, not a primitive type
-                if s.struct_name.is_empty() {
+                if let Some(array_type) = s.array_wrapper_julia_type() {
+                    array_type
+                } else if s.struct_name.is_empty() {
                     crate::types::JuliaType::Any
                 } else {
-                    crate::types::JuliaType::Struct(s.struct_name.clone())
+                    crate::types::JuliaType::Struct(s.struct_name.to_string())
                 }
             }
             Value::StructRef(_) => crate::types::JuliaType::Any, // StructRef needs VM context to resolve
-            Value::Rng(_) => crate::types::JuliaType::Any,
+            // typeof(rng): report the concrete RNG type. The global handle
+            // (default_rng()/GLOBAL_RNG) reports as TaskLocalRNG (Issues #7230, #7231).
+            Value::Rng(rng) => crate::types::JuliaType::Struct(
+                match rng {
+                    RngInstance::Stable(_) => "StableRNG",
+                    RngInstance::Xoshiro(_) => "Xoshiro",
+                    RngInstance::Mersenne(_) => "MersenneTwister",
+                    RngInstance::Global => "TaskLocalRNG",
+                }
+                .to_string(),
+            ),
             Value::Tuple(t) => {
                 let element_types: Vec<crate::types::JuliaType> =
                     t.elements.iter().map(|e| e.runtime_type()).collect();
                 crate::types::JuliaType::TupleOf(element_types)
             }
+            // Issue #4722: typeof(<DataType>.parameters) === Core.SimpleVector.
+            Value::SimpleVector(_) => {
+                crate::types::JuliaType::Struct("Core.SimpleVector".to_string())
+            }
             Value::NamedTuple(_) => crate::types::JuliaType::NamedTuple,
-            Value::Dict(_) => crate::types::JuliaType::Dict,
-            Value::Set(_) => crate::types::JuliaType::Set, // Set{Any} type
-            Value::Ref(inner) => inner.runtime_type(),     // Ref has type of inner value
+            Value::Ref(inner) => {
+                // Base.RefValue{T}: typeof(Ref(5)) === Base.RefValue{Int64} (Issue #5130)
+                let inner_ty = inner.borrow().runtime_type();
+                crate::types::JuliaType::Struct(format!("Base.RefValue{{{}}}", inner_ty))
+            }
             Value::Generator(_) => crate::types::JuliaType::Generator, // Generator type
             Value::DataType(_) => crate::types::JuliaType::DataType, // typeof(typeof(x)) == DataType
-            Value::Module(_) => crate::types::JuliaType::Module,     // typeof(Statistics) == Module
-            Value::Function(_) => crate::types::JuliaType::Function, // Functions are subtypes of Function
-            Value::Closure(_) => crate::types::JuliaType::Function,  // Closures are also Functions
+            Value::RuntimeTypeVar(_) => crate::types::JuliaType::Struct("TypeVar".to_string()),
+            Value::RuntimeTypeName(_) => {
+                crate::types::JuliaType::Struct("Core.TypeName".to_string())
+            }
+            Value::Module(_) => crate::types::JuliaType::Module, // typeof(Statistics) == Module
+            Value::Function(f) => crate::types::JuliaType::Struct(format!("typeof({})", f.name)), // callable singleton <: Function
+            Value::Closure(_) => crate::types::JuliaType::Function, // Closures are also Functions
             Value::ComposedFunction(_) => crate::types::JuliaType::Function, // Composed functions are also Functions
             Value::IO(_) => crate::types::JuliaType::IOBuffer, // IO stream type (concrete)
             // Macro system types
@@ -321,11 +391,30 @@ impl Value {
             Value::Regex(_) => crate::types::JuliaType::Struct("Regex".to_string()),
             Value::RegexMatch(_) => crate::types::JuliaType::Struct("RegexMatch".to_string()),
             Value::Enum { type_name, .. } => crate::types::JuliaType::Enum(type_name.clone()),
+            // Flat static-array representation (Issue #7964): reports the same
+            // concrete Julia type as the Struct+Tuple representation it replaces.
+            Value::StaticArray(sv) => {
+                crate::types::JuliaType::Struct(sv.julia_type_name().to_string())
+            }
+            Value::StaticArrayInline(sv) => {
+                crate::types::JuliaType::Struct(sv.julia_type_name_owned().to_string())
+            }
+            // The legacy native-array carrier is filtered out by the
+            // early-return above (Issue #3908). This wildcard satisfies
+            // Rust's exhaustiveness checking and provides a safe default for
+            // any future `Value` variant: return `Any`.
+            _ => crate::types::JuliaType::Any,
         }
     }
 
     /// Get the ValueType of this value.
     pub fn value_type(&self) -> ValueType {
+        // Route the legacy native-array carrier through the shared
+        // `super::array_value::native_array_value_ref` helper so the match
+        // below no longer holds a native-array arm (Issue #3908).
+        if super::array_value::is_native_array_value(self) {
+            return ValueType::Array;
+        }
         match self {
             // Signed integers
             Value::I8(_) => ValueType::I8,
@@ -354,25 +443,22 @@ impl Value {
             Value::Nothing => ValueType::Nothing,
             Value::Missing => ValueType::Missing,
             Value::Undef => ValueType::Any, // #undef has no specific type
-            Value::Array(_) => ValueType::Array,
-            Value::Memory(ref m) => {
-                ValueType::MemoryOf(m.borrow().element_type.clone())
-            }
+            Value::Memory(ref m) => ValueType::MemoryOf(m.borrow().element_type.clone()),
+            Value::MemoryRef(_) => ValueType::Any,
             Value::Range(_) => ValueType::Range,
             Value::SliceAll => ValueType::Array,
-            Value::Struct(s) => {
-                // Complex numbers are now Pure Julia structs, not a primitive type
-                ValueType::Struct(s.type_id)
-            }
+            Value::Struct(s) => value_type_for_struct_instance(s),
             Value::StructRef(_) => ValueType::Any, // StructRef type is dynamic
             Value::Rng(_) => ValueType::Rng,
             Value::Tuple(_) => ValueType::Tuple,
             Value::NamedTuple(_) => ValueType::NamedTuple,
-            Value::Dict(_) => ValueType::Dict,
-            Value::Set(_) => ValueType::Set,
-            Value::Ref(inner) => inner.value_type(), // Ref has type of inner value
+            // Coarse ValueType tag: Ref keeps reporting the inner value's tag so the
+            // existing broadcast/dispatch special-casing of `Value::Ref(_)` keeps working.
+            // The precise `Base.RefValue{T}` type is reported by `runtime_type()` (Issue #5130).
+            Value::Ref(inner) => inner.borrow().value_type(),
             Value::Generator(_) => ValueType::Generator,
-            Value::DataType(_) => ValueType::DataType,
+            Value::DataType(_) | Value::RuntimeTypeVar(_) => ValueType::DataType,
+            Value::RuntimeTypeName(_) => ValueType::Any,
             Value::Module(_) => ValueType::Module,
             Value::Function(_) => ValueType::Function,
             Value::Closure(_) => ValueType::Function, // Closures are Functions at the type level
@@ -391,6 +477,14 @@ impl Value {
             Value::RegexMatch(_) => ValueType::RegexMatch,
             // Enum type
             Value::Enum { .. } => ValueType::Enum,
+            // Flat static-array: treated as a struct-like value for dispatch
+            // (Issue #7964). The precise type is available via runtime_type().
+            Value::StaticArray(_) | Value::StaticArrayInline(_) => ValueType::Any,
+            // The legacy native-array carrier is filtered out by the
+            // early-return above (Issue #3908). This wildcard satisfies
+            // Rust's exhaustiveness checking and provides a safe default for
+            // any future `Value` variant: return `Any`.
+            _ => ValueType::Any,
         }
     }
 
@@ -478,8 +572,9 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rng::{RngInstance, Xoshiro};
+    use crate::rng::RngInstance;
     use crate::vm::value::io::IOValue;
+    use crate::vm::value::GeneratorCallable;
 
     /// Compile-time coverage test for ALL Value variants (Issue #1736).
     ///
@@ -491,6 +586,14 @@ mod tests {
     /// When adding a new Value variant, you MUST add it to this test.
     #[test]
     fn test_all_value_variants_constructed() {
+        let tuple_array_ref = super::super::new_array_ref(super::super::ArrayValue::new(
+            super::super::ArrayData::Any(vec![]),
+            vec![0],
+        ));
+        tuple_array_ref.borrow_mut().element_type_override = Some(ArrayElementType::TupleOf(vec![
+            ArrayElementType::ComplexF64,
+        ]));
+
         let all_values: Vec<Value> = vec![
             // Signed integers
             Value::I8(0),
@@ -519,45 +622,57 @@ mod tests {
             Value::Nothing,
             Value::Missing,
             Value::Undef,
-            // Collections
-            Value::Array(super::super::new_array_ref(super::super::ArrayValue::new(
-                super::super::ArrayData::F64(vec![]),
-                vec![0],
-            ))),
+            // Collections - route through the shared `native_array_ref_value`
+            // constructor so this test holds no literal native-array
+            // construction (Issue #3908).
+            super::super::array_value::native_array_ref_value(tuple_array_ref),
             Value::Memory(super::super::new_memory_ref(
-                super::super::MemoryValue::undef_typed(
+                super::super::MemoryValue::undef_typed(&super::super::ArrayElementType::F64, 0),
+            )),
+            Value::MemoryRef(Box::new(super::super::MemoryRefValue::first(
+                super::super::new_memory_ref(super::super::MemoryValue::undef_typed(
                     &super::super::ArrayElementType::F64,
                     0,
-                ),
-            )),
+                )),
+            ))),
             Value::Range(RangeValue {
                 start: 0.0,
                 step: 1.0,
                 stop: 0.0,
                 is_float: false,
+                element_type: RangeElementType::Default,
+                is_step_range: false,
             }),
             Value::SliceAll,
             // Struct types
             Value::Struct(super::super::StructInstance {
                 type_id: 0,
-                struct_name: String::new(),
+                struct_name: String::new().into(),
                 values: vec![],
             }),
             Value::StructRef(0),
-            Value::Rng(RngInstance::Xoshiro(Xoshiro::new(0))),
+            Value::Rng(RngInstance::xoshiro(0)),
             // Tuple types
             Value::Tuple(TupleValue { elements: vec![] }),
             Value::NamedTuple(NamedTupleValue::new(vec![], vec![]).unwrap()),
             Value::Pairs(PairsValue::new(vec![], vec![]).unwrap()),
-            Value::Dict(Box::default()),
-            Value::Set(SetValue::new()),
-            Value::Ref(Box::new(Value::Nothing)),
-            Value::Generator(GeneratorValue {
-                func_index: 0,
+            new_ref(Value::Nothing),
+            Value::Generator(Box::new(GeneratorValue {
+                callable: GeneratorCallable::FunctionIndex(0),
                 iter: Box::new(Value::Nothing),
-            }),
+                result_element_type: None,
+            })),
             // Type/Module types
-            Value::DataType(crate::types::JuliaType::Any),
+            Value::DataType(Box::new(crate::types::JuliaType::Any)),
+            Value::RuntimeTypeVar(Box::new(RuntimeTypeVarValue {
+                id: 0,
+                name: "T".to_string(),
+                lower_bound: crate::types::JuliaType::Bottom,
+                upper_bound: crate::types::JuliaType::Any,
+            })),
+            Value::RuntimeTypeName(Box::new(RuntimeTypeNameValue {
+                name: "Any".to_string(),
+            })),
             Value::Module(Box::new(ModuleValue::new("test"))),
             // Callable types
             Value::Function(FunctionValue::new("test")),
@@ -570,15 +685,12 @@ mod tests {
             Value::IO(IOValue::buffer_ref()),
             // Macro system types
             Value::Symbol(SymbolValue::new("")),
-            Value::Expr(ExprValue {
-                head: SymbolValue::new("call"),
-                args: vec![],
-            }),
+            Value::Expr(ExprValue::from_head("call", vec![])),
             Value::QuoteNode(Box::new(Value::Nothing)),
             Value::LineNumberNode(LineNumberNodeValue::new(0, None)),
             Value::GlobalRef(GlobalRefValue::new("", SymbolValue::new(""))),
             // Regex types
-            Value::Regex(RegexValue::new("", "").unwrap()),
+            Value::Regex(Box::new(RegexValue::new("", "").unwrap())),
             Value::RegexMatch(Box::new(RegexMatchValue {
                 match_str: String::new(),
                 captures: vec![],
@@ -590,6 +702,23 @@ mod tests {
                 type_name: String::new(),
                 value: 0,
             },
+            // Core.SimpleVector (svec) — appended last to preserve the
+            // positional indices the assertions below rely on (Issue #4722).
+            Value::SimpleVector(TupleValue { elements: vec![] }),
+            // Flat static-array (Issue #7964 Phase 1).
+            Value::StaticArray(Box::new(StaticRealValue::new_vector(
+                "SVector{2, Float64}",
+                crate::vm::value::StaticElem::F64(vec![1.0, 2.0]),
+            ))),
+            // Zero-allocation inline static-array (Issue #7964 Phase 3).
+            Value::StaticArrayInline(
+                crate::vm::value::static_real::StaticArrayInlineData::try_from_elem(
+                    2,
+                    1,
+                    &crate::vm::value::StaticElem::F64(vec![1.0, 2.0]),
+                )
+                .unwrap(),
+            ),
         ];
 
         // Exhaustive match: if a new Value variant is added and not listed above,
@@ -617,8 +746,9 @@ mod tests {
                 | Value::Nothing
                 | Value::Missing
                 | Value::Undef
-                | Value::Array(_)
+                | Value::ExprArgs(_)
                 | Value::Memory(_)
+                | Value::MemoryRef(_)
                 | Value::Range(_)
                 | Value::SliceAll
                 | Value::Struct(_)
@@ -627,11 +757,11 @@ mod tests {
                 | Value::Tuple(_)
                 | Value::NamedTuple(_)
                 | Value::Pairs(_)
-                | Value::Dict(_)
-                | Value::Set(_)
                 | Value::Ref(_)
                 | Value::Generator(_)
                 | Value::DataType(_)
+                | Value::RuntimeTypeVar(_)
+                | Value::RuntimeTypeName(_)
                 | Value::Module(_)
                 | Value::Function(_)
                 | Value::Closure(_)
@@ -644,7 +774,10 @@ mod tests {
                 | Value::GlobalRef(_)
                 | Value::Regex(_)
                 | Value::RegexMatch(_)
-                | Value::Enum { .. } => {}
+                | Value::SimpleVector(_)
+                | Value::Enum { .. }
+                | Value::StaticArray(_)
+                | Value::StaticArrayInline(_) => {}
             }
             // Verify Debug and runtime_type work for every variant
             let _ = format!("{:?}", v);
@@ -653,25 +786,53 @@ mod tests {
         }
 
         // Ensure we have at least as many test values as Value variants.
-        // The exact count (49) should match the number of variants in the Value enum.
+        // The exact count should match the number of variants in the Value enum.
+        // 50 after removing the `Value::Dict` (Issue #6731) and `Value::Set`
+        // (Issue #6732) carriers. 52 after adding `StaticArrayInline` (Issue #7964 Phase 3).
+        // 53 after adding `RuntimeTypeName` for DataType.name (Issue #8451).
         assert_eq!(
             all_values.len(),
-            49,
-            "Expected 49 Value variants but found {}. \
+            53,
+            "Expected 53 Value variants but found {}. \
              If you added a new Value variant, update this test and increment the count.",
             all_values.len()
         );
+
+        assert_eq!(
+            all_values[21].runtime_type(),
+            crate::types::JuliaType::VectorOf(Box::new(crate::types::JuliaType::TupleOf(vec![
+                crate::types::JuliaType::Struct("Complex{Float64}".to_string())
+            ])))
+        );
     }
 
-    /// Verify that boxing large variants keeps Value enum compact (Issue #3352).
+    /// Verify that boxing large variants keeps Value enum bounded (Issue #3352/#4166/#5171).
     #[test]
     fn test_value_enum_size_is_compact() {
+        // Issue #5171: `Value::Generator` carried a 104-byte `GeneratorValue`
+        // inline (the single largest variant), forcing every stack op / slot copy
+        // / Vec growth to move 112 bytes. Boxing it dropped the enum to 64 bytes.
+        // Issue #7966 boxed `Regex`, #7977 boxed `DataType`, and #7976 shrank
+        // `StructInstance` (`struct_name` String->Box<str>, 56->48 bytes).
+        //
+        // The enum is nonetheless still 64 bytes, and `struct_name` was NOT the
+        // lever (empirically measured, Issue #7976): `Value` has alignment 16
+        // (from the inline `I128(i128)`/`U128(u128)` variants), so its size must
+        // be a multiple of 16. The largest variant payload is now 48 bytes
+        // (`Struct`/`Pairs`/`NamedTuple`/`Function`), and 48 + the 1-byte tag
+        // rounds up to 64 under 16-byte alignment. Dropping to 56 requires BOTH
+        // boxing `I128`/`U128` (to make the enum 8-aligned) AND keeping every
+        // payload <= 48; that alignment fix is tracked separately as the real
+        // ceiling lever. Keep this bound tight so any new large variant fails the
+        // audit.
+        const MAX_TRANSITIONAL_VALUE_SIZE_BYTES: usize = 64;
         let size = std::mem::size_of::<Value>();
         assert!(
-            size <= 64,
-            "Value enum is {} bytes, expected at most 64. \
-             Large variants should be boxed to keep the enum compact.",
-            size
+            size <= MAX_TRANSITIONAL_VALUE_SIZE_BYTES,
+            "Value enum is {} bytes, expected at most {} (Issue #5171 boxed Generator down to 64). \
+             Large variants should be boxed or moved behind registry handles to keep the enum bounded.",
+            size,
+            MAX_TRANSITIONAL_VALUE_SIZE_BYTES
         );
     }
 }
@@ -759,11 +920,11 @@ pub enum ValueType {
     F64,
     BigFloat, // Arbitrary precision float
     // Collections
-    Array,                     // Legacy array type (treated as F64 for backward compatibility)
-    ArrayOf(ArrayElementType), // Array with known element type
-    Memory,                        // Memory{T} flat typed buffer (element type unknown)
-    MemoryOf(ArrayElementType),    // Memory{T} with known element type
-    Range,                     // Lazy range type
+    Array, // Legacy array type (treated as F64 for backward compatibility)
+    ArrayOf(ArrayElementType, Option<usize>), // Array with known element type; 2nd field = rank (ndims), None = unknown→Vector (Issue #6817)
+    Memory,                                   // Memory{T} flat typed buffer (element type unknown)
+    MemoryOf(ArrayElementType),               // Memory{T} with known element type
+    Range,                                    // Lazy range type
     // String types
     Str,
     Char, // Julia's Char type (32-bit Unicode codepoint)
@@ -796,4 +957,17 @@ pub enum ValueType {
     Union(Vec<ValueType>), // Union of multiple types, e.g., Union{Int64, Float64}
     // Enum type (from @enum macro)
     Enum, // Enum type
+    // Concrete Complex scalar tags used by runtime specialization. The runtime
+    // value remains a Pure Julia StructRef/Struct; this avoids losing the
+    // Complex element type in erased call paths.
+    ComplexF32,
+    ComplexF64,
+}
+
+pub(crate) fn value_type_for_struct_instance(s: &StructInstance) -> ValueType {
+    match &*s.struct_name {
+        "Complex{Float32}" | "ComplexF32" => ValueType::ComplexF32,
+        "Complex{Float64}" | "ComplexF64" => ValueType::ComplexF64,
+        _ => ValueType::Struct(s.type_id),
+    }
 }

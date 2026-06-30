@@ -339,39 +339,13 @@ end
 # quantile - Compute quantiles
 # =============================================================================
 
-# quantile(arr, p) - Compute the p-th quantile (0 <= p <= 1)
-# Uses linear interpolation (R/NumPy default, Definition 7)
-# Note: Julia's quantile supports alpha/beta parameters, but we use defaults
+# quantile(arr, p) - Compute quantiles without mutating the input
+# Match Julia's stdlib structure: copy, then delegate to quantile!.
+# Uses linear interpolation (R/NumPy default, Definition 7) for scalar p.
+# Note: Julia's quantile supports alpha/beta parameters, but we use defaults.
 function quantile(arr, p)
-    if p < 0.0 || p > 1.0
-        return 0.0 / 0.0  # Invalid probability
-    end
-    n = length(arr)
-    if n == 0
-        return 0.0 / 0.0
-    end
-    # Copy and sort
     sorted = _copy_array(arr)
-    _sort_inplace!(sorted)
-
-    if n == 1
-        return sorted[1]
-    end
-
-    # Linear interpolation between points ((k-1)/(n-1), x[k])
-    # This is Definition 7 (R/NumPy default)
-    h = p * (n - 1)
-    lo = Int64(floor(h)) + 1
-    hi = lo + 1
-    if hi > n
-        return sorted[n]
-    end
-    if lo < 1
-        return sorted[1]
-    end
-
-    frac = h - floor(h)
-    return sorted[lo] + frac * (sorted[hi] - sorted[lo])
+    return quantile!(sorted, p)
 end
 
 # quantile!(v, p) - Compute the p-th quantile, overwriting v with sorted data

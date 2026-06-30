@@ -232,8 +232,7 @@ mod tests {
     #[test]
     fn test_float_remainder_negative_dividend() {
         // Julia: -7.0 % 3.0 == -1.0  (truncated remainder, NOT floor-division mod)
-        let result =
-            eval_const_binary("%", &ConstValue::Float64(-7.0), &ConstValue::Float64(3.0));
+        let result = eval_const_binary("%", &ConstValue::Float64(-7.0), &ConstValue::Float64(3.0));
         assert_eq!(result, Some(ConstValue::Float64(-1.0)));
     }
 

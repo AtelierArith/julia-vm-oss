@@ -1,8 +1,8 @@
 use crate::vm::error::VmError;
-use crate::vm::value::{ArrayData, ArrayValue, StructInstance};
+use crate::vm::value::{ArrayValue, StructInstance};
 
 use super::complex::Complex64;
-use super::helpers::extract_complex_data;
+use super::helpers::{as_f64_data, extract_complex_data};
 
 /// Scalar-vector multiplication: scalar * vector or vector * scalar.
 pub(crate) fn scalar_vector_mul_complex(
@@ -21,25 +21,9 @@ pub(crate) fn scalar_vector_mul_complex(
 pub(crate) fn scalar_vector_mul_real(scalar: f64, arr: &ArrayValue) -> Result<ArrayValue, VmError> {
     let result_shape = arr.shape.clone();
 
-    let result_data: Vec<f64> = match &arr.data {
-        ArrayData::F64(data) => data.iter().map(|&v| scalar * v).collect(),
-        ArrayData::I64(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::F32(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::I32(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::I16(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::I8(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::U64(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::U32(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::U16(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        ArrayData::U8(data) => data.iter().map(|&v| scalar * v as f64).collect(),
-        _ => {
-            return Err(VmError::TypeError(
-                "scalar_vector_mul_real: unsupported array element type".to_string(),
-            ));
-        }
-    };
+    let result_data: Vec<f64> = as_f64_data(arr)?.into_iter().map(|v| scalar * v).collect();
 
-    Ok(ArrayValue::from_f64(result_data, result_shape))
+    Ok(ArrayValue::memory_first_from_f64(result_data, result_shape))
 }
 
 #[cfg(test)]
@@ -58,12 +42,7 @@ mod tests {
 
     #[test]
     fn test_scalar_vector_mul_real_i64() {
-        let arr = ArrayValue {
-            data: ArrayData::I64(vec![1, 2, 3]),
-            shape: vec![3],
-            struct_type_id: None,
-            element_type_override: None,
-        };
+        let arr = ArrayValue::memory_first_from_i64(vec![1, 2, 3], vec![3]);
         let result = scalar_vector_mul_real(3.0, &arr).unwrap();
         if let ArrayData::F64(data) = result.data {
             assert_eq!(data, vec![3.0, 6.0, 9.0]);
@@ -79,12 +58,7 @@ mod tests {
 
     #[test]
     fn test_scalar_vector_mul_real_invalid_type_returns_err() {
-        let arr = ArrayValue {
-            data: ArrayData::Bool(vec![true, false]),
-            shape: vec![2],
-            struct_type_id: None,
-            element_type_override: None,
-        };
+        let arr = ArrayValue::memory_first_from_bool(vec![true, false], vec![2]);
         assert!(matches!(
             scalar_vector_mul_real(2.0, &arr),
             Err(VmError::TypeError(_))

@@ -6,6 +6,41 @@
 # This file contains array-related utilities that work with any iterable.
 
 # =============================================================================
+# eltype - iterator element type protocol
+# =============================================================================
+# Based on Julia's base/abstractarray.jl:243-245. Type-specific eltype methods
+# should be defined on `::Type{T}`; the value fallback delegates through
+# `typeof(x)` so custom iterators work with Base.IteratorEltype's default.
+
+function eltype(::Type)
+    return Any
+end
+
+function eltype(x)
+    return eltype(typeof(x))
+end
+
+function length(A::AbstractArray)
+    dims = size(A)
+    n = 1
+    for d in dims
+        n *= d
+    end
+    return n
+end
+
+function size(A::AbstractArray, d::Int64)
+    return size(A)[d]
+end
+
+function getindex(A::AbstractMatrix, k::Integer)
+    rows = size(A, 1)
+    i = ((k - 1) % rows) + 1
+    j = div(k - 1, rows) + 1
+    return A[i, j]
+end
+
+# =============================================================================
 # foreach - apply function to each element for side effects
 # =============================================================================
 # Based on Julia's base/abstractarray.jl
@@ -84,6 +119,52 @@ julia> a = Int64[]; sizehint!(a, 100); push!(a, 1); length(a)
 ```
 """
 sizehint!(a, _) = a
+
+# =============================================================================
+# Generic AbstractArray element-wise equality (Issue #8229)
+# =============================================================================
+# Based on Julia's base/abstractarray.jl:3085 (`isequal`) and :3126 (`==`),
+# which compare two AbstractArrays element-wise by iterating both with
+# `zip(A, B)` after a shape check.
+#
+# `isequal(A::AbstractArray, B::AbstractArray)` element-compares two arrays
+# through the `size`/`getindex` protocol. It is needed for AbstractArray
+# subtypes the equality builtin cannot read — a user `struct <: AbstractArray`
+# (generic struct ref) or a `SubArray` view — for which the generic
+# `isequal(x, y) = x === y` fallback otherwise wins dispatch and returns `false`.
+# It also backs the `isequal` Rust builtin's dispatch fallback for those same
+# operands when they reach the builtin via the `==` operator (Issue #8229).
+#
+# A native `Array`/`Memory` carrier is also `<: AbstractArray`, but a statically
+# typed native-array `isequal`/`==` is routed straight to the Rust builtin fast
+# path by the compiler and never enters this method; it is reached only for the
+# generic struct carriers. There is deliberately NO matching `==(::AbstractArray,
+# ::AbstractArray)` method: the binary-op codegen statically resolves `==` and
+# would coerce a `Memory`/native operand to `Array`, so `==` on these structs is
+# instead routed through the `isequal` builtin by the gate in
+# `compile_binary_op`. Element count is computed locally from `size` (via
+# `_abstractarray_count`, NOT `length`); arrays in this VM are 1-based, so the
+# `size` equality check is equivalent to upstream's `axes` check.
+
+function _abstractarray_count(A::AbstractArray)
+    n = 1
+    for d in size(A)
+        n *= d
+    end
+    return n
+end
+
+function isequal(A::AbstractArray, B::AbstractArray)
+    if size(A) != size(B)
+        return false
+    end
+    for i in 1:_abstractarray_count(A)
+        if !isequal(A[i], B[i])
+            return false
+        end
+    end
+    return true
+end
 
 # =============================================================================
 # stride / strides - Memory stride for column-major arrays

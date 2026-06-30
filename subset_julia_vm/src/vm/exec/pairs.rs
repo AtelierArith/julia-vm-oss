@@ -17,22 +17,13 @@ use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
 use super::super::value::{PairsValue, TupleValue, Value};
 use super::super::Vm;
-
-/// Result of executing a Pairs instruction.
-pub(super) enum PairsResult {
-    /// Instruction not handled by this module
-    NotHandled,
-    /// Instruction handled successfully
-    Handled,
-    /// Error was raised and caught by handler, continue to next iteration
-    Continue,
-}
+use super::DispatchAction;
 
 impl<R: RngLike> Vm<R> {
     /// Execute Pairs instructions.
     /// Returns the execution result.
     #[inline]
-    pub(super) fn execute_pairs(&mut self, instr: &Instr) -> Result<PairsResult, VmError> {
+    pub(super) fn execute_pairs(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::NewPairs(names) => {
                 let mut values = Vec::with_capacity(names.len());
@@ -42,10 +33,10 @@ impl<R: RngLike> Vm<R> {
                 values.reverse();
                 let pairs = match self.try_or_handle(PairsValue::new(names.clone(), values))? {
                     Some(p) => p,
-                    None => return Ok(PairsResult::Continue),
+                    None => return Ok(DispatchAction::Continue),
                 };
                 self.stack.push(Value::Pairs(pairs));
-                Ok(PairsResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::PairsGetBySymbol => {
@@ -57,7 +48,7 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "PairsGetBySymbol: expected Symbol on stack, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 // Pop pairs from stack
@@ -68,16 +59,16 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "PairsGetBySymbol: expected Pairs on stack, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 // Get field by name
                 let value = match self.try_or_handle(pairs.get_by_symbol(&symbol_name).cloned())? {
                     Some(v) => v,
-                    None => return Ok(PairsResult::Continue),
+                    None => return Ok(DispatchAction::Continue),
                 };
                 self.stack.push(value);
-                Ok(PairsResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::PairsLength => {
@@ -88,11 +79,11 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "PairsLength: expected Pairs on stack, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 self.stack.push(Value::I64(pairs.len() as i64));
-                Ok(PairsResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::PairsKeys => {
@@ -103,13 +94,13 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "PairsKeys: expected Pairs on stack, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 // Return keys as a tuple of symbols
                 let keys: Vec<Value> = pairs.keys().into_iter().map(Value::Symbol).collect();
                 self.stack.push(Value::Tuple(TupleValue { elements: keys }));
-                Ok(PairsResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::PairsValues => {
@@ -120,15 +111,15 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "PairsValues: expected Pairs on stack, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 // Return values as the underlying NamedTuple
                 self.stack.push(Value::NamedTuple(pairs.data));
-                Ok(PairsResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
-            _ => Ok(PairsResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

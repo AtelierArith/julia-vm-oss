@@ -29,6 +29,18 @@ pub(super) fn parse_where_expression<'a>(
     let left = children[0];
     let right = children[children.len() - 1];
 
+    // Parse the right side (type constraints) FIRST so the `where`-clause
+    // parameter names are known before the signature is parsed. A same-named
+    // top-level binding (`T = Int64`, registered as a type alias) must not
+    // freeze a `where T` parameter annotation to the global's concrete type:
+    // the method's `where` parameter lexically shadows the global, exactly as
+    // upstream Julia scopes it. Excluding these names from alias expansion for
+    // the duration of signature parsing keeps `f(x::T) where T` lowering `x`'s
+    // annotation as the type variable `T` rather than `Int64` (Issue #7847).
+    let new_type_params = parse_type_constraints(walker, right)?;
+    let excluded_names: Vec<String> = new_type_params.iter().map(|tp| tp.name.clone()).collect();
+    let _exclusion = crate::lowering::type_alias::ScopedExclusion::new(&excluded_names);
+
     // Parse the left side (signature) - may be nested where_expression
     let (name, params, kwparams, is_base_extension, mut type_params) = match walker.kind(&left) {
         NodeKind::WhereExpression => {
@@ -54,8 +66,6 @@ pub(super) fn parse_where_expression<'a>(
         }
     };
 
-    // Parse the right side (type constraints)
-    let new_type_params = parse_type_constraints(walker, right)?;
     type_params.extend(new_type_params);
 
     // Convert parameter types to TypeVar when they match type parameters
@@ -66,7 +76,7 @@ pub(super) fn parse_where_expression<'a>(
 
 /// Parse type constraints from the right side of a where expression.
 /// Handles: `T`, `T<:Real`, `{T, S<:Number}`, etc.
-pub(super) fn parse_type_constraints<'a>(
+pub(crate) fn parse_type_constraints<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
 ) -> LowerResult<Vec<TypeParam>> {
@@ -78,9 +88,14 @@ pub(super) fn parse_type_constraints<'a>(
             let name = walker.text(&node).to_string();
             Ok(vec![TypeParam::new(name)])
         }
-        NodeKind::SubtypeExpression | NodeKind::BinaryExpression => {
-            // Bounded: where T<:Real
-            // tree-sitter may return either subtype_expression or binary_expression
+        NodeKind::SubtypeExpression
+        | NodeKind::BinaryExpression
+        | NodeKind::SubtypeConstraint
+        | NodeKind::SupertypeConstraint => {
+            // Bounded: where T<:Real / where T>:Int / where Int<:T<:Real.
+            // tree-sitter returns subtype_expression / binary_expression; the
+            // pure-Rust parser returns Subtype/SupertypeConstraint (the latter
+            // carries the `>:` lower-bound direction, Issue #5650).
             parse_subtype_expression(walker, node).map(|tp| vec![tp])
         }
         NodeKind::CurlyExpression | NodeKind::TypeParameterList => {
@@ -118,7 +133,85 @@ pub(super) fn parse_type_constraints<'a>(
     }
 }
 
-/// Parse a type constraint expression: T<:Number (upper bound) or T>:Integer (lower bound)
+/// Parse the type parameters out of a pure-parser `WhereClause` node.
+///
+/// A `WhereClause` (produced by `parse_where_clause` in the pure-Rust parser)
+/// contains one of:
+/// - `Identifier` — unbraced unbounded: `where T`
+/// - `SubtypeExpression` / `BinaryExpression` / `SubtypeConstraint` /
+///   `SupertypeConstraint` — unbraced bounded: `where T<:Real`
+/// - `TypeParameters` — braced list: `where {T, S<:Number}`, whose children are
+///   again identifiers or constraint expressions
+///
+/// Shared by the long form (`function *(...) where {...} ... end`) and the
+/// assignment-form operator path (`*(...) where {...} = ...`). The operator
+/// path previously had a divergent hand-rolled copy that did not recognize the
+/// `BinaryExpression`/`SubtypeConstraint` shapes the pure parser emits for
+/// braced bounds, silently dropping `where {T<:Real}` bounds (Issue #6537).
+pub(crate) fn parse_where_clause_type_params<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+) -> LowerResult<Vec<TypeParam>> {
+    let mut type_params = Vec::new();
+    for where_child in walker.named_children(&node) {
+        match walker.kind(&where_child) {
+            NodeKind::Identifier => {
+                type_params.push(TypeParam::new(walker.text(&where_child).to_string()));
+            }
+            NodeKind::TypeParameters | NodeKind::TypeParameterList | NodeKind::CurlyExpression => {
+                for tp_child in walker.named_children(&where_child) {
+                    match walker.kind(&tp_child) {
+                        NodeKind::TypeParameter => {
+                            // TypeParameter contains children describing the param
+                            let tp_children = walker.named_children(&tp_child);
+                            if tp_children.len() >= 2 {
+                                // Bounded: T<:Real
+                                let param_name = walker.text(&tp_children[0]).to_string();
+                                let bound =
+                                    expand_where_bound(&param_name, walker.text(&tp_children[1]));
+                                type_params.push(TypeParam::with_upper_bound(param_name, bound));
+                            } else if !tp_children.is_empty() {
+                                // Unbounded: T
+                                let param_name = walker.text(&tp_children[0]).to_string();
+                                type_params.push(TypeParam::new(param_name));
+                            }
+                        }
+                        NodeKind::Identifier => {
+                            type_params.push(TypeParam::new(walker.text(&tp_child).to_string()));
+                        }
+                        NodeKind::SubtypeExpression
+                        | NodeKind::BinaryExpression
+                        | NodeKind::SubtypeConstraint
+                        | NodeKind::SupertypeConstraint => {
+                            // The pure parser builds `T<:Bound` as a BinaryExpression
+                            // `[T, <:, Bound]` whose operator is the middle named child,
+                            // so the bound is the LAST child, not `children[1]` (which is
+                            // the bare `<:`). Delegate to the shared parser (Issue #5374).
+                            type_params.push(parse_subtype_expression(walker, tp_child)?);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            NodeKind::SubtypeExpression
+            | NodeKind::BinaryExpression
+            | NodeKind::SubtypeConstraint
+            | NodeKind::SupertypeConstraint => {
+                // Unbraced `where T<:Bound`. Same operator-is-middle-child layout as
+                // the braced case above (Issue #5374).
+                type_params.push(parse_subtype_expression(walker, where_child)?);
+            }
+            _ => {}
+        }
+    }
+    Ok(type_params)
+}
+
+/// Parse a type constraint expression:
+/// - `T<:Number` - upper bound (covariant)
+/// - `T>:Integer` - lower bound (contravariant)
+/// - `Integer<:T<:Real` - both bounds (Issue #5051), emitted by the pure-Rust
+///   parser as a `SubtypeConstraint` with three children `[name, upper, lower]`.
 pub(super) fn parse_subtype_expression<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
@@ -134,11 +227,19 @@ pub(super) fn parse_subtype_expression<'a>(
         ));
     }
 
+    // Double-bounded form `Lower<:T<:Upper`: children are [name, upper, lower].
+    if matches!(kind, NodeKind::SubtypeConstraint) && children.len() >= 3 {
+        let name = walker.text(&children[0]).to_string();
+        let upper = expand_where_bound(&name, walker.text(&children[1]));
+        let lower = expand_where_bound(&name, walker.text(&children[2]));
+        return Ok(TypeParam::with_both_bounds(name, lower, upper));
+    }
+
     let name_node = children[0];
     let bound_node = children[children.len() - 1];
 
     let name = walker.text(&name_node).to_string();
-    let bound = walker.text(&bound_node).to_string();
+    let bound = expand_where_bound(&name, walker.text(&bound_node));
 
     // Determine constraint type based on node kind
     match kind {
@@ -154,6 +255,10 @@ pub(super) fn parse_subtype_expression<'a>(
     }
 }
 
+fn expand_where_bound(param_name: &str, bound: &str) -> String {
+    crate::lowering::type_alias::expand_excluding(bound, &[param_name.to_string()])
+}
+
 /// Convert parameter types to TypeVar when they match type parameters from where clause.
 /// For example, if type_params contains TypeParam { name: "T", upper_bound: Some("Real") },
 /// and a parameter has type JuliaType::Struct("T"), it will be converted to
@@ -165,18 +270,54 @@ pub(super) fn convert_params_with_type_vars(
     params
         .into_iter()
         .map(|param| {
-            if let Some(JuliaType::Struct(name)) = &param.type_annotation {
-                // Check if this struct name matches a type parameter
-                if let Some(tp) = type_params.iter().find(|tp| &tp.name == name) {
-                    // Use get_upper_bound() to get the effective upper bound
-                    let bound = tp.get_upper_bound().cloned();
-                    let new_type = JuliaType::TypeVar(tp.name.clone(), bound);
-                    return TypedParam::new(param.name, Some(new_type), param.span);
-                }
+            let Some(type_annotation) = param.type_annotation else {
+                return param;
+            };
+            let converted = convert_type_with_type_vars(type_annotation, type_params);
+            TypedParam {
+                name: param.name,
+                type_annotation: Some(converted),
+                is_varargs: param.is_varargs,
+                vararg_count: param.vararg_count,
+                span: param.span,
             }
-            param
         })
         .collect()
+}
+
+fn convert_type_with_type_vars(ty: JuliaType, type_params: &[TypeParam]) -> JuliaType {
+    match ty {
+        JuliaType::Struct(name) => {
+            if let Some(tp) = type_params.iter().find(|tp| tp.name == name) {
+                let bound = tp.get_upper_bound().cloned();
+                JuliaType::TypeVar(tp.name.clone(), bound)
+            } else {
+                JuliaType::Struct(name)
+            }
+        }
+        JuliaType::TypeOf(inner) => {
+            JuliaType::TypeOf(Box::new(convert_type_with_type_vars(*inner, type_params)))
+        }
+        JuliaType::VectorOf(elem) => {
+            JuliaType::VectorOf(Box::new(convert_type_with_type_vars(*elem, type_params)))
+        }
+        JuliaType::MatrixOf(elem) => {
+            JuliaType::MatrixOf(Box::new(convert_type_with_type_vars(*elem, type_params)))
+        }
+        JuliaType::TupleOf(types) => JuliaType::TupleOf(
+            types
+                .into_iter()
+                .map(|ty| convert_type_with_type_vars(ty, type_params))
+                .collect(),
+        ),
+        JuliaType::Union(types) => JuliaType::Union(
+            types
+                .into_iter()
+                .map(|ty| convert_type_with_type_vars(ty, type_params))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -193,13 +334,18 @@ mod tests {
     #[test]
     fn test_convert_struct_matching_type_param_becomes_typevar() {
         // Param "x" typed as Struct("T"), type param "T" (no bound) → TypeVar("T", None)
-        let params = vec![TypedParam::new("x".to_string(), Some(JuliaType::Struct("T".to_string())), s())];
+        let params = vec![TypedParam::new(
+            "x".to_string(),
+            Some(JuliaType::Struct("T".to_string())),
+            s(),
+        )];
         let type_params = vec![TypeParam::new("T".to_string())];
         let result = convert_params_with_type_vars(params, &type_params);
         assert_eq!(result.len(), 1);
         assert!(
             matches!(&result[0].type_annotation, Some(JuliaType::TypeVar(name, None)) if name == "T"),
-            "Expected TypeVar(T, None), got {:?}", result[0].type_annotation
+            "Expected TypeVar(T, None), got {:?}",
+            result[0].type_annotation
         );
     }
 
@@ -210,39 +356,78 @@ mod tests {
         tp.upper_bound = Some("Number".to_string());
         tp.bound = Some("Number".to_string());
 
-        let params = vec![TypedParam::new("x".to_string(), Some(JuliaType::Struct("T".to_string())), s())];
+        let params = vec![TypedParam::new(
+            "x".to_string(),
+            Some(JuliaType::Struct("T".to_string())),
+            s(),
+        )];
         let type_params = vec![tp];
         let result = convert_params_with_type_vars(params, &type_params);
         assert_eq!(result.len(), 1);
         assert!(
             matches!(&result[0].type_annotation, Some(JuliaType::TypeVar(name, Some(_))) if name == "T"),
-            "Expected TypeVar(T, Some(...)), got {:?}", result[0].type_annotation
+            "Expected TypeVar(T, Some(...)), got {:?}",
+            result[0].type_annotation
+        );
+    }
+
+    #[test]
+    fn test_convert_typeof_struct_matching_type_param_becomes_typeof_typevar() {
+        // Param typed as Type{T}, type param "T" → Type{TypeVar("T")}
+        let params = vec![TypedParam::new(
+            "x".to_string(),
+            Some(JuliaType::TypeOf(Box::new(JuliaType::Struct(
+                "T".to_string(),
+            )))),
+            s(),
+        )];
+        let type_params = vec![TypeParam::new("T".to_string())];
+        let result = convert_params_with_type_vars(params, &type_params);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(
+                &result[0].type_annotation,
+                Some(JuliaType::TypeOf(inner))
+                    if matches!(inner.as_ref(), JuliaType::TypeVar(name, None) if name == "T")
+            ),
+            "Expected TypeOf(TypeVar(T, None)), got {:?}",
+            result[0].type_annotation
         );
     }
 
     #[test]
     fn test_convert_struct_not_matching_type_param_unchanged() {
         // Param typed as Struct("Foo"), type params only contain "T" → unchanged
-        let params = vec![TypedParam::new("x".to_string(), Some(JuliaType::Struct("Foo".to_string())), s())];
+        let params = vec![TypedParam::new(
+            "x".to_string(),
+            Some(JuliaType::Struct("Foo".to_string())),
+            s(),
+        )];
         let type_params = vec![TypeParam::new("T".to_string())];
         let result = convert_params_with_type_vars(params, &type_params);
         assert_eq!(result.len(), 1);
         assert!(
             matches!(&result[0].type_annotation, Some(JuliaType::Struct(name)) if name == "Foo"),
-            "Expected Struct(Foo) unchanged, got {:?}", result[0].type_annotation
+            "Expected Struct(Foo) unchanged, got {:?}",
+            result[0].type_annotation
         );
     }
 
     #[test]
     fn test_convert_non_struct_type_unchanged() {
         // Param typed as Int64 (primitive) → unchanged
-        let params = vec![TypedParam::new("x".to_string(), Some(JuliaType::Int64), s())];
+        let params = vec![TypedParam::new(
+            "x".to_string(),
+            Some(JuliaType::Int64),
+            s(),
+        )];
         let type_params = vec![TypeParam::new("T".to_string())];
         let result = convert_params_with_type_vars(params, &type_params);
         assert_eq!(result.len(), 1);
         assert!(
             matches!(&result[0].type_annotation, Some(JuliaType::Int64)),
-            "Expected Int64 unchanged, got {:?}", result[0].type_annotation
+            "Expected Int64 unchanged, got {:?}",
+            result[0].type_annotation
         );
     }
 
@@ -253,22 +438,35 @@ mod tests {
         let type_params = vec![TypeParam::new("T".to_string())];
         let result = convert_params_with_type_vars(params, &type_params);
         assert_eq!(result.len(), 1);
-        assert!(result[0].type_annotation.is_none(), "Expected None type annotation");
+        assert!(
+            result[0].type_annotation.is_none(),
+            "Expected None type annotation"
+        );
     }
 
     #[test]
     fn test_convert_multiple_params_only_matching_converted() {
         // Params: (x: T, y: Float64). Type param: T. Only x should be converted.
         let params = vec![
-            TypedParam::new("x".to_string(), Some(JuliaType::Struct("T".to_string())), s()),
+            TypedParam::new(
+                "x".to_string(),
+                Some(JuliaType::Struct("T".to_string())),
+                s(),
+            ),
             TypedParam::new("y".to_string(), Some(JuliaType::Float64), s()),
         ];
         let type_params = vec![TypeParam::new("T".to_string())];
         let result = convert_params_with_type_vars(params, &type_params);
         assert_eq!(result.len(), 2);
-        assert!(matches!(&result[0].type_annotation, Some(JuliaType::TypeVar(name, _)) if name == "T"),
-            "x should be TypeVar, got {:?}", result[0].type_annotation);
-        assert!(matches!(&result[1].type_annotation, Some(JuliaType::Float64)),
-            "y should remain Float64, got {:?}", result[1].type_annotation);
+        assert!(
+            matches!(&result[0].type_annotation, Some(JuliaType::TypeVar(name, _)) if name == "T"),
+            "x should be TypeVar, got {:?}",
+            result[0].type_annotation
+        );
+        assert!(
+            matches!(&result[1].type_annotation, Some(JuliaType::Float64)),
+            "y should remain Float64, got {:?}",
+            result[1].type_annotation
+        );
     }
 }

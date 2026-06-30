@@ -80,10 +80,33 @@ pub fn lower_abstract_definition<'a>(
                 type_params = parse_type_parameters_node(walker, child)?;
             }
             NodeKind::ParametrizedTypeExpression => {
-                // Parametric abstract type: Container{T}
-                let (parsed_name, params) = parse_parametrized_abstract_head(walker, child)?;
-                name = Some(parsed_name);
-                type_params = params;
+                // A parametrized type expression here is EITHER the abstract type's
+                // own head (`abstract type Container{T} end`) OR — when the name was
+                // already captured from a preceding `Identifier` — the PARAMETRIC
+                // PARENT of a `<:` clause whose RHS is parametric
+                // (`abstract type Dist{F,S} <: Sampleable{F,S} end`, where the
+                // pure-Rust parser emits `Identifier("Dist")`, `TypeParameters`,
+                // then a top-level `ParametrizedTypeExpression("Sampleable{...}")`
+                // rather than a single `SubtypeExpression`). Treating it as the head
+                // unconditionally overwrote the real name with the parent's base
+                // (`Dist` -> `Sampleable`), so `Dist` was never registered and any
+                // later use (`isa Dist`, `::Dist` dispatch) failed (Issue #7235
+                // sub-case 2). Only adopt it as the head when no name is set yet;
+                // otherwise record its FULL parametric text as the declared parent.
+                if name.is_none() {
+                    let (parsed_name, params) = parse_parametrized_abstract_head(walker, child)?;
+                    name = Some(parsed_name);
+                    type_params = params;
+                } else if parent.is_none() {
+                    // The parent is a parametric type whose type/value parameters
+                    // (`AbstractArray{T,N}`, `StaticArray7458{Tuple{N},T,1}`) must
+                    // be PRESERVED verbatim so the subtype machinery can thread the
+                    // concrete element/dim parameters down the abstract chain. Using
+                    // only the base name dropped them, so `SVector7458{3,Int64} <:
+                    // AbstractArray{Int64,1}` was wrongly false (Issue #7728). This
+                    // mirrors the struct lowering, which records the full parent text.
+                    parent = Some(walker.text(&child).trim().to_string());
+                }
             }
             NodeKind::BinaryExpression | NodeKind::SubtypeExpression => {
                 // Subtype clause: A <: B
@@ -138,10 +161,8 @@ fn parse_parametrized_abstract_head<'a>(
 
     for child in walker.named_children(&node) {
         match walker.kind(&child) {
-            NodeKind::Identifier => {
-                if name.is_none() {
-                    name = Some(walker.text(&child).to_string());
-                }
+            NodeKind::Identifier if name.is_none() => {
+                name = Some(walker.text(&child).to_string());
             }
             NodeKind::CurlyExpression => {
                 type_params = parse_curly_type_params(walker, child)?;
@@ -304,15 +325,20 @@ fn try_parse_subtype_clause<'a>(
             }
             NodeKind::ParametrizedTypeExpression => {
                 // Subtype with parametric child or parent
-                if let Ok((parsed_name, parsed_params)) =
-                    parse_parametrized_abstract_head(walker, *child)
-                {
-                    if name.is_none() {
+                if name.is_none() {
+                    if let Ok((parsed_name, parsed_params)) =
+                        parse_parametrized_abstract_head(walker, *child)
+                    {
                         name = Some(parsed_name);
                         params = parsed_params;
-                    } else {
-                        parent = Some(parsed_name);
                     }
+                } else {
+                    // PRESERVE the parametric parent's parameters verbatim
+                    // (`AbstractArray{T,N}`, `StaticArray7458{Tuple{N},T,1}`), not
+                    // just its base name, so the subtype machinery can substitute the
+                    // concrete element/dim parameters through the abstract chain
+                    // (Issue #7728). Mirrors the struct lowering.
+                    parent = Some(walker.text(child).trim().to_string());
                 }
             }
             _ => {}

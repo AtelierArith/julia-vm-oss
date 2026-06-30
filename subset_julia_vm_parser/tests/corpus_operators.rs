@@ -34,6 +34,30 @@ fn test_assignment_simple() {
     assert_root_child_kind("x = y = z", NodeKind::Assignment);
 }
 
+#[test]
+fn test_assignment_to_bare_operator_before_separator_issue_6394() {
+    let cst = parse("f = +; println(f(1, 2))")
+        .expect("parse semicolon-separated assignment to bare operator");
+    assert_eq!(cst.children.len(), 2);
+    let assignment = &cst.children[0];
+    assert_eq!(assignment.kind, NodeKind::Assignment);
+    assert_eq!(assignment.children[2].kind, NodeKind::Operator);
+    assert_eq!(assignment.children[2].text.as_deref(), Some("+"));
+
+    let cst = parse("f = +\nprintln(f(1, 2))")
+        .expect("parse newline-separated assignment to bare operator");
+    assert_eq!(cst.children.len(), 2);
+    let assignment = &cst.children[0];
+    assert_eq!(assignment.kind, NodeKind::Assignment);
+    assert_eq!(assignment.children[2].kind, NodeKind::Operator);
+    assert_eq!(assignment.children[2].text.as_deref(), Some("+"));
+
+    let cst = parse("x = + 1").expect("parse unary plus expression");
+    let assignment = &cst.children[0];
+    assert_eq!(assignment.kind, NodeKind::Assignment);
+    assert_eq!(assignment.children[2].kind, NodeKind::UnaryExpression);
+}
+
 // Compound assignment is parsed as CompoundAssignmentExpression
 #[test]
 fn test_assignment_compound() {
@@ -136,6 +160,13 @@ fn test_comparison_in() {
     assert_root_child_kind("a in b", NodeKind::BinaryExpression);
     assert_root_child_kind("a ∈ b", NodeKind::BinaryExpression);
     assert_root_child_kind("a ∉ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("in(a, b)", NodeKind::CallExpression);
+    assert_root_child_kind("∈(a, b)", NodeKind::CallExpression);
+    assert_root_child_kind("∉(a, b)", NodeKind::CallExpression);
+    assert_root_child_kind("∋(b, a)", NodeKind::CallExpression);
+    assert_root_child_kind("∌(b, a)", NodeKind::CallExpression);
+    assert_root_child_kind("Base.:∈(a, b)", NodeKind::CallExpression);
+    assert_root_child_kind("Base.:(∈)(a, b)", NodeKind::CallExpression);
 }
 
 #[test]
@@ -214,6 +245,12 @@ fn test_unary_plus_minus() {
 #[test]
 fn test_unary_not() {
     assert_root_child_kind("!x", NodeKind::UnaryExpression);
+}
+
+#[test]
+fn test_unary_dotted_not_broadcast() {
+    assert_root_child_kind(".!x", NodeKind::BroadcastCallExpression);
+    assert_root_child_kind(".!Bool[true, false]", NodeKind::BroadcastCallExpression);
 }
 
 #[test]
@@ -297,6 +334,52 @@ fn test_precedence_power() {
     // ^ binds tighter than *
     assert_parses("a * b ^ c");
     assert_parses("a ^ b * c");
+}
+
+// `^`/`.^` bind TIGHTER than a prefix unary operator: Julia parses `-x^2` as
+// `-(x^2)`, not `(-x)^2` (julia/src/julia-parser.scm `parse-unary`:
+// "-2^3 is parsed as -(2^3)"). The unary must wrap the whole power expression.
+// Issue #7232.
+#[test]
+fn test_unary_minus_binds_looser_than_power() {
+    for src in ["-x^2", "-2^2", "-3.0^2", "-x .^ 2", "!x^2", "~x^2"] {
+        let cst = parse(src).unwrap_or_else(|_| panic!("Failed to parse: {}", src));
+        let root_child = &cst.children[0];
+        assert_eq!(
+            root_child.kind,
+            NodeKind::UnaryExpression,
+            "`{}` should parse as a UnaryExpression wrapping the power, got {:?}",
+            src,
+            root_child.kind
+        );
+        // The unary's operand (second child) must be the power BinaryExpression.
+        assert_eq!(
+            root_child.children[1].kind,
+            NodeKind::BinaryExpression,
+            "`{}` unary operand should be the power BinaryExpression, got {:?}",
+            src,
+            root_child.children[1].kind
+        );
+    }
+}
+
+// The RHS of `^` keeps its own unary sign: `2^-3` is `2^(-3)` (left side is a
+// plain operand, unchanged by Issue #7232). `-x^-2` is `-(x^(-2))`.
+#[test]
+fn test_power_rhs_keeps_unary_sign() {
+    let cst = parse("2^-3").expect("parse 2^-3");
+    let root = &cst.children[0];
+    assert_eq!(root.kind, NodeKind::BinaryExpression);
+    assert_eq!(
+        root.children[2].kind,
+        NodeKind::UnaryExpression,
+        "RHS of `2^-3` should stay a UnaryExpression"
+    );
+
+    let cst = parse("-x^-2").expect("parse -x^-2");
+    let root = &cst.children[0];
+    assert_eq!(root.kind, NodeKind::UnaryExpression, "-x^-2 == -(x^(-2))");
+    assert_eq!(root.children[1].kind, NodeKind::BinaryExpression);
 }
 
 #[test]

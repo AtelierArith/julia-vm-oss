@@ -21,11 +21,16 @@ vs = values(nt)
 @assert vs[1] == 1
 @assert vs[2] == 2
 
-# Test 5: pairs returns tuple of (symbol, value) pairs
+# Test 5: pairs follows Julia's Base.Pairs behavior.
 ps = pairs(nt)
 @assert length(ps) == 2
-@assert ps[1] == (:a, 1)
-@assert ps[2] == (:b, 2)
+first_pair = first(ps)
+@assert first_pair == Pair(:a, 1)
+collected_pairs = collect(ps)
+@assert collected_pairs[1] == Pair(:a, 1)
+@assert collected_pairs[2] == Pair(:b, 2)
+@assert ps[1] == 1
+@assert ps[2] == 2
 
 # Test 6: Nested NamedTuple types
 nt2 = (outer=(inner=1,),)

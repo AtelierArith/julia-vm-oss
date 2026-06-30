@@ -23,7 +23,49 @@ expected = true
 description = "Test eachmatch function with Regex"
 
 [[tests]]
+name = "regex_match_user_method_7502"
+file = "regex_match_user_method_7502.jl"
+expected = true
+description = "User-defined match(a,b,c) dispatches normally while match(::Regex, ::AbstractString) still routes to the regex builtin (Issue #7502)."
+
+[[tests]]
 name = "regex_match_field_access"
 file = "match_field_access.jl"
 expected = true
 description = "RegexMatch field access: m.match, m.captures, m.offset, m.offsets (Issue #2116)"
+
+[[tests]]
+name = "regex_typed_param_coercion_5678"
+file = "regex_typed_param_coercion_5678.jl"
+expected = true
+description = "A ::Regex / ::RegexMatch typed function parameter now widens to Any when boxed/stored/passed through, so match()/field access on it compiles (Issue #5678). Adds the missing (Regex|RegexMatch)->Any identity arms in emit_coercion, matching every other concrete value type. Repro k(s, re::Regex)=match(re,s).offset previously failed with 'Cannot convert Regex to Any'."
+
+[[tests]]
+name = "regex_occursin_needle_5705"
+file = "regex_occursin_needle_5705.jl"
+expected = true
+description = "occursin(re::Regex, s) accepts a Regex needle (Issue #5705). The generic occursin(needle, haystack) calls ncodeunits(needle) and rejects a Regex; a dedicated occursin(needle::Regex, haystack) = match(needle, haystack) !== nothing method dispatches ahead of it. Also covers contains(haystack, ::Regex) (reverse-arg form) and confirms plain string/Char needles are unaffected."
+
+[[tests]]
+name = "regex_endswith_5676"
+file = "regex_endswith_5676.jl"
+expected = true
+description = "endswith(s, suffix::Regex) returns true iff the pattern matches ending at the end of s (Issue #5676). Adds a pure-Julia endswith(s, ::Regex) method delegating to a new engine-anchored _endswith_regex builtin (RegexValue::ends_with_match rebuilds the pattern with a trailing $ anchor, emulating PCRE ENDANCHORED), since a leftmost match cannot decide end-anchoring (endswith(\"hello\", r\".\")==true). Covers anchors, overlap, empty pattern, dynamic dispatch; startswith(s, ::Regex) unregressed."
+
+[[tests]]
+name = "regex_typed_array_5706"
+file = "regex_typed_array_5706.jl"
+expected = true
+description = "Typed array literal Regex[...] / RegexMatch[...] compiles and stores elements verbatim (Issue #5706). Adds Regex/RegexMatch to heap_type_array_element_type (boxed Abstract slot), fixing the previous 'Cannot convert Regex to I64' (element type fell through to the numeric default). Covers length/eltype/typeof/indexing, match/occursin on elements, and push! onto a populated typed array."
+
+[[tests]]
+name = "regex_flag_literals_5709"
+file = "regex_flag_literals_5709.jl"
+expected = true
+description = "Flag-suffixed regex literals r\"...\"i / r\"...\"ims now parse (Issue #5709). The parser captures an identifier immediately adjacent to the closing quote (for the r prefix) as a third child, and lowering passes it as the Regex flags. Covers i/m/s flags, no-flag regression, and composition with endswith/startswith (#5676/#5677)."
+
+[[tests]]
+name = "regex_count_findall_6749"
+file = "regex_count_findall_6749.jl"
+expected = true
+description = "Pure-Julia public regex search wrappers count(::Regex, s) and findall(::Regex, s) (Issue #6749). Built on top of the eachmatch engine boundary (Rust regex crate) in base/strings/search.jl, completing the public search API alongside the existing occursin(::Regex). count returns the number of non-overlapping matches; findall returns Vector{UnitRange{Int64}} of byte ranges (m.offset : m.offset + ncodeunits(m.match) - 1). Covers ASCII and unicode haystacks and the empty-match/no-match cases; values verified against upstream julia 1.12. (eltype is not asserted: sjulia degrades empty Vector{UnitRange{Int64}} to Vector{Any} after push!, tracked by #6768.)"

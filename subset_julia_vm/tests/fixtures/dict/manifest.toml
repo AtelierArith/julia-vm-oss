@@ -1,6 +1,66 @@
 # Test manifest for dict category
 
 [[tests]]
+name = "dict_haskey_return_type_defer_6610"
+file = "haskey_return_type_defer_6610.jl"
+expected = true
+description = "haskey/isempty/empty! overridden with a different return type on a custom type dispatch cleanly through an Any-typed binding instead of being coerced to Bool/the-collection (Issue #6610)"
+
+[[tests]]
+name = "dict_public_construction_struct_routing_6619"
+file = "dict_construction_fastpath_6589.jl"
+expected = true
+description = "Literal/comprehension/empty/typed Dict construction routes to pure-Julia Memory-backed Dict{K,V} structs; NewDict* remains cache-compat only (Issue #6619)"
+
+[[tests]]
+name = "dict_bare_dict_annotation_dispatch_7632"
+file = "bare_dict_annotation_dispatch_7632.jl"
+expected = true
+description = "Pure-Julia Dict values dispatch to bare ::Dict annotations through direct and Any-typed calls (Issue #7632)"
+
+[[tests]]
+name = "dict_op_display_parity_6620"
+file = "dict_op_display_parity_6620.jl"
+expected = true
+description = "Struct-backed Dict{K,V} keys/values views, membership, filter/filter!, equality/hash, display, mutation reference, mixed keys, and rehash parity (Issue #6620)"
+
+[[tests]]
+name = "dict_getindex_setindex_dispatch_6587"
+file = "dict_getindex_setindex_dispatch_6587.jl"
+expected = true
+description = "getindex/setindex! dispatch method-first (user methods win); Value::Dict keeps its fast path (Issue #6587)"
+
+[[tests]]
+name = "dict_view_ops_dispatch_6588"
+file = "dict_view_ops_dispatch_6588.jl"
+expected = true
+description = "keys/values/pairs/merge/copy dispatch method-first (user methods win); Value::Dict views via Pure Julia wrappers (Issue #6588)"
+
+[[tests]]
+name = "dict_dispatch_matrix_6586"
+file = "dict_dispatch_matrix_6586.jl"
+expected = true
+description = "Every public Dict op routed through an Any-typed binding matches upstream (no bare-vs-parametric dispatch gap) (Issue #6586)"
+
+[[tests]]
+name = "dict_user_method_wins_6586"
+file = "dict_user_method_wins_6586.jl"
+expected = true
+description = "User methods extending Base Dict-family functions win over the Rust Value::Dict fallback; Base path stays intact (Issue #6586)"
+
+[[tests]]
+name = "dict_getbang_type_preservation_6585"
+file = "dict_getbang_type_preservation_6585.jl"
+expected = true
+description = "get! preserves its result value type through an Any-typed binding (was coerced to Float64 via the bare Dict lattice default) (Issue #6585)"
+
+[[tests]]
+name = "dict_pure_julia_parity_6571"
+file = "dict_pure_julia_parity_6571.jl"
+expected = true
+description = "Public Dict surface parity across literal/non-literal construction and Any-typed dispatch; empty! gap regression (Issues #6571, #6584)"
+
+[[tests]]
 name = "dict_iteration"
 file = "dict_iteration.jl"
 expected = true
@@ -16,7 +76,7 @@ description = "mergewith! and mergewith - merge dicts with custom combine functi
 name = "dict_indexing_any"
 file = "dict_indexing_any.jl"
 expected = true
-description = "Dict string-key indexing with Any-typed function parameters (Issue #1814)"
+description = "Dict indexing with Any-typed function parameters covers string, integer, and struct-ref keys; struct keys route to Dict dispatch instead of array IndexLoad type errors (Issues #1814, #8397)"
 
 [[tests]]
 name = "dict_copy"
@@ -76,7 +136,13 @@ description = "Hash table helper functions: _tablesz, _shorthash7, hashindex, co
 name = "dict_pure_julia_struct"
 file = "test_pure_julia_dict.jl"
 expected = true
-description = "Dict{K,V} Pure Julia mutable struct: constructor, insert, lookup, delete, iterate (Issue #2748)"
+description = "Dict{K,V} Pure Julia mutable struct: Memory-backed typed storage, constructor, insert, lookup, delete, iterate (Issues #2748, #6617)"
+
+[[tests]]
+name = "dict_constructors_6618"
+file = "dict_constructors_6618.jl"
+expected = true
+description = "Pure-Julia Dict generic constructors build typed Memory-backed Dict{K,V} structs with upstream typejoin narrowing for pair variables and iterable entries (Issue #6618)"
 
 [[tests]]
 name = "dict_setindex_struct_dispatch"
@@ -89,3 +155,117 @@ name = "dict_delete_struct_dispatch"
 file = "dict_delete_struct_dispatch.jl"
 expected = true
 description = "DictDelete dispatches delete! to user methods on non-Dict StructRef (Issue #3169)"
+
+[[tests]]
+name = "dict_haskey_typeof"
+file = "test_haskey_typeof.jl"
+expected = true
+description = "typeof(haskey(...)) returns Bool, not Int64 - expr inference fix (Issue #3473)"
+
+[[tests]]
+name = "dict_keys_values_pairs_types"
+file = "keys_values_pairs_types.jl"
+expected = true
+description = "keys/values return Array, pairs returns dict itself (Issue #3474)"
+
+[[tests]]
+name = "dict_pure_julia_mutating_dispatch"
+file = "test_pure_julia_mutating_dispatch.jl"
+expected = true
+description = "delete!/empty! on Dict{K,V} (Pure Julia struct) and legacy Dict (Issue #3739)"
+
+[[tests]]
+name = "dict_getbang_writeback_5225"
+file = "dict_getbang_writeback_5225.jl"
+expected = true
+description = "get!(dict,key,default) and get!(f,dict,key) persist the inserted entry to the bound variable (Issue #5225)"
+
+[[tests]]
+name = "dict_string_key_borrow_probe_5187"
+file = "dict_string_key_borrow_probe_5187.jl"
+expected = true
+description = "String/Symbol-key reads (getindex/get/getkey/haskey) via the no-clone borrowed-key probe match the owned path, incl. after rehash (Issue #5187)"
+
+[[tests]]
+name = "dict_fast_hash_stress_5188"
+file = "dict_fast_hash_stress_5188.jl"
+expected = true
+description = "Internal fast FxHash dict-key slot hashing: resize, collisions, mixed/numeric/-0.0/NaN keys round-trip (Issue #5188)"
+
+[[tests]]
+name = "dict_inline_index_string_eq_5269"
+file = "dict_inline_index_string_eq_5269.jl"
+expected = true
+description = "Inline dict[key] returning a String compares equal to a String literal/variable with == (Issue #5269)"
+
+[[tests]]
+name = "dict_local_any_carrier_5081"
+file = "dict_local_any_carrier_5081.jl"
+expected = true
+description = "Dict fallback locals use locals_any with VarTypeTag::Dict after legacy locals_dict removal (Issue #5081)"
+
+[[tests]]
+name = "dict_pass_by_reference_5675"
+file = "dict_pass_by_reference_5675.jl"
+expected = true
+description = "A Dict is a mutable reference object: mutating a Dict passed to a function propagates to the caller (pass-by-reference), and mergewith/mergewith!/merge! accumulator patterns produce correct results, while copy(d) and non-bang merge(a,b) stay independent. Value::Dict moved from an owned Box (deep-copied on parameter binding) to a shared Rc<RefCell<DictValue>>, matching how arrays already behave (Issue #5675)."
+
+[[tests]]
+name = "dict_testset_global_haskey_any_6263"
+file = "testset_global_haskey_any_6263.jl"
+expected = true
+description = "@testset global Dict reads through haskey remain dynamically typed before rebinding the same global to a scalar (Issue #6263)"
+
+[[tests]]
+name = "dict_filter_result_native_dict_6672"
+file = "filter_result_native_dict_6672.jl"
+expected = true
+description = "filter(pred, d::Dict) propagates the receiver's Dict{K,V} type at the call site so the result stays a native struct-backed dict; a following empty!/setindex! dispatches natively instead of widening to Any and demoting to a legacy DictEmpty boundary (Issue #6672, the dispatch/cache-order-dependent failure behind the #6621 guard)"
+
+[[tests]]
+name = "dict_tuple_key_getindex_hash_6693"
+file = "tuple_key_getindex_hash_6693.jl"
+expected = true
+description = "Tuple Dict keys work through d[(...)] bracket syntax (lowering no longer flattens a parenthesized TupleExpression into multi-dim indices) and tuples/structs hash consistently by structural value (hash resolves heap struct refs), so haskey/getindex/setindex! find struct-bearing keys like (OneTo(3),) (Issue #6693)"
+
+[[tests]]
+name = "dict_comma_multikey_getindex_setindex_6707"
+file = "comma_multikey_getindex_setindex_6707.jl"
+expected = true
+description = "d[k1, k2, ...] comma form getindex/setindex! on a tuple-keyed Dict (sugar for d[(k1,k2,...)]); array multi-dim indexing unaffected (Issue #6707)"
+
+[[tests]]
+name = "dict_keys_values_pairs_pure_dispatch_6731"
+file = "dict_keys_values_pairs_pure_dispatch_6731.jl"
+expected = true
+description = "keys/values/pairs on a Dict route through pure-Julia Dict{K,V} methods (base/dict.jl) with no Value::Dict builtin fallback (Issue #6731 slice 1). Their BASE_FUNCTION_ROUTES entries are now markers (no BuiltinOp), so the call dispatches to the pure parametric methods statically and through a dynamic Any-typed barrier; keys/values on a NamedTuple still work. The BuiltinOp/BuiltinId DictKeys/DictValues/DictPairs become dead-but-kept. Values vs julia 1.12."
+
+[[tests]]
+name = "dict_mutating_ops_pure_dispatch_6731"
+file = "dict_mutating_ops_pure_dispatch_6731.jl"
+expected = true
+description = "Mutating Dict ops delete!/get!/empty!/merge! route through pure-Julia Dict{K,V} methods (base/dict.jl) with no Value::Dict builtin fallback (Issue #6731 slice 2). BASE_FUNCTION_ROUTES entries changed route()→marker(); BuiltinOp DictDelete/DictGetBang/DictEmpty/DictMergeBang moved to dead_but_kept. Verified statically, through a dynamic Any-typed barrier incl. the #6584 empty! trap, and that delete!/empty! on a Set still work. Values vs julia 1.12."
+
+[[tests]]
+name = "dict_carrier_removed_pure_struct_6731"
+file = "dict_carrier_removed_pure_struct_6731.jl"
+expected = true
+description = "The Value::Dict Rust carrier was removed (Issue #6731): every Dict is a pure-Julia Dict{K,V} struct and the full public API (getindex/setindex!/get/get!/getkey/haskey/keys/values/pairs/delete!/merge!/empty!/pop!/eltype/keytype/valtype/construction/iteration) dispatches through its methods. The _dict_* intrinsics, BuiltinId _Dict*/DictNew/DictMerge/DictLen, and NewDict* Instrs are deleted; remaining Dict BuiltinIds are pure struct-dispatch trampolines. Verified incl. #6584 Any-typed empty! trap and that Set delete!/empty! still work. Values vs julia 1.12."
+
+[[tests]]
+name = "dict_inline_dict_real_struct_key_7173"
+file = "inline_dict_real_struct_key_7173.jl"
+expected = true
+description = "Indexing an inline-chained `Dict(...)[key]` whose key is a module-qualified user struct `<: Real` (so the inferred Dict name carries a dot inside its type params, e.g. `Dict{M.R, Int64}`) dispatches to `getindex` instead of misrouting to numeric array indexing. `is_dict_struct_name` now splits on `{` before stripping a module prefix (Issue #7173). Bound vs inline parity; ordinary numeric array indexing and inline Int/String-keyed Dict indexing unaffected. Values vs julia 1.12."
+
+[[tests]]
+name = "dict_generic_datatype_keys_7940"
+file = "dict_generic_datatype_keys_7940.jl"
+expected = true
+description = "Dict get/set keyed by a generic `DataType` value (a `where` type parameter, e.g. `D[T] = ...` / `D[T]`) compiles and dispatches to the Dict path instead of coercing the key to an I64 array index (\"Cannot convert DataType to I64\"). Covers haskey/write/read through a Dict argument, top-level concrete DataType keys with value-type preservation (no Int->Float64 coercion via DictSet routing), and `Dict{Type,Any}` (Issue #7940)."
+
+[[tests]]
+name = "dict_typed_datatype_param_ctor_7934"
+file = "dict_typed_datatype_param_ctor_7934.jl"
+expected = true
+description = "Typed Dict constructors whose type parameters are DataType values (`Dict{Type, Dict{Symbol, Any}}()`) construct, index, nest, and `isa`-check correctly (regression fixture; resolved on current main) (Issue #7934)."

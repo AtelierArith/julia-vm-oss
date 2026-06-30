@@ -13,6 +13,147 @@ use super::super::error::VmError;
 use super::array_element::ArrayElementType;
 use super::Value;
 
+const BITS_PER_WORD: usize = u64::BITS as usize;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BitPackedBoolData {
+    words: Vec<u64>,
+    len: usize,
+}
+
+impl BitPackedBoolData {
+    pub fn new_false(len: usize) -> Self {
+        Self {
+            words: vec![0; Self::words_for_len(len)],
+            len,
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            words: Vec::with_capacity(Self::words_for_len(capacity)),
+            len: 0,
+        }
+    }
+
+    pub fn from_bools(values: &[bool]) -> Self {
+        let mut packed = Self::with_capacity(values.len());
+        for &value in values {
+            packed.push(value);
+        }
+        packed
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn raw_word_len(&self) -> usize {
+        self.words.len()
+    }
+
+    pub fn reserve(&mut self, additional: usize) {
+        let required_words = Self::words_for_len(self.len.saturating_add(additional));
+        self.words
+            .reserve(required_words.saturating_sub(self.words.capacity()));
+    }
+
+    pub fn get(&self, index: usize) -> Option<bool> {
+        if index >= self.len {
+            return None;
+        }
+        let (word_idx, mask) = Self::word_mask(index);
+        self.words.get(word_idx).map(|word| (word & mask) != 0)
+    }
+
+    pub fn set(&mut self, index: usize, value: bool) -> Option<()> {
+        if index >= self.len {
+            return None;
+        }
+        let (word_idx, mask) = Self::word_mask(index);
+        let word = self.words.get_mut(word_idx)?;
+        if value {
+            *word |= mask;
+        } else {
+            *word &= !mask;
+        }
+        Some(())
+    }
+
+    pub fn push(&mut self, value: bool) {
+        if self.len == self.words.len() * BITS_PER_WORD {
+            self.words.push(0);
+        }
+        self.len += 1;
+        let _ = self.set(self.len - 1, value);
+    }
+
+    pub fn pop(&mut self) -> Option<bool> {
+        if self.len == 0 {
+            return None;
+        }
+        let index = self.len - 1;
+        let value = self.get(index)?;
+        self.len -= 1;
+        if self.len == 0 {
+            self.words.clear();
+        } else {
+            self.words.truncate(Self::words_for_len(self.len));
+            let unused_bits = self.words.len() * BITS_PER_WORD - self.len;
+            if unused_bits > 0 {
+                let keep_bits = BITS_PER_WORD - unused_bits;
+                if let Some(last) = self.words.last_mut() {
+                    *last &= (1_u64 << keep_bits) - 1;
+                }
+            }
+        }
+        Some(value)
+    }
+
+    pub fn insert(&mut self, index: usize, value: bool) -> Option<()> {
+        if index > self.len {
+            return None;
+        }
+        self.push(false);
+        for i in (index + 1..self.len).rev() {
+            let prev = self.get(i - 1)?;
+            self.set(i, prev)?;
+        }
+        self.set(index, value)
+    }
+
+    pub fn remove(&mut self, index: usize) -> Option<bool> {
+        if index >= self.len {
+            return None;
+        }
+        let removed = self.get(index)?;
+        for i in index..self.len - 1 {
+            let next = self.get(i + 1)?;
+            self.set(i, next)?;
+        }
+        let _ = self.pop();
+        Some(removed)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+        (0..self.len).map(|index| self.get(index).unwrap_or(false))
+    }
+
+    fn words_for_len(len: usize) -> usize {
+        len.div_ceil(BITS_PER_WORD)
+    }
+
+    fn word_mask(index: usize) -> (usize, u64) {
+        let word_idx = index / BITS_PER_WORD;
+        let bit_idx = index % BITS_PER_WORD;
+        (word_idx, 1_u64 << bit_idx)
+    }
+}
+
 /// Type-segregated array storage for efficient operations
 /// Each variant holds a homogeneous vector of the corresponding type
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +173,7 @@ pub enum ArrayData {
     U64(Vec<u64>),
     // Other types
     Bool(Vec<bool>),
+    BitPackedBool(BitPackedBoolData),
     String(Vec<std::string::String>),
     Char(Vec<char>),
     StructRefs(Vec<usize>),
@@ -53,6 +195,7 @@ impl ArrayData {
             ArrayData::U32(_) => ArrayElementType::U32,
             ArrayData::U64(_) => ArrayElementType::U64,
             ArrayData::Bool(_) => ArrayElementType::Bool,
+            ArrayData::BitPackedBool(_) => ArrayElementType::Bool,
             ArrayData::String(_) => ArrayElementType::String,
             ArrayData::Char(_) => ArrayElementType::Char,
             ArrayData::StructRefs(_) => ArrayElementType::Struct,
@@ -74,10 +217,41 @@ impl ArrayData {
             ArrayData::U32(v) => v.len(),
             ArrayData::U64(v) => v.len(),
             ArrayData::Bool(v) => v.len(),
+            ArrayData::BitPackedBool(v) => v.len(),
             ArrayData::String(v) => v.len(),
             ArrayData::Char(v) => v.len(),
             ArrayData::StructRefs(v) => v.len(),
             ArrayData::Any(v) => v.len(),
+        }
+    }
+
+    /// Reserve capacity for at least `additional` more *raw* slots in the
+    /// backing vector, leaving the logical length unchanged (Issue #5186).
+    ///
+    /// This is a pure capacity hint used to pre-size the backing storage of a
+    /// filter-free comprehension whose final length is known at runtime, so the
+    /// repeated `push` growth no longer triggers `O(log n)` reallocations. The
+    /// caller is responsible for scaling `additional` by the per-element raw
+    /// multiplier (e.g. 2 for interleaved Complex storage, the field count for
+    /// AoS Tuple/struct storage).
+    pub fn reserve(&mut self, additional: usize) {
+        match self {
+            ArrayData::F32(v) => v.reserve(additional),
+            ArrayData::F64(v) => v.reserve(additional),
+            ArrayData::I8(v) => v.reserve(additional),
+            ArrayData::I16(v) => v.reserve(additional),
+            ArrayData::I32(v) => v.reserve(additional),
+            ArrayData::I64(v) => v.reserve(additional),
+            ArrayData::U8(v) => v.reserve(additional),
+            ArrayData::U16(v) => v.reserve(additional),
+            ArrayData::U32(v) => v.reserve(additional),
+            ArrayData::U64(v) => v.reserve(additional),
+            ArrayData::Bool(v) => v.reserve(additional),
+            ArrayData::BitPackedBool(v) => v.reserve(additional),
+            ArrayData::String(v) => v.reserve(additional),
+            ArrayData::Char(v) => v.reserve(additional),
+            ArrayData::StructRefs(v) => v.reserve(additional),
+            ArrayData::Any(v) => v.reserve(additional),
         }
     }
 
@@ -95,6 +269,7 @@ impl ArrayData {
             ArrayData::U32(v) => v.is_empty(),
             ArrayData::U64(v) => v.is_empty(),
             ArrayData::Bool(v) => v.is_empty(),
+            ArrayData::BitPackedBool(v) => v.is_empty(),
             ArrayData::String(v) => v.is_empty(),
             ArrayData::Char(v) => v.is_empty(),
             ArrayData::StructRefs(v) => v.is_empty(),
@@ -116,6 +291,7 @@ impl ArrayData {
             ArrayData::U32(v) => v.iter().map(|&x| x as f64).sum(),
             ArrayData::U64(v) => v.iter().map(|&x| x as f64).sum(),
             ArrayData::Bool(v) => v.iter().map(|&x| if x { 1.0 } else { 0.0 }).sum(),
+            ArrayData::BitPackedBool(v) => v.iter().map(|x| if x { 1.0 } else { 0.0 }).sum(),
             ArrayData::Any(v) => {
                 // Sum boxed numeric values (from collect(map(...)))
                 v.iter()
@@ -130,13 +306,8 @@ impl ArrayData {
                         Value::U64(x) => *x as f64,
                         Value::F32(x) => *x as f64,
                         Value::F64(x) => *x,
-                        Value::Bool(b) => {
-                            if *b {
-                                1.0
-                            } else {
-                                0.0
-                            }
-                        }
+                        Value::Bool(true) => 1.0,
+                        Value::Bool(false) => 0.0,
                         _ => 0.0, // Non-numeric values contribute 0
                     })
                     .sum()
@@ -159,6 +330,7 @@ impl ArrayData {
             ArrayData::U32(_) => "U32",
             ArrayData::U64(_) => "U64",
             ArrayData::Bool(_) => "Bool",
+            ArrayData::BitPackedBool(_) => "Bool",
             ArrayData::String(_) => "String",
             ArrayData::Char(_) => "Char",
             ArrayData::StructRefs(_) => "StructRefs",
@@ -181,6 +353,7 @@ impl ArrayData {
             ArrayData::U32(v) => v.get(index).map(|&x| Value::U32(x)),
             ArrayData::U64(v) => v.get(index).map(|&x| Value::U64(x)),
             ArrayData::Bool(v) => v.get(index).map(|&x| Value::Bool(x)),
+            ArrayData::BitPackedBool(v) => v.get(index).map(Value::Bool),
             ArrayData::String(v) => v.get(index).map(|x| Value::Str(x.clone())),
             ArrayData::Char(v) => v.get(index).map(|&x| Value::Char(x)),
             ArrayData::StructRefs(v) => v.get(index).map(|&idx| Value::StructRef(idx)),
@@ -216,6 +389,18 @@ impl ArrayData {
                         v[index] = x as f32;
                         Ok(())
                     }
+                    Value::I32(x) => {
+                        v[index] = x as f32;
+                        Ok(())
+                    }
+                    Value::I16(x) => {
+                        v[index] = x as f32;
+                        Ok(())
+                    }
+                    Value::I8(x) => {
+                        v[index] = x as f32;
+                        Ok(())
+                    }
                     _ => Err(VmError::TypeError(format!(
                         "Cannot store {:?} in F32 array",
                         value.value_type()
@@ -234,6 +419,18 @@ impl ArrayData {
                         Ok(())
                     }
                     Value::I64(x) => {
+                        v[index] = x as f64;
+                        Ok(())
+                    }
+                    Value::I32(x) => {
+                        v[index] = x as f64;
+                        Ok(())
+                    }
+                    Value::I16(x) => {
+                        v[index] = x as f64;
+                        Ok(())
+                    }
+                    Value::I8(x) => {
                         v[index] = x as f64;
                         Ok(())
                     }
@@ -271,6 +468,10 @@ impl ArrayData {
                         v[index] = x as i16;
                         Ok(())
                     }
+                    Value::I8(x) => {
+                        v[index] = x as i16;
+                        Ok(())
+                    }
                     _ => Err(VmError::TypeError(format!(
                         "Cannot store {:?} in I16 array",
                         value.value_type()
@@ -288,6 +489,14 @@ impl ArrayData {
                         v[index] = x as i32;
                         Ok(())
                     }
+                    Value::I16(x) => {
+                        v[index] = x as i32;
+                        Ok(())
+                    }
+                    Value::I8(x) => {
+                        v[index] = x as i32;
+                        Ok(())
+                    }
                     _ => Err(VmError::TypeError(format!(
                         "Cannot store {:?} in I32 array",
                         value.value_type()
@@ -302,6 +511,18 @@ impl ArrayData {
                         Ok(())
                     }
                     Value::F64(x) if x.fract() == 0.0 => {
+                        v[index] = x as i64;
+                        Ok(())
+                    }
+                    Value::I32(x) => {
+                        v[index] = x as i64;
+                        Ok(())
+                    }
+                    Value::I16(x) => {
+                        v[index] = x as i64;
+                        Ok(())
+                    }
+                    Value::I8(x) => {
                         v[index] = x as i64;
                         Ok(())
                     }
@@ -396,6 +617,23 @@ impl ArrayData {
                     ))),
                 }
             }
+            ArrayData::BitPackedBool(v) => {
+                check_bounds!(v);
+                match value {
+                    Value::Bool(b) => v.set(index, b).ok_or(VmError::IndexOutOfBounds {
+                        indices: vec![index as i64 + 1],
+                        shape: vec![v.len()],
+                    }),
+                    Value::I64(x) => v.set(index, x != 0).ok_or(VmError::IndexOutOfBounds {
+                        indices: vec![index as i64 + 1],
+                        shape: vec![v.len()],
+                    }),
+                    _ => Err(VmError::TypeError(format!(
+                        "Cannot store {:?} in Bool array",
+                        value.value_type()
+                    ))),
+                }
+            }
             ArrayData::String(v) => {
                 check_bounds!(v);
                 match value {
@@ -459,6 +697,18 @@ impl ArrayData {
                     v.push(x as f32);
                     Ok(())
                 }
+                Value::I32(x) => {
+                    v.push(x as f32);
+                    Ok(())
+                }
+                Value::I16(x) => {
+                    v.push(x as f32);
+                    Ok(())
+                }
+                Value::I8(x) => {
+                    v.push(x as f32);
+                    Ok(())
+                }
                 _ => Err(VmError::TypeError(format!(
                     "Cannot push {:?} to F32 array",
                     value.value_type()
@@ -474,6 +724,18 @@ impl ArrayData {
                     Ok(())
                 }
                 Value::I64(x) => {
+                    v.push(x as f64);
+                    Ok(())
+                }
+                Value::I32(x) => {
+                    v.push(x as f64);
+                    Ok(())
+                }
+                Value::I16(x) => {
+                    v.push(x as f64);
+                    Ok(())
+                }
+                Value::I8(x) => {
                     v.push(x as f64);
                     Ok(())
                 }
@@ -505,6 +767,10 @@ impl ArrayData {
                     v.push(x as i16);
                     Ok(())
                 }
+                Value::I8(x) => {
+                    v.push(x as i16);
+                    Ok(())
+                }
                 _ => Err(VmError::TypeError(format!(
                     "Cannot push {:?} to I16 array",
                     value.value_type()
@@ -519,6 +785,14 @@ impl ArrayData {
                     v.push(x as i32);
                     Ok(())
                 }
+                Value::I16(x) => {
+                    v.push(x as i32);
+                    Ok(())
+                }
+                Value::I8(x) => {
+                    v.push(x as i32);
+                    Ok(())
+                }
                 _ => Err(VmError::TypeError(format!(
                     "Cannot push {:?} to I32 array",
                     value.value_type()
@@ -530,6 +804,18 @@ impl ArrayData {
                     Ok(())
                 }
                 Value::F64(x) if x.fract() == 0.0 => {
+                    v.push(x as i64);
+                    Ok(())
+                }
+                Value::I32(x) => {
+                    v.push(x as i64);
+                    Ok(())
+                }
+                Value::I16(x) => {
+                    v.push(x as i64);
+                    Ok(())
+                }
+                Value::I8(x) => {
                     v.push(x as i64);
                     Ok(())
                 }
@@ -608,6 +894,20 @@ impl ArrayData {
                     value.value_type()
                 ))),
             },
+            ArrayData::BitPackedBool(v) => match value {
+                Value::Bool(b) => {
+                    v.push(b);
+                    Ok(())
+                }
+                Value::I64(x) => {
+                    v.push(x != 0);
+                    Ok(())
+                }
+                _ => Err(VmError::TypeError(format!(
+                    "Cannot push {:?} to Bool array",
+                    value.value_type()
+                ))),
+            },
             ArrayData::String(v) => match value {
                 Value::Str(s) => {
                     v.push(s);
@@ -659,6 +959,7 @@ impl ArrayData {
             ArrayData::U32(v) => v.pop().map(Value::U32).ok_or(VmError::EmptyArrayPop),
             ArrayData::U64(v) => v.pop().map(Value::U64).ok_or(VmError::EmptyArrayPop),
             ArrayData::Bool(v) => v.pop().map(Value::Bool).ok_or(VmError::EmptyArrayPop),
+            ArrayData::BitPackedBool(v) => v.pop().map(Value::Bool).ok_or(VmError::EmptyArrayPop),
             ArrayData::String(v) => v.pop().map(Value::Str).ok_or(VmError::EmptyArrayPop),
             ArrayData::Char(v) => v.pop().map(Value::Char).ok_or(VmError::EmptyArrayPop),
             ArrayData::StructRefs(v) => v.pop().map(Value::StructRef).ok_or(VmError::EmptyArrayPop),
@@ -693,17 +994,34 @@ mod tests {
 
     #[test]
     fn test_element_type_f64() {
-        assert_eq!(ArrayData::F64(vec![1.0]).element_type(), ArrayElementType::F64);
+        assert_eq!(
+            ArrayData::F64(vec![1.0]).element_type(),
+            ArrayElementType::F64
+        );
     }
 
     #[test]
     fn test_element_type_i64() {
-        assert_eq!(ArrayData::I64(vec![1]).element_type(), ArrayElementType::I64);
+        assert_eq!(
+            ArrayData::I64(vec![1]).element_type(),
+            ArrayElementType::I64
+        );
     }
 
     #[test]
     fn test_element_type_bool() {
-        assert_eq!(ArrayData::Bool(vec![true]).element_type(), ArrayElementType::Bool);
+        assert_eq!(
+            ArrayData::Bool(vec![true]).element_type(),
+            ArrayElementType::Bool
+        );
+    }
+
+    #[test]
+    fn test_element_type_bitpacked_bool() {
+        assert_eq!(
+            ArrayData::BitPackedBool(BitPackedBoolData::new_false(3)).element_type(),
+            ArrayElementType::Bool
+        );
     }
 
     #[test]
@@ -721,6 +1039,12 @@ mod tests {
     #[test]
     fn test_raw_len_empty() {
         assert_eq!(ArrayData::I64(vec![]).raw_len(), 0);
+    }
+
+    #[test]
+    fn test_bitpacked_bool_raw_len_is_logical_len() {
+        let data = BitPackedBoolData::from_bools(&[true, false, true, true, false]);
+        assert_eq!(ArrayData::BitPackedBool(data).raw_len(), 5);
     }
 
     #[test]
@@ -760,7 +1084,11 @@ mod tests {
     #[test]
     fn test_sum_as_f64_integers() {
         let result = ArrayData::I64(vec![1, 2, 3]).sum_as_f64();
-        assert!((result - 6.0).abs() < 1e-15, "sum should be 6.0, got {}", result);
+        assert!(
+            (result - 6.0).abs() < 1e-15,
+            "sum should be 6.0, got {}",
+            result
+        );
     }
 
     #[test]
@@ -773,6 +1101,14 @@ mod tests {
     fn test_sum_as_f64_booleans_count_true() {
         // true=1.0, false=0.0
         let result = ArrayData::Bool(vec![true, false, true, true]).sum_as_f64();
+        assert!((result - 3.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_sum_as_f64_bitpacked_booleans_count_true() {
+        let result =
+            ArrayData::BitPackedBool(BitPackedBoolData::from_bools(&[true, false, true, true]))
+                .sum_as_f64();
         assert!((result - 3.0).abs() < 1e-15);
     }
 
@@ -807,7 +1143,23 @@ mod tests {
     #[test]
     fn test_get_value_out_of_bounds_returns_none() {
         let data = ArrayData::I64(vec![1, 2]);
-        assert!(data.get_value(10).is_none(), "out-of-bounds should return None");
+        assert!(
+            data.get_value(10).is_none(),
+            "out-of-bounds should return None"
+        );
+    }
+
+    #[test]
+    fn test_bitpacked_bool_get_set_push_pop() {
+        let mut data = BitPackedBoolData::from_bools(&[true, false, true]);
+        assert_eq!(data.raw_word_len(), 1);
+        assert_eq!(data.get(1), Some(false));
+
+        data.set(1, true).unwrap();
+        data.push(false);
+        assert_eq!(data.get(1), Some(true));
+        assert_eq!(data.pop(), Some(false));
+        assert_eq!(data.len(), 3);
     }
 
     // ── as_f64_slice ──────────────────────────────────────────────────────────

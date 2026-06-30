@@ -27,3 +27,99 @@ name = "subarray_views_macro"
 file = "views_macro.jl"
 expected = true
 description = "Test @views macro transforms all indexing to views (Issue #466)"
+
+[[tests]]
+name = "subarray_type_surface_5137"
+file = "subarray_type_surface_5137.jl"
+expected = true
+description = "SubArray 1D views expose upstream-like five-parameter type surface and AbstractArray/AbstractVector membership, including Int8 regression coverage (Issues #5137, #5583)"
+
+[[tests]]
+name = "subarray_reshapedarray_type_surface_5137"
+file = "reshapedarray_type_surface_5137.jl"
+expected = true
+description = "reshape(::Array) remains Array while reshape(::SubArray) exposes a ReshapedArray{T,N,P,Tuple{}}-style AbstractArray surface with parent delegation and SubArray aliasing (Issue #5137)"
+
+[[tests]]
+name = "subarray_matrix_range_view_5137"
+file = "matrix_range_view_5137.jl"
+expected = true
+description = "Matrix UnitRange/UnitRange view exposes a 2D SubArray surface with parent aliasing and shape-preserving collect copy (Issue #5137)"
+
+[[tests]]
+name = "subarray_matrix_colon_view_5137"
+file = "matrix_colon_view_5137.jl"
+expected = true
+description = "Matrix views with Colon indices expose a 2D SubArray surface with parent aliasing and shape-preserving collect copy (Issue #5137)"
+
+[[tests]]
+name = "subarray_matrix_dim_dropping_view_5137"
+file = "matrix_dim_dropping_view_5137.jl"
+expected = true
+description = "Matrix view with a scalar Int index drops that dimension, yielding a 1D SubArray (row/column slice) with parent aliasing and read/write reflection (Issue #5137)"
+
+[[tests]]
+name = "subarray_view_3d_range_5137"
+file = "view_3d_range_5137.jl"
+expected = true
+description = "3D range view view(A::Array{T,3}, r1, r2, r3) returns a 3D SubArray with column-major linear/Cartesian read and write-through to the parent and a shape-preserving collect into Array{T,3} (Issue #5137)"
+
+[[tests]]
+name = "subarray_map_over_view_5137"
+file = "map_over_view_5137.jl"
+expected = true
+description = "map(f, v) over a SubArray materializes the view via collect(::SubArray) first (the runtime collect iterator path does not recognize the SubArray struct), so 1D/2D/dimension-dropping view mapping matches upstream without mutating the parent (Issue #5137)"
+
+[[tests]]
+name = "subarray_reshape_view_iterate_5137"
+file = "reshape_view_iterate_5137.jl"
+expected = true
+description = "reshape(view(...), n) produces a 1D ReshapedArray over a SubArray; linear iterate/collect/map/sum (via the element getindex delegating to the SubArray parent) match upstream column-major reads without mutating the parent (Issue #5137)"
+
+[[tests]]
+name = "subarray_broadcast_over_view_5137"
+file = "broadcast_over_view_5137.jl"
+expected = true
+description = "Broadcasting over a SubArray view (arithmetic, math functions, comparisons, 1D/2D/dimension-dropping) participates in the pure-Julia broadcast pipeline as the aliased array (shape/axes, eltype inference, Extruded loop, non-Extruded BitVector path, scalar/2D fast-path guards) instead of being treated as a scalar (Issue #5137)"
+
+[[tests]]
+name = "subarray_range_view_5137"
+file = "range_view_5137.jl"
+expected = true
+description = "Range view with UnitRange indices returns an upstream-compatible range slice (Issue #5137)"
+
+[[tests]]
+name = "subarray_value_param_wrapper_5586"
+file = "value_param_wrapper_5586.jl"
+expected = true
+description = "Generic constructors preserve numeric value parameters in explicit parametric type instantiation (Issue #5586)"
+
+[[tests]]
+name = "subarray_reshape_subarray_5587"
+file = "reshape_subarray_5587.jl"
+expected = true
+description = "reshape(::SubArray, dims...) returns an indexable ReshapedArray wrapper with parent/shape accessors (Issue #5587)"
+
+[[tests]]
+name = "subarray_view_int8_reassignment_5588"
+file = "view_int8_reassignment_5588.jl"
+expected = true
+description = "Reusing a local array name with a new element type does not leave stale view dispatch metadata (Issue #5588)"
+
+[[tests]]
+name = "subarray_copy_similar_zero_display_8003"
+file = "copy_similar_zero_display_8003.jl"
+expected = true
+description = "copy/similar/zero on a SubArray return a fresh Vector and a SubArray displays element-wise (string/repr) instead of dumping its raw struct (Issue #8003)"
+
+[[tests]]
+name = "subarray_view_equality_8240"
+file = "view_equality_8240.jl"
+expected = true
+description = "SubArray view == view compares elements rather than falling back to identity when view(...) return-type inference previously widened to Any (Issue #8240)"
+
+[[tests]]
+name = "subarray_array_like_wrapper_contract_8246"
+file = "array_like_wrapper_contract_8246.jl"
+expected = true
+description = "Reusable prevention contract: view(Vector, UnitRange) and reshape wrappers compare element-wise against themselves and native arrays, keeping call-site inference and runtime equality normalization aligned (Issue #8246)"

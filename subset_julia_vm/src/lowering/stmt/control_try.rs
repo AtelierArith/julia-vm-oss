@@ -17,6 +17,14 @@ use super::{lower_block, lower_block_with_ctx};
 /// This is kept for backwards compatibility with code paths that don't have
 /// a lambda context available. It uses `lower_block` internally.
 pub fn lower_try_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Stmt> {
+    lower_try_stmt_impl(walker, node, None)
+}
+
+fn lower_try_stmt_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Stmt> {
     let span = walker.span(&node);
 
     let mut try_block_node = None;
@@ -37,7 +45,7 @@ pub fn lower_try_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
     }
 
     let try_block = match try_block_node {
-        Some(block_node) => lower_block(walker, block_node)?,
+        Some(block_node) => lower_block_maybe_ctx(walker, block_node, lambda_ctx)?,
         None => Block {
             stmts: Vec::new(),
             span,
@@ -54,7 +62,7 @@ pub fn lower_try_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                         var = Some(walker.text(&child).to_string());
                     }
                     NodeKind::Block if block.is_none() => {
-                        block = Some(lower_block(walker, child)?);
+                        block = Some(lower_block_maybe_ctx(walker, child, lambda_ctx)?);
                     }
                     _ => {}
                 }
@@ -75,7 +83,7 @@ pub fn lower_try_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 .into_iter()
                 .find(|child| walker.kind(child) == NodeKind::Block);
             let block = match block_node {
-                Some(node) => lower_block(walker, node)?,
+                Some(node) => lower_block_maybe_ctx(walker, node, lambda_ctx)?,
                 None => Block {
                     stmts: Vec::new(),
                     span: walker.span(&else_node),
@@ -93,7 +101,7 @@ pub fn lower_try_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 .into_iter()
                 .find(|child| walker.kind(child) == NodeKind::Block);
             let block = match block_node {
-                Some(node) => lower_block(walker, node)?,
+                Some(node) => lower_block_maybe_ctx(walker, node, lambda_ctx)?,
                 None => Block {
                     stmts: Vec::new(),
                     span: walker.span(&finally_node),
@@ -123,101 +131,18 @@ pub fn lower_try_stmt_with_ctx<'a>(
     node: Node<'a>,
     lambda_ctx: &LambdaContext,
 ) -> LowerResult<Stmt> {
-    let span = walker.span(&node);
+    lower_try_stmt_impl(walker, node, Some(lambda_ctx))
+}
 
-    let mut try_block_node = None;
-    let mut catch_clause = None;
-    let mut else_clause = None;
-    let mut finally_clause = None;
-
-    for child in walker.named_children(&node) {
-        match walker.kind(&child) {
-            NodeKind::Block if try_block_node.is_none() => {
-                try_block_node = Some(child);
-            }
-            NodeKind::CatchClause => catch_clause = Some(child),
-            NodeKind::ElseClause => else_clause = Some(child),
-            NodeKind::FinallyClause => finally_clause = Some(child),
-            _ => {}
-        }
+fn lower_block_maybe_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Block> {
+    match lambda_ctx {
+        Some(ctx) => lower_block_with_ctx(walker, node, ctx),
+        None => lower_block(walker, node),
     }
-
-    let try_block = match try_block_node {
-        Some(block_node) => lower_block_with_ctx(walker, block_node, lambda_ctx)?,
-        None => Block {
-            stmts: Vec::new(),
-            span,
-        },
-    };
-
-    let (catch_var, catch_block) = match catch_clause {
-        Some(catch_node) => {
-            let mut var = None;
-            let mut block = None;
-            for child in walker.named_children(&catch_node) {
-                match walker.kind(&child) {
-                    NodeKind::Identifier if var.is_none() => {
-                        var = Some(walker.text(&child).to_string());
-                    }
-                    NodeKind::Block if block.is_none() => {
-                        block = Some(lower_block_with_ctx(walker, child, lambda_ctx)?);
-                    }
-                    _ => {}
-                }
-            }
-            let block = block.unwrap_or(Block {
-                stmts: Vec::new(),
-                span: walker.span(&catch_node),
-            });
-            (var, Some(block))
-        }
-        None => (None, None),
-    };
-
-    let else_block = match else_clause {
-        Some(else_node) => {
-            let block_node = walker
-                .named_children(&else_node)
-                .into_iter()
-                .find(|child| walker.kind(child) == NodeKind::Block);
-            let block = match block_node {
-                Some(node) => lower_block_with_ctx(walker, node, lambda_ctx)?,
-                None => Block {
-                    stmts: Vec::new(),
-                    span: walker.span(&else_node),
-                },
-            };
-            Some(block)
-        }
-        None => None,
-    };
-
-    let finally_block = match finally_clause {
-        Some(finally_node) => {
-            let block_node = walker
-                .named_children(&finally_node)
-                .into_iter()
-                .find(|child| walker.kind(child) == NodeKind::Block);
-            let block = match block_node {
-                Some(node) => lower_block_with_ctx(walker, node, lambda_ctx)?,
-                None => Block {
-                    stmts: Vec::new(),
-                    span: walker.span(&finally_node),
-                },
-            };
-            Some(block)
-        }
-        None => None,
-    };
-
-    Ok(Stmt::Try {
-        try_block,
-        catch_var,
-        catch_block,
-        else_block,
-        finally_block,
-        span,
-    })
 }
 
 #[cfg(test)]
@@ -239,7 +164,14 @@ mod tests {
     fn test_try_catch_basic() {
         let stmt = lower_first_stmt("try\n  1\ncatch\n  2\nend");
         assert!(
-            matches!(stmt, Stmt::Try { catch_block: Some(_), catch_var: None, .. }),
+            matches!(
+                stmt,
+                Stmt::Try {
+                    catch_block: Some(_),
+                    catch_var: None,
+                    ..
+                }
+            ),
             "Expected Try with catch block and no catch variable, got {:?}",
             stmt
         );
@@ -259,7 +191,14 @@ mod tests {
     fn test_try_catch_finally() {
         let stmt = lower_first_stmt("try\n  1\ncatch\n  2\nfinally\n  3\nend");
         assert!(
-            matches!(stmt, Stmt::Try { catch_block: Some(_), finally_block: Some(_), .. }),
+            matches!(
+                stmt,
+                Stmt::Try {
+                    catch_block: Some(_),
+                    finally_block: Some(_),
+                    ..
+                }
+            ),
             "Expected Try with both catch and finally blocks, got {:?}",
             stmt
         );

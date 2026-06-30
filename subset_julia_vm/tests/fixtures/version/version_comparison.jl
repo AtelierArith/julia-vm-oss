@@ -6,6 +6,15 @@ using Test
     @test VersionNumber(0, 1, 0) != VersionNumber(1, 0, 0)
 end
 
+@testset "VersionNumber comparison operators (Issue #7529)" begin
+    @test v"1.2.0" >= v"1.1.0"
+    @test v"1.2.0" > v"1.1.9"
+    @test v"1.2.0" <= v"1.2.0"
+    @test v"1.2.0" < v"1.2.1"
+    @test !(v"1.0.0" >= v"2.0.0")
+    @test VERSION >= v"0.1.0"
+end
+
 @testset "VersionNumber field access patterns" begin
     v = VersionNumber(3, 5, 7)
     @test v.major == 3

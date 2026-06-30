@@ -87,12 +87,19 @@ pub enum Token {
     KwIsa,
     #[token("where")]
     KwWhere,
-    #[token("outer")]
-    KwOuter,
-    #[token("type")]
-    KwType,
-    #[token("as")]
-    KwAs,
+    // NOTE: `outer`, `type`, and `as` are NOT lexed as keywords. Upstream Julia
+    // treats each as a *contextual* keyword, significant only in one position:
+    //   - `outer` only inside `for outer x in ...` (outer-local-variable
+    //     modifier) — Issue #8099.
+    //   - `type` only after `abstract`/`primitive` (`abstract type … end`,
+    //     `primitive type … N end`) — Issue #8108.
+    //   - `as` only in import/using aliasing (`import X as Y`,
+    //     `using M: f as g`) — Issue #8108.
+    // Everywhere else (function names, ordinary variables, parameters, struct
+    // fields, calls) they are plain identifiers. We therefore lex them as
+    // normal `Identifier`s and detect the contextual positions by text in
+    // `parse_for_binding` / `parse_abstract_definition` /
+    // `parse_primitive_definition` / the import parser.
 
     // ==================== Boolean Literals ====================
     #[token("true")]
@@ -517,11 +524,17 @@ pub enum Token {
     // This includes:
     // - XID_Start/XID_Continue for standard Unicode identifiers
     // - Mathematical symbols like ∑ (U+2211), ∫ (U+222B)
+    // - Prime suffix marks (U+2032-U+2037)
     // - Subscript digits (U+2080-U+2089) and letters (U+2090-U+209C)
-    // - Superscript digits (U+2070-U+2079) and letters
+    // - Superscript digits (U+2070-U+2079 plus legacy U+00B2/U+00B3/U+00B9)
+    //   and letters
     // - Trailing ! for mutating functions (sort!, push!, etc.)
     // Note: Excludes √∛∜ (U+221A-U+221C) which are unary operators
-    #[regex(r"[_\p{XID_Start}\u{2200}-\u{2219}\u{221D}-\u{22FF}\u{2A00}-\u{2AFF}][_\p{XID_Continue}\u{2080}-\u{209C}\u{2070}-\u{207F}]*!?")]
+    // The greedy trailing `!?` is required so a `keyword!` name (e.g. `in!`) and
+    // names like `push!` out-match the bare keyword / base identifier. The
+    // `a!=b` ambiguity (don't fold the `!` of `!=` into the name) is resolved in
+    // the lexer wrapper, which can rewind via `restart_from` (Issue #8194).
+    #[regex(r"[_\p{XID_Start}\u{2200}-\u{2219}\u{221D}-\u{22FF}\u{2A00}-\u{2AFF}][_\p{XID_Continue}\u{2032}-\u{2037}\u{2080}-\u{209C}\u{2070}-\u{207F}\u{00B2}\u{00B3}\u{00B9}]*!?")]
     Identifier,
 
     // Macro identifier
@@ -570,9 +583,6 @@ impl Token {
                 | Token::KwIn
                 | Token::KwIsa
                 | Token::KwWhere
-                | Token::KwOuter
-                | Token::KwType
-                | Token::KwAs
         )
     }
 
@@ -597,6 +607,10 @@ impl Token {
                 | Token::EqEqEq
                 | Token::NotEq
                 | Token::NotEqEq
+                | Token::ElementOf
+                | Token::NotElementOf
+                | Token::Contains
+                | Token::NotContains
                 | Token::Subtype
                 | Token::Supertype
                 | Token::AndAnd
@@ -631,6 +645,14 @@ impl Token {
                 | Token::Xor
                 | Token::DoubleColon
         )
+    }
+
+    /// Check if this token is a keyword that also denotes a first-class
+    /// function/operator value in upstream Julia (`isa`, `in`). These are
+    /// lexed as keyword tokens but can appear as quoted operator names
+    /// (`Base.:(isa)`, `Base.:isa`, `:(in)`) (Issue #5115).
+    pub fn is_operator_keyword(&self) -> bool {
+        matches!(self, Token::KwIsa | Token::KwIn)
     }
 
     /// Check if this token is an assignment operator (including simple =)
@@ -807,9 +829,6 @@ impl Token {
             Token::KwIn => Some("in"),
             Token::KwIsa => Some("isa"),
             Token::KwWhere => Some("where"),
-            Token::KwOuter => Some("outer"),
-            Token::KwType => Some("type"),
-            Token::KwAs => Some("as"),
             Token::True => Some("true"),
             Token::False => Some("false"),
             _ => None,

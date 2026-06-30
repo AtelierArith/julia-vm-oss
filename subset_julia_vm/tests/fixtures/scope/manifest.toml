@@ -17,3 +17,27 @@ name = "global_compound_assignment_mul"
 file = "global_compound_assignment_mul.jl"
 expected = true
 description = "Global variable compound multiplication (global x *= expr)"
+
+[[tests]]
+name = "scope_string_keyed_slot_cache"
+file = "string_keyed_slot_cache.jl"
+expected = true
+description = "Issue #5179: string/typed-keyed local Load*/Store* resolve to correct slots via the pre-computed name->slot map"
+
+[[tests]]
+name = "scope_global_assignment_in_function"
+file = "global_assignment_in_function.jl"
+expected = true
+description = "Issues #5548/#5549: `global x` inside a function routes reads and writes to the module-level binding (read-modify-write, write-only, and compound assignment)"
+
+[[tests]]
+name = "scope_top_level_begin_rhs_assignments_7667"
+file = "top_level_begin_rhs_assignments_7667.jl"
+expected = true
+description = "Issue #7667: top-level assignment RHS begin blocks do not hide assignments from the surrounding global scope"
+
+[[tests]]
+name = "scope_testset_pi_shadow_5991"
+file = "testset_pi_shadow_5991.jl"
+expected = true
+description = "Issue #5991: a local variable named pi inside @testset shadows Base.pi for assignments and field access"

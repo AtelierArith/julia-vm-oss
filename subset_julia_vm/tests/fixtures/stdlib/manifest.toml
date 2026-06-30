@@ -29,6 +29,24 @@ expected = true
 description = "Random module randcycle, randcycle!, randsubseq, randsubseq! functions (Issue #1919)"
 
 [[tests]]
+name = "stdlib_random_rng_local_any_carrier_5081"
+file = "random_rng_local_any_carrier_5081.jl"
+expected = true
+description = "Random.Xoshiro locals continue to round-trip and reassign correctly after consolidating the legacy locals_rng map into the Any carrier (Issue #5081)"
+
+[[tests]]
+name = "stdlib_random_xoshiro_randn_5436"
+file = "random_xoshiro_randn_5436.jl"
+expected = true
+description = "Random.Xoshiro qualified construction and randn(rng) return Float64 for bare and qualified calls (Issue #5436)"
+
+[[tests]]
+name = "stdlib_random_rng_array_sampling_7227"
+file = "random_rng_array_sampling_7227.jl"
+expected = true
+description = "Explicit-RNG sampling: rand(rng), rand(rng, dims...), rand(rng, Int, dims...), randn(rng, dims...) produce correctly-shaped results and advance the stream (Issue #7227)"
+
+[[tests]]
 name = "stdlib_printf_sprintf"
 file = "printf_sprintf.jl"
 expected = true
@@ -39,3 +57,33 @@ name = "stdlib_test_module"
 file = "test_module.jl"
 expected = true
 description = "Test module macros: @test, @testset, @test_throws, @test_broken (Issue #2864)"
+
+[[tests]]
+name = "stdlib_printf_pure_julia_6746"
+file = "printf_pure_julia_6746.jl"
+expected = true
+description = "@sprintf/sprintf is a pure-Julia C-style Printf engine (base/printf.jl, Issue #6746, #6730 slice 1/4). Parses flags/width/.precision/conversion and lays out integers, hex/octal, strings and chars in pure Julia; the float conversions %f/%e/%E/%g/%G delegate to the Rust _printf_fmt_float boundary (Ryu float→string). Fixes the old behavior that ignored width/precision/flags and dropped default float precision (%f now → 6 digits). Covers integer width/zero-pad/+/space/precision, %#x/%08x/%#o, float precision/width/left/zero/sign, %e/%E/%g, %s width/precision, %c, %%. Uses the standard @sprintf macro; values verified against upstream julia 1.12."
+
+[[tests]]
+name = "stdlib_random_default_rng_7230"
+file = "random_default_rng_7230.jl"
+expected = true
+description = "Random.default_rng() and Random.GLOBAL_RNG return the VM's global RNG; rand/randn through them advance the SAME stream as bare rand/randn (verified against upstream julia 1.12.6, Issue #7230)"
+
+[[tests]]
+name = "stdlib_random_rng_param_threading_7231"
+file = "random_rng_param_threading_7231.jl"
+expected = true
+description = "An explicit RNG argument threaded through a user function: untyped, ::Xoshiro, and ::AbstractRNG params all let rand(rng)/randn(rng) resolve to the scalar-from-rng form (not randn(dims...)); rand(rng,dims)/randn(rng,dims) reachable via typed params; default_rng() threading shares the global stream (Issue #7231)"
+
+[[tests]]
+name = "stdlib_random_rng_user_function_state_7751"
+file = "random_rng_user_function_state_7751.jl"
+expected = true
+description = "RNG state passed through user functions remains caller-visible, matching mutable Julia RNG semantics (Issue #7751)"
+
+[[tests]]
+name = "stdlib_random_mersenne_twister_ctor_7306"
+file = "random_mersenne_twister_ctor_7306.jl"
+expected = true
+description = "MersenneTwister(seed) construction: constructible (bare and Random.-qualified), rand/randn return finite values, same seed -> same sequence (reproducible across two constructions), distinct seeds differ, rand(m,n)/randn(m,n) vectors, isa AbstractRNG, typeof name, threads through untyped/::MersenneTwister/::AbstractRNG params. Backed by a deterministic MT19937-64 engine; stream is NOT bit-identical to upstream julia's dSFMT MersenneTwister (Issue #7306)"

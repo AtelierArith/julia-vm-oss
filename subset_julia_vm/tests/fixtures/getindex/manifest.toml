@@ -29,3 +29,9 @@ name = "setindex_array_basic"
 file = "setindex_array_basic.jl"
 expected = true
 description = "setindex!(arr, v, i) modifies array in place"
+
+[[tests]]
+name = "getindex_slice_carrier_dispatch_7333"
+file = "getindex_slice_carrier_dispatch_7333.jl"
+expected = true
+description = "Issue #7333: a matrix slice (m[:,1]/m[1,:]) recovers its rank and dispatches to ::Vector methods; a full slice (m[:,:]) stays a Matrix"

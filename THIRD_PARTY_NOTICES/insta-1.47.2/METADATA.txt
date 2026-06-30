@@ -1,0 +1,5 @@
+crate: insta
+version: 1.47.2
+license: Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/mitsuhiko/insta

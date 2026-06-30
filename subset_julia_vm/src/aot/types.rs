@@ -1,217 +1,15 @@
 //! Type definitions for AoT compilation
 //!
-//! This module defines the type system used during AoT compilation,
-//! including Julia type representations and type lattice operations.
+//! This module defines [`StaticType`], the AoT carrier type used by the SSA IR
+//! and code generation.
 //!
-//! # StaticType vs JuliaType
-//!
-//! - `JuliaType`: General Julia type representation used throughout AoT compilation
-//! - `StaticType`: Specifically for tracking statically-inferred types with Rust mappings
-//!
-//! StaticType is designed for code generation where we need to know exact Rust types.
+//! `StaticType` is a lossy ABI/codegen projection from the shared `CoreType`
+//! model, designed for code generation where we need exact Rust/ABI layouts. It
+//! must not own Julia semantic rules such as subtyping, parametric matching, or
+//! type joins; those live in `inference_core::CoreType` and are projected back
+//! here only when a stable AoT layout exists.
 
 use std::fmt;
-
-/// Julia type representation for AoT compilation
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum JuliaType {
-    /// Any type (top of lattice)
-    Any,
-    /// Bottom type (no value)
-    Bottom,
-    /// Nothing type
-    Nothing,
-    /// Missing type
-    Missing,
-    /// Boolean type
-    Bool,
-    /// Integer types
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    Int128,
-    /// Unsigned integer types
-    UInt8,
-    UInt16,
-    UInt32,
-    UInt64,
-    UInt128,
-    /// Floating point types
-    Float16,
-    Float32,
-    Float64,
-    /// Character type
-    Char,
-    /// String type
-    String,
-    /// Symbol type
-    Symbol,
-    /// Array type with element type and dimensions
-    Array {
-        element_type: Box<JuliaType>,
-        ndims: Option<usize>,
-    },
-    /// Tuple type
-    Tuple(Vec<JuliaType>),
-    /// Union type
-    Union(Vec<JuliaType>),
-    /// User-defined struct
-    Struct {
-        name: std::string::String,
-        type_params: Vec<JuliaType>,
-    },
-    /// Type variable (for generics)
-    TypeVar(std::string::String),
-    /// Unknown type (needs inference)
-    Unknown,
-}
-
-impl JuliaType {
-    /// Check if this type is concrete (fully known)
-    pub fn is_concrete(&self) -> bool {
-        match self {
-            JuliaType::Any | JuliaType::Unknown | JuliaType::TypeVar(_) => false,
-            JuliaType::Union(types) => types.iter().all(|t| t.is_concrete()),
-            JuliaType::Array { element_type, .. } => element_type.is_concrete(),
-            JuliaType::Tuple(types) => types.iter().all(|t| t.is_concrete()),
-            JuliaType::Struct { type_params, .. } => type_params.iter().all(|t| t.is_concrete()),
-            _ => true,
-        }
-    }
-
-    /// Check if this type is numeric
-    pub fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            JuliaType::Int8
-                | JuliaType::Int16
-                | JuliaType::Int32
-                | JuliaType::Int64
-                | JuliaType::Int128
-                | JuliaType::UInt8
-                | JuliaType::UInt16
-                | JuliaType::UInt32
-                | JuliaType::UInt64
-                | JuliaType::UInt128
-                | JuliaType::Float16
-                | JuliaType::Float32
-                | JuliaType::Float64
-        )
-    }
-
-    /// Check if this type is an integer type
-    pub fn is_integer(&self) -> bool {
-        matches!(
-            self,
-            JuliaType::Int8
-                | JuliaType::Int16
-                | JuliaType::Int32
-                | JuliaType::Int64
-                | JuliaType::Int128
-                | JuliaType::UInt8
-                | JuliaType::UInt16
-                | JuliaType::UInt32
-                | JuliaType::UInt64
-                | JuliaType::UInt128
-        )
-    }
-
-    /// Check if this type is a floating point type
-    pub fn is_float(&self) -> bool {
-        matches!(
-            self,
-            JuliaType::Float16 | JuliaType::Float32 | JuliaType::Float64
-        )
-    }
-
-    /// Get the Rust type name for this Julia type
-    pub fn to_rust_type(&self) -> std::string::String {
-        match self {
-            JuliaType::Bool => "bool".to_string(),
-            JuliaType::Int8 => "i8".to_string(),
-            JuliaType::Int16 => "i16".to_string(),
-            JuliaType::Int32 => "i32".to_string(),
-            JuliaType::Int64 => "i64".to_string(),
-            JuliaType::Int128 => "i128".to_string(),
-            JuliaType::UInt8 => "u8".to_string(),
-            JuliaType::UInt16 => "u16".to_string(),
-            JuliaType::UInt32 => "u32".to_string(),
-            JuliaType::UInt64 => "u64".to_string(),
-            JuliaType::UInt128 => "u128".to_string(),
-            JuliaType::Float16 => "f32".to_string(), // No f16 in Rust
-            JuliaType::Float32 => "f32".to_string(),
-            JuliaType::Float64 => "f64".to_string(),
-            JuliaType::Char => "char".to_string(),
-            JuliaType::String => "String".to_string(),
-            JuliaType::Nothing => "()".to_string(),
-            JuliaType::Array { element_type, .. } => {
-                format!("Vec<{}>", element_type.to_rust_type())
-            }
-            JuliaType::Tuple(types) => {
-                let inner: Vec<_> = types.iter().map(|t| t.to_rust_type()).collect();
-                format!("({})", inner.join(", "))
-            }
-            _ => "Value".to_string(), // Fallback to dynamic Value
-        }
-    }
-}
-
-impl fmt::Display for JuliaType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            JuliaType::Any => write!(f, "Any"),
-            JuliaType::Bottom => write!(f, "Union{{}}"),
-            JuliaType::Nothing => write!(f, "Nothing"),
-            JuliaType::Missing => write!(f, "Missing"),
-            JuliaType::Bool => write!(f, "Bool"),
-            JuliaType::Int8 => write!(f, "Int8"),
-            JuliaType::Int16 => write!(f, "Int16"),
-            JuliaType::Int32 => write!(f, "Int32"),
-            JuliaType::Int64 => write!(f, "Int64"),
-            JuliaType::Int128 => write!(f, "Int128"),
-            JuliaType::UInt8 => write!(f, "UInt8"),
-            JuliaType::UInt16 => write!(f, "UInt16"),
-            JuliaType::UInt32 => write!(f, "UInt32"),
-            JuliaType::UInt64 => write!(f, "UInt64"),
-            JuliaType::UInt128 => write!(f, "UInt128"),
-            JuliaType::Float16 => write!(f, "Float16"),
-            JuliaType::Float32 => write!(f, "Float32"),
-            JuliaType::Float64 => write!(f, "Float64"),
-            JuliaType::Char => write!(f, "Char"),
-            JuliaType::String => write!(f, "String"),
-            JuliaType::Symbol => write!(f, "Symbol"),
-            JuliaType::Array {
-                element_type,
-                ndims,
-            } => {
-                if let Some(n) = ndims {
-                    write!(f, "Array{{{}, {}}}", element_type, n)
-                } else {
-                    write!(f, "Array{{{}}}", element_type)
-                }
-            }
-            JuliaType::Tuple(types) => {
-                let inner: Vec<_> = types.iter().map(|t| format!("{}", t)).collect();
-                write!(f, "Tuple{{{}}}", inner.join(", "))
-            }
-            JuliaType::Union(types) => {
-                let inner: Vec<_> = types.iter().map(|t| format!("{}", t)).collect();
-                write!(f, "Union{{{}}}", inner.join(", "))
-            }
-            JuliaType::Struct { name, type_params } => {
-                if type_params.is_empty() {
-                    write!(f, "{}", name)
-                } else {
-                    let params: Vec<_> = type_params.iter().map(|t| format!("{}", t)).collect();
-                    write!(f, "{}{{{}}}", name, params.join(", "))
-                }
-            }
-            JuliaType::TypeVar(name) => write!(f, "{}", name),
-            JuliaType::Unknown => write!(f, "?"),
-        }
-    }
-}
 
 // ============================================================================
 // StaticType - Static type representation for AoT code generation
@@ -220,9 +18,9 @@ impl fmt::Display for JuliaType {
 /// Static type representation for AoT compilation
 ///
 /// This enum represents types that have been statically inferred and can be
-/// directly mapped to Rust types for code generation. Unlike `JuliaType`,
-/// `StaticType` is designed specifically for tracking compile-time type
-/// information with clear Rust equivalents.
+/// directly mapped to Rust types for code generation. `StaticType` is designed
+/// specifically for tracking compile-time type information with clear Rust
+/// equivalents.
 ///
 /// # Type Levels
 ///
@@ -235,6 +33,8 @@ pub enum StaticType {
     // ========== Primitive Types ==========
     /// 64-bit signed integer (Julia Int64, Rust i64)
     I64,
+    /// 128-bit signed integer (Julia Int128, Rust i128)
+    I128,
     /// 32-bit signed integer (Julia Int32, Rust i32)
     I32,
     /// 16-bit signed integer (Julia Int16, Rust i16)
@@ -243,6 +43,8 @@ pub enum StaticType {
     I8,
     /// 64-bit unsigned integer (Julia UInt64, Rust u64)
     U64,
+    /// 128-bit unsigned integer (Julia UInt128, Rust u128)
+    U128,
     /// 32-bit unsigned integer (Julia UInt32, Rust u32)
     U32,
     /// 16-bit unsigned integer (Julia UInt16, Rust u16)
@@ -253,6 +55,8 @@ pub enum StaticType {
     F64,
     /// 32-bit floating point (Julia Float32, Rust f32)
     F32,
+    /// 16-bit floating point (Julia Float16). Preserved for inference; codegen may widen.
+    F16,
     /// Boolean (Julia Bool, Rust bool)
     Bool,
     /// String (Julia String, Rust String)
@@ -263,6 +67,12 @@ pub enum StaticType {
     Nothing,
     /// Missing (Julia Missing, maps to Option::None at runtime)
     Missing,
+    /// Julia DataType / type object value.
+    ///
+    /// This is an explicit AoT carrier for first-class type values such as the
+    /// result of `typeof(x)`. Rust backend codegen currently gates this value
+    /// until a Julia-compatible DataType runtime representation exists.
+    DataType,
 
     // ========== Container Types ==========
     /// Array with known element type
@@ -274,6 +84,8 @@ pub enum StaticType {
     },
     /// Tuple with known element types
     Tuple(Vec<StaticType>),
+    /// NamedTuple with known field names and element types, carried as a Rust tuple.
+    NamedTuple(Vec<(String, StaticType)>),
     /// Dictionary with known key/value types
     Dict {
         /// Key type
@@ -281,9 +93,19 @@ pub enum StaticType {
         /// Value type
         value: Box<StaticType>,
     },
+    /// Set with known element type
+    Set {
+        /// Element type
+        element: Box<StaticType>,
+    },
     /// Range type (Julia start:stop or start:step:stop)
     Range {
         /// Element type (typically I64)
+        element: Box<StaticType>,
+    },
+    /// Lazy generator expression with known yielded element type.
+    Generator {
+        /// Yielded element type
         element: Box<StaticType>,
     },
 
@@ -340,12 +162,15 @@ impl StaticType {
             }
             StaticType::Array { element, .. } => element.is_fully_static(),
             StaticType::Tuple(elements) => elements.iter().all(|e| e.is_fully_static()),
+            StaticType::NamedTuple(fields) => fields.iter().all(|(_, ty)| ty.is_fully_static()),
             StaticType::Dict { key, value } => key.is_fully_static() && value.is_fully_static(),
-            StaticType::Range { element } => element.is_fully_static(),
+            StaticType::Set { element }
+            | StaticType::Range { element }
+            | StaticType::Generator { element } => element.is_fully_static(),
             StaticType::Function { params, ret } => {
                 params.iter().all(|p| p.is_fully_static()) && ret.is_fully_static()
             }
-            StaticType::Struct { .. } => true,
+            StaticType::Struct { .. } | StaticType::DataType => true,
             // All primitive types are fully static
             _ => true,
         }
@@ -358,15 +183,18 @@ impl StaticType {
         matches!(
             self,
             StaticType::I64
+                | StaticType::I128
                 | StaticType::I32
                 | StaticType::I16
                 | StaticType::I8
                 | StaticType::U64
+                | StaticType::U128
                 | StaticType::U32
                 | StaticType::U16
                 | StaticType::U8
                 | StaticType::F64
                 | StaticType::F32
+                | StaticType::F16
                 | StaticType::Bool
                 | StaticType::Char
                 | StaticType::Str
@@ -374,65 +202,229 @@ impl StaticType {
         )
     }
 
-    /// Check if this is a numeric type
+    /// Bridge to the shared primitive-numeric taxonomy
+    /// ([`crate::inference_core::PrimitiveNumeric`], Issue #3508).
+    ///
+    /// Returns `Some(_)` for primitive numeric variants, `None` for every
+    /// non-primitive variant (`Array`, `Tuple`, `Struct`, `Union`, `Any`, …).
+    /// This single conversion is the only place that maps between the AoT
+    /// static-type representation and the canonical taxonomy used by both
+    /// the VM-side and AoT-side classifiers, so the two pipelines can no
+    /// longer drift on what counts as numeric / integer / float.
+    pub fn primitive_numeric(&self) -> Option<crate::inference_core::PrimitiveNumeric> {
+        crate::inference_core::CoreType::from(self).primitive_numeric()
+    }
+
+    /// Convert from the shared primitive-numeric taxonomy into AoT's
+    /// `StaticType` without dropping widths that the inference layer can track.
+    pub fn from_primitive_numeric(kind: crate::inference_core::PrimitiveNumeric) -> Self {
+        use crate::inference_core::PrimitiveNumeric as P;
+        match kind {
+            P::Bool => StaticType::Bool,
+            P::Int8 => StaticType::I8,
+            P::Int16 => StaticType::I16,
+            P::Int32 => StaticType::I32,
+            P::Int64 => StaticType::I64,
+            P::Int128 => StaticType::I128,
+            P::UInt8 => StaticType::U8,
+            P::UInt16 => StaticType::U16,
+            P::UInt32 => StaticType::U32,
+            P::UInt64 => StaticType::U64,
+            P::UInt128 => StaticType::U128,
+            P::Float16 => StaticType::F16,
+            P::Float32 => StaticType::F32,
+            P::Float64 => StaticType::F64,
+        }
+    }
+
+    /// Project a shared semantic [`crate::inference_core::CoreType`] back into
+    /// AoT's backend-oriented `StaticType` representation when the shape has
+    /// a stable codegen projection.
+    ///
+    /// This is intentionally lossy: semantic supertypes, `UnionAll`, type
+    /// variables, value parameters, and unknown user-defined type objects stay
+    /// in `CoreType` and return `None` instead of forcing `StaticType` to own
+    /// Julia type semantics.
+    pub fn from_core_type_lossy(core: &crate::inference_core::CoreType) -> Option<Self> {
+        use crate::inference_core::{
+            type_core::CoreValueParam as V, CoreAbstract as A, CorePrimitive as P, CoreType as C,
+        };
+
+        Some(match core {
+            C::Any => StaticType::Any,
+            // `CoreType::Bottom` (Julia's `Union{}`) projects to the empty
+            // union. This keeps a provably-disjoint intersection from silently
+            // widening to a misleading concrete/`Any` backend type (Issue #3912).
+            C::Bottom => StaticType::Union { variants: vec![] },
+            C::Primitive(P::Bool) => StaticType::Bool,
+            C::Primitive(P::Int8) => StaticType::I8,
+            C::Primitive(P::Int16) => StaticType::I16,
+            C::Primitive(P::Int32) => StaticType::I32,
+            C::Primitive(P::Int64) => StaticType::I64,
+            C::Primitive(P::Int128) => StaticType::I128,
+            C::Primitive(P::UInt8) => StaticType::U8,
+            C::Primitive(P::UInt16) => StaticType::U16,
+            C::Primitive(P::UInt32) => StaticType::U32,
+            C::Primitive(P::UInt64) => StaticType::U64,
+            C::Primitive(P::UInt128) => StaticType::U128,
+            C::Primitive(P::Float16) => StaticType::F16,
+            C::Primitive(P::Float32) => StaticType::F32,
+            C::Primitive(P::Float64) => StaticType::F64,
+            C::Primitive(P::String) => StaticType::Str,
+            C::Primitive(P::Char) => StaticType::Char,
+            C::Primitive(P::Nothing) => StaticType::Nothing,
+            C::Primitive(P::Missing) => StaticType::Missing,
+            C::Abstract(A::DataType) | C::TypeOf(_) => StaticType::DataType,
+            C::Tuple(elements) => StaticType::Tuple(
+                elements
+                    .iter()
+                    .map(Self::from_core_type_lossy)
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            C::Union(types) => StaticType::Union {
+                variants: types
+                    .iter()
+                    .map(Self::from_core_type_lossy)
+                    .collect::<Option<Vec<_>>>()?,
+            },
+            C::Struct { name, params }
+                if name == "Array" || name == "Vector" || name == "Matrix" =>
+            {
+                let element = match params.first() {
+                    Some(param) => Self::from_core_type_lossy(param)?,
+                    None => StaticType::Any,
+                };
+                let ndims = match name.as_str() {
+                    "Vector" => Some(1),
+                    "Matrix" => Some(2),
+                    "Array" => match params.get(1) {
+                        Some(C::Value(V::Int(n))) => usize::try_from(*n).ok(),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                StaticType::Array {
+                    element: Box::new(element),
+                    ndims,
+                }
+            }
+            C::Struct { name, params } if name == "Dict" && params.len() == 2 => StaticType::Dict {
+                key: Box::new(Self::from_core_type_lossy(&params[0])?),
+                value: Box::new(Self::from_core_type_lossy(&params[1])?),
+            },
+            C::Struct { name, params } if name == "Set" && params.len() == 1 => StaticType::Set {
+                element: Box::new(Self::from_core_type_lossy(&params[0])?),
+            },
+            C::Struct { name, params }
+                if (name == "UnitRange" || name == "AbstractRange") && params.len() == 1 =>
+            {
+                StaticType::Range {
+                    element: Box::new(Self::from_core_type_lossy(&params[0])?),
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Project the VM's Julia type syntax through the shared `CoreType` bridge
+    /// before falling back to AoT's backend representation (Issue #3912).
+    pub fn from_vm_julia_type_lossy(jt: &crate::types::JuliaType) -> Option<Self> {
+        Self::from_core_type_lossy(&crate::inference_core::CoreType::from(jt))
+    }
+
+    /// Parse a Julia type name through `CoreType` before projecting to AoT.
+    pub fn from_julia_name_lossy(name: &str) -> Option<Self> {
+        Self::from_core_type_lossy(&crate::inference_core::CoreType::from_julia_name(name))
+    }
+
+    /// Project a shared `TypeExpr` into AoT's backend-oriented `StaticType`.
+    ///
+    /// Concrete VM-side `JuliaType` values keep the existing `From<&JuliaType>`
+    /// behavior so abstract types still widen to `Any`. Non-concrete
+    /// expressions go through the shared `CoreType` name parser first, then
+    /// fall back to a user-struct surface when no stable AoT projection exists.
+    pub fn from_type_expr_lossy(type_expr: &crate::types::TypeExpr) -> Self {
+        use crate::types::TypeExpr;
+
+        match type_expr {
+            TypeExpr::Concrete(jt) => StaticType::from(jt),
+            TypeExpr::TypeVar(_) | TypeExpr::Parameterized { .. } | TypeExpr::RuntimeExpr(_) => {
+                let rendered = type_expr.to_string();
+                StaticType::from_julia_name_lossy(&rendered).unwrap_or(StaticType::Struct {
+                    type_id: 0,
+                    name: rendered,
+                })
+            }
+        }
+    }
+
+    /// Join through the shared `CoreType` lattice and project the result back
+    /// to AoT when possible. This keeps `StaticType` as a codegen projection
+    /// while tuple / union normalization and semantic joins live in the shared
+    /// inference core (Issue #3860).
+    pub fn core_typejoin(&self, other: &Self) -> Option<Self> {
+        let joined = crate::inference_core::CoreType::from(self)
+            .typejoin(&crate::inference_core::CoreType::from(other));
+        Self::from_core_type_lossy(&joined)
+    }
+
+    /// Intersect (meet) through the shared `CoreType` lattice and project the
+    /// result back to AoT when possible. Mirrors [`Self::core_typejoin`] so
+    /// AoT meet decisions reuse the same subtype/intersection semantics the
+    /// VM/compiler paths use, rather than a local AoT recursion (Issue #3912).
+    ///
+    /// A provably-disjoint meet yields `CoreType::Bottom`, which projects to
+    /// the empty union (`Union{}`). Returns `None` only when the narrowed
+    /// `CoreType` has no stable AoT backend projection.
+    pub fn core_typeintersect(&self, other: &Self) -> Option<Self> {
+        let met = crate::inference_core::CoreType::from(self)
+            .type_intersect(&crate::inference_core::CoreType::from(other));
+        Self::from_core_type_lossy(&met)
+    }
+
+    /// Check if this is a numeric type.
     ///
     /// In Julia, Bool is a subtype of Integer, which is a subtype of Number,
     /// so Bool is included as a numeric type for promotion purposes.
+    ///
+    /// Issue #3508 — delegates to the canonical
+    /// [`crate::inference_core::PrimitiveNumeric`] taxonomy via
+    /// [`Self::primitive_numeric`]. Behaviour is unchanged.
     pub fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            StaticType::I64
-                | StaticType::I32
-                | StaticType::I16
-                | StaticType::I8
-                | StaticType::U64
-                | StaticType::U32
-                | StaticType::U16
-                | StaticType::U8
-                | StaticType::F64
-                | StaticType::F32
-                | StaticType::Bool // Bool <: Integer <: Number
-        )
+        self.primitive_numeric().is_some_and(|p| p.is_numeric())
     }
 
-    /// Check if this is an integer type (including Bool)
+    /// Check if this is an integer type (including Bool).
     ///
     /// In Julia, Bool is a subtype of Integer:
-    /// `julia> Bool <: Integer` returns `true`
+    /// `julia> Bool <: Integer` returns `true`.
+    ///
+    /// Delegates to [`crate::inference_core::PrimitiveNumeric::is_integer`]
+    /// (Issue #3508).
     pub fn is_integer(&self) -> bool {
-        matches!(
-            self,
-            StaticType::I64
-                | StaticType::I32
-                | StaticType::I16
-                | StaticType::I8
-                | StaticType::U64
-                | StaticType::U32
-                | StaticType::U16
-                | StaticType::U8
-                | StaticType::Bool // Bool <: Integer in Julia
-        )
+        self.primitive_numeric().is_some_and(|p| p.is_integer())
     }
 
-    /// Check if this is a signed integer type
+    /// Check if this is a signed integer type.
+    /// Delegates to the shared taxonomy (Issue #3508). Bool is **not**
+    /// classified as signed (matches the prior behaviour).
     pub fn is_signed(&self) -> bool {
-        matches!(
-            self,
-            StaticType::I64 | StaticType::I32 | StaticType::I16 | StaticType::I8
-        )
+        self.primitive_numeric()
+            .is_some_and(|p| p.is_signed_integer())
     }
 
-    /// Check if this is an unsigned integer type
+    /// Check if this is an unsigned integer type.
+    /// Delegates to the shared taxonomy (Issue #3508). Bool is **not**
+    /// classified as unsigned (matches the prior behaviour).
     pub fn is_unsigned(&self) -> bool {
-        matches!(
-            self,
-            StaticType::U64 | StaticType::U32 | StaticType::U16 | StaticType::U8
-        )
+        self.primitive_numeric()
+            .is_some_and(|p| p.is_unsigned_integer())
     }
 
-    /// Check if this is a floating point type
+    /// Check if this is a floating point type.
+    /// Delegates to the shared taxonomy (Issue #3508).
     pub fn is_float(&self) -> bool {
-        matches!(self, StaticType::F64 | StaticType::F32)
+        self.primitive_numeric().is_some_and(|p| p.is_float())
     }
 
     /// Check if this is an array type
@@ -442,12 +434,27 @@ impl StaticType {
 
     /// Check if this is a tuple type
     pub fn is_tuple(&self) -> bool {
-        matches!(self, StaticType::Tuple(_))
+        matches!(self, StaticType::Tuple(_) | StaticType::NamedTuple(_))
     }
 
     /// Check if this is a range type
     pub fn is_range(&self) -> bool {
         matches!(self, StaticType::Range { .. })
+    }
+
+    /// Check if this is a set type
+    pub fn is_set(&self) -> bool {
+        matches!(self, StaticType::Set { .. })
+    }
+
+    /// Check if this is a dict type
+    pub fn is_dict(&self) -> bool {
+        matches!(self, StaticType::Dict { .. })
+    }
+
+    /// Check if this is a lazy generator type
+    pub fn is_generator(&self) -> bool {
+        matches!(self, StaticType::Generator { .. })
     }
 
     /// Convert to Rust type name
@@ -464,20 +471,24 @@ impl StaticType {
     pub fn to_rust_type(&self) -> String {
         match self {
             StaticType::I64 => "i64".to_string(),
+            StaticType::I128 => "i128".to_string(),
             StaticType::I32 => "i32".to_string(),
             StaticType::I16 => "i16".to_string(),
             StaticType::I8 => "i8".to_string(),
             StaticType::U64 => "u64".to_string(),
+            StaticType::U128 => "u128".to_string(),
             StaticType::U32 => "u32".to_string(),
             StaticType::U16 => "u16".to_string(),
             StaticType::U8 => "u8".to_string(),
             StaticType::F64 => "f64".to_string(),
             StaticType::F32 => "f32".to_string(),
+            StaticType::F16 => "f32".to_string(),
             StaticType::Bool => "bool".to_string(),
             StaticType::Str => "String".to_string(),
             StaticType::Char => "char".to_string(),
             StaticType::Nothing => "()".to_string(),
-            StaticType::Missing => "Option<Value>".to_string(),
+            StaticType::Missing => "Value".to_string(),
+            StaticType::DataType => "Value".to_string(),
             StaticType::Array { element, ndims } => {
                 // For multidimensional arrays, generate nested Vec types
                 // 1D: Vec<T>, 2D: Vec<Vec<T>>, etc.
@@ -496,7 +507,19 @@ impl StaticType {
             }
             StaticType::Tuple(elements) => {
                 let inner: Vec<_> = elements.iter().map(|e| e.to_rust_type()).collect();
-                format!("({})", inner.join(", "))
+                if inner.len() == 1 {
+                    format!("({},)", inner[0])
+                } else {
+                    format!("({})", inner.join(", "))
+                }
+            }
+            StaticType::NamedTuple(fields) => {
+                let inner: Vec<_> = fields.iter().map(|(_, ty)| ty.to_rust_type()).collect();
+                if inner.len() == 1 {
+                    format!("({},)", inner[0])
+                } else {
+                    format!("({})", inner.join(", "))
+                }
             }
             StaticType::Dict { key, value } => {
                 format!(
@@ -505,8 +528,32 @@ impl StaticType {
                     value.to_rust_type()
                 )
             }
+            StaticType::Set { element } => {
+                format!("std::collections::HashSet<{}>", element.to_rust_type())
+            }
+            StaticType::Range { element } if matches!(element.as_ref(), StaticType::Char) => {
+                "SjuliaCharRange".to_string()
+            }
             StaticType::Range { element } => {
-                format!("std::ops::Range<{}>", element.to_rust_type())
+                format!("SjuliaRange<{}>", element.to_rust_type())
+            }
+            StaticType::Generator { element } => {
+                format!("Box<dyn Iterator<Item = {}>>", element.to_rust_type())
+            }
+            StaticType::Struct { name, .. } if name == "Complex" || name == "Complex64" => {
+                "Complex".to_string()
+            }
+            StaticType::Struct { name, .. }
+                if Self::complex_param_rust_type_name(name).is_some()
+                    && Self::parametric_type_parts(name).is_none() =>
+            {
+                format!(
+                    "Complex<{}>",
+                    Self::complex_param_rust_type_name(name).expect("checked above")
+                )
+            }
+            StaticType::Struct { name, .. } if Self::parametric_rust_type_name(name).is_some() => {
+                Self::parametric_rust_type_name(name).expect("checked above")
             }
             StaticType::Struct { name, .. } => {
                 // Use the struct name as-is (assume it's been declared in generated code)
@@ -528,6 +575,133 @@ impl StaticType {
         }
     }
 
+    pub(crate) fn complex_param_type_from_name(name: &str) -> Option<StaticType> {
+        let param = Self::complex_param_name(name)?;
+        match param {
+            "Float64" => Some(StaticType::F64),
+            "Float32" => Some(StaticType::F32),
+            "Int64" => Some(StaticType::I64),
+            "Int32" => Some(StaticType::I32),
+            "Int16" => Some(StaticType::I16),
+            "Int8" => Some(StaticType::I8),
+            "UInt64" => Some(StaticType::U64),
+            "UInt32" => Some(StaticType::U32),
+            "UInt16" => Some(StaticType::U16),
+            "UInt8" => Some(StaticType::U8),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn complex_param_rust_type_name(name: &str) -> Option<&'static str> {
+        match Self::complex_param_type_from_name(name)? {
+            StaticType::F64 => Some("f64"),
+            StaticType::F32 => Some("f32"),
+            StaticType::I64 => Some("i64"),
+            StaticType::I32 => Some("i32"),
+            StaticType::I16 => Some("i16"),
+            StaticType::I8 => Some("i8"),
+            StaticType::U64 => Some("u64"),
+            StaticType::U32 => Some("u32"),
+            StaticType::U16 => Some("u16"),
+            StaticType::U8 => Some("u8"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn parametric_type_parts(name: &str) -> Option<(&str, Vec<&str>)> {
+        let open = name.find('{')?;
+        let base = name[..open].trim();
+        let rest = name[open + 1..].strip_suffix('}')?;
+        if base.is_empty() {
+            return None;
+        }
+
+        let mut params = Vec::new();
+        let mut depth = 0usize;
+        let mut start = 0usize;
+        for (idx, ch) in rest.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => depth = depth.checked_sub(1)?,
+                ',' if depth == 0 => {
+                    let param = rest[start..idx].trim();
+                    if param.is_empty() {
+                        return None;
+                    }
+                    params.push(param);
+                    start = idx + ch.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return None;
+        }
+        let param = rest[start..].trim();
+        if param.is_empty() {
+            return None;
+        }
+        params.push(param);
+
+        Some((base, params))
+    }
+
+    pub(crate) fn parametric_arg_static_type(name: &str) -> Option<StaticType> {
+        StaticType::from_julia_name_lossy(name).or_else(|| {
+            if Self::parametric_type_parts(name).is_some() {
+                Some(StaticType::Struct {
+                    type_id: 0,
+                    name: name.to_string(),
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    pub(crate) fn parametric_arg_rust_type_name(name: &str) -> Option<String> {
+        Self::parametric_arg_static_type(name)
+            .map(|ty| ty.to_rust_type())
+            .or_else(|| {
+                if name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                {
+                    Some(name.to_string())
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub(crate) fn parametric_rust_type_name(name: &str) -> Option<String> {
+        let (base, params) = Self::parametric_type_parts(name)?;
+        let rust_params: Vec<_> = params
+            .iter()
+            .map(|param| Self::parametric_arg_rust_type_name(param))
+            .collect::<Option<_>>()?;
+        Some(format!("{}<{}>", base, rust_params.join(", ")))
+    }
+
+    pub(crate) fn parametric_rust_constructor_path(name: &str) -> Option<String> {
+        let (base, params) = Self::parametric_type_parts(name)?;
+        let rust_params: Vec<_> = params
+            .iter()
+            .map(|param| Self::parametric_arg_rust_type_name(param))
+            .collect::<Option<_>>()?;
+        Some(format!("{}::<{}>", base, rust_params.join(", ")))
+    }
+
+    fn complex_param_name(name: &str) -> Option<&str> {
+        match name {
+            "ComplexF64" | "Complex{Float64}" => Some("Float64"),
+            "ComplexF32" | "Complex{Float32}" => Some("Float32"),
+            _ => name
+                .strip_prefix("Complex{")
+                .and_then(|rest| rest.strip_suffix('}')),
+        }
+    }
+
     /// Convert to Rust Result type name
     ///
     /// Returns the Rust type wrapped in RuntimeResult for error handling.
@@ -546,20 +720,24 @@ impl StaticType {
     pub fn julia_type_name(&self) -> String {
         match self {
             StaticType::I64 => "Int64".to_string(),
+            StaticType::I128 => "Int128".to_string(),
             StaticType::I32 => "Int32".to_string(),
             StaticType::I16 => "Int16".to_string(),
             StaticType::I8 => "Int8".to_string(),
             StaticType::U64 => "UInt64".to_string(),
+            StaticType::U128 => "UInt128".to_string(),
             StaticType::U32 => "UInt32".to_string(),
             StaticType::U16 => "UInt16".to_string(),
             StaticType::U8 => "UInt8".to_string(),
             StaticType::F64 => "Float64".to_string(),
             StaticType::F32 => "Float32".to_string(),
+            StaticType::F16 => "Float16".to_string(),
             StaticType::Bool => "Bool".to_string(),
             StaticType::Str => "String".to_string(),
             StaticType::Char => "Char".to_string(),
             StaticType::Nothing => "Nothing".to_string(),
             StaticType::Missing => "Missing".to_string(),
+            StaticType::DataType => "DataType".to_string(),
             StaticType::Array { element, ndims } => {
                 if let Some(n) = ndims {
                     format!("Array{{{}, {}}}", element.julia_type_name(), n)
@@ -571,6 +749,13 @@ impl StaticType {
                 let inner: Vec<_> = elements.iter().map(|e| e.julia_type_name()).collect();
                 format!("Tuple{{{}}}", inner.join(", "))
             }
+            StaticType::NamedTuple(fields) => {
+                let inner: Vec<_> = fields
+                    .iter()
+                    .map(|(name, ty)| format!("{} = {}", name, ty.julia_type_name()))
+                    .collect();
+                format!("@NamedTuple{{{}}}", inner.join(", "))
+            }
             StaticType::Dict { key, value } => {
                 format!(
                     "Dict{{{}, {}}}",
@@ -578,8 +763,14 @@ impl StaticType {
                     value.julia_type_name()
                 )
             }
+            StaticType::Set { element } => {
+                format!("Set{{{}}}", element.julia_type_name())
+            }
             StaticType::Range { element } => {
                 format!("UnitRange{{{}}}", element.julia_type_name())
+            }
+            StaticType::Generator { element } => {
+                format!("Base.Generator{{{}}}", element.julia_type_name())
             }
             StaticType::Struct { name, .. } => name.clone(),
             StaticType::Function { params, ret } => {
@@ -613,20 +804,24 @@ impl StaticType {
     pub fn mangle_suffix(&self) -> String {
         match self {
             StaticType::I64 => "i64".to_string(),
+            StaticType::I128 => "i128".to_string(),
             StaticType::I32 => "i32".to_string(),
             StaticType::I16 => "i16".to_string(),
             StaticType::I8 => "i8".to_string(),
             StaticType::U64 => "u64".to_string(),
+            StaticType::U128 => "u128".to_string(),
             StaticType::U32 => "u32".to_string(),
             StaticType::U16 => "u16".to_string(),
             StaticType::U8 => "u8".to_string(),
             StaticType::F64 => "f64".to_string(),
             StaticType::F32 => "f32".to_string(),
+            StaticType::F16 => "f16".to_string(),
             StaticType::Bool => "bool".to_string(),
             StaticType::Char => "char".to_string(),
             StaticType::Str => "str".to_string(),
             StaticType::Nothing => "nothing".to_string(),
             StaticType::Missing => "missing".to_string(),
+            StaticType::DataType => "datatype".to_string(),
             StaticType::Array { element, ndims } => {
                 if let Some(n) = ndims {
                     format!("arr{}_{}", n, element.mangle_suffix())
@@ -638,10 +833,19 @@ impl StaticType {
                 let inner: Vec<_> = elements.iter().map(|e| e.mangle_suffix()).collect();
                 format!("tup_{}", inner.join("_"))
             }
+            StaticType::NamedTuple(fields) => {
+                let inner: Vec<_> = fields
+                    .iter()
+                    .map(|(name, ty)| format!("{}_{}", name, ty.mangle_suffix()))
+                    .collect();
+                format!("nt_{}", inner.join("_"))
+            }
             StaticType::Dict { key, value } => {
                 format!("dict_{}_{}", key.mangle_suffix(), value.mangle_suffix())
             }
+            StaticType::Set { element } => format!("set_{}", element.mangle_suffix()),
             StaticType::Range { element } => format!("range_{}", element.mangle_suffix()),
+            StaticType::Generator { element } => format!("generator_{}", element.mangle_suffix()),
             StaticType::Struct { name, .. } => name.to_lowercase(),
             StaticType::Function { .. } => "fn".to_string(),
             StaticType::Union { .. } => "union".to_string(),
@@ -661,61 +865,28 @@ impl From<&crate::types::JuliaType> for StaticType {
     fn from(jt: &crate::types::JuliaType) -> Self {
         use crate::types::JuliaType as VmType;
 
+        if let Some(projected) = StaticType::from_vm_julia_type_lossy(jt) {
+            return projected;
+        }
+
+        // Anything with a stable `CoreType` projection (every primitive, the
+        // `Vector{T}`/`Matrix{T}`/`Array` family, parameterized tuples/unions,
+        // and projectable ranges/dicts) has already returned above via
+        // `from_vm_julia_type_lossy`. The arms below are only the residual
+        // fallbacks for shapes the shared projection deliberately leaves in
+        // `CoreType` (`None`): bigints, bare `Tuple`/`Dict`/range shells,
+        // unknown user structs, enums, abstract families, and `UnionAll`
+        // (Issue #6598).
         match jt {
-            // Signed integers
-            VmType::Int8 => StaticType::I8,
-            VmType::Int16 => StaticType::I16,
-            VmType::Int32 => StaticType::I32,
-            VmType::Int64 => StaticType::I64,
-            VmType::Int128 => StaticType::Any, // No direct Rust i128 support in runtime
             VmType::BigInt => StaticType::Any, // Arbitrary precision needs runtime
-
-            // Unsigned integers
-            VmType::UInt8 => StaticType::U8,
-            VmType::UInt16 => StaticType::U16,
-            VmType::UInt32 => StaticType::U32,
-            VmType::UInt64 => StaticType::U64,
-            VmType::UInt128 => StaticType::Any, // No direct Rust u128 support in runtime
-
-            // Floating point
-            VmType::Float16 => StaticType::F32, // Map to f32
-            VmType::Float32 => StaticType::F32,
-            VmType::Float64 => StaticType::F64,
             VmType::BigFloat => StaticType::Any, // Arbitrary precision needs runtime
-
-            // Boolean
-            VmType::Bool => StaticType::Bool,
-
-            // String/Char
-            VmType::String => StaticType::Str,
-            VmType::Char => StaticType::Char,
-
-            // Special types
-            VmType::Nothing => StaticType::Nothing,
-            VmType::Missing => StaticType::Missing,
-
-            // Container types
-            VmType::Array | VmType::VectorOf(_) | VmType::MatrixOf(_) => {
-                // Get element type if available
-                let element = match jt {
-                    VmType::VectorOf(elem) => Box::new(StaticType::from(elem.as_ref())),
-                    VmType::MatrixOf(elem) => Box::new(StaticType::from(elem.as_ref())),
-                    _ => Box::new(StaticType::Any),
-                };
-                let ndims = match jt {
-                    VmType::VectorOf(_) => Some(1),
-                    VmType::MatrixOf(_) => Some(2),
-                    _ => None,
-                };
-                StaticType::Array { element, ndims }
-            }
-            VmType::TupleOf(elements) => {
-                StaticType::Tuple(elements.iter().map(StaticType::from).collect())
-            }
             VmType::Tuple => StaticType::Tuple(vec![]),
             VmType::Dict => StaticType::Dict {
                 key: Box::new(StaticType::Any),
                 value: Box::new(StaticType::Any),
+            },
+            VmType::Set => StaticType::Set {
+                element: Box::new(StaticType::Any),
             },
             VmType::UnitRange | VmType::StepRange => StaticType::Range {
                 element: Box::new(StaticType::I64),
@@ -728,6 +899,8 @@ impl From<&crate::types::JuliaType> for StaticType {
             },
 
             // Abstract types and others map to Any
+            VmType::DataType | VmType::TypeOf(_) => StaticType::DataType,
+
             VmType::Any
             | VmType::Number
             | VmType::Real
@@ -743,7 +916,6 @@ impl From<&crate::types::JuliaType> for StaticType {
             | VmType::IO
             | VmType::IOBuffer
             | VmType::Module
-            | VmType::DataType
             | VmType::Type
             | VmType::Symbol
             | VmType::Expr
@@ -752,12 +924,10 @@ impl From<&crate::types::JuliaType> for StaticType {
             | VmType::GlobalRef
             | VmType::Pairs
             | VmType::Generator
-            | VmType::Set
             | VmType::NamedTuple
             | VmType::AbstractUser(_, _)
             | VmType::TypeVar(_, _)
-            | VmType::Bottom
-            | VmType::TypeOf(_) => StaticType::Any,
+            | VmType::Bottom => StaticType::Any,
 
             // Enum types are backed by Int32 in Julia
             VmType::Enum(_) => StaticType::I32,
@@ -778,87 +948,7 @@ impl From<&crate::types::JuliaType> for StaticType {
                 // The type parameter is existentially quantified
                 StaticType::from(body.as_ref())
             }
-        }
-    }
-}
-
-/// Convert from VM's JuliaType to AoT's JuliaType
-impl From<&crate::types::JuliaType> for JuliaType {
-    fn from(jt: &crate::types::JuliaType) -> Self {
-        use crate::types::JuliaType as VmType;
-
-        match jt {
-            // Signed integers
-            VmType::Int8 => JuliaType::Int8,
-            VmType::Int16 => JuliaType::Int16,
-            VmType::Int32 => JuliaType::Int32,
-            VmType::Int64 => JuliaType::Int64,
-            VmType::Int128 => JuliaType::Int128,
-            VmType::BigInt => JuliaType::Any,
-
-            // Unsigned integers
-            VmType::UInt8 => JuliaType::UInt8,
-            VmType::UInt16 => JuliaType::UInt16,
-            VmType::UInt32 => JuliaType::UInt32,
-            VmType::UInt64 => JuliaType::UInt64,
-            VmType::UInt128 => JuliaType::UInt128,
-
-            // Floating point
-            VmType::Float16 => JuliaType::Float16,
-            VmType::Float32 => JuliaType::Float32,
-            VmType::Float64 => JuliaType::Float64,
-            VmType::BigFloat => JuliaType::Any,
-
-            // Boolean
-            VmType::Bool => JuliaType::Bool,
-
-            // String/Char
-            VmType::String => JuliaType::String,
-            VmType::Char => JuliaType::Char,
-
-            // Special types
-            VmType::Nothing => JuliaType::Nothing,
-            VmType::Missing => JuliaType::Missing,
-
-            // Container types
-            VmType::Array | VmType::VectorOf(_) | VmType::MatrixOf(_) => {
-                let element = match jt {
-                    VmType::VectorOf(elem) => Box::new(JuliaType::from(elem.as_ref())),
-                    VmType::MatrixOf(elem) => Box::new(JuliaType::from(elem.as_ref())),
-                    _ => Box::new(JuliaType::Any),
-                };
-                let ndims = match jt {
-                    VmType::VectorOf(_) => Some(1),
-                    VmType::MatrixOf(_) => Some(2),
-                    _ => None,
-                };
-                JuliaType::Array {
-                    element_type: element,
-                    ndims,
-                }
-            }
-            VmType::TupleOf(elements) => {
-                JuliaType::Tuple(elements.iter().map(JuliaType::from).collect())
-            }
-            VmType::Tuple => JuliaType::Tuple(vec![]),
-
-            // Struct types
-            VmType::Struct(name) => JuliaType::Struct {
-                name: name.clone(),
-                type_params: vec![],
-            },
-
-            // Type variable
-            VmType::TypeVar(name, _) => JuliaType::TypeVar(name.clone()),
-
-            // Union types
-            VmType::Union(types) => JuliaType::Union(types.iter().map(JuliaType::from).collect()),
-
-            // UnionAll types
-            VmType::UnionAll { body, .. } => JuliaType::from(body.as_ref()),
-
-            // Everything else maps to Any
-            _ => JuliaType::Any,
+            _ => StaticType::Any,
         }
     }
 }
@@ -866,44 +956,6 @@ impl From<&crate::types::JuliaType> for JuliaType {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_julia_type_is_concrete() {
-        assert!(JuliaType::Int64.is_concrete());
-        assert!(JuliaType::Bool.is_concrete());
-        assert!(!JuliaType::Any.is_concrete());
-        assert!(!JuliaType::Unknown.is_concrete());
-    }
-
-    #[test]
-    fn test_julia_type_is_numeric() {
-        assert!(JuliaType::Int64.is_numeric());
-        assert!(JuliaType::Float64.is_numeric());
-        assert!(!JuliaType::Bool.is_numeric());
-        assert!(!JuliaType::String.is_numeric());
-    }
-
-    #[test]
-    fn test_julia_type_to_rust_type() {
-        assert_eq!(JuliaType::Int64.to_rust_type(), "i64");
-        assert_eq!(JuliaType::Float64.to_rust_type(), "f64");
-        assert_eq!(JuliaType::Bool.to_rust_type(), "bool");
-    }
-
-    #[test]
-    fn test_julia_type_display() {
-        assert_eq!(format!("{}", JuliaType::Int64), "Int64");
-        assert_eq!(
-            format!(
-                "{}",
-                JuliaType::Array {
-                    element_type: Box::new(JuliaType::Float64),
-                    ndims: Some(2)
-                }
-            ),
-            "Array{Float64, 2}"
-        );
-    }
 
     // ========== StaticType Tests ==========
 
@@ -914,7 +966,22 @@ mod tests {
         assert_eq!(StaticType::Bool.to_rust_type(), "bool");
         assert_eq!(StaticType::Str.to_rust_type(), "String");
         assert_eq!(StaticType::Nothing.to_rust_type(), "()");
+        assert_eq!(StaticType::DataType.to_rust_type(), "Value");
         assert_eq!(StaticType::Any.to_rust_type(), "Value");
+    }
+
+    #[test]
+    fn datatype_static_type_is_explicit_issue_6973() {
+        assert_eq!(StaticType::DataType.julia_type_name(), "DataType");
+        assert_eq!(StaticType::DataType.mangle_suffix(), "datatype");
+        assert_eq!(
+            StaticType::from_core_type_lossy(&crate::inference_core::CoreType::TypeOf(Box::new(
+                crate::inference_core::CoreType::Primitive(
+                    crate::inference_core::CorePrimitive::Int64
+                )
+            ))),
+            Some(StaticType::DataType)
+        );
     }
 
     #[test]
@@ -924,6 +991,31 @@ mod tests {
             ndims: Some(1),
         };
         assert_eq!(arr.to_rust_type(), "Vec<i64>");
+    }
+
+    #[test]
+    fn test_static_type_set_to_rust_type_issue_7035() {
+        let set = StaticType::Set {
+            element: Box::new(StaticType::I64),
+        };
+        assert_eq!(set.to_rust_type(), "std::collections::HashSet<i64>");
+        assert_eq!(set.julia_type_name(), "Set{Int64}");
+        assert_eq!(set.mangle_suffix(), "set_i64");
+    }
+
+    #[test]
+    fn test_static_type_dict_to_rust_type_issue_7034() {
+        let dict = StaticType::Dict {
+            key: Box::new(StaticType::Str),
+            value: Box::new(StaticType::I64),
+        };
+        assert_eq!(
+            dict.to_rust_type(),
+            "std::collections::HashMap<String, i64>"
+        );
+        assert_eq!(dict.julia_type_name(), "Dict{String, Int64}");
+        assert_eq!(dict.mangle_suffix(), "dict_str_i64");
+        assert!(dict.is_dict());
     }
 
     #[test]
@@ -1051,6 +1143,223 @@ mod tests {
     }
 
     #[test]
+    fn test_issue_6598_array_projections_route_through_core_type() {
+        // #6598: the bare `Array` and `MatrixOf` arms of conversion #7
+        // (`From<&vm::JuliaType> for StaticType`) duplicated what the shared
+        // `CoreType` projection (`from_vm_julia_type_lossy`) already produces.
+        // Pin that the modern CoreType-routed path yields the exact backend
+        // shapes, so the redundant manual arms can be dropped without changing
+        // any AoT projection.
+        use crate::types::JuliaType as VmType;
+
+        // Bare `Array` (no element / ndims) projects to `Array{Any}` with an
+        // unknown rank entirely through CoreType.
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::Array),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::Any),
+                ndims: None,
+            })
+        );
+        // `Matrix{T}` carries its element and the rank-2 ndims through CoreType.
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::MatrixOf(Box::new(VmType::Float64))),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::F64),
+                ndims: Some(2),
+            })
+        );
+        // `Vector{T}` was never duplicated in the manual fallback — it has only
+        // ever resolved through CoreType; pin it alongside for completeness.
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::VectorOf(Box::new(VmType::Int64))),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::I64),
+                ndims: Some(1),
+            })
+        );
+
+        // The public `From` entry point yields the same shapes (the modern path
+        // wins before the manual fallback is ever consulted).
+        assert_eq!(
+            StaticType::from(&VmType::Array),
+            StaticType::Array {
+                element: Box::new(StaticType::Any),
+                ndims: None,
+            }
+        );
+        assert_eq!(
+            StaticType::from(&VmType::MatrixOf(Box::new(VmType::Float64))),
+            StaticType::Array {
+                element: Box::new(StaticType::F64),
+                ndims: Some(2),
+            }
+        );
+    }
+
+    #[test]
+    fn test_issue_3912_static_type_projection_uses_core_type() {
+        use crate::inference_core::CoreType;
+        use crate::types::JuliaType as VmType;
+        use crate::types::TypeExpr;
+
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::Int8),
+            Some(StaticType::I8)
+        );
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::Int16),
+            Some(StaticType::I16)
+        );
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::UInt128),
+            Some(StaticType::U128)
+        );
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::Float16),
+            Some(StaticType::F16)
+        );
+
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::VectorOf(Box::new(VmType::Int64))),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::I64),
+                ndims: Some(1),
+            })
+        );
+        assert_eq!(
+            StaticType::from_vm_julia_type_lossy(&VmType::MatrixOf(Box::new(VmType::Float64))),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::F64),
+                ndims: Some(2),
+            })
+        );
+        assert_eq!(
+            StaticType::from_julia_name_lossy("Array{Int64, 2}"),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::I64),
+                ndims: Some(2),
+            })
+        );
+        assert_eq!(
+            StaticType::from_julia_name_lossy("Matrix"),
+            Some(StaticType::Array {
+                element: Box::new(StaticType::Any),
+                ndims: Some(2),
+            })
+        );
+        assert_eq!(
+            StaticType::from_julia_name_lossy("Tuple{Int64, String}"),
+            Some(StaticType::Tuple(vec![StaticType::I64, StaticType::Str]))
+        );
+        assert_eq!(
+            StaticType::from_julia_name_lossy("Union{Int64, Float64}"),
+            Some(StaticType::Union {
+                variants: vec![StaticType::I64, StaticType::F64],
+            })
+        );
+
+        assert_eq!(
+            StaticType::from_julia_name_lossy("Type{Int64}"),
+            Some(StaticType::DataType)
+        );
+        assert_eq!(
+            StaticType::from_type_expr_lossy(&TypeExpr::Parameterized {
+                base: "Array".to_string(),
+                params: vec![
+                    TypeExpr::Concrete(VmType::Int64),
+                    TypeExpr::TypeVar("2".to_string()),
+                ],
+            }),
+            StaticType::Array {
+                element: Box::new(StaticType::I64),
+                ndims: Some(2),
+            }
+        );
+        assert_eq!(
+            StaticType::from_type_expr_lossy(&TypeExpr::Parameterized {
+                base: "Tuple".to_string(),
+                params: vec![
+                    TypeExpr::Concrete(VmType::Int64),
+                    TypeExpr::Concrete(VmType::String),
+                ],
+            }),
+            StaticType::Tuple(vec![StaticType::I64, StaticType::Str])
+        );
+        assert_eq!(
+            StaticType::from_type_expr_lossy(&TypeExpr::Concrete(VmType::Real)),
+            StaticType::Any
+        );
+        assert_eq!(
+            StaticType::from_type_expr_lossy(&TypeExpr::TypeVar("T".to_string())),
+            StaticType::Struct {
+                type_id: 0,
+                name: "T".to_string(),
+            }
+        );
+        assert_eq!(
+            StaticType::from_type_expr_lossy(&TypeExpr::RuntimeExpr("Symbol(s)".to_string())),
+            StaticType::Struct {
+                type_id: 0,
+                name: "Symbol(s)".to_string(),
+            }
+        );
+        assert_eq!(
+            StaticType::from_core_type_lossy(&CoreType::from(&VmType::UnionAll {
+                var: "T".to_string(),
+                lower_bound: None,
+                bound: Some(Box::new("Integer".to_string())),
+                body: Box::new(VmType::VectorOf(Box::new(VmType::TypeVar(
+                    "T".to_string(),
+                    Some("Integer".to_string()),
+                )))),
+            })),
+            None
+        );
+    }
+
+    #[test]
+    fn test_issue_3912_core_typeintersect_projects_through_core_type() {
+        // Narrowing: Union{Int64, Float64} ∩ Int64 == Int64.
+        assert_eq!(
+            StaticType::Union {
+                variants: vec![StaticType::I64, StaticType::F64],
+            }
+            .core_typeintersect(&StaticType::I64),
+            Some(StaticType::I64)
+        );
+
+        // Provable disjointness projects CoreType::Bottom to the empty union
+        // (Julia's `Union{}`), never to a misleading concrete/`Any` backend type.
+        assert_eq!(
+            StaticType::I64.core_typeintersect(&StaticType::F64),
+            Some(StaticType::Union { variants: vec![] })
+        );
+
+        // Tuple intersection narrows element-wise.
+        assert_eq!(
+            StaticType::Tuple(vec![StaticType::I64, StaticType::F64])
+                .core_typeintersect(&StaticType::Tuple(vec![StaticType::I64, StaticType::F64])),
+            Some(StaticType::Tuple(vec![StaticType::I64, StaticType::F64]))
+        );
+
+        // Shapes without a stable AoT projection (a struct-vs-primitive meet
+        // that lands on a non-projectable CoreType) report `None` rather than
+        // forcing StaticType to own the semantics.
+        assert_eq!(
+            StaticType::Struct {
+                type_id: 0,
+                name: "BigInt".to_string(),
+            }
+            .core_typeintersect(&StaticType::Struct {
+                type_id: 0,
+                name: "BigFloat".to_string(),
+            }),
+            Some(StaticType::Union { variants: vec![] })
+        );
+    }
+
+    #[test]
     fn test_static_type_struct() {
         let s = StaticType::Struct {
             type_id: 1,
@@ -1058,7 +1367,7 @@ mod tests {
         };
         assert!(s.is_fully_static());
         assert!(!s.is_primitive());
-        assert_eq!(s.to_rust_type(), "Point{Float64}");
+        assert_eq!(s.to_rust_type(), "Point<f64>");
     }
 
     #[test]

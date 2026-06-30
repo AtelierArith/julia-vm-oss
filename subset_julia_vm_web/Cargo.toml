@@ -1,9 +1,9 @@
 [package]
 name = "subset_julia_vm_web"
-version = "0.6.6"
+version = "0.9.4"
 edition = "2021"
 description = "WebAssembly binding for SubsetJuliaVM - Julia subset interpreter"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -30,7 +30,7 @@ features = ["wasm"]
 [dependencies.subset_julia_vm_parser]
 path = "../subset_julia_vm_parser"
 
-[profile.release]
-# Optimize for small code size
-opt-level = "s"
-lto = true
+# NOTE: profiles must live at the workspace root — a `[profile.*]` block here is
+# silently ignored by Cargo. The WASM size-optimized profile (`opt-level = "s"`,
+# `lto = true`) is defined as `[profile.web-release]` in the root `Cargo.toml`
+# and selected via `wasm-pack build --profile web-release` (Issue #6922).

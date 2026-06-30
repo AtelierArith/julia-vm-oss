@@ -40,7 +40,7 @@ description = "Nested try/catch: inner exceptions, rethrow, sequential blocks (I
 name = "error_negative_dimensions"
 file = "error_negative_dimensions.jl"
 expected = true
-description = "Negative array dimensions produce errors instead of silent overflow (Issue #2880)"
+description = "Negative array dimensions produce catchable ArgumentError instead of silent overflow or VM errors (Issues #2880, #4040)"
 
 [[tests]]
 name = "error_division_by_zero"
@@ -95,3 +95,33 @@ name = "error_try_catch_widening"
 file = "error_try_catch_widening.jl"
 expected = true
 description = "try/catch type-widening: variables assigned in both branches (Issue #3070)"
+
+[[tests]]
+name = "error_typeassert_typeerror_5146"
+file = "error_typeassert_typeerror_5146.jl"
+expected = true
+description = "Failed type assertion TypeError stores offending value in `got` and formats upstream message 'expected T, got a value of type S' (Issue #5146)"
+
+[[tests]]
+name = "error_stack_overflow_5969"
+file = "error_stack_overflow_5969.jl"
+expected = true
+description = "Runaway/infinite recursion raises a catchable StackOverflowError instead of OOMing (Issue #5969, prevention for #5966)"
+
+[[tests]]
+name = "error_eval_ancestor_catch_5972"
+file = "error_eval_ancestor_catch_5972.jl"
+expected = true
+description = "An error raised inside an eval-driven nested dispatch is caught by an ancestor try/catch (StackOverflow/error/DomainError no longer silently swallowed) (Issue #5972)"
+
+[[tests]]
+name = "error_eval_nested_dispatch_catch_5979"
+file = "error_eval_nested_dispatch_catch_5979.jl"
+expected = true
+description = "An error raised through a doubly/triply-nested eval is caught by an ancestor try/catch (the inner Immediate-builtin eval no longer double-handles and clobbers catch_ip) (Issue #5979)"
+
+[[tests]]
+name = "error_custom_exception_showerror_8256"
+file = "custom_exception_showerror_8256.jl"
+expected = true
+description = "sprint(showerror, custom exception) dispatches to a package-defined Base.showerror extension (Issue #8256)"

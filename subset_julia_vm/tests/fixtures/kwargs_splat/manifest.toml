@@ -35,3 +35,21 @@ name = "kwargs_splat_short_form"
 file = "short_form_kwargs.jl"
 expected = true
 description = "Short-form function definitions with kwargs varargs f(x; kwargs...) = expr (Issue #2242)"
+
+[[tests]]
+name = "kwargs_splat_pairs_eltype_collect_4282"
+file = "pairs_eltype_collect_4282.jl"
+expected = true
+description = "kwargs... Pairs preserves Pair eltype and collect result type (Issue #4282)"
+
+[[tests]]
+name = "kwargs_splat_pairs_forwarding_4292"
+file = "pairs_forwarding_4292.jl"
+expected = true
+description = "Positional and keyword splat metadata survives known, module-qualified, and closure calls (Issue #4292)"
+
+[[tests]]
+name = "kwargs_splat_arrow_kwparams_4294"
+file = "arrow_kwparams_4294.jl"
+expected = true
+description = "Arrow functions accept positional, keyword, and splatted keyword parameters (Issue #4294)"

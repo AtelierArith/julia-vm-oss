@@ -45,7 +45,7 @@ impl AotStrengthReducer {
     }
 
     /// Optimize a list of statements
-    fn optimize_stmts(&mut self, stmts: &mut Vec<AotStmt>) -> usize {
+    fn optimize_stmts(&mut self, stmts: &mut [AotStmt]) -> usize {
         let mut total = 0;
 
         for stmt in stmts.iter_mut() {
@@ -313,6 +313,20 @@ impl AotStrengthReducer {
                 (expr.clone(), 0)
             }
 
+            AotExpr::SetFromIter { iter, elem_ty } => {
+                let (reduced_iter, red) = self.reduce_expr(iter);
+                if red > 0 {
+                    return (
+                        AotExpr::SetFromIter {
+                            iter: Box::new(reduced_iter),
+                            elem_ty: elem_ty.clone(),
+                        },
+                        red,
+                    );
+                }
+                (expr.clone(), 0)
+            }
+
             // Tuple literal - recurse
             AotExpr::TupleLit { elements } => {
                 let mut new_elements = Vec::with_capacity(elements.len());
@@ -333,11 +347,124 @@ impl AotStrengthReducer {
                 (expr.clone(), 0)
             }
 
+            AotExpr::NamedTupleLit { fields } => {
+                let mut new_fields = Vec::with_capacity(fields.len());
+                let mut total = 0;
+                for (name, field) in fields {
+                    let (reduced, red) = self.reduce_expr(field);
+                    new_fields.push((name.clone(), reduced));
+                    total += red;
+                }
+                if total > 0 {
+                    return (AotExpr::NamedTupleLit { fields: new_fields }, total);
+                }
+                (expr.clone(), 0)
+            }
+
+            AotExpr::Comprehension {
+                body,
+                var,
+                iter,
+                filter,
+                elem_ty,
+            } => {
+                let (new_iter, iter_red) = self.reduce_expr(iter);
+                let (new_body, body_red) = self.reduce_expr(body);
+                let (new_filter, filter_red) = if let Some(filter) = filter {
+                    let (reduced, red) = self.reduce_expr(filter);
+                    (Some(Box::new(reduced)), red)
+                } else {
+                    (None, 0)
+                };
+                let total = iter_red + body_red + filter_red;
+                if total > 0 {
+                    return (
+                        AotExpr::Comprehension {
+                            body: Box::new(new_body),
+                            var: var.clone(),
+                            iter: Box::new(new_iter),
+                            filter: new_filter,
+                            elem_ty: elem_ty.clone(),
+                        },
+                        total,
+                    );
+                }
+                (expr.clone(), 0)
+            }
+
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                elem_ty,
+            } => {
+                let mut total = 0;
+                let mut new_iterations = Vec::with_capacity(iterations.len());
+                for (var, iter) in iterations {
+                    let (new_iter, red) = self.reduce_expr(iter);
+                    total += red;
+                    new_iterations.push((var.clone(), new_iter));
+                }
+                let (new_body, body_red) = self.reduce_expr(body);
+                total += body_red;
+                let new_filter = if let Some(filter) = filter {
+                    let (reduced, red) = self.reduce_expr(filter);
+                    total += red;
+                    Some(Box::new(reduced))
+                } else {
+                    None
+                };
+                if total > 0 {
+                    return (
+                        AotExpr::MultiComprehension {
+                            body: Box::new(new_body),
+                            iterations: new_iterations,
+                            filter: new_filter,
+                            elem_ty: elem_ty.clone(),
+                        },
+                        total,
+                    );
+                }
+                (expr.clone(), 0)
+            }
+
+            AotExpr::Generator {
+                body,
+                var,
+                iter,
+                filter,
+                elem_ty,
+            } => {
+                let (new_iter, iter_red) = self.reduce_expr(iter);
+                let (new_body, body_red) = self.reduce_expr(body);
+                let (new_filter, filter_red) = if let Some(filter) = filter {
+                    let (reduced, red) = self.reduce_expr(filter);
+                    (Some(Box::new(reduced)), red)
+                } else {
+                    (None, 0)
+                };
+                let total = iter_red + body_red + filter_red;
+                if total > 0 {
+                    return (
+                        AotExpr::Generator {
+                            body: Box::new(new_body),
+                            var: var.clone(),
+                            iter: Box::new(new_iter),
+                            filter: new_filter,
+                            elem_ty: elem_ty.clone(),
+                        },
+                        total,
+                    );
+                }
+                (expr.clone(), 0)
+            }
+
             // Function calls - recurse into arguments
             AotExpr::CallStatic {
                 function,
                 args,
                 return_ty,
+                inline_policy,
             } => {
                 let mut new_args = Vec::with_capacity(args.len());
                 let mut total = 0;
@@ -352,6 +479,7 @@ impl AotStrengthReducer {
                             function: function.clone(),
                             args: new_args,
                             return_ty: return_ty.clone(),
+                            inline_policy: *inline_policy,
                         },
                         total,
                     );
@@ -550,6 +678,7 @@ impl AotStrengthReducer {
             | AotExpr::LitStr(_)
             | AotExpr::LitChar(_)
             | AotExpr::LitNothing
+            | AotExpr::LitMissing
             | AotExpr::Var { .. } => (expr.clone(), 0),
 
             // Lambda expressions - recurse into body
@@ -591,6 +720,9 @@ impl AotStrengthReducer {
                 if !self.is_integer_type(result_ty) {
                     return None;
                 }
+                if Self::has_bool_operand(left, right) {
+                    return None;
+                }
 
                 // Check right operand for power of 2
                 if let Some(shift) = self.get_power_of_two_shift(right) {
@@ -621,6 +753,9 @@ impl AotStrengthReducer {
                 if !self.is_integer_type(result_ty) {
                     return None;
                 }
+                if Self::has_bool_operand(left, right) {
+                    return None;
+                }
 
                 // Check right operand for power of 2
                 if let Some(shift) = self.get_power_of_two_shift(right) {
@@ -637,24 +772,27 @@ impl AotStrengthReducer {
 
             // x^2 -> x * x, x^3 -> x * x * x
             AotBinOp::Pow => {
+                if matches!(result_ty, StaticType::Bool) || Self::has_bool_operand(left, right) {
+                    return None;
+                }
                 if let Some(exp) = self.get_small_integer_exponent(right) {
                     match exp {
                         0 => {
                             // x^0 = 1 (handled by constant folding if x is known)
-                            return Some(AotExpr::LitI64(1));
+                            Some(AotExpr::LitI64(1))
                         }
                         1 => {
                             // x^1 = x
-                            return Some(left.clone());
+                            Some(left.clone())
                         }
                         2 => {
                             // x^2 = x * x
-                            return Some(AotExpr::BinOpStatic {
+                            Some(AotExpr::BinOpStatic {
                                 op: AotBinOp::Mul,
                                 left: Box::new(left.clone()),
                                 right: Box::new(left.clone()),
                                 result_ty: result_ty.clone(),
-                            });
+                            })
                         }
                         3 => {
                             // x^3 = x * x * x = (x * x) * x
@@ -664,12 +802,12 @@ impl AotStrengthReducer {
                                 right: Box::new(left.clone()),
                                 result_ty: result_ty.clone(),
                             };
-                            return Some(AotExpr::BinOpStatic {
+                            Some(AotExpr::BinOpStatic {
                                 op: AotBinOp::Mul,
                                 left: Box::new(x_squared),
                                 right: Box::new(left.clone()),
                                 result_ty: result_ty.clone(),
-                            });
+                            })
                         }
                         4 => {
                             // x^4 = (x * x) * (x * x)
@@ -679,12 +817,12 @@ impl AotStrengthReducer {
                                 right: Box::new(left.clone()),
                                 result_ty: result_ty.clone(),
                             };
-                            return Some(AotExpr::BinOpStatic {
+                            Some(AotExpr::BinOpStatic {
                                 op: AotBinOp::Mul,
                                 left: Box::new(x_squared.clone()),
                                 right: Box::new(x_squared),
                                 result_ty: result_ty.clone(),
-                            });
+                            })
                         }
                         _ => None,
                     }
@@ -700,6 +838,10 @@ impl AotStrengthReducer {
     /// Check if a type is an integer type
     fn is_integer_type(&self, ty: &StaticType) -> bool {
         matches!(ty, StaticType::I64 | StaticType::I32)
+    }
+
+    fn has_bool_operand(left: &AotExpr, right: &AotExpr) -> bool {
+        matches!(left.get_type(), StaticType::Bool) || matches!(right.get_type(), StaticType::Bool)
     }
 
     /// Get the shift amount if the expression is a power of 2 literal

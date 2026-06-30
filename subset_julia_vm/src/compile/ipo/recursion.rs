@@ -171,6 +171,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         }
     }
@@ -197,6 +198,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         }
     }

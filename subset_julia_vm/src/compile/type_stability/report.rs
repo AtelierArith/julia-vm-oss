@@ -4,6 +4,8 @@
 
 use crate::compile::lattice::types::LatticeType;
 use crate::compile::type_stability::reason::TypeStabilityReason;
+#[cfg(test)]
+use crate::inference_core::{CorePrimitive, CoreType};
 use serde::{Deserialize, Serialize};
 
 /// The stability status of a function.
@@ -121,9 +123,16 @@ impl FunctionStabilityReport {
         match ty {
             LatticeType::Bottom => "Bottom".to_string(),
             LatticeType::Const(cv) => format!("Const({:?})", cv),
-            LatticeType::Concrete(ct) => format!("{:?}", ct),
+            // Prefer the Julia type name (e.g. `Int64`) over the internal Debug
+            // form. After the Issue #6720 fold, faithful types are carried as
+            // `Core(CoreType::..)`, whose Debug would otherwise leak into this
+            // user-facing report; `to_type_name` recovers the Julia name.
+            LatticeType::Concrete(ct) => ct.to_type_name().unwrap_or_else(|| format!("{:?}", ct)),
             LatticeType::Union(types) => {
-                let type_strs: Vec<String> = types.iter().map(|t| format!("{:?}", t)).collect();
+                let type_strs: Vec<String> = types
+                    .iter()
+                    .map(|t| t.to_type_name().unwrap_or_else(|| format!("{:?}", t)))
+                    .collect();
                 format!("Union{{{}}}", type_strs.join(", "))
             }
             LatticeType::Conditional { .. } => "Conditional".to_string(),
@@ -148,10 +157,22 @@ mod tests {
             "add".to_string(),
             1,
             vec![
-                ("x".to_string(), LatticeType::Concrete(ConcreteType::Int64)),
-                ("y".to_string(), LatticeType::Concrete(ConcreteType::Int64)),
+                (
+                    "x".to_string(),
+                    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Int64,
+                    ))),
+                ),
+                (
+                    "y".to_string(),
+                    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Int64,
+                    ))),
+                ),
             ],
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         );
         assert!(report.is_stable());
         assert!(!report.is_unstable());
@@ -160,15 +181,21 @@ mod tests {
     #[test]
     fn test_unstable_union_function() {
         let mut types = std::collections::BTreeSet::new();
-        types.insert(ConcreteType::Int64);
-        types.insert(ConcreteType::Float64);
+        types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
 
         let report = FunctionStabilityReport::new(
             "compute".to_string(),
             10,
             vec![(
                 "x".to_string(),
-                LatticeType::Concrete(ConcreteType::Float64),
+                LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64,
+                ))),
             )],
             LatticeType::Union(types),
         );
@@ -189,13 +216,22 @@ mod tests {
             "add".to_string(),
             1,
             vec![
-                ("x".to_string(), LatticeType::Concrete(ConcreteType::Int64)),
+                (
+                    "x".to_string(),
+                    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Int64,
+                    ))),
+                ),
                 (
                     "y".to_string(),
-                    LatticeType::Concrete(ConcreteType::Float64),
+                    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Float64,
+                    ))),
                 ),
             ],
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         );
         let sig = report.format_signature();
         assert!(sig.contains("add"));

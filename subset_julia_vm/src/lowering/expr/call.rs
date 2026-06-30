@@ -4,13 +4,71 @@
 //! do syntax, and argument list parsing.
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
-use crate::ir::core::{BinaryOp, Block, Expr, Function, Stmt, TypedParam, UnaryOp};
-use crate::lowering::stmt::lower_stmt;
+use crate::ir::core::{
+    BinaryOp, Block, BuiltinOp, Expr, Function, KwParam, Literal, Stmt, TypedParam, UnaryOp,
+};
+use crate::lowering::function::{
+    generate_default_arg_stubs, inject_parameter_destructuring_prologue,
+    lower_anonymous_function_named, parse_parameter,
+};
+use crate::lowering::stmt::{lower_stmt, lower_stmt_with_ctx};
 use crate::lowering::{LambdaContext, LowerResult};
 use crate::parser::cst::{CstWalker, Node, NodeKind};
 use crate::stdlib;
 
 use super::{is_broadcast_op, lower_expr, lower_expr_with_ctx, map_builtin_name};
+
+/// Split a `new{...}` type-argument list on top-level commas, respecting nested
+/// `()`, `{}`, and `[]` so that a parameter such as `Dict{Symbol, Any}` or
+/// `elem_type(coefficient_ring(R))` is kept intact rather than torn apart at an
+/// inner comma (Issue #7935).
+fn split_top_level_type_args(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut depth: i32 = 0;
+    let mut current = String::new();
+    for ch in s.chars() {
+        match ch {
+            '(' | '{' | '[' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' | '}' | ']' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                parts.push(std::mem::take(&mut current));
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() || !parts.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
+/// Classify a single `new{...}` type argument.
+///
+/// A bare identifier (`T`, `Int64`) stays a [`TypeExpr::TypeVar`] so the existing
+/// `where`-clause type-variable / concrete-name handling applies. Anything more
+/// complex — a call like `elem_type(R)` or a parametric application like
+/// `Dict{Symbol, Any}` — is kept as a [`TypeExpr::RuntimeExpr`] holding the
+/// source text, which the compiler re-lowers and evaluates at runtime to obtain
+/// the concrete `DataType` (Issue #7935).
+fn classify_new_type_arg(tok: &str) -> crate::types::TypeExpr {
+    let is_plain_ident = !tok.is_empty()
+        && tok
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+        && tok.chars().all(|c| c.is_alphanumeric() || c == '_');
+    if is_plain_ident {
+        crate::types::TypeExpr::TypeVar(tok.to_string())
+    } else {
+        crate::types::TypeExpr::RuntimeExpr(tok.to_string())
+    }
+}
 
 /// Extract the operator string if the callee node represents an operator partial application.
 ///
@@ -43,6 +101,33 @@ fn extract_partial_apply_operator<'a>(walker: &CstWalker<'a>, callee: Node<'a>) 
     }
 }
 
+/// Returns `true` when an operator string names a regular Base function that may
+/// be invoked in call position with two or more positional arguments (or a
+/// splat): `+`, `-`, `*`, `/`, `\`, `%`, `^`, and the comparison operators.
+///
+/// Short-circuit operators (`&&`, `||`) and the `<:`/`>:` type operators are
+/// excluded — they are syntactic forms, not ordinary callable functions, so a
+/// `&&(a, b)` call must not be silently lowered to a function call (Issue #5144).
+pub(crate) fn is_operator_function_call_target(op: &str) -> bool {
+    matches!(
+        op,
+        "+" | "-"
+            | "*"
+            | "/"
+            | "\\"
+            | "%"
+            | "^"
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "=="
+            | "!="
+            | "==="
+            | "!=="
+    )
+}
+
 /// Extract the inner `ArrowFunctionExpression` from a `ParenthesizedExpression` callee,
 /// for handling immediately invoked lambda expressions: `(x -> expr)(args)` (Issue #3142).
 ///
@@ -59,6 +144,27 @@ fn extract_paren_arrow_function<'a>(walker: &CstWalker<'a>, callee: Node<'a>) ->
     }
 }
 
+fn wrap_expr_splat_args(
+    args: Vec<Expr>,
+    splat_mask: Vec<bool>,
+    span: crate::span::Span,
+) -> Vec<Expr> {
+    args.into_iter()
+        .enumerate()
+        .map(|(idx, arg)| {
+            if splat_mask.get(idx).copied().unwrap_or(false) {
+                Expr::Builtin {
+                    name: BuiltinOp::SplatInterpolation,
+                    args: vec![arg],
+                    span,
+                }
+            } else {
+                arg
+            }
+        })
+        .collect()
+}
+
 /// Lower an immediately invoked lambda expression `(x -> expr)(args)` inside a full-form
 /// function body (no separate `LambdaContext`) by embedding the lambda as a nested
 /// `FunctionDef` inside a `LetBlock` and calling it immediately (Issue #3142).
@@ -69,10 +175,15 @@ fn extract_paren_arrow_function<'a>(walker: &CstWalker<'a>, callee: Node<'a>) ->
 ///   bindings: [],
 ///   body: [
 ///     Stmt::FunctionDef(__iife_N),   // defines the lambda
-///     Stmt::Return(Call(__iife_N, args)),  // calls it
+///     Stmt::Expr(Call(__iife_N, args)),  // calls it, yielding the block's value
 ///   ]
 /// }
 /// ```
+///
+/// The trailing statement is `Stmt::Expr` (the block's value), NOT `Stmt::Return`:
+/// a `return` here would leak out of this `LetBlock` and tail-return the enclosing
+/// function, so `r = (x -> body)(arg)` would return the lambda's value early and
+/// drop the surrounding statement's continuation (Issue #8018).
 fn lower_iife_as_nested<'a>(
     walker: &CstWalker<'a>,
     arrow_node: Node<'a>,
@@ -87,6 +198,8 @@ fn lower_iife_as_nested<'a>(
     let child_count = children.len();
 
     let mut params: Vec<TypedParam> = Vec::new();
+    let mut kwparams: Vec<KwParam> = Vec::new();
+    let mut defaults: Vec<Option<Expr>> = Vec::new();
     let mut body_expr: Option<Expr> = None;
 
     for (i, child) in children.iter().enumerate() {
@@ -98,16 +211,19 @@ fn lower_iife_as_nested<'a>(
                 NodeKind::Identifier => {
                     let name = walker.text(child).to_string();
                     params.push(TypedParam::untyped(name, walker.span(child)));
+                    defaults.push(None);
                 }
                 NodeKind::ArgumentList
                 | NodeKind::TupleExpression
-                | NodeKind::ParenthesizedExpression => {
-                    for arg in walker.named_children(child) {
-                        if walker.kind(&arg) == NodeKind::Identifier {
-                            let name = walker.text(&arg).to_string();
-                            params.push(TypedParam::untyped(name, walker.span(&arg)));
-                        }
-                    }
+                | NodeKind::ParenthesizedExpression
+                | NodeKind::ParameterList => {
+                    collect_lifted_arrow_parameters(
+                        walker,
+                        *child,
+                        &mut params,
+                        &mut kwparams,
+                        &mut defaults,
+                    )?;
                 }
                 _ => {}
             }
@@ -127,7 +243,7 @@ fn lower_iife_as_nested<'a>(
     let func = Function {
         name: iife_name.clone(),
         params,
-        kwparams: vec![],
+        kwparams,
         type_params: vec![],
         return_type: None,
         body: Block {
@@ -138,8 +254,13 @@ fn lower_iife_as_nested<'a>(
             span: arrow_span,
         },
         is_base_extension: false,
+        is_runtime_eval: false,
         span: arrow_span,
     };
+
+    // Optional positional defaults: emit reduced-arity stubs so an IIFE invoked
+    // with fewer args than declared binds the defaults (Issue #8047).
+    let stubs = generate_default_arg_stubs(&func, &defaults);
 
     let func_def_stmt = Stmt::FunctionDef {
         func: Box::new(func),
@@ -155,13 +276,68 @@ fn lower_iife_as_nested<'a>(
         span,
     };
 
+    let mut stmts = vec![func_def_stmt];
+    for stub in stubs {
+        stmts.push(Stmt::FunctionDef {
+            func: Box::new(stub),
+            span,
+        });
+    }
+    stmts.push(Stmt::Expr {
+        expr: call_expr,
+        span,
+    });
+
+    Ok(Expr::LetBlock {
+        bindings: vec![],
+        body: Block { stmts, span },
+        span,
+    })
+}
+
+/// Lower an immediately-invoked **full-form** anonymous function
+/// `(function(x) body end)(args)` by lifting the lambda into a `FunctionDef`
+/// embedded directly in a `LetBlock` *body* and calling it by its generated name
+/// in the same block.
+///
+/// The lambda's `FunctionDef` MUST live in the block `body` (not a `LetBlock`
+/// binding produced by `build_indirect_call`): `collect_block_functions` /
+/// `collect_expr_functions` only descend into a `LetBlock`'s `body`, never its
+/// `bindings`, so a lambda hidden in a binding is never discovered as a nested
+/// function of the enclosing frame and emits no bytecode — dispatch then fails
+/// at runtime with `Function '<parent>#__anonymous_function_N' not found`
+/// (Issue #8030). This mirrors the arrow IIFE path `lower_iife_as_nested`, and
+/// keeps the no-`LambdaContext` body-lowering path (full-form `function f()`
+/// without a macro call) working the same way the arrow form already does.
+#[allow(clippy::too_many_arguments)]
+fn lower_fullform_iife_as_nested<'a>(
+    walker: &CstWalker<'a>,
+    func_def_node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+    args: Vec<Expr>,
+    kwargs: Vec<(String, Expr)>,
+    splat_mask: Vec<bool>,
+    kwargs_splat_mask: Vec<bool>,
+    span: crate::span::Span,
+) -> LowerResult<Expr> {
+    let (function, func) = lower_anonymous_function_named(walker, func_def_node, lambda_ctx)?;
     Ok(Expr::LetBlock {
         bindings: vec![],
         body: Block {
             stmts: vec![
-                func_def_stmt,
-                Stmt::Return {
-                    value: Some(call_expr),
+                Stmt::FunctionDef {
+                    func: Box::new(func),
+                    span,
+                },
+                Stmt::Expr {
+                    expr: Expr::Call {
+                        function,
+                        args,
+                        kwargs,
+                        splat_mask,
+                        kwargs_splat_mask,
+                        span,
+                    },
                     span,
                 },
             ],
@@ -171,12 +347,28 @@ fn lower_iife_as_nested<'a>(
     })
 }
 
-/// Generate a closure for operator partial application: `op(x)` → `y -> y op x` (Issue #3119).
+/// Lower an arrow function used as a value inside a full-form function body.
 ///
-/// `op_text` is the operator string (e.g. "==", ">").
-/// `arg_expr` is the already-lowered right-hand argument (inlined into the lambda body).
-/// The argument expression is inlined directly so that free variable analysis can detect
-/// captures from the enclosing function's params (e.g. `==(n)` inside `foo(n)` captures `n`).
+/// The no-context lowering path cannot add to the top-level `LambdaContext`, so
+/// embed the lambda as a nested `FunctionDef` inside a `LetBlock`. This lets the
+/// normal nested-function collector and closure-capture analysis see free
+/// variables from the enclosing function (Issue #4289).
+pub(super) fn lower_arrow_value_as_nested<'a>(
+    walker: &CstWalker<'a>,
+    arrow_node: Node<'a>,
+) -> LowerResult<Expr> {
+    lower_arrow_value_as_nested_impl(walker, arrow_node, None)
+}
+
+pub(super) fn lower_arrow_value_as_nested_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    arrow_node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    lower_arrow_value_as_nested_impl(walker, arrow_node, Some(lambda_ctx))
+}
+
+/// Generate a closure for operator partial application: `op(x)` -> `y -> y op x` (Issue #3119).
 fn lower_operator_partial_apply(
     op_text: &str,
     arg_expr: Expr,
@@ -202,10 +394,6 @@ fn lower_operator_partial_apply(
 
     let lambda_name = lambda_ctx.next_lambda_name();
     let param_name = "__op_y".to_string();
-
-    // Lambda body: __op_y op arg_expr
-    // arg_expr is inlined so that free variables in arg_expr are correctly detected
-    // as captures when the lambda is analyzed against the enclosing function's scope.
     let body_expr = Expr::BinaryOp {
         op: bin_op,
         left: Box::new(Expr::Var(param_name.clone(), span)),
@@ -227,6 +415,7 @@ fn lower_operator_partial_apply(
             span,
         },
         is_base_extension: false,
+        is_runtime_eval: false,
         span,
     };
 
@@ -234,6 +423,103 @@ fn lower_operator_partial_apply(
 
     Ok(Expr::FunctionRef {
         name: lambda_name,
+        span,
+    })
+}
+
+fn lower_arrow_value_as_nested_impl<'a>(
+    walker: &CstWalker<'a>,
+    arrow_node: Node<'a>,
+    _lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
+    let span = walker.span(&arrow_node);
+    let children = walker.named_children(&arrow_node);
+    let child_count = children.len();
+
+    let mut params: Vec<TypedParam> = Vec::new();
+    let mut kwparams: Vec<KwParam> = Vec::new();
+    let mut defaults: Vec<Option<Expr>> = Vec::new();
+    let mut body_expr: Option<Expr> = None;
+
+    for (i, child) in children.iter().enumerate() {
+        let is_last = i == child_count - 1;
+        if is_last {
+            body_expr = Some(lower_expr(walker, *child)?);
+        } else {
+            match walker.kind(child) {
+                NodeKind::Identifier => {
+                    let name = walker.text(child).to_string();
+                    params.push(TypedParam::untyped(name, walker.span(child)));
+                    defaults.push(None);
+                }
+                NodeKind::ArgumentList
+                | NodeKind::TupleExpression
+                | NodeKind::ParenthesizedExpression
+                | NodeKind::ParameterList => {
+                    collect_lifted_arrow_parameters(
+                        walker,
+                        *child,
+                        &mut params,
+                        &mut kwparams,
+                        &mut defaults,
+                    )?;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let body_expr = body_expr.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::UnsupportedExpression(
+                "arrow function without body".to_string(),
+            ),
+            span,
+        )
+    })?;
+
+    let lambda_name = format!("__lambda_nested_{}", span.start);
+    let body = Block {
+        stmts: vec![Stmt::Return {
+            value: Some(body_expr),
+            span,
+        }],
+        span,
+    };
+    let (params, body) = inject_parameter_destructuring_prologue(params, body);
+    let func = Function {
+        name: lambda_name.clone(),
+        params,
+        kwparams,
+        type_params: vec![],
+        return_type: None,
+        body,
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span,
+    };
+
+    // Optional positional defaults bind in reduced-arity calls (Issue #8047).
+    let stubs = generate_default_arg_stubs(&func, &defaults);
+
+    let mut stmts = vec![Stmt::FunctionDef {
+        func: Box::new(func),
+        span,
+    }];
+    for stub in stubs {
+        stmts.push(Stmt::FunctionDef {
+            func: Box::new(stub),
+            span,
+        });
+    }
+    stmts.push(Stmt::Expr {
+        expr: Expr::Var(lambda_name, span),
+        span,
+    });
+
+    Ok(Expr::LetBlock {
+        bindings: vec![],
+        body: Block { stmts, span },
         span,
     })
 }
@@ -297,6 +583,7 @@ fn lower_operator_partial_apply_as_nested(
             span,
         },
         is_base_extension: false,
+        is_runtime_eval: false,
         span,
     };
 
@@ -380,10 +667,16 @@ fn resolve_call_target<'a>(
     // Name extraction from Identifier, ParametrizedTypeExpression, Operator
     match walker.kind(&callee) {
         NodeKind::Identifier => Ok(ResolvedCallTarget::DirectCall {
+            // Keep bare callee names intact here. Compile-time resolution routes
+            // visible type aliases through DataType callables with lexical/module
+            // visibility intact; expanding in lowering would leak module aliases
+            // before `using M: x` filtering can run.
             name: walker.text(&callee).to_string(),
         }),
         NodeKind::ParametrizedTypeExpression => Ok(ResolvedCallTarget::DirectCall {
-            name: walker.text(&callee).to_string(),
+            // Issue #5055: expand a parametric type-alias constructor call head
+            // (`MyVec{Int}([..])` -> `Vector{Int}([..])`).
+            name: crate::lowering::type_alias::expand(walker.text(&callee)),
         }),
         NodeKind::Operator => {
             let op_text = walker.text(&callee).to_string();
@@ -411,7 +704,17 @@ fn resolve_call_target<'a>(
             }
 
             // Broadcast operators: .*(a, b), .+(a, b)
-            if is_broadcast_op(&op_text) {
+            if is_broadcast_op(&op_text) || matches!(op_text.as_str(), "∈" | "∉" | "∋" | "∌")
+            {
+                Ok(ResolvedCallTarget::DirectCall { name: op_text })
+            } else if is_operator_function_call_target(&op_text) {
+                // Operator used as a function in call position with multiple
+                // arguments or a splat: `*(2, 3, 4)`, `^(2, 3)`, `*(xs...)`.
+                // Single-argument operator partial application (`>(3)`) is
+                // intercepted earlier by `extract_partial_apply_operator`, so by
+                // the time we reach here the operator names a real Base function
+                // that the method table resolves at runtime — mirror `min`/`max`
+                // (Issue #5144).
                 Ok(ResolvedCallTarget::DirectCall { name: op_text })
             } else {
                 Err(UnsupportedFeature::new(
@@ -499,41 +802,39 @@ pub fn lower_arrow_function<'a>(
     let span = walker.span(&node);
     let children = walker.named_children(&node);
 
-    // Find parameters and body
-    // Structure: identifier/argument_list, ->, expression
-    // Note: named_children excludes the -> operator (not a named node),
-    // so named children are [params..., body]. The LAST child is always the body.
     let mut params: Vec<TypedParam> = Vec::new();
+    let mut kwparams: Vec<KwParam> = Vec::new();
+    // Optional positional default values, index-aligned with `params` (Issue #8047).
+    // `(x, d=2) -> ...` must bind the default in the reduced-arity call, mirroring
+    // the named/short/block forms that go through `generate_default_arg_stubs`.
+    let mut defaults: Vec<Option<Expr>> = Vec::new();
     let mut body_expr: Option<Expr> = None;
     let child_count = children.len();
 
     for (i, child) in children.iter().enumerate() {
         let is_last = i == child_count - 1;
-
         if is_last {
-            // Last named child is always the body expression
             body_expr = Some(lower_expr(walker, *child)?);
         } else {
             match walker.kind(child) {
                 NodeKind::Identifier => {
-                    // Parameter before ->
                     let name = walker.text(child).to_string();
                     params.push(TypedParam::untyped(name, walker.span(child)));
+                    defaults.push(None);
                 }
                 NodeKind::ArgumentList
                 | NodeKind::TupleExpression
-                | NodeKind::ParenthesizedExpression => {
-                    // Multiple parameters: (x, y) -> ...
-                    for arg in walker.named_children(child) {
-                        if walker.kind(&arg) == NodeKind::Identifier {
-                            let name = walker.text(&arg).to_string();
-                            params.push(TypedParam::untyped(name, walker.span(&arg)));
-                        }
-                    }
+                | NodeKind::ParenthesizedExpression
+                | NodeKind::ParameterList => {
+                    collect_lifted_arrow_parameters(
+                        walker,
+                        *child,
+                        &mut params,
+                        &mut kwparams,
+                        &mut defaults,
+                    )?;
                 }
-                _ => {
-                    // Unexpected node before body
-                }
+                _ => {}
             }
         }
     }
@@ -545,33 +846,146 @@ pub fn lower_arrow_function<'a>(
         )
     })?;
 
-    // Create a function with the body wrapped in a return statement
     let lambda_name = lambda_ctx.next_lambda_name();
+    let body = Block {
+        stmts: vec![Stmt::Return {
+            value: Some(body_expr),
+            span,
+        }],
+        span,
+    };
+    let (params, body) = inject_parameter_destructuring_prologue(params, body);
     let func = Function {
         name: lambda_name.clone(),
         params,
-        kwparams: vec![],
+        kwparams,
         type_params: Vec::new(),
         return_type: None,
-        body: Block {
-            stmts: vec![Stmt::Return {
-                value: Some(body_expr),
-                span,
-            }],
-            span,
-        },
+        body,
         is_base_extension: false,
+        is_runtime_eval: false,
         span,
     };
 
-    // Add to lifted functions
+    // Emit reduced-arity stub methods so optional positional defaults bind in
+    // shorter calls, e.g. `(x, d=2) -> ...` called as `a(1)` (Issue #8047).
+    // The stubs share `lambda_name`, forming a method table dispatched by arity,
+    // exactly as the named/short/block default-arg paths do.
+    let stubs = generate_default_arg_stubs(&func, &defaults);
     lambda_ctx.add_lifted_function(func);
+    for stub in stubs {
+        lambda_ctx.add_lifted_function(stub);
+    }
 
-    // Return a FunctionRef pointing to the lifted function
     Ok(Expr::FunctionRef {
         name: lambda_name,
         span,
     })
+}
+
+fn collect_lifted_arrow_parameters<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    params: &mut Vec<TypedParam>,
+    kwparams: &mut Vec<KwParam>,
+    defaults: &mut Vec<Option<Expr>>,
+) -> LowerResult<()> {
+    let mut in_kwargs = false;
+    for arg in walker.named_children(&node) {
+        match walker.kind(&arg) {
+            NodeKind::Semicolon => in_kwargs = true,
+            NodeKind::Identifier if !in_kwargs => {
+                let name = walker.text(&arg).to_string();
+                params.push(TypedParam::untyped(name, walker.span(&arg)));
+                defaults.push(None);
+            }
+            // Optional positional default `d=2` (and typed `d::Int=2`) parses as
+            // an `Assignment` node inside the arrow parameter tuple (Issue #8047).
+            // The LHS is the parameter (untyped Identifier or a typed parameter),
+            // the RHS is the default expression.
+            NodeKind::Assignment if !in_kwargs => {
+                let assign_children: Vec<_> = walker
+                    .named_children(&arg)
+                    .into_iter()
+                    .filter(|n| walker.kind(n) != NodeKind::Operator)
+                    .collect();
+                if assign_children.len() >= 2 {
+                    let lhs = assign_children[0];
+                    let rhs = assign_children[assign_children.len() - 1];
+                    params.push(parse_parameter(walker, lhs)?);
+                    defaults.push(Some(lower_expr(walker, rhs)?));
+                }
+            }
+            NodeKind::Parameter | NodeKind::TypedExpression | NodeKind::TupleExpression
+                if !in_kwargs =>
+            {
+                params.push(parse_parameter(walker, arg)?);
+                defaults.push(None);
+            }
+            NodeKind::SplatExpression | NodeKind::SplatParameter if !in_kwargs => {
+                params.push(parse_parameter(walker, arg)?);
+                defaults.push(None);
+            }
+            NodeKind::KwParameter => {
+                if let Some(kw) = lower_arrow_kwparam(walker, arg)? {
+                    kwparams.push(kw);
+                }
+            }
+            NodeKind::SplatParameter if in_kwargs => {
+                if let Some(name_node) = walker
+                    .named_children(&arg)
+                    .into_iter()
+                    .find(|n| walker.kind(n) == NodeKind::Identifier)
+                {
+                    let name = walker.text(&name_node).to_string();
+                    kwparams.push(KwParam::varargs(name, walker.span(&arg)));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn lower_arrow_kwparam<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Option<KwParam>> {
+    let span = walker.span(&node);
+    let children = walker.named_children(&node);
+    let node_text = walker.text(&node);
+    let has_type_annotation = node_text.contains("::");
+
+    let mut name: Option<String> = None;
+    let mut default_value: Option<Expr> = None;
+    let mut seen_type_identifier = false;
+
+    for child in children {
+        match walker.kind(&child) {
+            NodeKind::Identifier => {
+                if name.is_none() {
+                    name = Some(walker.text(&child).to_string());
+                } else if has_type_annotation && !seen_type_identifier {
+                    seen_type_identifier = true;
+                } else if default_value.is_none() {
+                    default_value = Some(lower_expr(walker, child)?);
+                }
+            }
+            NodeKind::TypeClause
+            | NodeKind::TypedParameter
+            | NodeKind::ParametrizedTypeExpression => {
+                seen_type_identifier = true;
+            }
+            _ => {
+                if default_value.is_none() {
+                    default_value = Some(lower_expr(walker, child)?);
+                }
+            }
+        }
+    }
+
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let default = default_value.unwrap_or(Expr::Literal(Literal::Undef, span));
+    Ok(Some(KwParam::new(name, default, None, span)))
 }
 
 /// Lower call expression with lambda context (handles do syntax)
@@ -604,13 +1018,20 @@ pub fn lower_call_expr_with_ctx<'a>(
     });
 
     // Check for operator partial application: ==(x), >(3), (!=)(val), etc. (Issue #3119)
-    // Transform op(x) → closure y -> y op x using a lambda lifted to the current scope.
+    // Function bodies need nested closures so captures are discovered as free variables.
     if let Some(op) = extract_partial_apply_operator(walker, callee) {
         let (args, _, _, _) = match args_node {
             Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
             None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         };
         if args.len() == 1 {
+            if lambda_ctx.prefer_nested_lambdas() {
+                return lower_operator_partial_apply_as_nested(
+                    &op,
+                    args.into_iter().next().unwrap(),
+                    span,
+                );
+            }
             return lower_operator_partial_apply(
                 &op,
                 args.into_iter().next().unwrap(),
@@ -621,9 +1042,13 @@ pub fn lower_call_expr_with_ctx<'a>(
     }
 
     // Handle immediately invoked lambda: (x -> expr)(args) (Issue #3142)
-    // When the callee is a parenthesized arrow function literal, lift the lambda and call it.
+    // Function-body lowering embeds the lambda so capture analysis sees outer locals.
     if let Some(arrow_node) = extract_paren_arrow_function(walker, callee) {
-        let lambda_ref = lower_arrow_function(walker, arrow_node, lambda_ctx)?;
+        let lambda_ref = if lambda_ctx.prefer_nested_lambdas() {
+            lower_arrow_value_as_nested_with_ctx(walker, arrow_node, lambda_ctx)?
+        } else {
+            lower_arrow_function(walker, arrow_node, lambda_ctx)?
+        };
         let temp_name = format!("__iife_{}", span.start);
         let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
             Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
@@ -640,10 +1065,98 @@ pub fn lower_call_expr_with_ctx<'a>(
         ));
     }
 
+    if walker.kind(&callee) == NodeKind::ParenthesizedExpression {
+        let children = walker.named_children(&callee);
+        if children.len() == 1 {
+            if walker.kind(&children[0]) == NodeKind::FunctionDefinition {
+                let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
+                    Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
+                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                };
+                return lower_fullform_iife_as_nested(
+                    walker,
+                    children[0],
+                    Some(lambda_ctx),
+                    args,
+                    kwargs,
+                    splat_mask,
+                    kwargs_splat_mask,
+                    span,
+                );
+            }
+            let callee_expr = lower_expr_with_ctx(walker, children[0], lambda_ctx)?;
+            let temp_name = format!("__paren_func_{}", span.start);
+            let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
+                Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
+                None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            };
+            return Ok(build_indirect_call(
+                temp_name,
+                callee_expr,
+                args,
+                kwargs,
+                splat_mask,
+                kwargs_splat_mask,
+                span,
+            ));
+        }
+    }
+
+    // Call result as callee: `make_adder(a)(x)`. Julia treats the result of the
+    // first call as a callable object; lower it through the same indirect-call
+    // path used for field and indexed callable values.
+    if walker.kind(&callee) == NodeKind::CallExpression {
+        let callee_expr = lower_expr_with_ctx(walker, callee, lambda_ctx)?;
+        let temp_name = format!("__call_result_func_{}", span.start);
+        let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
+            Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
+            None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+        };
+        return Ok(build_indirect_call(
+            temp_name,
+            callee_expr,
+            args,
+            kwargs,
+            splat_mask,
+            kwargs_splat_mask,
+            span,
+        ));
+    }
+
     // Resolve call target using shared helper (Issue #2271)
     match resolve_call_target(walker, callee, &named, span)? {
         ResolvedCallTarget::ModuleCall { module, function } => {
-            let (args, kwargs, _splat_mask, _kwargs_splat_mask) = match args_node {
+            if let Some(do_node) = do_clause {
+                let (regular_args, _kwargs, _splat_mask, _kwargs_splat_mask) = match args_node {
+                    Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
+                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                };
+                if lambda_ctx.prefer_nested_lambdas() {
+                    return lower_do_module_call_as_nested(
+                        walker,
+                        do_node,
+                        module,
+                        function,
+                        regular_args,
+                        span,
+                        Some(lambda_ctx),
+                    );
+                }
+                let lambda_ref = lower_do_clause(walker, do_node, lambda_ctx)?;
+                let mut all_args = vec![lambda_ref];
+                all_args.extend(regular_args);
+                let splat_mask = vec![false; all_args.len()];
+                return Ok(Expr::ModuleCall {
+                    module,
+                    function,
+                    args: all_args,
+                    kwargs: Vec::new(),
+                    splat_mask,
+                    kwargs_splat_mask: Vec::new(),
+                    span,
+                });
+            }
+            let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
                 Some(node) => lower_argument_list_with_ctx(walker, node, lambda_ctx)?,
                 None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
             };
@@ -652,6 +1165,8 @@ pub fn lower_call_expr_with_ctx<'a>(
                 function,
                 args,
                 kwargs,
+                splat_mask,
+                kwargs_splat_mask,
                 span,
             })
         }
@@ -670,32 +1185,30 @@ pub fn lower_call_expr_with_ctx<'a>(
                 span,
             ))
         }
-        ResolvedCallTarget::UnaryNot { operand } => {
-            Ok(Expr::UnaryOp {
-                op: UnaryOp::Not,
-                operand: Box::new(operand),
-                span,
-            })
-        }
+        ResolvedCallTarget::UnaryNot { operand } => Ok(Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(operand),
+            span,
+        }),
         ResolvedCallTarget::DirectCall { name } => {
-            // Special handling for include("path") - file inclusion
-            if name == "include" {
-                let path = extract_include_path(walker, args_node);
-                return Err(UnsupportedFeature::new(
-                    UnsupportedFeatureKind::IncludeCall(path),
-                    span,
-                ).with_hint("include is not supported in sandboxed environments. Use prelude for bundled functions, or define functions directly in the source."));
-            }
-
             // Handle do clause: map([1,2,3]) do x; x^2 end
             if let Some(do_node) = do_clause {
-                let lambda_ref = lower_do_clause(walker, do_node, lambda_ctx)?;
-
                 // Get regular arguments (excluding do_clause)
                 let (regular_args, _kwargs, _splat_mask, _kwargs_splat_mask) = match args_node {
                     Some(node) => lower_argument_list_with_kwargs(walker, node)?,
                     None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
                 };
+                if lambda_ctx.prefer_nested_lambdas() {
+                    return lower_do_call_as_nested(
+                        walker,
+                        do_node,
+                        name,
+                        regular_args,
+                        span,
+                        Some(lambda_ctx),
+                    );
+                }
+                let lambda_ref = lower_do_clause(walker, do_node, lambda_ctx)?;
 
                 // For do syntax: function(lambda_ref, regular_args...)
                 let mut all_args = vec![lambda_ref];
@@ -748,6 +1261,13 @@ pub fn lower_call_expr_with_ctx<'a>(
             }
 
             if let Some(builtin) = map_builtin_name(&name) {
+                let args = if builtin == BuiltinOp::ExprNew
+                    && splat_mask.iter().any(|is_splat| *is_splat)
+                {
+                    wrap_expr_splat_args(args, splat_mask, span)
+                } else {
+                    args
+                };
                 return Ok(Expr::Builtin {
                     name: builtin,
                     args,
@@ -767,12 +1287,12 @@ pub fn lower_call_expr_with_ctx<'a>(
     }
 }
 
-/// Lower do clause to a FunctionRef
-fn lower_do_clause<'a>(
+/// Extract the do-clause lambda's parameters and body block (shared by both lowering paths).
+fn extract_do_clause_parts<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
-    lambda_ctx: &LambdaContext,
-) -> LowerResult<Expr> {
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<(Vec<TypedParam>, Block)> {
     let span = walker.span(&node);
     let children = walker.named_children(&node);
 
@@ -798,7 +1318,7 @@ fn lower_do_clause<'a>(
                 params.push(TypedParam::untyped(name, walker.span(&child)));
             }
             NodeKind::Block => {
-                body_block = Some(lower_block_simple(walker, child)?);
+                body_block = Some(lower_block_simple(walker, child, lambda_ctx)?);
             }
             _ => {}
         }
@@ -808,6 +1328,156 @@ fn lower_do_clause<'a>(
         stmts: vec![],
         span,
     });
+
+    Ok((params, body))
+}
+
+/// Lower a do-clause trailing closure inside a full-form function body (no `LambdaContext`).
+///
+/// Mirrors `lower_arrow_value_as_nested` (Issue #4289): the no-context lowering path cannot
+/// add to the top-level `LambdaContext`, so the do-block lambda is embedded as a nested
+/// `FunctionDef` inside a `LetBlock` and the enclosing call is desugared as
+/// `f(__do_block_N, regular_args...)` (closure prepended as the FIRST argument, matching
+/// upstream Julia's `f(args...) do x; body end` ≡ `f(x -> body, args...)`).
+///
+/// Without this, do-blocks attached to calls inside `function ... end` / `f() = ...` bodies
+/// were silently dropped, because the no-context `lower_call_expr` never inspected the
+/// `DoClause` node (Issue #5227). The produced IR lets `collect_block_functions` discover the
+/// lambda as a nested function of the enclosing function, enabling closure capture of outer
+/// variables (e.g. `n` in `get!(cache, n) do; n * n end`).
+///
+/// Produced IR:
+/// ```text
+/// LetBlock {
+///   bindings: [],
+///   body: [
+///     Stmt::FunctionDef(__do_block_N),                 // defines the do-block lambda
+///     Stmt::Expr(Call(name, [Var(__do_block_N), regular_args...])),  // the desugared call
+///   ]
+/// }
+/// ```
+fn lower_do_call_as_nested<'a>(
+    walker: &CstWalker<'a>,
+    do_node: Node<'a>,
+    name: String,
+    regular_args: Vec<Expr>,
+    span: crate::span::Span,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
+    let do_span = walker.span(&do_node);
+    let (params, body) = extract_do_clause_parts(walker, do_node, lambda_ctx)?;
+
+    let lambda_name = format!("__do_block_{}", do_span.start);
+    let func = Function {
+        name: lambda_name.clone(),
+        params,
+        kwparams: vec![],
+        type_params: Vec::new(),
+        return_type: None,
+        body,
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span: do_span,
+    };
+
+    // For do syntax: function(lambda_ref, regular_args...) — closure is the FIRST argument.
+    let mut all_args = vec![Expr::Var(lambda_name.clone(), do_span)];
+    all_args.extend(regular_args);
+
+    let call_expr = Expr::Call {
+        function: name,
+        args: all_args,
+        kwargs: vec![],
+        splat_mask: vec![],
+        kwargs_splat_mask: vec![],
+        span,
+    };
+
+    Ok(Expr::LetBlock {
+        bindings: vec![],
+        body: Block {
+            stmts: vec![
+                Stmt::FunctionDef {
+                    func: Box::new(func),
+                    span: do_span,
+                },
+                Stmt::Expr {
+                    expr: call_expr,
+                    span,
+                },
+            ],
+            span,
+        },
+        span,
+    })
+}
+
+fn lower_do_module_call_as_nested<'a>(
+    walker: &CstWalker<'a>,
+    do_node: Node<'a>,
+    module: String,
+    function: String,
+    regular_args: Vec<Expr>,
+    span: crate::span::Span,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
+    let do_span = walker.span(&do_node);
+    let (params, body) = extract_do_clause_parts(walker, do_node, lambda_ctx)?;
+
+    let lambda_name = format!("__do_block_{}", do_span.start);
+    let func = Function {
+        name: lambda_name.clone(),
+        params,
+        kwparams: vec![],
+        type_params: Vec::new(),
+        return_type: None,
+        body,
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span: do_span,
+    };
+
+    let mut all_args = vec![Expr::Var(lambda_name.clone(), do_span)];
+    all_args.extend(regular_args);
+    let splat_mask = vec![false; all_args.len()];
+
+    let call_expr = Expr::ModuleCall {
+        module,
+        function,
+        args: all_args,
+        kwargs: Vec::new(),
+        splat_mask,
+        kwargs_splat_mask: Vec::new(),
+        span,
+    };
+
+    Ok(Expr::LetBlock {
+        bindings: vec![],
+        body: Block {
+            stmts: vec![
+                Stmt::FunctionDef {
+                    func: Box::new(func),
+                    span: do_span,
+                },
+                Stmt::Expr {
+                    expr: call_expr,
+                    span,
+                },
+            ],
+            span,
+        },
+        span,
+    })
+}
+
+/// Lower do clause to a FunctionRef
+fn lower_do_clause<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Expr> {
+    let span = walker.span(&node);
+    let (params, body) = extract_do_clause_parts(walker, node, Some(lambda_ctx))?;
 
     // Create a function
     let lambda_name = lambda_ctx.next_lambda_name();
@@ -819,6 +1489,7 @@ fn lower_do_clause<'a>(
         return_type: None,
         body,
         is_base_extension: false,
+        is_runtime_eval: false,
         span,
     };
 
@@ -831,7 +1502,11 @@ fn lower_do_clause<'a>(
 }
 
 /// Simple block lowering without lambda context (for do blocks)
-fn lower_block_simple<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Block> {
+fn lower_block_simple<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Block> {
     let span = walker.span(&node);
     let mut stmts = Vec::new();
 
@@ -848,16 +1523,25 @@ fn lower_block_simple<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 let value = walker
                     .named_children(&child)
                     .pop()
-                    .map(|n| lower_expr(walker, n))
+                    .map(|n| match lambda_ctx {
+                        Some(ctx) => lower_expr_with_ctx(walker, n, ctx),
+                        None => lower_expr(walker, n),
+                    })
                     .transpose()?;
                 stmts.push(Stmt::Return {
                     value,
                     span: child_span,
                 });
             }
-            NodeKind::Assignment => {
+            NodeKind::Assignment | NodeKind::BinaryExpression
+                if walker.kind(&child) == NodeKind::Assignment
+                    || is_binary_assignment_expr(walker, child) =>
+            {
                 // Handle assignment statements properly
-                let stmt = lower_stmt(walker, child)?;
+                let stmt = match lambda_ctx {
+                    Some(ctx) => lower_stmt_with_ctx(walker, child, ctx)?,
+                    None => lower_stmt(walker, child)?,
+                };
                 if is_last {
                     // If the last statement is an assignment, we need to return the assigned value
                     // Extract the variable name from the assignment and return it
@@ -876,7 +1560,10 @@ fn lower_block_simple<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 }
             }
             _ => {
-                let expr = lower_expr(walker, child)?;
+                let expr = match lambda_ctx {
+                    Some(ctx) => lower_expr_with_ctx(walker, child, ctx)?,
+                    None => lower_expr(walker, child)?,
+                };
                 if is_last {
                     // Last expression becomes implicit return
                     stmts.push(Stmt::Return {
@@ -896,9 +1583,17 @@ fn lower_block_simple<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
     Ok(Block { stmts, span })
 }
 
+fn is_binary_assignment_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> bool {
+    walker.kind(&node) == NodeKind::BinaryExpression
+        && walker
+            .children(&node)
+            .iter()
+            .any(|child| child.kind() == "operator" && walker.text(child) == "=")
+}
+
 /// Lower argument list with lambda context (handles arrow functions as arguments)
 /// Returns (positional_args, keyword_args, splat_mask, kwargs_splat_mask)
-fn lower_argument_list_with_ctx<'a>(
+pub(in crate::lowering::expr) fn lower_argument_list_with_ctx<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
     lambda_ctx: &LambdaContext,
@@ -922,7 +1617,11 @@ fn lower_argument_list_with_ctx<'a>(
 
         match kind {
             NodeKind::ArrowFunctionExpression => {
-                let expr = lower_arrow_function(walker, child, lambda_ctx)?;
+                let expr = if lambda_ctx.prefer_nested_lambdas() {
+                    lower_arrow_value_as_nested_with_ctx(walker, child, lambda_ctx)?
+                } else {
+                    lower_arrow_function(walker, child, lambda_ctx)?
+                };
                 if saw_semicolon {
                     // After semicolon - this would be a kwarg, but arrow functions as kwargs are unusual
                     positional_args.push(expr);
@@ -1055,14 +1754,110 @@ pub fn lower_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResul
             Some(node) => lower_argument_list_with_kwargs(walker, node)?,
             None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         };
-        return lower_iife_as_nested(walker, arrow_node, args, kwargs, splat_mask, kwargs_splat_mask, span);
+        return lower_iife_as_nested(
+            walker,
+            arrow_node,
+            args,
+            kwargs,
+            splat_mask,
+            kwargs_splat_mask,
+            span,
+        );
+    }
+
+    if walker.kind(&callee) == NodeKind::ParenthesizedExpression {
+        let children = walker.named_children(&callee);
+        if children.len() == 1 {
+            // Immediately-invoked full-form anonymous function:
+            // `(function(x) x + 1 end)(arg)`. Lift the lambda into a nested
+            // `FunctionDef` embedded in the `LetBlock` body (rather than routing
+            // through `build_indirect_call`, which would bury it in a `LetBlock`
+            // binding the nested-function collector never visits), so the lambda
+            // is discovered/compiled as a nested function of the enclosing frame
+            // and captures outer locals — matching the arrow IIFE path above
+            // (Issue #8030).
+            if walker.kind(&children[0]) == NodeKind::FunctionDefinition {
+                let args_node = find_args_node(walker, &named);
+                let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
+                    Some(node) => lower_argument_list_with_kwargs(walker, node)?,
+                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                };
+                return lower_fullform_iife_as_nested(
+                    walker,
+                    children[0],
+                    None,
+                    args,
+                    kwargs,
+                    splat_mask,
+                    kwargs_splat_mask,
+                    span,
+                );
+            }
+            let callee_expr = lower_expr(walker, children[0])?;
+            let temp_name = format!("__paren_func_{}", span.start);
+            let args_node = find_args_node(walker, &named);
+            let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
+                Some(node) => lower_argument_list_with_kwargs(walker, node)?,
+                None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            };
+            return Ok(build_indirect_call(
+                temp_name,
+                callee_expr,
+                args,
+                kwargs,
+                splat_mask,
+                kwargs_splat_mask,
+                span,
+            ));
+        }
+    }
+
+    // Call result as callee: `make_adder(a)(x)`.
+    if walker.kind(&callee) == NodeKind::CallExpression {
+        let callee_expr = lower_expr(walker, callee)?;
+        let temp_name = format!("__call_result_func_{}", span.start);
+        let args_node = find_args_node(walker, &named);
+        let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
+            Some(node) => lower_argument_list_with_kwargs(walker, node)?,
+            None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+        };
+        return Ok(build_indirect_call(
+            temp_name,
+            callee_expr,
+            args,
+            kwargs,
+            splat_mask,
+            kwargs_splat_mask,
+            span,
+        ));
     }
 
     // Resolve call target using shared helper (Issue #2271)
     match resolve_call_target(walker, callee, &named, span)? {
         ResolvedCallTarget::ModuleCall { module, function } => {
             let args_node = find_args_node(walker, &named);
-            let (args, kwargs, _splat_mask, _kwargs_splat_mask) = match args_node {
+            let do_clause = args_node.and_then(|args| {
+                walker
+                    .named_children(&args)
+                    .into_iter()
+                    .find(|n| walker.kind(n) == NodeKind::DoClause)
+            });
+            if let Some(do_node) = do_clause {
+                let (regular_args, _kwargs, _splat_mask, _kwargs_splat_mask) = match args_node {
+                    Some(node) => lower_argument_list_with_kwargs(walker, node)?,
+                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                };
+                return lower_do_module_call_as_nested(
+                    walker,
+                    do_node,
+                    module,
+                    function,
+                    regular_args,
+                    span,
+                    None,
+                );
+            }
+            let (args, kwargs, splat_mask, kwargs_splat_mask) = match args_node {
                 Some(node) => lower_argument_list_with_kwargs(walker, node)?,
                 None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
             };
@@ -1071,6 +1866,8 @@ pub fn lower_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResul
                 function,
                 args,
                 kwargs,
+                splat_mask,
+                kwargs_splat_mask,
                 span,
             })
         }
@@ -1090,15 +1887,32 @@ pub fn lower_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResul
                 span,
             ))
         }
-        ResolvedCallTarget::UnaryNot { operand } => {
-            Ok(Expr::UnaryOp {
-                op: UnaryOp::Not,
-                operand: Box::new(operand),
-                span,
-            })
-        }
+        ResolvedCallTarget::UnaryNot { operand } => Ok(Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(operand),
+            span,
+        }),
         ResolvedCallTarget::DirectCall { name } => {
             let args_node = find_args_node(walker, &named);
+
+            // Handle do clause without a LambdaContext (inside a full-form function body):
+            //   map(xs) do x; x*2 end  ≡  map(x -> x*2, xs)   (Issue #5227)
+            // The no-context path cannot lift into the top-level LambdaContext, so embed the
+            // do-block lambda as a nested FunctionDef in a LetBlock and prepend it as the
+            // FIRST argument, matching upstream Julia's do-block desugaring.
+            let do_clause = args_node.and_then(|args| {
+                walker
+                    .named_children(&args)
+                    .into_iter()
+                    .find(|n| walker.kind(n) == NodeKind::DoClause)
+            });
+            if let Some(do_node) = do_clause {
+                let (regular_args, _kwargs, _splat_mask, _kwargs_splat_mask) = match args_node {
+                    Some(node) => lower_argument_list_with_kwargs(walker, node)?,
+                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                };
+                return lower_do_call_as_nested(walker, do_node, name, regular_args, span, None);
+            }
 
             // Special handling for include("path") - file inclusion
             if name == "include" {
@@ -1114,9 +1928,9 @@ pub fn lower_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResul
                 let type_args: Vec<crate::types::TypeExpr> =
                     if name.starts_with("new{") && name.ends_with('}') {
                         let type_args_str = &name[4..name.len() - 1];
-                        type_args_str
-                            .split(',')
-                            .map(|s| crate::types::TypeExpr::TypeVar(s.trim().to_string()))
+                        split_top_level_type_args(type_args_str)
+                            .into_iter()
+                            .map(|s| classify_new_type_arg(s.trim()))
                             .collect()
                     } else {
                         vec![]
@@ -1191,6 +2005,13 @@ pub fn lower_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResul
             }
 
             if let Some(builtin) = map_builtin_name(&name) {
+                let args = if builtin == BuiltinOp::ExprNew
+                    && splat_mask.iter().any(|is_splat| *is_splat)
+                {
+                    wrap_expr_splat_args(args, splat_mask, span)
+                } else {
+                    args
+                };
                 return Ok(Expr::Builtin {
                     name: builtin,
                     args,
@@ -1231,7 +2052,7 @@ pub fn lower_call_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResul
 ///   would need to be passed from the compile phase (see Issue #1360)
 fn is_known_module_name(name: &str) -> bool {
     // Check built-in modules
-    if matches!(name, "Base" | "Core" | "Main" | "Pkg") {
+    if matches!(name, "Base" | "Core" | "Main" | "Pkg" | "Sys") {
         return true;
     }
 
@@ -1266,6 +2087,14 @@ fn extract_module_call_target<'a>(
         NodeKind::Operator => {
             // Handle Base.:+ syntax - operator node contains just the operator symbol
             func_text.to_string()
+        }
+        NodeKind::QuoteExpression => {
+            let quoted = func_text.strip_prefix(':').unwrap_or(func_text);
+            if quoted.starts_with('(') && quoted.ends_with(')') && quoted.len() > 2 {
+                quoted[1..quoted.len() - 1].to_string()
+            } else {
+                quoted.to_string()
+            }
         }
         _ => {
             // For other node kinds, check if text starts with ':'
@@ -1433,6 +2262,10 @@ pub fn lower_argument_list_with_kwargs<'a>(
                         positional_args.push(lower_expr(walker, *inner)?);
                         splat_mask.push(true);
                     }
+                }
+                NodeKind::ArrowFunctionExpression => {
+                    positional_args.push(lower_arrow_value_as_nested(walker, child)?);
+                    splat_mask.push(false);
                 }
                 NodeKind::Operator => {
                     // Bare operator as function argument: map(+, ...), reduce(*, ...)

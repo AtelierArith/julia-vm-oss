@@ -16,6 +16,7 @@ using Statistics
         # Integer array (promoted to float)
         arr_int = [1, 2, 3, 4, 5]
         @test mean(arr_int) == 3.0
+        @test typeof(mean(arr_int)) == Float64
     end
 
     @testset "var (sample variance)" begin
@@ -25,6 +26,7 @@ using Statistics
         # Variance = 32 / 7 ≈ 4.571428...
         v = var(arr)
         @test abs(v - 4.571428571428571) < 0.0001
+        @test typeof(v) == Float64
     end
 
     @testset "varm (variance with known mean)" begin
@@ -41,6 +43,7 @@ using Statistics
         s = std(arr)
         # std = sqrt(var) ≈ sqrt(4.571428...) ≈ 2.138...
         @test abs(s - 2.138089935299395) < 0.0001
+        @test typeof(s) == Float64
     end
 
     @testset "stdm (std with known mean)" begin

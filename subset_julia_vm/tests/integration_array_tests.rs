@@ -1,4 +1,5 @@
 //! Integration tests: Arrays, matrices, broadcast, strings, complex numbers
+#![allow(dead_code)]
 
 mod common;
 use common::*;
@@ -10,9 +11,6 @@ use subset_julia_vm::*;
 
 // ==================== Array Tests (VM Level) ====================
 
-
-
-#[test]
 fn test_array_value_zeros() {
     let arr = ArrayValue::zeros(vec![3]);
     assert_eq!(arr.len(), 3);
@@ -22,7 +20,6 @@ fn test_array_value_zeros() {
     }
 }
 
-#[test]
 fn test_array_value_ones() {
     let arr = ArrayValue::ones(vec![2, 3]);
     assert_eq!(arr.len(), 6);
@@ -34,7 +31,6 @@ fn test_array_value_ones() {
     }
 }
 
-#[test]
 fn test_array_value_fill() {
     let fill_value = 314.0 / 100.0;
     let arr = ArrayValue::fill(fill_value, vec![2, 2]);
@@ -46,7 +42,6 @@ fn test_array_value_fill() {
     }
 }
 
-#[test]
 fn test_array_value_get_set() {
     let mut arr = ArrayValue::zeros(vec![3]);
     arr.set_f64(&[1], 10.0).unwrap();
@@ -58,7 +53,6 @@ fn test_array_value_get_set() {
     assert!((arr.get_f64(&[3]).unwrap() - 30.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_array_value_2d_indexing() {
     // Create a 2x3 matrix
     let mut arr = ArrayValue::zeros(vec![2, 3]);
@@ -77,7 +71,6 @@ fn test_array_value_2d_indexing() {
     assert!((arr.get_f64(&[2, 3]).unwrap() - 23.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_array_value_push_pop() {
     let mut arr = ArrayValue::vector(vec![1.0, 2.0, 3.0]);
     assert_eq!(arr.len(), 3);
@@ -91,14 +84,12 @@ fn test_array_value_push_pop() {
     assert_eq!(arr.len(), 3);
 }
 
-#[test]
 fn test_array_index_out_of_bounds() {
     let arr = ArrayValue::zeros(vec![3]);
     assert!(arr.get(&[0]).is_err()); // Julia is 1-indexed
     assert!(arr.get(&[4]).is_err()); // Out of bounds
 }
 
-#[test]
 fn test_vm_array_instructions() {
     // Test creating an array and indexing it
     let code = vec![
@@ -127,7 +118,6 @@ fn test_vm_array_instructions() {
     }
 }
 
-#[test]
 fn test_vm_zeros_instruction() {
     let code = vec![
         Instr::PushI64(5), // Create array of size 5
@@ -146,7 +136,6 @@ fn test_vm_zeros_instruction() {
     }
 }
 
-#[test]
 fn test_vm_make_range() {
     let code = vec![
         Instr::PushI64(1), // start
@@ -167,7 +156,6 @@ fn test_vm_make_range() {
     }
 }
 
-#[test]
 fn test_vm_array_push_instruction() {
     let code = vec![
         Instr::PushI64(2), // Create array of size 2
@@ -190,63 +178,53 @@ fn test_vm_array_push_instruction() {
 
 // ==================== Comprehension Tests ====================
 
-#[test]
 fn test_comprehension_simple() {
     // Test [x for x in 1:5] - creates array [1.0, 2.0, 3.0, 4.0, 5.0]
     let src = "[x for x in 1:5]";
     let result = run_core_pipeline(src, 0).expect("pipeline failed");
 
-    match result {
-        Value::Array(arr) => {
-            let arr = arr.borrow();
-            assert_eq!(arr.len(), 5);
-            assert!((arr.get_f64(&[1]).unwrap() - 1.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[5]).unwrap() - 5.0).abs() < 1e-10);
-        }
-        _ => panic!("Expected Array"),
-    }
+    let arr = subset_julia_vm::vm::value::array_wrapper_value_to_array_value(&result, &[])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("Expected Array"));
+    assert_eq!(arr.len(), 5);
+    assert!((arr.get_f64(&[1]).unwrap() - 1.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[5]).unwrap() - 5.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_comprehension_with_expression() {
     // Test [x*x for x in 1:4] - creates array [1.0, 4.0, 9.0, 16.0]
     let src = "[x*x for x in 1:4]";
     let result = run_core_pipeline(src, 0).expect("pipeline failed");
 
-    match result {
-        Value::Array(arr) => {
-            let arr = arr.borrow();
-            assert_eq!(arr.len(), 4);
-            assert!((arr.get_f64(&[1]).unwrap() - 1.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[2]).unwrap() - 4.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[3]).unwrap() - 9.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[4]).unwrap() - 16.0).abs() < 1e-10);
-        }
-        _ => panic!("Expected Array"),
-    }
+    let arr = subset_julia_vm::vm::value::array_wrapper_value_to_array_value(&result, &[])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("Expected Array"));
+    assert_eq!(arr.len(), 4);
+    assert!((arr.get_f64(&[1]).unwrap() - 1.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[2]).unwrap() - 4.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[3]).unwrap() - 9.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[4]).unwrap() - 16.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_comprehension_with_filter() {
     // Test [x for x in 1:6 if x > 3] - creates array [4.0, 5.0, 6.0]
     let src = "[x for x in 1:6 if x > 3]";
     let result = run_core_pipeline(src, 0).expect("pipeline failed");
 
-    match result {
-        Value::Array(arr) => {
-            let arr = arr.borrow();
-            assert_eq!(arr.len(), 3);
-            assert!((arr.get_f64(&[1]).unwrap() - 4.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[2]).unwrap() - 5.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[3]).unwrap() - 6.0).abs() < 1e-10);
-        }
-        _ => panic!("Expected Array"),
-    }
+    let arr = subset_julia_vm::vm::value::array_wrapper_value_to_array_value(&result, &[])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("Expected Array"));
+    assert_eq!(arr.len(), 3);
+    assert!((arr.get_f64(&[1]).unwrap() - 4.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[2]).unwrap() - 5.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[3]).unwrap() - 6.0).abs() < 1e-10);
 }
 
 // ==================== Array Parsing Integration Tests ====================
 
-#[test]
 fn test_vector_basics_sample() {
     // Test the exact Vector Basics sample from iOS app
     // Integer arrays return I64 elements now (type-preserving behavior)
@@ -272,7 +250,6 @@ arr[3]"#;
     }
 }
 
-#[test]
 fn test_vector_basics_via_compile_and_run() {
     // Test through the compile_and_run_auto_str API (same as FFI)
     use subset_julia_vm::compile_and_run_auto_str;
@@ -294,7 +271,6 @@ arr[3]"#;
     assert!((result - 3.0).abs() < 1e-10, "Expected 3.0, got {}", result);
 }
 
-#[test]
 fn test_parse_array_literal() {
     // Test parsing array literal from source
     // Integer arrays return I64 elements now (type-preserving behavior)
@@ -311,7 +287,6 @@ arr[3]
     }
 }
 
-#[test]
 fn test_parse_range_expression() {
     // Test parsing range expression
     let src = r#"
@@ -326,7 +301,6 @@ length(r)
     }
 }
 
-#[test]
 fn test_parse_array_index_assign() {
     // Test parsing array index assignment
     // Integer arrays return I64 elements now (type-preserving behavior)
@@ -344,26 +318,22 @@ arr[2]
     }
 }
 
-#[test]
 fn test_parse_comprehension_from_source() {
     // Test parsing comprehension from source
     let src = r#"[x^2 for x in 1:4]"#;
     let result = run_core_pipeline(src, 0).expect("pipeline failed");
 
-    match result {
-        Value::Array(arr) => {
-            let arr = arr.borrow();
-            assert_eq!(arr.len(), 4);
-            assert!((arr.get_f64(&[1]).unwrap() - 1.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[2]).unwrap() - 4.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[3]).unwrap() - 9.0).abs() < 1e-10);
-            assert!((arr.get_f64(&[4]).unwrap() - 16.0).abs() < 1e-10);
-        }
-        _ => panic!("Expected Array, got {:?}", result),
-    }
+    let arr = subset_julia_vm::vm::value::array_wrapper_value_to_array_value(&result, &[])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("Expected Array, got {:?}", result));
+    assert_eq!(arr.len(), 4);
+    assert!((arr.get_f64(&[1]).unwrap() - 1.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[2]).unwrap() - 4.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[3]).unwrap() - 9.0).abs() < 1e-10);
+    assert!((arr.get_f64(&[4]).unwrap() - 16.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_for_loop_with_sqrt_range() {
     // Test for loop with sqrt() in range expression
     let src = r#"
@@ -381,7 +351,6 @@ f(100)
     assert!((result - 9.0).abs() < 1e-10, "Expected 9.0, got {}", result);
 }
 
-#[test]
 fn test_sieve_of_eratosthenes() {
     let src = r#"
 function sieve(n)
@@ -415,7 +384,6 @@ sieve(100)
     );
 }
 
-#[test]
 fn test_time_macro_with_assignment() {
     // Test @time with assignment (as used in sieve sample)
     let src = r#"
@@ -434,7 +402,6 @@ end
     );
 }
 
-#[test]
 fn test_array_mutation_simple() {
     // Test basic array mutation
     let src = r#"
@@ -451,7 +418,6 @@ arr[2]
     );
 }
 
-#[test]
 fn test_push_pop_basic() {
     // Test push! and pop!
     let src = r#"
@@ -464,7 +430,6 @@ length(arr)
     assert!((result - 4.0).abs() < 1e-10, "Expected 4.0, got {}", result);
 }
 
-#[test]
 fn test_println_with_array_index() {
     // Test println with array indexing
     let src = r#"
@@ -481,7 +446,6 @@ arr[1]
     );
 }
 
-#[test]
 fn test_array_mutation_full() {
     // Test the full Array Mutation sample
     let src = r#"
@@ -501,7 +465,6 @@ arr[2]
     );
 }
 
-#[test]
 fn test_pop_returns_value() {
     // Test that pop! returns the correct value when used in assignment
     let src = r#"
@@ -519,7 +482,6 @@ last
     );
 }
 
-#[test]
 fn test_array_functions_sample() {
     // Test the Array Functions sample
     let src = r#"
@@ -543,7 +505,6 @@ f[1]
     );
 }
 
-#[test]
 fn test_power_with_variable() {
     // Test 2.0^i where i is a variable (not just ^2)
     let src = r#"
@@ -556,7 +517,6 @@ result
     // This should fail because only ^2 is supported
 }
 
-#[test]
 fn test_array_mutation_sample_full() {
     // Test the full Array Mutation sample from CodeSample.swift
     let src = r#"
@@ -584,7 +544,6 @@ arr[2]
     );
 }
 
-#[test]
 fn test_sieve_with_time_macro() {
     // Test the actual sieve sample code from CodeSample.swift
     let src = r#"
@@ -628,7 +587,6 @@ end
     );
 }
 
-#[test]
 fn test_array_functions_sample_with_power() {
     // This is the Array Functions sample with 2.0^i (arbitrary power support)
     let src = r#"
@@ -663,7 +621,6 @@ powers_of_2[11]
     );
 }
 
-#[test]
 fn test_arbitrary_power() {
     // Test arbitrary power support
     let src = r#"
@@ -678,7 +635,6 @@ x
     );
 }
 
-#[test]
 fn test_power_with_variable_exponent() {
     // Test power with variable exponent
     let src = r#"
@@ -696,7 +652,6 @@ result
     );
 }
 
-#[test]
 fn test_array_mutation_sample() {
     // This is the Array Mutation sample from CodeSample.swift
     let src = r#"
@@ -728,7 +683,6 @@ arr[2]
     );
 }
 
-#[test]
 fn test_identity_matrix_simple() {
     // Simplified Identity Matrix test
     let src = r#"
@@ -743,7 +697,6 @@ m[3, 3]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_function_return_array_simple() {
     // Test function returning an array
     let src = r#"
@@ -759,7 +712,6 @@ a[2]
     assert!((result - 2.0).abs() < 1e-10, "Expected 2.0, got {}", result);
 }
 
-#[test]
 fn test_function_with_param_zeros() {
     // Test function with parameter passed to zeros
     let src = r#"
@@ -775,7 +727,6 @@ length(a)
     assert!((result - 5.0).abs() < 1e-10, "Expected 5.0, got {}", result);
 }
 
-#[test]
 fn test_identity_matrix_with_function() {
     // Identity Matrix with function
     let src = r#"
@@ -796,7 +747,6 @@ I[3, 3]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_identity_matrix_sample() {
     // Identity Matrix sample from CodeSample.swift
     let src = r#"
@@ -835,7 +785,6 @@ I[3, 3]
 
 // ==================== Matrix Multiplication Tests ====================
 
-#[test]
 fn test_matrix_vector_multiplication() {
     // Test A * v where A is 2x3 matrix and v is 3-element vector
     // First check individual result elements
@@ -882,7 +831,6 @@ result[2]
     );
 }
 
-#[test]
 fn test_matrix_matrix_multiplication() {
     // Test A * B where A is 2x3 and B is 3x2
     let src = r#"
@@ -931,7 +879,6 @@ C[1, 1]
     );
 }
 
-#[test]
 fn test_identity_matrix_multiplication() {
     // Test that I * v = v for identity matrix
     let src = r#"
@@ -962,7 +909,6 @@ result[1] + result[2] + result[3]
     );
 }
 
-#[test]
 fn test_matrix_sum_sample() {
     // Matrix Sum sample from CodeSample.swift
     let src = r#"
@@ -1013,7 +959,6 @@ sum
 
 // ==================== Broadcast Operations Tests ====================
 
-#[test]
 fn test_broadcast_add_arrays() {
     // Test element-wise addition of arrays
     let src = r#"
@@ -1037,7 +982,6 @@ c[1] + c[2] + c[3]
     );
 }
 
-#[test]
 fn test_broadcast_mul_arrays() {
     // Test element-wise multiplication of arrays
     let src = r#"
@@ -1061,7 +1005,6 @@ c[1] + c[2] + c[3]
     );
 }
 
-#[test]
 fn test_broadcast_sub_arrays() {
     // Test element-wise subtraction
     let src = r#"
@@ -1085,7 +1028,6 @@ c[1] + c[2] + c[3]
     );
 }
 
-#[test]
 fn test_broadcast_div_arrays() {
     // Test element-wise division
     let src = r#"
@@ -1109,7 +1051,6 @@ c[1] + c[2] + c[3]
     );
 }
 
-#[test]
 fn test_broadcast_pow_arrays() {
     // Test element-wise power
     let src = r#"
@@ -1133,7 +1074,6 @@ c[1] + c[2] + c[3]
     );
 }
 
-#[test]
 fn test_broadcast_scalar_right() {
     // Test array .* scalar (broadcast scalar to array)
     let src = r#"
@@ -1157,7 +1097,6 @@ c[1] + c[2] + c[3] + c[4]
     );
 }
 
-#[test]
 fn test_broadcast_scalar_left() {
     // Test scalar .+ array (broadcast scalar to array)
     let src = r#"
@@ -1180,7 +1119,6 @@ c[1] + c[2] + c[3]
     );
 }
 
-#[test]
 fn test_broadcast_chained() {
     // Test chained broadcast operations
     let src = r#"
@@ -1206,7 +1144,6 @@ result[1] + result[2] + result[3]
     );
 }
 
-#[test]
 fn test_broadcast_sqrt() {
     // Test sqrt.(x) - element-wise sqrt
     let src = r#"
@@ -1231,7 +1168,6 @@ b[1] + b[2] + b[3] + b[4] + b[5]
     );
 }
 
-#[test]
 fn test_broadcast_sqrt_with_operations() {
     // Test combining sqrt.() with broadcast operations
     let src = r#"
@@ -1258,7 +1194,6 @@ result[1] + result[2] + result[3]
 
 // ==================== Let Block ====================
 
-#[test]
 fn test_let_block_basic() {
     // Basic let block with bindings
     let src = r#"
@@ -1277,7 +1212,6 @@ x + y
     );
 }
 
-#[test]
 fn test_let_block_multiple_bindings() {
     // Let block with multiple bindings
     let src = r#"
@@ -1295,7 +1229,6 @@ result
     );
 }
 
-#[test]
 fn test_let_block_shadowing() {
     // Let block should shadow outer variable
     let src = r#"
@@ -1315,7 +1248,6 @@ x + y
     );
 }
 
-#[test]
 fn test_let_block_empty_bindings() {
     // Let block without bindings (just a block)
     let src = r#"
@@ -1334,7 +1266,6 @@ y
     );
 }
 
-#[test]
 fn test_let_block_with_loop() {
     // Let block with a for loop inside
     let src = r#"
@@ -1357,7 +1288,6 @@ result
 
 // ==================== String Interpolation ====================
 
-#[test]
 fn test_string_interpolation_simple() {
     // Simple variable interpolation
     let src = r#"
@@ -1369,7 +1299,6 @@ x
     assert!((result - 3.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_string_interpolation_expression() {
     // Expression inside interpolation
     let src = r#"
@@ -1382,7 +1311,6 @@ x + y
     assert!((result - 7.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_string_interpolation_multiple() {
     // Multiple interpolations in one string
     let src = r#"
@@ -1395,7 +1323,6 @@ x * y
     assert!((result - 12.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_string_interpolation_nested_parens() {
     // Expression with nested parentheses
     let src = r#"
@@ -1407,7 +1334,6 @@ println("result = $((x + 1) * 2)")
     assert!((result - 6.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_string_interpolation_escaped_dollar() {
     // Escaped dollar sign should be literal
     let src = r#"
@@ -1419,7 +1345,6 @@ x
     assert!((result - 5.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_string_interpolation_float() {
     // Float value interpolation
     let src = r#"
@@ -1434,7 +1359,6 @@ x
 
 // ==================== String Concatenation with * ====================
 
-#[test]
 fn test_string_concat_two_strings() {
     // Julia uses * for string concatenation
     let src = r#"
@@ -1450,7 +1374,6 @@ println(str)
     );
 }
 
-#[test]
 fn test_string_concat_three_strings() {
     // Chain multiple strings with *
     let src = r#"
@@ -1466,7 +1389,6 @@ println(str)
     );
 }
 
-#[test]
 fn test_string_concat_with_variables() {
     // Concatenate string variables
     let src = r#"
@@ -1485,7 +1407,6 @@ println(str)
     );
 }
 
-#[test]
 fn test_string_concat_with_expression() {
     // Use string concatenation with string literals
     let src = r#"
@@ -1505,7 +1426,6 @@ println(result)
 
 // ==================== Complex Numbers ====================
 
-#[test]
 fn test_complex_literal_im() {
     // im is the imaginary unit
     let src = r#"
@@ -1516,7 +1436,6 @@ imag(z)
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_complex_literal_3im() {
     // 3im = Complex(0, 3)
     let src = r#"
@@ -1527,7 +1446,6 @@ imag(z)
     assert!((result - 3.0).abs() < 1e-10, "Expected 3.0, got {}", result);
 }
 
-#[test]
 fn test_complex_constructor() {
     // complex(re, im) constructor
     let src = r#"
@@ -1538,7 +1456,6 @@ real(z)
     assert!((result - 3.0).abs() < 1e-10, "Expected 3.0, got {}", result);
 }
 
-#[test]
 fn test_complex_abs() {
     // abs(3 + 4im) = 5
     let src = r#"
@@ -1549,7 +1466,6 @@ abs(z)
     assert!((result - 5.0).abs() < 1e-10, "Expected 5.0, got {}", result);
 }
 
-#[test]
 fn test_complex_conj() {
     // conj(3 + 4im) = 3 - 4im
     let src = r#"
@@ -1565,7 +1481,6 @@ imag(w)
     );
 }
 
-#[test]
 fn test_complex_equality() {
     // Complex equality is supported in Julia
     let src = r#"
@@ -1577,7 +1492,6 @@ z == w
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_complex_ordering_error() {
     // Complex ordering comparisons are not supported in Julia
     let src = r#"
@@ -1600,7 +1514,6 @@ z < 3
     );
 }
 
-#[test]
 fn test_complex_add() {
     // (1+2im) + (3+4im) = 4+6im
     let src = r#"
@@ -1613,7 +1526,6 @@ real(z3)
     assert!((result - 4.0).abs() < 1e-10, "Expected 4.0, got {}", result);
 }
 
-#[test]
 fn test_complex_sub() {
     // (3+4im) - (1+2im) = 2+2im
     let src = r#"
@@ -1626,7 +1538,6 @@ imag(z3)
     assert!((result - 2.0).abs() < 1e-10, "Expected 2.0, got {}", result);
 }
 
-#[test]
 fn test_complex_mul() {
     // (1+2im) * (3+4im) = (1*3 - 2*4) + (1*4 + 2*3)im = -5 + 10im
     let src = r#"
@@ -1643,7 +1554,6 @@ real(z3)
     );
 }
 
-#[test]
 fn test_complex_mul_imag() {
     // (1+2im) * (3+4im) = -5 + 10im
     let src = r#"
@@ -1660,7 +1570,6 @@ imag(z3)
     );
 }
 
-#[test]
 fn test_complex_div() {
     // (3+4im) / (1+2im) = (3+4i)(1-2i) / |1+2i|^2 = (11+2i) / 5 = 2.2 + 0.4i
     let src = r#"
@@ -1674,7 +1583,6 @@ real(z3)
 }
 
 /// Test complex sqrt - Issue #1275 resolved.
-#[test]
 fn test_complex_sqrt() {
     // sqrt(complex(-1, 0)) = im
     let src = r#"
@@ -1686,7 +1594,6 @@ imag(w)
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_complex_real_for_real() {
     // real(x) for real x returns x
     let src = r#"
@@ -1697,7 +1604,6 @@ real(x)
     assert!((result - 5.0).abs() < 1e-10, "Expected 5.0, got {}", result);
 }
 
-#[test]
 fn test_complex_imag_for_real() {
     // imag(x) for real x returns 0
     let src = r#"
@@ -1710,7 +1616,6 @@ imag(x)
 
 // ==================== Broadcast Comparison Operators ====================
 
-#[test]
 fn test_broadcast_less_than() {
     // Test .< broadcast comparison
     let src = r#"
@@ -1725,7 +1630,6 @@ c[1] + c[2] + c[3]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_broadcast_greater_than() {
     // Test .> broadcast comparison
     let src = r#"
@@ -1740,7 +1644,6 @@ c[1] + c[2] + c[3]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_broadcast_equal() {
     // Test .== broadcast comparison
     let src = r#"
@@ -1755,7 +1658,6 @@ c[1] + c[2] + c[3]
     assert!((result - 2.0).abs() < 1e-10, "Expected 2.0, got {}", result);
 }
 
-#[test]
 fn test_broadcast_not_equal() {
     // Test .!= broadcast comparison
     let src = r#"
@@ -1770,7 +1672,6 @@ c[1] + c[2] + c[3]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_broadcast_comparison_with_scalar() {
     // Test broadcast comparison with scalar
     let src = r#"
@@ -1786,7 +1687,6 @@ c[1] + c[2] + c[3] + c[4] + c[5]
 
 // ==================== Broadcast Logical Operators ====================
 
-#[test]
 fn test_broadcast_and() {
     // Test .& broadcast AND
     let src = r#"
@@ -1801,7 +1701,6 @@ c[1] + c[2] + c[3] + c[4]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
 fn test_broadcast_or() {
     // Test .| broadcast OR
     let src = r#"
@@ -1818,7 +1717,6 @@ c[1] + c[2] + c[3] + c[4]
 
 // ==================== Broadcast Functions ====================
 
-#[test]
 fn test_broadcast_abs() {
     // Test abs.() broadcast function
     let src = r#"
@@ -1836,7 +1734,6 @@ b[1] + b[2] + b[3] + b[4]
     );
 }
 
-#[test]
 fn test_broadcast_ifelse() {
     // Test ifelse.() broadcast function - cond must be Bool array
     let src = r#"
@@ -1856,7 +1753,6 @@ result[1] + result[2] + result[3] + result[4]
     );
 }
 
-#[test]
 fn test_broadcast_ifelse_with_scalar() {
     // Test ifelse.() with scalar values - cond must be Bool array
     let src = r#"
@@ -1872,4 +1768,124 @@ result[1] + result[2] + result[3]
         "Expected 200.0, got {}",
         result
     );
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_array_value_zeros();
+    test_array_value_ones();
+    test_array_value_fill();
+    test_array_value_get_set();
+    test_array_value_2d_indexing();
+    test_array_value_push_pop();
+    test_array_index_out_of_bounds();
+    test_vm_array_instructions();
+    test_vm_zeros_instruction();
+    test_vm_make_range();
+    test_vm_array_push_instruction();
+    test_comprehension_simple();
+    test_comprehension_with_expression();
+    test_comprehension_with_filter();
+    test_vector_basics_sample();
+    test_vector_basics_via_compile_and_run();
+}
+
+#[test]
+fn chunk_001() {
+    test_parse_array_literal();
+    test_parse_range_expression();
+    test_parse_array_index_assign();
+    test_parse_comprehension_from_source();
+    test_for_loop_with_sqrt_range();
+    test_sieve_of_eratosthenes();
+    test_time_macro_with_assignment();
+    test_array_mutation_simple();
+    test_push_pop_basic();
+    test_println_with_array_index();
+    test_array_mutation_full();
+    test_pop_returns_value();
+    test_array_functions_sample();
+    test_power_with_variable();
+    test_array_mutation_sample_full();
+    test_sieve_with_time_macro();
+}
+
+#[test]
+fn chunk_002() {
+    test_array_functions_sample_with_power();
+    test_arbitrary_power();
+    test_power_with_variable_exponent();
+    test_array_mutation_sample();
+    test_identity_matrix_simple();
+    test_function_return_array_simple();
+    test_function_with_param_zeros();
+    test_identity_matrix_with_function();
+    test_identity_matrix_sample();
+    test_matrix_vector_multiplication();
+    test_matrix_matrix_multiplication();
+    test_identity_matrix_multiplication();
+    test_matrix_sum_sample();
+    test_broadcast_add_arrays();
+    test_broadcast_mul_arrays();
+    test_broadcast_sub_arrays();
+}
+
+#[test]
+fn chunk_003() {
+    test_broadcast_div_arrays();
+    test_broadcast_pow_arrays();
+    test_broadcast_scalar_right();
+    test_broadcast_scalar_left();
+    test_broadcast_chained();
+    test_broadcast_sqrt();
+    test_broadcast_sqrt_with_operations();
+    test_let_block_basic();
+    test_let_block_multiple_bindings();
+    test_let_block_shadowing();
+    test_let_block_empty_bindings();
+    test_let_block_with_loop();
+    test_string_interpolation_simple();
+    test_string_interpolation_expression();
+    test_string_interpolation_multiple();
+    test_string_interpolation_nested_parens();
+}
+
+#[test]
+fn chunk_004() {
+    test_string_interpolation_escaped_dollar();
+    test_string_interpolation_float();
+    test_string_concat_two_strings();
+    test_string_concat_three_strings();
+    test_string_concat_with_variables();
+    test_string_concat_with_expression();
+    test_complex_literal_im();
+    test_complex_literal_3im();
+    test_complex_constructor();
+    test_complex_abs();
+    test_complex_conj();
+    test_complex_equality();
+    test_complex_ordering_error();
+    test_complex_add();
+    test_complex_sub();
+    test_complex_mul();
+}
+
+#[test]
+fn chunk_005() {
+    test_complex_mul_imag();
+    test_complex_div();
+    test_complex_sqrt();
+    test_complex_real_for_real();
+    test_complex_imag_for_real();
+    test_broadcast_less_than();
+    test_broadcast_greater_than();
+    test_broadcast_equal();
+    test_broadcast_not_equal();
+    test_broadcast_comparison_with_scalar();
+    test_broadcast_and();
+    test_broadcast_or();
+    test_broadcast_abs();
+    test_broadcast_ifelse();
+    test_broadcast_ifelse_with_scalar();
 }

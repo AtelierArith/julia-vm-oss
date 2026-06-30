@@ -1,0 +1,7 @@
+package: StatsPlots
+version: 0.15.0
+local_uuid: f3b207a7-027a-5e70-b257-86293d7955fd
+registry_uuid: f3b207a7-027a-5e70-b257-86293d7955fd
+repository: https://github.com/JuliaPlots/StatsPlots.jl
+license: MIT
+license_source: LICENSE.md at ref v0.15.0

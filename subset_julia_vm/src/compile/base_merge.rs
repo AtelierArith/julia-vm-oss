@@ -5,7 +5,8 @@
 
 use std::collections::HashSet;
 
-use crate::ir::core::Program;
+use crate::ir::core::{MetaAnnotation, Program, Stmt, BASE_USER_MAIN_BOUNDARY_META};
+use crate::span::Span;
 
 /// Result of merging a user program with base functions.
 /// Contains the merged program and the count of base functions (for specialization filtering).
@@ -86,6 +87,19 @@ pub(super) fn merge_with_precompiled_base(program: &Program) -> MergedProgram {
             .into_iter()
             .filter(|a| !user_abstract_names.contains(&a.name))
             .collect();
+        // User primitive types (`primitive type Name Bits end`, Issue #5058) override
+        // any same-named base entry; in practice the base has none, but keep the
+        // merge shape symmetric with abstract types.
+        let user_primitive_names: HashSet<String> = program
+            .primitive_types
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        let mut merged_primitive_types: Vec<crate::ir::core::PrimitiveTypeDef> = base_program
+            .primitive_types
+            .into_iter()
+            .filter(|p| !user_primitive_names.contains(&p.name))
+            .collect();
 
         // Count base functions BEFORE adding user functions
         // This tells the compiler which functions are from Base and should NOT be specialized
@@ -95,10 +109,18 @@ pub(super) fn merge_with_precompiled_base(program: &Program) -> MergedProgram {
         merged_functions.extend(program.functions.clone());
         merged_structs.extend(program.structs.clone());
         merged_abstract_types.extend(program.abstract_types.clone());
+        merged_primitive_types.extend(program.primitive_types.clone());
 
         // Merge main blocks: base_program.main statements go first (defines globals like `im`)
         // then user program.main statements follow
         let mut merged_main_stmts = base_program.main.stmts.clone();
+        merged_main_stmts.push(Stmt::Meta {
+            annotation: MetaAnnotation {
+                name: BASE_USER_MAIN_BOUNDARY_META.to_string(),
+                args: Vec::new(),
+            },
+            span: Span::new(0, 0, 0, 0, 0, 0),
+        });
         merged_main_stmts.extend(program.main.stmts.clone());
         let merged_main = crate::ir::core::Block {
             stmts: merged_main_stmts,
@@ -110,6 +132,7 @@ pub(super) fn merge_with_precompiled_base(program: &Program) -> MergedProgram {
                 functions: merged_functions,
                 structs: merged_structs,
                 abstract_types: merged_abstract_types,
+                primitive_types: merged_primitive_types,
                 type_aliases: program.type_aliases.clone(),
                 base_function_count,
                 main: merged_main,

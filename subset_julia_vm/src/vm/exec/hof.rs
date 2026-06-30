@@ -22,360 +22,66 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use super::DispatchAction;
 use crate::rng::RngLike;
 
 use super::super::error::VmError;
-use super::super::frame::HofOpKind;
 use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
-use super::super::util::{pop_array_or_values, PopArrayResult};
-use super::super::value::{new_array_ref, ArrayValue, GeneratorValue, TupleValue, Value};
+use super::super::value::{GeneratorValue, TupleValue, Value};
 use super::super::Vm;
 
-/// Result of executing a HOF instruction.
-pub(super) enum HofResult {
-    /// Instruction not handled by this module
-    NotHandled,
-    /// Instruction handled successfully
-    Handled,
-    /// Error was raised and caught by handler, continue to next iteration
-    Continue,
+/// Extract the numeric value parameter `N` from a `Val{N}` type name.
+///
+/// Returns `Some(N)` when `name` is exactly `Val{<integer literal>}`, e.g.
+/// `"Val{3}"` -> `Some(3)`. Used so `ntuple(f, Val(N))` can recover the length
+/// directly from the `Val` wrapper struct (Issue #4975).
+fn val_struct_numeric_param(name: &str) -> Option<i64> {
+    let rest = name.strip_prefix("Val")?;
+    let inner = rest.strip_prefix('{')?.strip_suffix('}')?;
+    inner.trim().parse::<i64>().ok()
 }
 
 impl<R: RngLike> Vm<R> {
+    /// Pop the `ntuple` length argument, accepting either an integer value or a
+    /// `Val{N}` length wrapper (Issue #4975).
+    ///
+    /// Upstream Julia exposes `ntuple(f, ::Val{N})` so callers can pass the
+    /// length as a compile-time `Val` value (e.g. `ntuple(identity, Val(3))`).
+    /// In this VM `ntuple` is a builtin HOF whose length operand is normally an
+    /// integer; when a `Val{N}` struct arrives instead we recover `N` from the
+    /// struct's parametric type name.
+    fn pop_ntuple_length(&mut self) -> Result<i64, VmError> {
+        let value = self.stack.pop_value()?;
+        let struct_name: Option<String> = match &value {
+            Value::Struct(s) => Some(s.struct_name.to_string()),
+            Value::StructRef(idx) => self
+                .struct_heap
+                .get(*idx)
+                .map(|s| s.struct_name.to_string()),
+            _ => None,
+        };
+        if let Some(name) = struct_name {
+            if let Some(n) = val_struct_numeric_param(&name) {
+                return Ok(n);
+            }
+        }
+        // Not a Val{N} wrapper: push the value back and use the normal numeric
+        // coercion so non-integer arguments report the usual type error.
+        self.stack.push(value);
+        self.stack.pop_i64()
+    }
+
     /// Execute higher-order function instructions.
     /// Returns the execution result.
     #[inline]
-    pub(super) fn execute_hof(&mut self, instr: &Instr) -> Result<HofResult, VmError> {
+    pub(super) fn execute_hof(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             // Note: MapFunc, FilterFunc removed - now Pure Julia (base/iterators.jl)
-            Instr::FindAllFunc(func_index) => {
-                let arr_result = pop_array_or_values(&mut self.stack);
-                match self.try_or_handle(arr_result)? {
-                    Some(PopArrayResult::F64Array(arr)) => {
-                        if arr.borrow().data.is_empty() {
-                            // Empty array returns empty Int64 array
-                            self.stack
-                                .push(Value::Array(new_array_ref(ArrayValue::from_i64(
-                                    vec![],
-                                    vec![0],
-                                ))));
-                        } else {
-                            self.start_hof_call(*func_index, arr, HofOpKind::FindAll, None)?;
-                        }
-                    }
-                    Some(PopArrayResult::Values { values, shape }) => {
-                        // Use value-based HOF path for struct arrays
-                        self.start_hof_call_values(*func_index, values, shape, HofOpKind::FindAll)?;
-                    }
-                    None => return Ok(HofResult::Continue),
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::FindFirstFunc(func_index) => {
-                let arr_result = pop_array_or_values(&mut self.stack);
-                match self.try_or_handle(arr_result)? {
-                    Some(PopArrayResult::F64Array(arr)) => {
-                        if arr.borrow().data.is_empty() {
-                            // Empty array returns nothing
-                            self.stack.push(Value::Nothing);
-                        } else {
-                            self.start_hof_call(*func_index, arr, HofOpKind::FindFirst, None)?;
-                        }
-                    }
-                    Some(PopArrayResult::Values { values, shape }) => {
-                        if values.is_empty() {
-                            self.stack.push(Value::Nothing);
-                        } else {
-                            self.start_hof_call_values(
-                                *func_index,
-                                values,
-                                shape,
-                                HofOpKind::FindFirst,
-                            )?;
-                        }
-                    }
-                    None => return Ok(HofResult::Continue),
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::FindLastFunc(func_index) => {
-                let arr_result = pop_array_or_values(&mut self.stack);
-                match self.try_or_handle(arr_result)? {
-                    Some(PopArrayResult::F64Array(arr)) => {
-                        if arr.borrow().data.is_empty() {
-                            // Empty array returns nothing
-                            self.stack.push(Value::Nothing);
-                        } else {
-                            self.start_hof_call(*func_index, arr, HofOpKind::FindLast, None)?;
-                        }
-                    }
-                    Some(PopArrayResult::Values { values, shape }) => {
-                        if values.is_empty() {
-                            self.stack.push(Value::Nothing);
-                        } else {
-                            self.start_hof_call_values(
-                                *func_index,
-                                values,
-                                shape,
-                                HofOpKind::FindLast,
-                            )?;
-                        }
-                    }
-                    None => return Ok(HofResult::Continue),
-                }
-                Ok(HofResult::Handled)
-            }
-
-            // Note: ReduceFunc, ReduceFuncWithInit, FoldrFunc, FoldrFuncWithInit removed
-            // - now Pure Julia (base/iterators.jl)
-            Instr::MapReduceFunc(map_func_index, reduce_func_index) => {
-                // mapreduce(f, op, arr) - apply f to each element, then reduce with op
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                let arr_borrow = arr.borrow();
-                if arr_borrow.data.is_empty() {
-                    // User-visible: user can call mapreduce on an empty array without providing an init value
-                    return Err(VmError::TypeError("mapreduce on empty array".to_string()));
-                } else if arr_borrow.len() == 1 {
-                    // Just apply the map function to single element
-                    let data = arr_borrow.try_as_f64_vec()?;
-                    drop(arr_borrow);
-                    self.call_function_with_arg(*map_func_index, data[0])?;
-                } else {
-                    drop(arr_borrow);
-                    self.start_mapreduce_call(*map_func_index, *reduce_func_index, arr, None)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::MapReduceFuncWithInit(map_func_index, reduce_func_index) => {
-                // mapreduce(f, op, arr, init) - apply f to each element, then reduce with op and init
-                let init = self.pop_f64_or_i64()?;
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                if arr.borrow().data.is_empty() {
-                    self.stack.push(Value::F64(init));
-                } else {
-                    self.start_mapreduce_call(
-                        *map_func_index,
-                        *reduce_func_index,
-                        arr,
-                        Some(init),
-                    )?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::MapFoldrFunc(map_func_index, reduce_func_index) => {
-                // mapfoldr(f, op, arr) - apply f to each element in reverse, then reduce with op (swapped args)
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                let arr_borrow = arr.borrow();
-                if arr_borrow.data.is_empty() {
-                    // User-visible: user can call mapfoldr on an empty array without providing an init value
-                    return Err(VmError::TypeError("mapfoldr on empty array".to_string()));
-                } else if arr_borrow.len() == 1 {
-                    // Just apply the map function to single element
-                    let data = arr_borrow.try_as_f64_vec()?;
-                    drop(arr_borrow);
-                    self.call_function_with_arg(*map_func_index, data[0])?;
-                } else {
-                    // Reverse the array for right-associative fold
-                    let data = arr_borrow.try_as_f64_vec()?;
-                    let reversed: Vec<f64> = data.iter().rev().cloned().collect();
-                    let reversed_arr =
-                        new_array_ref(ArrayValue::from_f64(reversed, vec![arr_borrow.len()]));
-                    drop(arr_borrow);
-                    self.start_mapfoldr_call(
-                        *map_func_index,
-                        *reduce_func_index,
-                        reversed_arr,
-                        None,
-                    )?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::MapFoldrFuncWithInit(map_func_index, reduce_func_index) => {
-                // mapfoldr(f, op, arr, init) - apply f to each element in reverse, then reduce with op (swapped args) and init
-                let init = self.pop_f64_or_i64()?;
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                if arr.borrow().data.is_empty() {
-                    self.stack.push(Value::F64(init));
-                } else {
-                    // Reverse the array for right-associative fold
-                    let arr_borrow = arr.borrow();
-                    let data = arr_borrow.try_as_f64_vec()?;
-                    let reversed: Vec<f64> = data.iter().rev().cloned().collect();
-                    let reversed_arr =
-                        new_array_ref(ArrayValue::from_f64(reversed, vec![arr_borrow.len()]));
-                    drop(arr_borrow);
-                    self.start_mapfoldr_call(
-                        *map_func_index,
-                        *reduce_func_index,
-                        reversed_arr,
-                        Some(init),
-                    )?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::MapFuncInPlace(func_index) => {
-                // map!(f, dest, src) - apply f to each element of src and store in dest
-                let src_result = self.stack.pop_array();
-                let src = match self.try_or_handle(src_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                let dest_result = self.stack.pop_array();
-                let dest = match self.try_or_handle(dest_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                let src_len = src.borrow().len();
-                let dest_len = dest.borrow().len();
-                if src_len != dest_len {
-                    // User-visible: user can call map! with source and destination arrays of different lengths
-                    return Err(VmError::TypeError(format!(
-                        "map!: destination and source must have the same length (got {} and {})",
-                        dest_len, src_len
-                    )));
-                }
-
-                if src.borrow().data.is_empty() {
-                    // Empty arrays, just return dest
-                    self.stack.push(Value::Array(dest));
-                } else {
-                    self.start_map_inplace_call(*func_index, dest, src)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::FilterFuncInPlace(func_index) => {
-                // filter!(f, arr) - filter elements in-place
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                if arr.borrow().data.is_empty() {
-                    // Empty array, just return it
-                    self.stack.push(Value::Array(arr));
-                } else {
-                    self.start_filter_inplace_call(*func_index, arr)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            // Note: ForEachFunc removed - foreach is now Pure Julia (base/abstractarray.jl)
-            Instr::SumFunc(func_index) => {
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                if arr.borrow().data.is_empty() {
-                    // Sum of empty array is 0
-                    self.stack.push(Value::F64(0.0));
-                } else {
-                    self.start_sum_call(*func_index, arr)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::AnyFunc(func_index) => {
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                if arr.borrow().data.is_empty() {
-                    // any on empty array is false (Issue #2031)
-                    self.stack.push(Value::Bool(false));
-                } else {
-                    self.start_hof_call(*func_index, arr, HofOpKind::Any, None)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::AllFunc(func_index) => {
-                let arr_result = self.stack.pop_array();
-                let arr = match self.try_or_handle(arr_result)? {
-                    Some(arr) => arr,
-                    None => return Ok(HofResult::Continue),
-                };
-
-                if arr.borrow().data.is_empty() {
-                    // all on empty array is true (vacuous truth, Issue #2031)
-                    self.stack.push(Value::Bool(true));
-                } else {
-                    self.start_hof_call(*func_index, arr, HofOpKind::All, None)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
-            Instr::CountFunc(func_index) => {
-                // count(f, itr) - Array/Range only
-                // Note: count(f, string) is handled by Pure Julia method dispatch
-                // via call.rs routing, not by this HOF instruction (Issue #2081).
-                let val = self.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let arr = match val {
-                    Value::Array(a) => a,
-                    Value::Range(r) => {
-                        let len = r.length() as usize;
-                        let mut data = Vec::with_capacity(len);
-                        for i in 0..len {
-                            data.push(r.start + (i as f64) * r.step);
-                        }
-                        new_array_ref(ArrayValue::from_f64(data, vec![len]))
-                    }
-                    // Memory → Array conversion (Issue #2764)
-                    Value::Memory(mem) => super::super::util::memory_to_array_ref(&mem),
-                    other => {
-                        // User-visible: user can call count on a non-iterable type
-                        return Err(VmError::TypeError(format!(
-                            "count: expected Array, got {:?}",
-                            super::super::util::value_type_name(&other)
-                        )));
-                    }
-                };
-
-                if arr.borrow().data.is_empty() {
-                    self.stack.push(Value::I64(0));
-                } else {
-                    self.start_hof_call_with_accumulator(*func_index, arr, HofOpKind::Count, 0.0)?;
-                }
-                Ok(HofResult::Handled)
-            }
-
             Instr::NtupleFunc(func_index) => {
-                // ntuple(f, n) - Create tuple by calling f(i) for i in 1:n
-                let n = self.stack.pop_i64()?;
+                // ntuple(f, n) - Create tuple by calling f(i) for i in 1:n.
+                // `n` may be an integer or a `Val{N}` length wrapper (Issue #4975).
+                let n = self.pop_ntuple_length()?;
                 if n < 0 {
                     // User-visible: user can call ntuple with a negative n argument
                     return Err(VmError::TypeError(
@@ -386,29 +92,64 @@ impl<R: RngLike> Vm<R> {
                     // Return empty tuple
                     self.stack.push(Value::Tuple(TupleValue::new(vec![])));
                 } else {
-                    // Create an array [1, 2, ..., n] and use HOF infrastructure
-                    let indices: Vec<f64> = (1..=n).map(|i| i as f64).collect();
-                    let arr = new_array_ref(ArrayValue::from_f64(indices, vec![n as usize]));
-                    self.start_ntuple_call(*func_index, arr, n as usize)?;
+                    let indices: Vec<Value> = (1..=n).map(Value::I64).collect();
+                    self.start_ntuple_call(*func_index, indices)?;
                 }
-                Ok(HofResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
-            Instr::MakeGenerator(func_index) => {
+            Instr::NtupleRuntime => {
+                // ntuple(f, n) where f is a runtime Function/Closure value.
+                // `n` may be an integer or a `Val{N}` length wrapper (Issue #4975).
+                let n = self.pop_ntuple_length()?;
+                let callable = self.stack.pop_value()?;
+                if n < 0 {
+                    return Err(VmError::TypeError(
+                        "ntuple: n must be non-negative".to_string(),
+                    ));
+                }
+                let indices: Vec<Value> = (1..=n).map(Value::I64).collect();
+                self.start_ntuple_runtime_call(callable, indices)?;
+                Ok(DispatchAction::Continue)
+            }
+
+            Instr::MakeGenerator(operands) => {
                 // Pop the underlying iterator and create a Generator
                 let iter = self.stack.pop_value()?;
-                let generator = GeneratorValue::new(*func_index, iter);
-                self.stack.push(Value::Generator(generator));
-                Ok(HofResult::Handled)
+                let generator = GeneratorValue::with_result_element_type(
+                    operands.callable.clone(),
+                    iter,
+                    operands.result_element_type.clone(),
+                );
+                self.stack.push(Value::Generator(Box::new(generator)));
+                Ok(DispatchAction::Continue)
+            }
+
+            Instr::MakeGeneratorRuntime(tuple_splat, result_element_type) => {
+                let iter = self.stack.pop_value()?;
+                let callable = self.stack.pop_value()?;
+                let (generator_callable, result_element_type) = self
+                    .runtime_generator_callable_and_eltype(
+                        callable,
+                        &iter,
+                        *tuple_splat,
+                        result_element_type.clone(),
+                    );
+                let generator = GeneratorValue::with_result_element_type(
+                    generator_callable,
+                    iter,
+                    result_element_type,
+                );
+                self.stack.push(Value::Generator(Box::new(generator)));
+                Ok(DispatchAction::Continue)
             }
 
             Instr::WrapInGenerator => {
                 // Pop an array and wrap it in a Generator for eager-evaluated generator expressions
-                // This uses func_index = usize::MAX as a sentinel to indicate "pre-evaluated"
                 let arr = self.stack.pop_value()?;
-                let generator = GeneratorValue::new(usize::MAX, arr);
-                self.stack.push(Value::Generator(generator));
-                Ok(HofResult::Handled)
+                let generator = GeneratorValue::eager(arr);
+                self.stack.push(Value::Generator(Box::new(generator)));
+                Ok(DispatchAction::Continue)
             }
 
             Instr::SprintFunc(func_index, arg_count) => {
@@ -426,10 +167,10 @@ impl<R: RngLike> Vm<R> {
 
                 // Start the sprint call: call f(io, args...)
                 self.start_sprint_call(*func_index, io, args)?;
-                Ok(HofResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
-            _ => Ok(HofResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

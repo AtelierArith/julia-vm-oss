@@ -29,3 +29,75 @@ name = "comprehension_multi_var"
 file = "multi_var_comprehension.jl"
 expected = true
 description = "Multi-variable comprehension [expr for i in R1, j in R2] with column-major order (Issue #2143)"
+
+[[tests]]
+name = "comprehension_typed_array_4462"
+file = "typed_array_comprehension_4462.jl"
+expected = true
+description = "Typed array comprehension T[expr for var in iter] parses and evaluates (Issue #4462)"
+
+[[tests]]
+name = "comprehension_typed_where_param_8364"
+file = "typed_where_param_comprehension_8364.jl"
+expected = true
+description = "Typed comprehensions whose element type is a where parameter allocate Vector{T}, not Vector{Any} (Issue #8364)"
+
+[[tests]]
+name = "comprehension_symbol_array_4463"
+file = "symbol_array_comprehension_4463.jl"
+expected = true
+description = "Array comprehension over Vector{Symbol} preserves Symbol elements (Issue #4463)"
+
+[[tests]]
+name = "comprehension_typed_any_4819"
+file = "typed_any_comprehension_4819.jl"
+expected = true
+description = "Typed-Any comprehension Any[expr for x in iter] produces a Vector{Any} instead of erroring with 'Unknown function: Any' — special-cased in wrap_comprehension_body_with_call to route through the Vector{Any} compile intercept (Issue #4819)"
+
+[[tests]]
+name = "comprehension_any_body_fallback_4822"
+file = "any_body_fallback_4822.jl"
+expected = true
+description = "Comprehension whose body has an Any-typed value (convert(Any, x), or any call returning Any) no longer silently coerces to Vector{Float64} via the F64 fallback in compile_comprehension — defaults to Vector{Any} preserving source values (Issue #4822)"
+
+[[tests]]
+name = "comprehension_multi_2d_matrix_4779"
+file = "multi_comprehension_2d_matrix_4779.jl"
+expected = true
+description = "Multi-variable comprehension [expr for i in R1, j in R2] returns a Matrix{T} of shape (length(R1), length(R2)) instead of a flat Vector{T}. compile_multi_comprehension now emits Reshape at the end so the column-major-ordered flat elements become the right 2D (or higher-dim) layout (Issue #4779)"
+
+[[tests]]
+name = "comprehension_multi_any_body_fallback_4836"
+file = "multi_any_body_fallback_4836.jl"
+expected = true
+description = "Multi-comp with an Any-typed body (multi-op expression like i+j+k that body inference cannot resolve) no longer silently coerces to Array{Float64, N} — defaults to Array{Any, N} preserving source values. F64-typed bodies still produce Matrix{Float64} via a new explicit F64 arm (Issue #4836, sibling of #4822)"
+
+[[tests]]
+name = "comprehension_presize_filter_free_5186"
+file = "presize_filter_free_5186.jl"
+expected = true
+description = "Filter-free comprehension [f(x) for x in iter] pre-sizes its backing storage from the already-computed length (ReserveArray instruction) instead of growing with O(log n) reallocations. The reserve is a pure capacity hint, so results and element types stay identical across Int64/Float64/String/Bool/Char bodies, range and array iterators, empty/single/large lengths (Issue #5186)"
+
+[[tests]]
+name = "comprehension_multidim_dispatch_6817"
+file = "multidim_comprehension_dispatch_6817.jl"
+expected = true
+description = "A multi-iterator comprehension's rank (= number of iterator clauses) is carried into the type system via the new ndims field on ValueType::ArrayOf / ConcreteType::Array, so a 2-D comprehension Matrix dispatches to ::Matrix (not ::Vector) and view(matrix_comprehension, ...) works. Previously every comprehension inferred the rank-free Array and typed dispatch mis-selected ::Vector. Element-specific methods (::Matrix{Int64}) still resolve on the concrete runtime value. Verified against upstream julia 1.12 (Issue #6817)."
+
+[[tests]]
+name = "comprehension_filter_guard_captured_arg_7891"
+file = "filter_guard_captured_arg_7891.jl"
+expected = true
+description = "A filtered comprehension [r for r in 1:n if r != i] whose `if` guard references a captured function argument (`i`) keeps the guard on EVERY specialization path. Regression guard for the silent wrong-output bug where the guard was dropped on some specialization orders (cache/dispatch-order/HashMap-seed dependent), returning ALL iterator elements and corrupting matrix-minor extraction. Covers println-materialized, tuple-returned, plain-return-after-another-comprehension, and matrix-minor (Int + Float64, re-specialized) forms. Non-Symbolics reproduction; verified against upstream julia 1.12 (Issue #7891)."
+
+[[tests]]
+name = "comprehension_multiline_for_if_clauses_8008"
+file = "multiline_for_if_clauses_8008.jl"
+expected = true
+description = "Inside `[...]`/`(...)` newlines are insignificant, so a comprehension/generator whose trailing `for`/`if` clauses are split across lines (`[x for x in xs⏎ if x > 0]`) parses and evaluates identically to the single-line form. Previously the parser terminated the clause list at the newline before a `for`/`if` guard and raised `expected RBracket`. Covers newline-before-`if`, newline-before-second-`for`, both together, and a multi-line generator argument to `sum`. Verified against upstream julia 1.12 (Issue #8008)."
+
+[[tests]]
+name = "comprehension_flatten_vs_cartesian_8014"
+file = "flatten_vs_cartesian_8014.jl"
+expected = true
+description = "A comprehension with two `for` clauses separated by WHITESPACE (`[expr for x in A for y in B]`) is a flattened generator and produces a 1-D Vector (Iterators.flatten semantics); only the comma form `for x in A, y in B` is the cartesian N-D Array. Previously sjulia treated every multi-`for` comprehension as N-D by clause count, so the flatten form was wrongly built as a 2-D Matrix. Lowering now carries the comma-vs-whitespace distinction (MultiComprehension.flatten); the flatten compile path nests iterators outermost-first, re-evaluates inner iterators per outer step (dependent ranges) and skips the reshape. Covers the flatten/comma/three-clause/dependent/mixed/filtered/typed/empty forms. Verified against upstream julia 1.12 (Issue #8014)."

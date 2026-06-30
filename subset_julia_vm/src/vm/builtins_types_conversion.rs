@@ -16,6 +16,101 @@ use super::value::{StructInstance, TupleValue, Value};
 use super::Vm;
 
 impl<R: crate::rng::RngLike> Vm<R> {
+    /// Convert a heap `Rational`/`Complex` struct to `Float64` for the `float`
+    /// builtin (`FloatConv`). Rationals collapse to `num/den`; complex values
+    /// reallocate a `Complex{Float64}`. Extracted from the `FloatConv` handler to
+    /// keep it flat (Issue #6833).
+    fn float_conv_struct_ref(&mut self, idx: usize) -> Result<Value, VmError> {
+        let Some(s) = self.struct_heap.get(idx).cloned() else {
+            return Err(VmError::TypeError(
+                "float: invalid struct reference".to_string(),
+            ));
+        };
+        if s.is_rational() {
+            if s.values.len() < 2 {
+                return Err(VmError::TypeError(
+                    "float: Rational must have num and den fields".to_string(),
+                ));
+            }
+            let num = match &s.values[0] {
+                Value::I64(n) => *n as f64,
+                Value::I32(n) => *n as f64,
+                Value::I16(n) => *n as f64,
+                Value::I8(n) => *n as f64,
+                Value::Bool(b) => {
+                    if *b {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                Value::F64(f) => *f,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "float: Rational numerator must be numeric".to_string(),
+                    ))
+                }
+            };
+            let den = match &s.values[1] {
+                Value::I64(d) => *d as f64,
+                Value::I32(d) => *d as f64,
+                Value::I16(d) => *d as f64,
+                Value::I8(d) => *d as f64,
+                Value::Bool(b) => {
+                    if *b {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                Value::F64(f) => *f,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "float: Rational denominator must be numeric".to_string(),
+                    ))
+                }
+            };
+            return Ok(Value::F64(num / den));
+        }
+        if s.is_complex() {
+            if s.values.len() < 2 {
+                return Err(VmError::TypeError(
+                    "float: Complex must have re and im fields".to_string(),
+                ));
+            }
+            let re = match &s.values[0] {
+                Value::I64(n) => *n as f64,
+                Value::F64(f) => *f,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "float: Complex re must be numeric".to_string(),
+                    ))
+                }
+            };
+            let im = match &s.values[1] {
+                Value::I64(n) => *n as f64,
+                Value::F64(f) => *f,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "float: Complex im must be numeric".to_string(),
+                    ))
+                }
+            };
+            let complex_struct = StructInstance::with_name(
+                s.type_id,
+                "Complex{Float64}".to_string(),
+                vec![Value::F64(re), Value::F64(im)],
+            );
+            let new_idx = self.struct_heap.len();
+            self.struct_heap.push(complex_struct);
+            return Ok(Value::StructRef(new_idx));
+        }
+        Err(VmError::TypeError(format!(
+            "float: cannot convert {} to Float64",
+            s.struct_name
+        )))
+    }
+
     pub(super) fn execute_builtin_types_conversion(
         &mut self,
         builtin: &BuiltinId,
@@ -25,6 +120,12 @@ impl<R: crate::rng::RngLike> Vm<R> {
             BuiltinId::Convert => {
                 let value = self.stack.pop_value()?;
                 let target_type = self.stack.pop_value()?;
+                let args = vec![target_type.clone(), value.clone()];
+
+                if let Some(func_index) = self.find_best_method_index(&["Base.convert"], &args) {
+                    self.start_function_call(func_index, args)?;
+                    return Ok(Some(()));
+                }
 
                 let type_name_owned: String;
                 let type_name: &str = match &target_type {
@@ -43,6 +144,12 @@ impl<R: crate::rng::RngLike> Vm<R> {
                 let converted = super::convert::convert_value(type_name, &value);
                 match converted {
                     Ok(val) => self.stack.push(val),
+                    // An `InexactError` is the final, correct result for a
+                    // recognized target type whose value is out of range; do not
+                    // fall back to a pure-Julia `convert` method (for `Bool` that
+                    // would call the missing `Bool(x)` constructor and mask the
+                    // error as "Function 'Bool' not found"). Issue #7970.
+                    Err(err @ VmError::InexactError(_)) => return Err(err),
                     Err(err) => {
                         let args = vec![target_type, value];
                         if let Some(func_index) =
@@ -69,13 +176,23 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     self.start_function_call(func_index, values)?;
                     return Ok(Some(()));
                 }
-                self.stack.push(Value::Tuple(TupleValue { elements: values }));
+                self.stack
+                    .push(Value::Tuple(TupleValue { elements: values }));
                 Ok(Some(()))
             }
             BuiltinId::Signed => {
                 let val = self.stack.pop_value()?;
                 let result = match val {
+                    Value::I8(v) => Value::I8(v),
+                    Value::I16(v) => Value::I16(v),
+                    Value::I32(v) => Value::I32(v),
                     Value::I64(v) => Value::I64(v),
+                    Value::I128(v) => Value::I128(v),
+                    Value::U8(v) => Value::I8(v as i8),
+                    Value::U16(v) => Value::I16(v as i16),
+                    Value::U32(v) => Value::I32(v as i32),
+                    Value::U64(v) => Value::I64(v as i64),
+                    Value::U128(v) => Value::I128(v as i128),
                     Value::F64(v) => Value::I64(v as i64),
                     Value::Bool(b) => Value::I64(if b { 1 } else { 0 }),
                     _ => {
@@ -91,9 +208,18 @@ impl<R: crate::rng::RngLike> Vm<R> {
             BuiltinId::Unsigned => {
                 let val = self.stack.pop_value()?;
                 let result = match val {
-                    Value::I64(v) => Value::I64(v as u64 as i64),
+                    Value::I8(v) => Value::U8(v as u8),
+                    Value::I16(v) => Value::U16(v as u16),
+                    Value::I32(v) => Value::U32(v as u32),
+                    Value::I64(v) => Value::U64(v as u64),
+                    Value::I128(v) => Value::U128(v as u128),
+                    Value::U8(v) => Value::U8(v),
+                    Value::U16(v) => Value::U16(v),
+                    Value::U32(v) => Value::U32(v),
+                    Value::U64(v) => Value::U64(v),
+                    Value::U128(v) => Value::U128(v),
                     Value::F64(v) => Value::I64(v as u64 as i64),
-                    Value::Bool(b) => Value::I64(if b { 1 } else { 0 }),
+                    Value::Bool(b) => Value::U64(if b { 1 } else { 0 }),
                     _ => {
                         return Err(VmError::TypeError(format!(
                             "unsigned: cannot convert {:?} to unsigned integer",
@@ -121,101 +247,7 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     Value::F32(v) => Value::F32(*v),
                     Value::F16(v) => Value::F16(*v),
                     Value::Bool(b) => Value::F64(if *b { 1.0 } else { 0.0 }),
-                    Value::StructRef(idx) => {
-                        if let Some(s) = self.struct_heap.get(*idx).cloned() {
-                            if s.struct_name.starts_with("Rational") {
-                                if s.values.len() >= 2 {
-                                    let num = match &s.values[0] {
-                                        Value::I64(n) => *n as f64,
-                                        Value::I32(n) => *n as f64,
-                                        Value::I16(n) => *n as f64,
-                                        Value::I8(n) => *n as f64,
-                                        Value::Bool(b) => {
-                                            if *b {
-                                                1.0
-                                            } else {
-                                                0.0
-                                            }
-                                        }
-                                        Value::F64(f) => *f,
-                                        _ => {
-                                            return Err(VmError::TypeError(
-                                                "float: Rational numerator must be numeric"
-                                                    .to_string(),
-                                            ))
-                                        }
-                                    };
-                                    let den = match &s.values[1] {
-                                        Value::I64(d) => *d as f64,
-                                        Value::I32(d) => *d as f64,
-                                        Value::I16(d) => *d as f64,
-                                        Value::I8(d) => *d as f64,
-                                        Value::Bool(b) => {
-                                            if *b {
-                                                1.0
-                                            } else {
-                                                0.0
-                                            }
-                                        }
-                                        Value::F64(f) => *f,
-                                        _ => {
-                                            return Err(VmError::TypeError(
-                                                "float: Rational denominator must be numeric"
-                                                    .to_string(),
-                                            ))
-                                        }
-                                    };
-                                    Value::F64(num / den)
-                                } else {
-                                    return Err(VmError::TypeError(
-                                        "float: Rational must have num and den fields".to_string(),
-                                    ));
-                                }
-                            } else if s.struct_name.starts_with("Complex") {
-                                if s.values.len() >= 2 {
-                                    let re = match &s.values[0] {
-                                        Value::I64(n) => *n as f64,
-                                        Value::F64(f) => *f,
-                                        _ => {
-                                            return Err(VmError::TypeError(
-                                                "float: Complex re must be numeric".to_string(),
-                                            ))
-                                        }
-                                    };
-                                    let im = match &s.values[1] {
-                                        Value::I64(n) => *n as f64,
-                                        Value::F64(f) => *f,
-                                        _ => {
-                                            return Err(VmError::TypeError(
-                                                "float: Complex im must be numeric".to_string(),
-                                            ))
-                                        }
-                                    };
-                                    let complex_struct = StructInstance::with_name(
-                                        s.type_id,
-                                        "Complex{Float64}".to_string(),
-                                        vec![Value::F64(re), Value::F64(im)],
-                                    );
-                                    let new_idx = self.struct_heap.len();
-                                    self.struct_heap.push(complex_struct);
-                                    Value::StructRef(new_idx)
-                                } else {
-                                    return Err(VmError::TypeError(
-                                        "float: Complex must have re and im fields".to_string(),
-                                    ));
-                                }
-                            } else {
-                                return Err(VmError::TypeError(format!(
-                                    "float: cannot convert {} to Float64",
-                                    s.struct_name
-                                )));
-                            }
-                        } else {
-                            return Err(VmError::TypeError(
-                                "float: invalid struct reference".to_string(),
-                            ));
-                        }
-                    }
+                    Value::StructRef(idx) => self.float_conv_struct_ref(*idx)?,
                     _ => {
                         return Err(VmError::TypeError(format!(
                             "float: cannot convert {:?} to Float64",
@@ -226,31 +258,8 @@ impl<R: crate::rng::RngLike> Vm<R> {
                 self.stack.push(result);
                 Ok(Some(()))
             }
-            BuiltinId::Widemul => {
-                let b = self.stack.pop_value()?;
-                let a = self.stack.pop_value()?;
-                let result = match (&a, &b) {
-                    (Value::I64(av), Value::I64(bv)) => {
-                        let wide_result = (*av as i128) * (*bv as i128);
-                        if wide_result >= i64::MIN as i128 && wide_result <= i64::MAX as i128 {
-                            Value::I64(wide_result as i64)
-                        } else {
-                            Value::F64(wide_result as f64)
-                        }
-                    }
-                    (Value::F64(av), Value::F64(bv)) => Value::F64(av * bv),
-                    (Value::I64(av), Value::F64(bv)) => Value::F64(*av as f64 * bv),
-                    (Value::F64(av), Value::I64(bv)) => Value::F64(av * *bv as f64),
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "widemul: cannot multiply {:?} and {:?}",
-                            a, b
-                        )))
-                    }
-                };
-                self.stack.push(result);
-                Ok(Some(()))
-            }
+            // Widemul removed - now Pure Julia (base/number.jl: widen(x)*widen(y),
+            // Issue #6737). The old I64-only handler errored on Int32 etc.
             BuiltinId::Reinterpret => {
                 let value = self.stack.pop_value()?;
                 let target_type = self.stack.pop_value()?;
@@ -330,9 +339,23 @@ impl<R: crate::rng::RngLike> Vm<R> {
                             )))
                         }
                     },
+                    // Float16 <-> UInt16/Int16 bit reinterpretation (Issue #6740):
+                    // needed by the pure-Julia float decomposition for Float16.
+                    "Float16" => match &value {
+                        Value::U16(v) => Value::F16(half::f16::from_bits(*v)),
+                        Value::I16(v) => Value::F16(half::f16::from_bits(*v as u16)),
+                        Value::F16(v) => Value::F16(*v),
+                        _ => {
+                            return Err(VmError::TypeError(format!(
+                                "reinterpret(Float16, {}): size mismatch (2 bytes required)",
+                                value_type_name(&value)
+                            )))
+                        }
+                    },
                     "Int16" => match &value {
                         Value::U16(v) => Value::I16(*v as i16),
                         Value::I16(v) => Value::I16(*v),
+                        Value::F16(v) => Value::I16(v.to_bits() as i16),
                         _ => {
                             return Err(VmError::TypeError(format!(
                                 "reinterpret(Int16, {}): size mismatch (2 bytes required)",
@@ -343,6 +366,7 @@ impl<R: crate::rng::RngLike> Vm<R> {
                     "UInt16" => match &value {
                         Value::I16(v) => Value::U16(*v as u16),
                         Value::U16(v) => Value::U16(*v),
+                        Value::F16(v) => Value::U16(v.to_bits()),
                         _ => {
                             return Err(VmError::TypeError(format!(
                                 "reinterpret(UInt16, {}): size mismatch (2 bytes required)",
@@ -402,6 +426,94 @@ impl<R: crate::rng::RngLike> Vm<R> {
                 Ok(Some(()))
             }
             _ => Ok(None),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::builtins::BuiltinId;
+    use crate::rng::StableRng;
+    use crate::vm::stack_ops::StackOps;
+    use crate::vm::value::Value;
+    use crate::vm::Vm;
+
+    fn run_conversion_builtin(builtin: BuiltinId, input: Value) -> Value {
+        let mut vm = Vm::new(vec![], StableRng::new(0));
+        vm.stack.push(input);
+        if let Err(err) = vm.execute_builtin_types_conversion(&builtin, 1) {
+            panic!("conversion builtin failed: {err:?}");
+        }
+        match vm.stack.pop_value() {
+            Ok(value) => value,
+            Err(err) => panic!("conversion builtin left no result: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn signed_builtin_reinterprets_integer_widths() {
+        let cases = [
+            (Value::I8(-1), Value::I8(-1)),
+            (Value::I16(-1), Value::I16(-1)),
+            (Value::I32(-1), Value::I32(-1)),
+            (Value::I64(-1), Value::I64(-1)),
+            (Value::I128(-1), Value::I128(-1)),
+            (Value::U8(u8::MAX), Value::I8(-1)),
+            (Value::U16(u16::MAX), Value::I16(-1)),
+            (Value::U32(u32::MAX), Value::I32(-1)),
+            (Value::U64(u64::MAX), Value::I64(-1)),
+            (Value::U128(u128::MAX), Value::I128(-1)),
+            (Value::Bool(true), Value::I64(1)),
+        ];
+
+        for (input, expected) in cases {
+            let actual = run_conversion_builtin(BuiltinId::Signed, input.clone());
+            assert!(
+                matches_expected_value(&actual, &expected),
+                "signed({input:?}) produced {actual:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsigned_builtin_reinterprets_integer_widths() {
+        let cases = [
+            (Value::I8(-1), Value::U8(u8::MAX)),
+            (Value::I16(-1), Value::U16(u16::MAX)),
+            (Value::I32(-1), Value::U32(u32::MAX)),
+            (Value::I64(-1), Value::U64(u64::MAX)),
+            (Value::I128(-1), Value::U128(u128::MAX)),
+            (Value::U8(u8::MAX), Value::U8(u8::MAX)),
+            (Value::U16(u16::MAX), Value::U16(u16::MAX)),
+            (Value::U32(u32::MAX), Value::U32(u32::MAX)),
+            (Value::U64(u64::MAX), Value::U64(u64::MAX)),
+            (Value::U128(u128::MAX), Value::U128(u128::MAX)),
+            (Value::Bool(true), Value::U64(1)),
+        ];
+
+        for (input, expected) in cases {
+            let actual = run_conversion_builtin(BuiltinId::Unsigned, input.clone());
+            assert!(
+                matches_expected_value(&actual, &expected),
+                "unsigned({input:?}) produced {actual:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    fn matches_expected_value(actual: &Value, expected: &Value) -> bool {
+        match (actual, expected) {
+            (Value::I8(a), Value::I8(b)) => a == b,
+            (Value::I16(a), Value::I16(b)) => a == b,
+            (Value::I32(a), Value::I32(b)) => a == b,
+            (Value::I64(a), Value::I64(b)) => a == b,
+            (Value::I128(a), Value::I128(b)) => a == b,
+            (Value::U8(a), Value::U8(b)) => a == b,
+            (Value::U16(a), Value::U16(b)) => a == b,
+            (Value::U32(a), Value::U32(b)) => a == b,
+            (Value::U64(a), Value::U64(b)) => a == b,
+            (Value::U128(a), Value::U128(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            _ => false,
         }
     }
 }

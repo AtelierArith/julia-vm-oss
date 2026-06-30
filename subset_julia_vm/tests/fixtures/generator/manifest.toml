@@ -13,6 +13,78 @@ expected = true
 description = "Filtered generator expression"
 
 [[tests]]
+name = "generator_heterogeneous_collect_typejoin_4279"
+file = "heterogeneous_collect_typejoin_4279.jl"
+expected = true
+description = "Heterogeneous numeric generator collect typejoins to Vector{Real} (Issue #4279)"
+
+[[tests]]
+name = "generator_function_call_collect"
+file = "function_call_collect.jl"
+expected = true
+description = "Generator function-call collect applies f(x) and preserves Memory-first result type (Issues #3961, #3966)"
+
+[[tests]]
+name = "generator_base_generator_collect_dispatch"
+file = "base_generator_collect_dispatch.jl"
+expected = true
+description = "Base.Generator collect applies f(x) and preserves result type through runtime dispatch (Issue #4068)"
+
+[[tests]]
+name = "generator_collect_user_method_4265"
+file = "collect_user_method_4265.jl"
+expected = true
+description = "User-defined collect(::Base.Generator) wins over VM-native materialization (Issue #4265)"
+
+[[tests]]
+name = "generator_typeof_trait_infer_collect_4265"
+file = "typeof_trait_infer_collect_4265.jl"
+expected = true
+description = "Base.Generator typeof traits and explicit collect return inference match upstream (Issue #4265)"
+
+[[tests]]
+name = "generator_base_generator_field_collect_4265"
+file = "base_generator_field_collect_4265.jl"
+expected = true
+description = "VM-native Base.Generator projects f/iter fields and collect(::Generator) can enter Pure Julia dispatch (Issue #4265)"
+
+[[tests]]
+name = "generator_public_collect_nonempty_generic_path_4265"
+file = "public_collect_nonempty_generic_path_4265.jl"
+expected = true
+description = "Nonempty non-splat VM-native Base.Generator public collect enters the generic _collect path for Vector/Matrix/Memory/Range-backed cases while unsafe cases stay native (Issue #4265)"
+
+[[tests]]
+name = "generator_typed_type_constructor"
+file = "typed_type_constructor.jl"
+expected = true
+description = "Base.Generator(::Type, itr) stores Type{T} and collect preserves the requested element type (Issue #4103)"
+
+[[tests]]
+name = "generator_vararg_constructor"
+file = "vararg_constructor.jl"
+expected = true
+description = "Base.Generator(f, I1, I2, Is...) zips inputs and stops at the shortest iterator (Issue #4106)"
+
+[[tests]]
+name = "generator_typed_vararg_constructor"
+file = "typed_vararg_constructor.jl"
+expected = true
+description = "Base.Generator(::Type, I1, I2, Is...) splats zipped tuples into type constructors (Issue #4109)"
+
+[[tests]]
+name = "generator_iterate_applies_function"
+file = "iterate_applies_function.jl"
+expected = true
+description = "Direct iterate(Base.Generator(f, itr)) applies f to yielded values (Issue #4107)"
+
+[[tests]]
+name = "generator_runtime_callable_constructor"
+file = "runtime_callable_constructor.jl"
+expected = true
+description = "Base.Generator stores runtime function values and applies them lazily (Issue #4118)"
+
+[[tests]]
 name = "generator_sum_direct"
 file = "sum_direct.jl"
 expected = true
@@ -23,3 +95,74 @@ name = "generator_typeof"
 file = "typeof_generator.jl"
 expected = true
 description = "typeof(generator) returns Base.Generator (Issue #414)"
+
+[[tests]]
+name = "generator_matrix_shape_collect_4127"
+file = "matrix_shape_collect_4127.jl"
+expected = true
+description = "Generator expression collect preserves matrix HasShape input shape (Issue #4127)"
+
+[[tests]]
+name = "generator_trait_collect_similar_4052"
+file = "trait_collect_similar_4052.jl"
+expected = true
+description = "VM-native Base.Generator IteratorSize/IteratorEltype and collect_similar follow upstream trait behavior; shaped concrete, Symbol, Float32, 3D, and Any arrays allocate through shared Array helper dispatch (Issues #4052/#4018/#4573/#4576)"
+
+[[tests]]
+name = "generator_collect_similar_memory_generator_container_4052_3954"
+file = "collect_similar_memory_generator_container_4052_3954.jl"
+expected = true
+description = "collect_similar keeps Memory container semantics for Generator inputs (Issues #4052/#3954)"
+
+[[tests]]
+name = "generator_direct_memory_generator_collect_pipeline_4052_3954"
+file = "direct_memory_generator_collect_pipeline_4052_3954.jl"
+expected = true
+description = "Direct _collect keeps Memory container semantics for Generator inputs (Issues #4052/#3954)"
+
+[[tests]]
+name = "generator_heterogeneous_identity_collect_4236"
+file = "heterogeneous_identity_collect_4236.jl"
+expected = true
+description = "collect(Base.Generator(identity, heterogeneous tuple)) typejoins to Real and preserves boxed values (Issue #4236)"
+
+[[tests]]
+name = "generator_collect_narrow_type_preservation_4631"
+file = "collect_narrow_type_preservation_4631.jl"
+expected = true
+description = "Generator expression collect preserves narrow source element types for eager comprehension-backed paths (Issues #4018/#4631)"
+
+[[tests]]
+name = "generator_boxed_value_local_roundtrip_5171"
+file = "boxed_value_local_roundtrip_5171.jl"
+expected = true
+description = "Boxing Value::Generator (Issue #5171) preserves local store/load, eager/lazy/filtered/nested generators, typeof, and reassignment"
+
+[[tests]]
+name = "generator_map_over_eager_generator_5138"
+file = "map_over_eager_generator_5138.jl"
+expected = true
+description = "map / collect / comprehension consume an eager Base.Generator as an iterable instead of erroring (Issue #5138)"
+[[tests]]
+name = "generator_iter_sources_collect_parity_5088"
+file = "iter_sources_collect_parity_5088.jl"
+expected = true
+description = "Generators over Range/Array/Tuple iterators collect/sum correctly after removing the per-access iter deep clone (Issue #5088)"
+
+[[tests]]
+name = "generator_local_any_carrier_5081"
+file = "generator_local_any_carrier_5081.jl"
+expected = true
+description = "Generator locals continue to round-trip and reassign correctly after consolidating the legacy locals_generator map into the Any carrier (Issue #5081)"
+
+[[tests]]
+name = "generator_arg_with_kwargs_5763"
+file = "generator_arg_with_kwargs_5763.jl"
+expected = true
+description = "Generator argument followed by `; kw=...` keyword args parses: f(x for x in it; kw=v), incl. filtered generators, multiple kwargs, and user functions; bare paren generator unaffected (Issue #5763)"
+
+[[tests]]
+name = "generator_empty_take_generator_5752"
+file = "empty_take_generator_5752.jl"
+expected = true
+description = "collect(Iterators.take(generator, 0)) (empty take of a generator) returns an empty array instead of erroring 'Unbound type parameter: T'; _collect_unknown_widen's empty path returns Vector{Union{}} directly (Issue #5752)"

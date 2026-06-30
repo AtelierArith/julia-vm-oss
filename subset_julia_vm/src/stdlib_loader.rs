@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 use std::sync::RwLock;
 
 use crate::ir::core::{Module, Program, UsingImport};
-use crate::lowering::{Lowering, MacroParamType, StoredMacroDef};
+use crate::lowering::{LambdaContext, Lowering, MacroHygieneInfo, MacroParamType, StoredMacroDef};
 use crate::parser::Parser;
 use crate::stdlib;
 
@@ -25,6 +25,49 @@ static STDLIB_MACROS: Lazy<RwLock<HashMap<String, StoredMacroDef>>> =
 /// Tracks which stdlib modules have had their macros loaded.
 static LOADED_STDLIB_MODULES: Lazy<RwLock<HashSet<String>>> =
     Lazy::new(|| RwLock::new(HashSet::new()));
+
+/// Tracks stdlib modules currently being scanned for macros.
+static LOADING_STDLIB_MODULES: Lazy<RwLock<HashSet<String>>> =
+    Lazy::new(|| RwLock::new(HashSet::new()));
+
+/// Tracks which bundled (embedded third-party) packages have had their macros
+/// registered. Separate from stdlib so the two registries stay independent.
+static LOADED_BUNDLED_PACKAGES: Lazy<RwLock<HashSet<String>>> =
+    Lazy::new(|| RwLock::new(HashSet::new()));
+
+/// Registry for bundled-package macros (e.g. Plots' `@animate` / `@gif`).
+///
+/// Kept separate from [`STDLIB_MACROS`] because the two are expanded by different
+/// engines: stdlib/Base macros use the template substitution path, whereas
+/// bundled-package macros are expanded through the full `macro_runtime` path that
+/// user-defined macros use (so they may build AST via `Expr(...)`, mutate `.args`,
+/// etc.). Key format: "ModuleName::macro_name".
+static BUNDLED_PACKAGE_MACROS: Lazy<RwLock<HashMap<String, StoredMacroDef>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn bundled_macros_write() -> std::sync::RwLockWriteGuard<'static, HashMap<String, StoredMacroDef>> {
+    BUNDLED_PACKAGE_MACROS
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn bundled_macros_read() -> std::sync::RwLockReadGuard<'static, HashMap<String, StoredMacroDef>> {
+    BUNDLED_PACKAGE_MACROS
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Check if a bundled-package macro exists in the given module.
+pub fn has_bundled_package_macro(module: &str, name: &str) -> bool {
+    bundled_macros_read().contains_key(&format!("{}::{}", module, name))
+}
+
+/// Get a bundled-package macro from the given module.
+pub fn get_bundled_package_macro(module: &str, name: &str) -> Option<StoredMacroDef> {
+    bundled_macros_read()
+        .get(&format!("{}::{}", module, name))
+        .cloned()
+}
 
 fn stdlib_macros_write() -> std::sync::RwLockWriteGuard<'static, HashMap<String, StoredMacroDef>> {
     STDLIB_MACROS
@@ -47,6 +90,12 @@ fn loaded_stdlib_modules_write() -> std::sync::RwLockWriteGuard<'static, HashSet
 fn loaded_stdlib_modules_read() -> std::sync::RwLockReadGuard<'static, HashSet<String>> {
     LOADED_STDLIB_MODULES
         .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn loading_stdlib_modules_write() -> std::sync::RwLockWriteGuard<'static, HashSet<String>> {
+    LOADING_STDLIB_MODULES
+        .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
@@ -90,8 +139,22 @@ pub fn ensure_stdlib_macros_loaded(module_name: &str) {
         }
     }
 
+    {
+        let mut loading = loading_stdlib_modules_write();
+        if !loading.insert(module_name.to_string()) {
+            // Issue #7735: stdlib sources can contain relative imports back to
+            // the module currently being lowered, e.g. LinearAlgebra.LAPACK
+            // imports from ..LinearAlgebra. The nested import does not need a
+            // second macro scan.
+            return;
+        }
+    }
+
     // Load the module
-    if let Ok(module) = load_stdlib_module(module_name) {
+    let module = load_stdlib_module(module_name);
+    loading_stdlib_modules_write().remove(module_name);
+
+    if let Ok(module) = module {
         // Register macros from the module
         for macro_def in &module.macros {
             // Default to Any type for all params (stdlib macros don't have type annotations in IR)
@@ -101,6 +164,9 @@ pub fn ensure_stdlib_macros_loaded(module_name: &str) {
                 param_types,
                 has_varargs: macro_def.has_varargs,
                 body: macro_def.body.clone(),
+                expansion_functions: vec![],
+                expansion_structs: vec![],
+                hygiene: None,
                 span: macro_def.span,
             };
             register_stdlib_macro(module_name, &macro_def.name, stored);
@@ -108,6 +174,139 @@ pub fn ensure_stdlib_macros_loaded(module_name: &str) {
 
         // Mark as loaded
         loaded_stdlib_modules_write().insert(module_name.to_string());
+    }
+}
+
+/// Ensure a bundled package's macros are registered so user code can expand them
+/// after `using <Package>`.
+///
+/// Bundled packages (e.g. Plots) are not stdlib, so [`ensure_stdlib_macros_loaded`]
+/// skips them. This mirrors that registration for the embedded package registry:
+/// the package is loaded through the normal [`crate::loader::PackageLoader`] (which
+/// resolves `include()` and populates `Module::macros`), and each macro is added to
+/// the shared macro registry under the package name. Issue #6355: `@animate` /
+/// `@gif` are defined in the Plots package and must be reachable through
+/// `using Plots`, exactly like `@testset` is through `using Test`.
+pub fn ensure_bundled_package_macros_loaded(module_name: &str) {
+    if !crate::packages::is_bundled_package(module_name) {
+        return;
+    }
+
+    {
+        let loaded = LOADED_BUNDLED_PACKAGES
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if loaded.contains(module_name) {
+            return;
+        }
+    }
+
+    let usings = vec![UsingImport {
+        module: module_name.to_string(),
+        is_relative: false,
+        relative_level: 0,
+        symbols: None,
+        alias_bindings: Vec::new(),
+        span: crate::span::Span::new(0, 0, 0, 0, 0, 0),
+    }];
+    let mut loader = crate::loader::PackageLoader::new(crate::loader::LoaderConfig::from_env());
+    if let Ok(modules) = loader.load_for_usings(&usings) {
+        for module in &modules {
+            let mut members: HashSet<String> = HashSet::new();
+            members.extend(
+                module
+                    .functions
+                    .iter()
+                    .filter(|f| !f.is_base_extension)
+                    .map(|f| f.name.clone()),
+            );
+            members.extend(module.structs.iter().map(|s| s.name.clone()));
+            members.extend(module.abstract_types.iter().map(|a| a.name.clone()));
+            members.extend(module.primitive_types.iter().map(|p| p.name.clone()));
+            members.extend(module.type_aliases.iter().map(|t| t.name.clone()));
+            let exports: HashSet<String> = module.exports.iter().cloned().collect();
+            for macro_def in &module.macros {
+                // Bundled-package macros carry no IR type annotations, so every
+                // parameter defaults to `Any` (matching the stdlib path).
+                let param_types = vec![MacroParamType::Any; macro_def.params.len()];
+                let stored = StoredMacroDef {
+                    params: macro_def.params.clone(),
+                    param_types,
+                    has_varargs: macro_def.has_varargs,
+                    body: macro_def.body.clone(),
+                    expansion_functions: module.functions.clone(),
+                    expansion_structs: module.structs.clone(),
+                    hygiene: Some(MacroHygieneInfo {
+                        module: module.name.clone(),
+                        members: members.clone(),
+                        exports: exports.clone(),
+                    }),
+                    span: macro_def.span,
+                };
+                bundled_macros_write()
+                    .insert(format!("{}::{}", module.name, macro_def.name), stored);
+            }
+        }
+        LOADED_BUNDLED_PACKAGES
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(module_name.to_string());
+    }
+}
+
+/// Add bundled-package helper functions/types to a caller macro context before
+/// expanding a macro from that package. The global bundled macro registry stores
+/// `StoredMacroDef`s, but MacroTools-style macros call private helpers such as
+/// `allbindings` while expanding (Issue #7535), so the expansion program must
+/// include the defining module's compile-time surface too.
+pub fn add_bundled_package_macro_context(module_name: &str, lambda_ctx: &LambdaContext) {
+    if !crate::packages::is_bundled_package(module_name) {
+        return;
+    }
+
+    let usings = vec![UsingImport {
+        module: module_name.to_string(),
+        is_relative: false,
+        relative_level: 0,
+        symbols: None,
+        alias_bindings: Vec::new(),
+        span: crate::span::Span::new(0, 0, 0, 0, 0, 0),
+    }];
+    let mut loader = crate::loader::PackageLoader::new(crate::loader::LoaderConfig::from_env());
+    let Ok(modules) = loader.load_for_usings(&usings) else {
+        return;
+    };
+
+    for module in &modules {
+        lambda_ctx.add_compile_time_functions(&module.functions);
+        lambda_ctx.add_compile_time_structs(&module.structs);
+        lambda_ctx.add_compile_time_abstract_types(&module.abstract_types);
+        lambda_ctx.add_compile_time_primitive_types(&module.primitive_types);
+
+        if module.macros.is_empty() {
+            continue;
+        }
+        let mut members: HashSet<String> = HashSet::new();
+        members.extend(
+            module
+                .functions
+                .iter()
+                .filter(|f| !f.is_base_extension)
+                .map(|f| f.name.clone()),
+        );
+        members.extend(module.structs.iter().map(|s| s.name.clone()));
+        members.extend(module.abstract_types.iter().map(|a| a.name.clone()));
+        members.extend(module.primitive_types.iter().map(|p| p.name.clone()));
+        members.extend(module.type_aliases.iter().map(|t| t.name.clone()));
+        let exports: HashSet<String> = module.exports.iter().cloned().collect();
+        for macro_def in &module.macros {
+            lambda_ctx.register_module_macro_hygiene(
+                &macro_def.name,
+                &module.name,
+                members.clone(),
+                exports.clone(),
+            );
+        }
     }
 }
 
@@ -255,7 +454,9 @@ mod tests {
         let usings = vec![UsingImport {
             module: "Statistics".to_string(),
             is_relative: false,
+            relative_level: 0,
             symbols: None,
+            alias_bindings: Vec::new(),
             span: crate::span::Span::new(0, 0, 0, 0, 0, 0),
         }];
         let modules = load_stdlib_modules(&usings);
@@ -319,5 +520,14 @@ mod tests {
             has_stdlib_macro("Test", "testset"),
             "@testset should be registered"
         );
+    }
+
+    #[test]
+    fn test_ensure_stdlib_macros_loaded_linear_algebra_no_recursion_7735() {
+        // LinearAlgebra.LAPACK imports from ..LinearAlgebra while the parent
+        // module is still being lowered. The macro scan must not recurse into
+        // the same module until the stack overflows.
+        ensure_stdlib_macros_loaded("LinearAlgebra");
+        assert!(!has_stdlib_macro("LinearAlgebra", "test"));
     }
 }

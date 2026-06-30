@@ -8,8 +8,9 @@ using Test
     # ncodeunits - get number of code units in string
     @test ncodeunits(s) == 5
 
-    # codeunit - get code unit at index (returns Int64 in SubsetJuliaVM)
+    # codeunit - get code unit at index
     @test codeunit(s, 1) == 104  # 'h' = 0x68 = 104
+    @test typeof(codeunit(s, 1)) == UInt8
 
     # codeunits - get string as byte array
     cu = codeunits(s)

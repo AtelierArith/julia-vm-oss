@@ -1,0 +1,5 @@
+crate: js-sys
+version: 0.3.99
+license: MIT OR Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys

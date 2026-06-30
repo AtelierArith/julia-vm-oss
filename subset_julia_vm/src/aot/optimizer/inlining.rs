@@ -3,7 +3,8 @@
 //! This module implements function inlining that replaces function calls
 //! with the body of the called function.
 
-use crate::aot::ir::{AotBuiltinOp, AotExpr, AotFunction, AotProgram, AotStmt};
+use crate::aot::abi::AotAbiValue;
+use crate::aot::ir::{AotBuiltinOp, AotExpr, AotFunction, AotInlinePolicy, AotProgram, AotStmt};
 use crate::aot::types::StaticType;
 use std::collections::{HashMap, HashSet};
 
@@ -20,12 +21,26 @@ pub struct InlineCandidate {
     pub is_pure: bool,
     /// Score for inlining priority (higher = more likely to inline)
     pub score: i32,
+    /// Metadata-derived inline policy.
+    pub inline_policy: AotInlinePolicy,
+    /// Whether the function returns through the runtime `Value` boundary.
+    pub return_needs_value: bool,
 }
 
 impl InlineCandidate {
     /// Check if this candidate should be inlined
     pub fn should_inline(&self, max_size: usize) -> bool {
-        !self.is_recursive && self.size <= max_size && self.score > 0
+        // Runtime-boxed returns need caller-context return rewriting before they
+        // can be inlined safely. (Issue #7012)
+        if self.return_needs_value {
+            return false;
+        }
+
+        match self.inline_policy {
+            AotInlinePolicy::Never => false,
+            AotInlinePolicy::Always => !self.is_recursive,
+            AotInlinePolicy::Auto => !self.is_recursive && self.size <= max_size && self.score > 0,
+        }
     }
 }
 
@@ -58,11 +73,36 @@ impl AotInliner {
 
     /// Analyze a program to find inline candidates
     pub fn analyze_program(&mut self, program: &AotProgram) {
-        // First pass: collect function info
-        for func in &program.functions {
-            let size = Self::count_statements(&func.body);
-            let is_recursive = Self::is_recursive(func, program);
-            let is_pure = Self::is_pure_function(func);
+        let function_info: Vec<_> = program
+            .functions
+            .iter()
+            .map(|func| {
+                (
+                    func,
+                    Self::count_statements(&func.body),
+                    Self::is_recursive(func, program),
+                )
+            })
+            .collect();
+
+        let mut pure_functions = HashSet::new();
+        loop {
+            let mut changed = false;
+            for (func, _, is_recursive) in &function_info {
+                if *is_recursive || pure_functions.contains(&func.name) {
+                    continue;
+                }
+                if Self::is_pure_function(func, &pure_functions) {
+                    changed |= pure_functions.insert(func.name.clone());
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        for (func, size, is_recursive) in function_info {
+            let is_pure = pure_functions.contains(&func.name);
 
             // Calculate inlining score
             let mut score: i32 = 10;
@@ -86,6 +126,9 @@ impl AotInliner {
                     is_recursive,
                     is_pure,
                     score,
+                    inline_policy: func.inline_policy,
+                    return_needs_value: AotAbiValue::from_static_type(&func.return_type)
+                        .needs_runtime_value(),
                 },
             );
         }
@@ -191,7 +234,7 @@ impl AotInliner {
                     || Self::calls_function(target, then_branch, program, visited)
                     || else_branch
                         .as_ref()
-                        .map_or(false, |e| Self::calls_function(target, e, program, visited))
+                        .is_some_and(|e| Self::calls_function(target, e, program, visited))
             }
             AotStmt::While {
                 condition, body, ..
@@ -208,9 +251,9 @@ impl AotInliner {
             } => {
                 Self::expr_calls_function(target, start, program, visited)
                     || Self::expr_calls_function(target, stop, program, visited)
-                    || step.as_ref().map_or(false, |s| {
-                        Self::expr_calls_function(target, s, program, visited)
-                    })
+                    || step
+                        .as_ref()
+                        .is_some_and(|s| Self::expr_calls_function(target, s, program, visited))
                     || Self::calls_function(target, body, program, visited)
             }
             AotStmt::ForEach { iter, body, .. } => {
@@ -273,6 +316,9 @@ impl AotInliner {
             } => elements
                 .iter()
                 .any(|e| Self::expr_calls_function(target, e, program, visited)),
+            AotExpr::SetFromIter { iter, .. } => {
+                Self::expr_calls_function(target, iter, program, visited)
+            }
             AotExpr::Ternary {
                 condition,
                 then_expr,
@@ -293,41 +339,50 @@ impl AotInliner {
             } => {
                 Self::expr_calls_function(target, start, program, visited)
                     || Self::expr_calls_function(target, stop, program, visited)
-                    || step.as_ref().map_or(false, |s| {
-                        Self::expr_calls_function(target, s, program, visited)
-                    })
+                    || step
+                        .as_ref()
+                        .is_some_and(|s| Self::expr_calls_function(target, s, program, visited))
             }
             AotExpr::Lambda { body, .. } => {
                 Self::expr_calls_function(target, body, program, visited)
+            }
+            AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::expr_calls_function(target, iter, program, visited)
+                    || filter.as_ref().is_some_and(|filter| {
+                        Self::expr_calls_function(target, filter, program, visited)
+                    })
+                    || Self::expr_calls_function(target, body, program, visited)
             }
             _ => false,
         }
     }
 
     /// Check if a function is pure (no side effects)
-    fn is_pure_function(func: &AotFunction) -> bool {
-        Self::stmts_are_pure(&func.body)
+    fn is_pure_function(func: &AotFunction, pure_functions: &HashSet<String>) -> bool {
+        Self::stmts_are_pure_with_known(&func.body, pure_functions)
     }
 
-    /// Check if statements are pure
-    fn stmts_are_pure(stmts: &[AotStmt]) -> bool {
-        stmts.iter().all(Self::stmt_is_pure)
+    fn stmts_are_pure_with_known(stmts: &[AotStmt], pure_functions: &HashSet<String>) -> bool {
+        stmts
+            .iter()
+            .all(|stmt| Self::stmt_is_pure_with_known(stmt, pure_functions))
     }
 
-    /// Check if a statement is pure
-    fn stmt_is_pure(stmt: &AotStmt) -> bool {
+    fn stmt_is_pure_with_known(stmt: &AotStmt, pure_functions: &HashSet<String>) -> bool {
         match stmt {
-            AotStmt::Let { value, .. } => Self::expr_is_pure(value),
+            AotStmt::Let { value, .. } => Self::expr_is_pure_with_known(value, pure_functions),
             AotStmt::Assign { value, target, .. } => {
                 // Assignment to array index is impure
                 if matches!(target, AotExpr::Index { .. }) {
                     return false;
                 }
-                Self::expr_is_pure(value)
+                Self::expr_is_pure_with_known(value, pure_functions)
             }
             AotStmt::CompoundAssign { .. } => true, // Local mutation is ok
-            AotStmt::Expr(expr) => Self::expr_is_pure(expr),
-            AotStmt::Return(Some(expr)) => Self::expr_is_pure(expr),
+            AotStmt::Expr(expr) => Self::expr_is_pure_with_known(expr, pure_functions),
+            AotStmt::Return(Some(expr)) => Self::expr_is_pure_with_known(expr, pure_functions),
             AotStmt::Return(None) => true,
             AotStmt::If {
                 condition,
@@ -335,17 +390,20 @@ impl AotInliner {
                 else_branch,
                 ..
             } => {
-                Self::expr_is_pure(condition)
-                    && Self::stmts_are_pure(then_branch)
+                Self::expr_is_pure_with_known(condition, pure_functions)
+                    && Self::stmts_are_pure_with_known(then_branch, pure_functions)
                     && else_branch
                         .as_ref()
-                        .map_or(true, |e| Self::stmts_are_pure(e))
+                        .is_none_or(|e| Self::stmts_are_pure_with_known(e, pure_functions))
             }
             AotStmt::While {
                 condition, body, ..
-            } => Self::expr_is_pure(condition) && Self::stmts_are_pure(body),
+            } => {
+                Self::expr_is_pure_with_known(condition, pure_functions)
+                    && Self::stmts_are_pure_with_known(body, pure_functions)
+            }
             AotStmt::ForRange { body, .. } | AotStmt::ForEach { body, .. } => {
-                Self::stmts_are_pure(body)
+                Self::stmts_are_pure_with_known(body, pure_functions)
             }
             AotStmt::Break | AotStmt::Continue => true,
         }
@@ -353,6 +411,10 @@ impl AotInliner {
 
     /// Check if an expression is pure
     pub fn expr_is_pure(expr: &AotExpr) -> bool {
+        Self::expr_is_pure_with_known(expr, &HashSet::new())
+    }
+
+    fn expr_is_pure_with_known(expr: &AotExpr, pure_functions: &HashSet<String>) -> bool {
         match expr {
             // Literals are pure
             AotExpr::LitI64(_)
@@ -362,7 +424,8 @@ impl AotInliner {
             | AotExpr::LitBool(_)
             | AotExpr::LitStr(_)
             | AotExpr::LitChar(_)
-            | AotExpr::LitNothing => true,
+            | AotExpr::LitNothing
+            | AotExpr::LitMissing => true,
 
             // Variables are pure
             AotExpr::Var { .. } => true,
@@ -370,12 +433,20 @@ impl AotInliner {
             // Operators are pure if operands are
             AotExpr::BinOpStatic { left, right, .. }
             | AotExpr::BinOpDynamic { left, right, .. } => {
-                Self::expr_is_pure(left) && Self::expr_is_pure(right)
+                Self::expr_is_pure_with_known(left, pure_functions)
+                    && Self::expr_is_pure_with_known(right, pure_functions)
             }
-            AotExpr::UnaryOp { operand, .. } => Self::expr_is_pure(operand),
+            AotExpr::UnaryOp { operand, .. } => {
+                Self::expr_is_pure_with_known(operand, pure_functions)
+            }
 
-            // Function calls - assume impure for safety (could be refined)
-            AotExpr::CallStatic { .. } | AotExpr::CallDynamic { .. } => false,
+            AotExpr::CallStatic { function, args, .. } => {
+                pure_functions.contains(function)
+                    && args
+                        .iter()
+                        .all(|arg| Self::expr_is_pure_with_known(arg, pure_functions))
+            }
+            AotExpr::CallDynamic { .. } => false,
 
             // Builtins - some are pure
             AotExpr::CallBuiltin { builtin, args, .. } => {
@@ -392,9 +463,13 @@ impl AotInliner {
                         | AotBuiltinOp::Min
                         | AotBuiltinOp::Max
                         | AotBuiltinOp::Length
+                        | AotBuiltinOp::In
                         | AotBuiltinOp::Sum
                 );
-                builtin_is_pure && args.iter().all(Self::expr_is_pure)
+                builtin_is_pure
+                    && args
+                        .iter()
+                        .all(|arg| Self::expr_is_pure_with_known(arg, pure_functions))
             }
 
             // Collections
@@ -402,21 +477,62 @@ impl AotInliner {
             | AotExpr::TupleLit { elements }
             | AotExpr::StructNew {
                 fields: elements, ..
-            } => elements.iter().all(Self::expr_is_pure),
+            } => elements
+                .iter()
+                .all(|element| Self::expr_is_pure_with_known(element, pure_functions)),
+            AotExpr::SetFromIter { iter, .. } => {
+                Self::expr_is_pure_with_known(iter, pure_functions)
+            }
+            AotExpr::NamedTupleLit { fields } => fields
+                .iter()
+                .all(|(_, field)| Self::expr_is_pure_with_known(field, pure_functions)),
+            AotExpr::Comprehension {
+                body, iter, filter, ..
+            }
+            | AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::expr_is_pure_with_known(iter, pure_functions)
+                    && filter
+                        .as_ref()
+                        .is_none_or(|filter| Self::expr_is_pure_with_known(filter, pure_functions))
+                    && Self::expr_is_pure_with_known(body, pure_functions)
+            }
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                iterations
+                    .iter()
+                    .all(|(_, iter)| Self::expr_is_pure_with_known(iter, pure_functions))
+                    && filter
+                        .as_ref()
+                        .is_none_or(|filter| Self::expr_is_pure_with_known(filter, pure_functions))
+                    && Self::expr_is_pure_with_known(body, pure_functions)
+            }
 
             AotExpr::Index { array, indices, .. } => {
-                Self::expr_is_pure(array) && indices.iter().all(Self::expr_is_pure)
+                Self::expr_is_pure_with_known(array, pure_functions)
+                    && indices
+                        .iter()
+                        .all(|index| Self::expr_is_pure_with_known(index, pure_functions))
             }
 
             AotExpr::Range {
                 start, stop, step, ..
             } => {
-                Self::expr_is_pure(start)
-                    && Self::expr_is_pure(stop)
-                    && step.as_ref().map_or(true, |s| Self::expr_is_pure(s))
+                Self::expr_is_pure_with_known(start, pure_functions)
+                    && Self::expr_is_pure_with_known(stop, pure_functions)
+                    && step
+                        .as_ref()
+                        .is_none_or(|s| Self::expr_is_pure_with_known(s, pure_functions))
             }
 
-            AotExpr::FieldAccess { object, .. } => Self::expr_is_pure(object),
+            AotExpr::FieldAccess { object, .. } => {
+                Self::expr_is_pure_with_known(object, pure_functions)
+            }
 
             AotExpr::Ternary {
                 condition,
@@ -424,14 +540,16 @@ impl AotInliner {
                 else_expr,
                 ..
             } => {
-                Self::expr_is_pure(condition)
-                    && Self::expr_is_pure(then_expr)
-                    && Self::expr_is_pure(else_expr)
+                Self::expr_is_pure_with_known(condition, pure_functions)
+                    && Self::expr_is_pure_with_known(then_expr, pure_functions)
+                    && Self::expr_is_pure_with_known(else_expr, pure_functions)
             }
 
             AotExpr::Box(inner)
             | AotExpr::Unbox { value: inner, .. }
-            | AotExpr::Convert { value: inner, .. } => Self::expr_is_pure(inner),
+            | AotExpr::Convert { value: inner, .. } => {
+                Self::expr_is_pure_with_known(inner, pure_functions)
+            }
 
             AotExpr::Lambda { .. } => true, // Lambda definition is pure
         }
@@ -578,22 +696,28 @@ impl AotInliner {
         functions: &HashMap<String, AotFunction>,
         depth: usize,
     ) -> Option<(Vec<AotStmt>, AotExpr, usize)> {
-        match expr {
-            AotExpr::CallStatic {
-                function,
-                args,
-                return_ty,
-            } => {
-                // Check if this function should be inlined
-                if let Some(candidate) = self.inline_candidates.get(function) {
-                    if candidate.should_inline(self.max_inline_size) {
-                        if let Some(func) = functions.get(function) {
-                            return self.inline_function_call(func, args, return_ty, depth);
-                        }
+        if let AotExpr::CallStatic {
+            function,
+            args,
+            return_ty,
+            inline_policy,
+        } = expr
+        {
+            // Check if this function should be inlined
+            if let Some(candidate) = self.inline_candidates.get(function) {
+                let should_inline = match inline_policy {
+                    AotInlinePolicy::Never => false,
+                    AotInlinePolicy::Always => {
+                        !candidate.is_recursive && !candidate.return_needs_value
+                    }
+                    AotInlinePolicy::Auto => candidate.should_inline(self.max_inline_size),
+                };
+                if should_inline {
+                    if let Some(func) = functions.get(function) {
+                        return self.inline_function_call(func, args, return_ty, depth);
                     }
                 }
             }
-            _ => {}
         }
         None
     }
@@ -824,6 +948,7 @@ impl AotInliner {
                 function,
                 args,
                 return_ty,
+                inline_policy,
             } => AotExpr::CallStatic {
                 function: function.clone(),
                 args: args
@@ -831,6 +956,7 @@ impl AotInliner {
                     .map(|a| self.rename_variables_in_expr(a, rename_map))
                     .collect(),
                 return_ty: return_ty.clone(),
+                inline_policy: *inline_policy,
             },
             AotExpr::CallDynamic { function, args } => AotExpr::CallDynamic {
                 function: function.clone(),
@@ -862,6 +988,10 @@ impl AotInliner {
                     .collect(),
                 elem_ty: elem_ty.clone(),
                 shape: shape.clone(),
+            },
+            AotExpr::SetFromIter { iter, elem_ty } => AotExpr::SetFromIter {
+                iter: Box::new(self.rename_variables_in_expr(iter, rename_map)),
+                elem_ty: elem_ty.clone(),
             },
             AotExpr::TupleLit { elements } => AotExpr::TupleLit {
                 elements: elements
@@ -896,6 +1026,25 @@ impl AotInliner {
                     .map(|s| Box::new(self.rename_variables_in_expr(s, rename_map))),
                 elem_ty: elem_ty.clone(),
             },
+            AotExpr::Generator {
+                body,
+                var,
+                iter,
+                filter,
+                elem_ty,
+            } => {
+                let mut inner_map = rename_map.clone();
+                inner_map.remove(var);
+                AotExpr::Generator {
+                    body: Box::new(self.rename_variables_in_expr(body, &inner_map)),
+                    var: var.clone(),
+                    iter: Box::new(self.rename_variables_in_expr(iter, rename_map)),
+                    filter: filter
+                        .as_ref()
+                        .map(|filter| Box::new(self.rename_variables_in_expr(filter, &inner_map))),
+                    elem_ty: elem_ty.clone(),
+                }
+            }
             AotExpr::StructNew { name, fields } => AotExpr::StructNew {
                 name: name.clone(),
                 fields: fields
@@ -970,4 +1119,91 @@ pub fn optimize_aot_program_with_inlining(
 ) -> usize {
     let mut inliner = AotInliner::new(max_inline_size);
     inliner.optimize_program(program)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aot::ir::AotBinOp;
+
+    fn lit_add_function(name: &str) -> AotFunction {
+        let mut func = AotFunction::new(name.to_string(), vec![], StaticType::I64);
+        func.body.push(AotStmt::Return(Some(AotExpr::BinOpStatic {
+            op: AotBinOp::Add,
+            left: Box::new(AotExpr::LitI64(1)),
+            right: Box::new(AotExpr::LitI64(2)),
+            result_ty: StaticType::I64,
+        })));
+        func
+    }
+
+    #[test]
+    fn static_calls_to_known_pure_functions_are_pure_issue_6981() {
+        let mut program = AotProgram::new();
+        program.add_function(lit_add_function("leaf"));
+
+        let mut wrapper = AotFunction::new("wrapper".to_string(), vec![], StaticType::I64);
+        wrapper.body.push(AotStmt::Return(Some(AotExpr::CallStatic {
+            function: "leaf".to_string(),
+            args: vec![],
+            return_ty: StaticType::I64,
+            inline_policy: AotInlinePolicy::Auto,
+        })));
+        program.add_function(wrapper);
+
+        let mut inliner = AotInliner::new(10);
+        inliner.analyze_program(&program);
+        assert!(inliner.get_candidates()["leaf"].is_pure);
+        assert!(inliner.get_candidates()["wrapper"].is_pure);
+        assert!(inliner.get_candidates()["wrapper"].score > 10);
+    }
+
+    #[test]
+    fn dynamic_calls_remain_impure_issue_6981() {
+        let mut program = AotProgram::new();
+        let mut wrapper = AotFunction::new("wrapper".to_string(), vec![], StaticType::Any);
+        wrapper
+            .body
+            .push(AotStmt::Return(Some(AotExpr::CallDynamic {
+                function: "f".to_string(),
+                args: vec![AotExpr::LitI64(1)],
+            })));
+        program.add_function(wrapper);
+
+        let mut inliner = AotInliner::new(10);
+        inliner.analyze_program(&program);
+        assert!(!inliner.get_candidates()["wrapper"].is_pure);
+    }
+
+    #[test]
+    fn runtime_boxed_return_calls_do_not_inline_into_main_issue_7012() {
+        let mut program = AotProgram::new();
+        let mut union_like = AotFunction::new("union_like".to_string(), vec![], StaticType::Any);
+        union_like.body.push(AotStmt::Return(Some(AotExpr::Ternary {
+            condition: Box::new(AotExpr::LitBool(true)),
+            then_expr: Box::new(AotExpr::LitI64(1)),
+            else_expr: Box::new(AotExpr::LitStr("fallback".to_string())),
+            result_ty: StaticType::Any,
+        })));
+        program.add_function(union_like);
+        program.main.push(AotStmt::Expr(AotExpr::CallStatic {
+            function: "union_like".to_string(),
+            args: vec![],
+            return_ty: StaticType::Any,
+            inline_policy: AotInlinePolicy::Always,
+        }));
+
+        let inlined = optimize_aot_program_with_inlining(&mut program, 10);
+
+        assert_eq!(inlined, 0);
+        assert!(
+            matches!(
+                program.main.as_slice(),
+                [AotStmt::Expr(AotExpr::CallStatic { function, .. })]
+                    if function == "union_like"
+            ),
+            "runtime-boxed return call should stay as a call, got {:?}",
+            program.main
+        );
+    }
 }

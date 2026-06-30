@@ -208,23 +208,25 @@ pub(super) fn extract_default_from_parameter_node<'a>(
         return Ok(None);
     }
 
-    // Has '=': find the default value expression.
-    // Children layout for `greeting::String="Hello"`: [Identifier, TypeClause, StringLiteral]
-    // Children layout for `b=10`: [Identifier, IntegerLiteral]
+    // Has '=': the default value is always the LAST named child.
+    // The Pure Rust parser builds a `Parameter` node in source order as
+    // `[name, type?, default?]` (see `parse_parameter` in
+    // subset_julia_vm_parser definitions.rs: the type from `::` is pushed
+    // before the default from `=`), so when `=` is present the default
+    // expression is appended last. Examples:
+    //   `b=10`                 -> [Identifier("b"), IntegerLiteral(10)]
+    //   `greeting::String="Hi"` -> [Identifier("greeting"), <type>, StringLiteral("Hi")]
+    //   `l=nothing`            -> [Identifier("l"), Identifier("nothing")]
+    // We must NOT skip identifier children here: a default value can itself be
+    // a bare identifier / global reference (`nothing`, `missing`, a const, a
+    // type), which is an `Identifier` node just like a type annotation. The old
+    // heuristic skipped every identifier as if it were a type, dropping such
+    // defaults so the default-arg stub was never generated and reduced-arity
+    // calls failed to dispatch (Issue #8017).
     let children = walker.named_children(&node);
-    for (i, child) in children.iter().enumerate() {
-        if i == 0 {
-            continue; // Skip parameter name
-        }
-        let kind = walker.kind(child);
-        if kind == NodeKind::TypeClause || kind == NodeKind::Identifier {
-            // Skip type annotation: TypeClause (tree-sitter) or bare Identifier (Pure Rust parser)
-            // For typed params without defaults, the 2nd+ children are type nodes.
-            // The '=' check above ensures we only reach here if there IS a default,
-            // so we skip type-related children and find the actual default value expression.
-            continue;
-        }
-        return Ok(Some(lower_expr(walker, *child)?));
+    if children.len() >= 2 {
+        let default_node = children[children.len() - 1];
+        return Ok(Some(lower_expr(walker, default_node)?));
     }
     Ok(None)
 }
@@ -247,7 +249,7 @@ pub(super) fn extract_default_from_assignment_node<'a>(
 }
 
 /// Generate stub methods for parameters with default values.
-pub(super) fn generate_default_arg_stubs(
+pub(crate) fn generate_default_arg_stubs(
     func: &Function,
     defaults: &[Option<Expr>],
 ) -> Vec<Function> {
@@ -279,12 +281,32 @@ pub(super) fn generate_default_arg_stubs(
             }
         }
 
+        // Thread the caller's keyword arguments through to the full method.
+        // The generated reduced-arity stub carries the same `kwparams` as the
+        // full method, so when a caller passes a keyword (e.g. `h(5; c=0)`) the
+        // stub binds it as a normal keyword parameter. Without re-forwarding it,
+        // the full method would re-apply the keyword's *default* and drop the
+        // explicitly-passed value (Issue #7992). For varargs kwparams
+        // (`kwargs...`) forward the collected NamedTuple as a kwargs splat.
+        let mut kwargs: Vec<(String, Expr)> = Vec::new();
+        let mut kwargs_splat_mask: Vec<bool> = Vec::new();
+        for kwparam in &func.kwparams {
+            let value = Expr::Var(kwparam.name.clone(), func.span);
+            if kwparam.is_varargs {
+                kwargs.push((String::new(), value));
+                kwargs_splat_mask.push(true);
+            } else {
+                kwargs.push((kwparam.name.clone(), value));
+                kwargs_splat_mask.push(false);
+            }
+        }
+
         let call_expr = Expr::Call {
             function: func.name.clone(),
             args: call_args,
-            kwargs: Vec::new(),
+            kwargs,
             splat_mask: Vec::new(),
-            kwargs_splat_mask: Vec::new(),
+            kwargs_splat_mask,
             span: func.span,
         };
 
@@ -306,6 +328,7 @@ pub(super) fn generate_default_arg_stubs(
             return_type: func.return_type.clone(),
             body,
             is_base_extension: func.is_base_extension,
+            is_runtime_eval: false,
             span: func.span,
         });
     }

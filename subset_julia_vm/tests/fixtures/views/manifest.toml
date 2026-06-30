@@ -1,0 +1,35 @@
+[[tests]]
+name = "views_dropdims_view_aliasing"
+file = "dropdims_view_aliasing.jl"
+expected = true
+description = "dropdims returns a view that shares storage with parent, preserving element type (Issue #3594)"
+
+[[tests]]
+name = "views_selectdim_view_aliasing"
+file = "selectdim_view_aliasing.jl"
+expected = true
+description = "selectdim returns a view that shares storage with parent, preserving element type (Issue #3593)"
+
+[[tests]]
+name = "views_selectdim_dropdims_string_fallback_4591"
+file = "selectdim_dropdims_string_fallback_4591.jl"
+expected = true
+description = "selectdim/dropdims fallback copies unsupported MatrixView eltypes with similar(A, n) instead of zeros(n) (Issues #4018, #4591)"
+
+[[tests]]
+name = "views_range_vector_index_5754"
+file = "range_vector_index_5754.jl"
+expected = true
+description = "Indexing a range with a vector of indices or a Bool mask materializes the selected elements into a Vector ((1:10)[[1,3,5]]); a range index still returns a range (Issue #5754)"
+
+[[tests]]
+name = "views_linear_getindex_2d_view_5816"
+file = "linear_getindex_2d_view_5816.jl"
+expected = true
+description = "Linear (single-index) getindex on a 2D view maps the column-major linear index through the per-dimension parent indices instead of assuming a contiguous offset+i layout (Issue #5816)"
+
+[[tests]]
+name = "views_collect_2d_view_dispatch_5812"
+file = "collect_2d_view_dispatch_5812.jl"
+expected = true
+description = "Regression: collect of a 2D view dispatches to the SubArray collect (Matrix of the view's shape), not the Array collect path that returned a flat Vector of parent storage (Issue #5812, resolved by #5813)"

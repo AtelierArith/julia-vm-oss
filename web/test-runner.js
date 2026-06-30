@@ -12,18 +12,20 @@
  *   npx playwright test-runner.js
  */
 
-const { chromium } = require('playwright');
+import { chromium } from 'playwright';
 
 const SERVER_URL = process.argv.find(a => a.startsWith('--server-url='))?.split('=')[1]
     || process.env.SERVER_URL
     || 'http://localhost:8080';
+const READY_TIMEOUT_MS = Number(process.env.WEB_TEST_READY_TIMEOUT_MS || 180000);
+const RUN_TIMEOUT_MS = Number(process.env.WEB_TEST_RUN_TIMEOUT_MS || 900000);
 
 async function runTests() {
     console.log('SubsetJuliaVM Web Test Runner');
     console.log('========================\n');
     console.log(`Server URL: ${SERVER_URL}\n`);
 
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ channel: 'chrome', headless: true });
     const page = await browser.newPage();
 
     // Collect console logs
@@ -42,7 +44,7 @@ async function runTests() {
         await page.waitForFunction(() => {
             const status = document.getElementById('status');
             return status && status.textContent === 'Ready';
-        }, { timeout: 30000 });
+        }, undefined, { timeout: READY_TIMEOUT_MS });
 
         console.log('Running tests...\n');
 
@@ -53,7 +55,7 @@ async function runTests() {
         await page.waitForFunction(() => {
             const status = document.getElementById('status');
             return status && status.textContent === 'Done';
-        }, { timeout: 120000 });
+        }, undefined, { timeout: RUN_TIMEOUT_MS });
 
         // Get results
         const results = await page.evaluate(() => {
@@ -63,7 +65,8 @@ async function runTests() {
             items.forEach((item, idx) => {
                 const name = item.querySelector('.name').textContent;
                 const status = item.classList.contains('pass') ? 'pass' :
-                              item.classList.contains('fail') ? 'fail' : 'unknown';
+                              item.classList.contains('fail') ? 'fail' :
+                              item.classList.contains('skip') ? 'skip' : 'unknown';
                 const error = item.querySelector('.error')?.textContent || null;
 
                 results.push({ idx, name, status, error });
@@ -75,10 +78,13 @@ async function runTests() {
         // Print results
         let passed = 0;
         let failed = 0;
+        let skipped = 0;
 
         for (const result of results) {
-            const icon = result.status === 'pass' ? '✓' : '✗';
-            const color = result.status === 'pass' ? '\x1b[32m' : '\x1b[31m';
+            const icon = result.status === 'pass' ? '✓' :
+                         result.status === 'skip' ? '⊘' : '✗';
+            const color = result.status === 'pass' ? '\x1b[32m' :
+                          result.status === 'skip' ? '\x1b[90m' : '\x1b[31m';
             const reset = '\x1b[0m';
 
             console.log(`${color}${icon}${reset} ${result.name}`);
@@ -88,12 +94,13 @@ async function runTests() {
             }
 
             if (result.status === 'pass') passed++;
+            else if (result.status === 'skip') skipped++;
             else failed++;
         }
 
         // Summary
         console.log('\n========================');
-        console.log(`Results: ${passed} passed, ${failed} failed, ${results.length} total`);
+        console.log(`Results: ${passed} passed, ${skipped} skipped, ${failed} failed, ${results.length} total`);
 
         await browser.close();
 

@@ -15,6 +15,8 @@
 //! This module detects and corrects this by merging the condition with the
 //! block's leading binary expression when appropriate.
 
+use std::collections::HashSet;
+
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
 use crate::ir::core::{BinaryOp, Block, Expr, Literal, Stmt};
 use crate::lowering::expr;
@@ -25,7 +27,7 @@ use crate::span::Span;
 
 use super::lower_block;
 use super::lower_block_with_ctx;
-use super::lower_stmt;
+use super::{lower_stmt, lower_stmt_with_ctx};
 
 /// Check if a node is a `@generated` or `@generated()` macro call.
 /// This is used to detect the `if @generated ... else ... end` pattern.
@@ -64,6 +66,128 @@ fn try_extract_quote_inner<'a>(walker: &CstWalker<'a>, quote_node: Node<'a>) -> 
     Some(inner_children[0])
 }
 
+fn dollar_unary_operand<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> Option<Node<'a>> {
+    if walker.kind(&node) != NodeKind::UnaryExpression {
+        return None;
+    }
+
+    let mut saw_dollar = false;
+    let mut operand = None;
+    for child in walker.named_children(&node) {
+        if walker.kind(&child) == NodeKind::Operator && walker.text(&child) == "$" {
+            saw_dollar = true;
+        } else {
+            operand = Some(child);
+        }
+    }
+
+    if saw_dollar {
+        operand
+    } else {
+        None
+    }
+}
+
+fn collect_quote_identifier_refs<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    interpolated_names: &mut HashSet<String>,
+    bare_names: &mut HashSet<String>,
+) {
+    if let Some(operand) = dollar_unary_operand(walker, node) {
+        if walker.kind(&operand) == NodeKind::Identifier {
+            interpolated_names.insert(walker.text(&operand).to_string());
+        }
+        // Identifiers inside `$(expr)` are generated-time expressions, not
+        // runtime-frame references in the returned Expr.
+        return;
+    }
+
+    if walker.kind(&node) == NodeKind::Identifier {
+        bare_names.insert(walker.text(&node).to_string());
+        return;
+    }
+
+    for child in walker.named_children(&node) {
+        collect_quote_identifier_refs(walker, child, interpolated_names, bare_names);
+    }
+}
+
+fn quote_mixes_interpolated_and_runtime_identifier<'a>(
+    walker: &CstWalker<'a>,
+    quote_node: Node<'a>,
+) -> bool {
+    let Some(inner_node) = try_extract_quote_inner(walker, quote_node) else {
+        return false;
+    };
+
+    let mut interpolated_names = HashSet::new();
+    let mut bare_names = HashSet::new();
+    collect_quote_identifier_refs(walker, inner_node, &mut interpolated_names, &mut bare_names);
+
+    interpolated_names
+        .iter()
+        .any(|name| bare_names.contains(name))
+}
+
+fn node_contains_dollar_unary<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> bool {
+    if dollar_unary_operand(walker, node).is_some() {
+        return true;
+    }
+
+    walker
+        .named_children(&node)
+        .into_iter()
+        .any(|child| node_contains_dollar_unary(walker, child))
+}
+
+fn quote_contains_generated_interpolation<'a>(
+    walker: &CstWalker<'a>,
+    quote_node: Node<'a>,
+) -> bool {
+    let Some(inner_node) = try_extract_quote_inner(walker, quote_node) else {
+        return false;
+    };
+    node_contains_dollar_unary(walker, inner_node)
+}
+
+fn unquoted_statement_requires_generated_frame<'a>(
+    walker: &CstWalker<'a>,
+    stmt_node: Node<'a>,
+) -> bool {
+    match walker.kind(&stmt_node) {
+        NodeKind::QuoteExpression => quote_contains_generated_interpolation(walker, stmt_node),
+        NodeKind::Assignment => {
+            let children = walker.named_children(&stmt_node);
+            children
+                .get(1)
+                .is_some_and(|rhs| quote_contains_generated_interpolation(walker, *rhs))
+        }
+        NodeKind::ReturnStatement => walker
+            .named_children(&stmt_node)
+            .first()
+            .is_some_and(|value| quote_contains_generated_interpolation(walker, *value)),
+        _ => false,
+    }
+}
+
+pub(super) fn unquoted_generated_block_requires_generated_frame<'a>(
+    walker: &CstWalker<'a>,
+    block_node: Node<'a>,
+) -> bool {
+    walker
+        .named_children(&block_node)
+        .into_iter()
+        .any(|stmt| unquoted_statement_requires_generated_frame(walker, stmt))
+}
+
+pub(super) fn unquoted_generated_short_body_requires_generated_frame<'a>(
+    walker: &CstWalker<'a>,
+    body_node: Node<'a>,
+) -> bool {
+    quote_contains_generated_interpolation(walker, body_node)
+}
+
 /// Pattern 1: Single quote expression like `:(x^2)` or `:(sin(x))`
 fn try_unquote_quote_expression<'a>(
     walker: &CstWalker<'a>,
@@ -75,6 +199,9 @@ fn try_unquote_quote_expression<'a>(
     }
 
     let span = walker.span(&stmt_node);
+    if quote_mixes_interpolated_and_runtime_identifier(walker, stmt_node) {
+        return None;
+    }
     let inner_node = try_extract_quote_inner(walker, stmt_node)?;
 
     let result = expr::lower_expr(walker, inner_node);
@@ -119,6 +246,9 @@ fn try_unquote_assignment<'a>(
         return None;
     }
 
+    if quote_mixes_interpolated_and_runtime_identifier(walker, rhs_node) {
+        return None;
+    }
     let inner_node = try_extract_quote_inner(walker, rhs_node)?;
     let span = walker.span(&stmt_node);
 
@@ -161,6 +291,9 @@ fn try_unquote_return<'a>(
         return None;
     }
 
+    if quote_mixes_interpolated_and_runtime_identifier(walker, return_value_node) {
+        return None;
+    }
     let inner_node = try_extract_quote_inner(walker, return_value_node)?;
     let span = walker.span(&stmt_node);
 
@@ -191,6 +324,9 @@ fn try_unquote_single_statement<'a>(
 
     // Pattern: Quote expression like `:(x^2)`
     if kind == NodeKind::QuoteExpression {
+        if quote_mixes_interpolated_and_runtime_identifier(walker, stmt_node) {
+            return None;
+        }
         let inner_node = try_extract_quote_inner(walker, stmt_node)?;
         return match expr::lower_expr(walker, inner_node) {
             Ok(unquoted_expr) => Some(Ok(Stmt::Expr {
@@ -211,6 +347,9 @@ fn try_unquote_single_statement<'a>(
             if walker.kind(&lhs_node) == NodeKind::Identifier
                 && walker.kind(&rhs_node) == NodeKind::QuoteExpression
             {
+                if quote_mixes_interpolated_and_runtime_identifier(walker, rhs_node) {
+                    return None;
+                }
                 let var_name = walker.text(&lhs_node).to_string();
                 if let Some(inner_node) = try_extract_quote_inner(walker, rhs_node) {
                     return match expr::lower_expr(walker, inner_node) {
@@ -232,6 +371,9 @@ fn try_unquote_single_statement<'a>(
         if return_children.len() == 1 {
             let return_value_node = return_children[0];
             if walker.kind(&return_value_node) == NodeKind::QuoteExpression {
+                if quote_mixes_interpolated_and_runtime_identifier(walker, return_value_node) {
+                    return None;
+                }
                 if let Some(inner_node) = try_extract_quote_inner(walker, return_value_node) {
                     return match expr::lower_expr(walker, inner_node) {
                         Ok(return_expr) => Some(Ok(Stmt::Return {
@@ -246,6 +388,39 @@ fn try_unquote_single_statement<'a>(
     }
 
     None
+}
+
+/// Try to unquote a one-line generated function body such as
+/// `@generated f(x) = :(x + 1)`.
+pub(super) fn try_unquote_generated_short_body<'a>(
+    walker: &CstWalker<'a>,
+    body_node: Node<'a>,
+) -> Option<LowerResult<Block>> {
+    if walker.kind(&body_node) != NodeKind::QuoteExpression {
+        return None;
+    }
+
+    if quote_mixes_interpolated_and_runtime_identifier(walker, body_node) {
+        return None;
+    }
+
+    // Mark the generated-unquote path active so a `$ident` interpolation in the
+    // quoted body lowers to its bound parameter rather than being rejected as
+    // `UnsupportedOperator("$")` (Issue #5934).
+    let _unquote_scope = crate::lowering::generated_unquote::UnquoteScope::enter();
+
+    let inner_node = try_extract_quote_inner(walker, body_node)?;
+    let span = walker.span(&body_node);
+    match expr::lower_expr(walker, inner_node) {
+        Ok(return_expr) => Some(Ok(Block {
+            stmts: vec![Stmt::Return {
+                value: Some(return_expr),
+                span,
+            }],
+            span,
+        })),
+        Err(e) => Some(Err(e)),
+    }
 }
 
 /// Try to unquote a multi-statement generated block.
@@ -292,7 +467,7 @@ fn try_unquote_multi_statement_block<'a>(
 /// - Multi-statement blocks with any combination of the above
 ///
 /// Returns None if the block doesn't match a simple pattern.
-fn try_unquote_generated_block<'a>(
+pub(super) fn try_unquote_generated_block<'a>(
     walker: &CstWalker<'a>,
     block_node: Node<'a>,
 ) -> Option<LowerResult<Block>> {
@@ -301,6 +476,11 @@ fn try_unquote_generated_block<'a>(
     if children.is_empty() {
         return None;
     }
+
+    // Mark the generated-unquote path active so a `$ident` interpolation in any
+    // quoted statement of the body lowers to its bound parameter rather than
+    // being rejected as `UnsupportedOperator("$")` (Issue #5934).
+    let _unquote_scope = crate::lowering::generated_unquote::UnquoteScope::enter();
 
     // Multi-statement block
     if children.len() > 1 {
@@ -316,6 +496,14 @@ fn try_unquote_generated_block<'a>(
 }
 
 pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Stmt> {
+    lower_if_stmt_impl(walker, node, None)
+}
+
+fn lower_if_stmt_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Stmt> {
     let span = walker.span(&node);
 
     // Get all children to understand structure
@@ -340,7 +528,7 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
             }
             "elseif" => {
                 // Parse elseif as nested if (old format: elseif keyword followed by condition and block)
-                let elseif_stmt = lower_elseif_chain(walker, &all_children, i + 1)?;
+                let elseif_stmt = lower_elseif_chain(walker, &all_children, i + 1, lambda_ctx)?;
                 else_branch = Some(Block {
                     stmts: vec![elseif_stmt],
                     span: walker.span(&child),
@@ -356,7 +544,8 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
                     .filter(|n| n.kind() == "elseif_clause" || n.kind() == "else_clause")
                     .copied()
                     .collect();
-                let elseif_stmt = lower_elseif_clause_chain(walker, &remaining_clauses)?;
+                let elseif_stmt =
+                    lower_elseif_clause_chain(walker, &remaining_clauses, lambda_ctx)?;
                 else_branch = Some(Block {
                     stmts: vec![elseif_stmt],
                     span: walker.span(&child),
@@ -369,7 +558,7 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
                 if i < all_children.len() {
                     let else_node = all_children[i];
                     if walker.kind(&else_node) == NodeKind::Block {
-                        else_branch = Some(lower_block(walker, else_node)?);
+                        else_branch = Some(lower_block_maybe_ctx(walker, else_node, lambda_ctx)?);
                     }
                 }
                 break; // else is always last before end
@@ -380,7 +569,7 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
                 let else_all: Vec<Node<'a>> = walker.children(&child);
                 for else_child in else_all.iter() {
                     if else_child.kind() == "block" {
-                        else_branch = Some(lower_block(walker, *else_child)?);
+                        else_branch = Some(lower_block_maybe_ctx(walker, *else_child, lambda_ctx)?);
                         break;
                     }
                 }
@@ -412,6 +601,25 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
     // Phase 3: Try to "unquote" simple generated expressions
     // Phase 1 fallback: Execute the else branch if unquoting fails
     if is_generated_macro_call(walker, condition_node) {
+        if lambda_ctx.is_some() {
+            if let Some(else_block) = else_branch {
+                let then_branch = lower_block_maybe_ctx(walker, then_block_node, lambda_ctx)?;
+                return Ok(Stmt::If {
+                    condition: Expr::Literal(Literal::Bool(false), span),
+                    then_branch,
+                    else_branch: Some(else_block),
+                    span,
+                });
+            }
+            return Err(UnsupportedFeature::new(
+                UnsupportedFeatureKind::IfStatement,
+                span,
+            )
+            .with_hint(
+                "@generated without fallback is not supported. Use `if @generated ... else fallback end` pattern.",
+            ));
+        }
+
         // Phase 3: Try to unquote the generated block
         // Supports patterns like `:(x^2)` and `result = :(x^2)`
         if let Some(unquoted_result) = try_unquote_generated_block(walker, then_block_node) {
@@ -436,7 +644,7 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
         // Return an if statement with condition=false to execute the else branch
         // This preserves the expression semantics (if returns a value)
         if let Some(else_block) = else_branch {
-            let then_branch = lower_block(walker, then_block_node)?;
+            let then_branch = lower_block_maybe_ctx(walker, then_block_node, lambda_ctx)?;
             return Ok(Stmt::If {
                 condition: Expr::Literal(Literal::Bool(false), span),
                 then_branch,
@@ -458,7 +666,7 @@ pub fn lower_if_stmt<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<
 
     // Try to fix tree-sitter parsing quirk: `if 1 + 2 > 3` parsed as condition=1, block=+2>3...
     let (condition_expr, then_branch) =
-        try_fix_if_condition_parsing(walker, condition_node, then_block_node)?;
+        try_fix_if_condition_parsing(walker, condition_node, then_block_node, lambda_ctx)?;
 
     Ok(Stmt::If {
         condition: condition_expr,
@@ -479,6 +687,7 @@ fn try_fix_if_condition_parsing<'a>(
     walker: &CstWalker<'a>,
     condition_node: Node<'a>,
     block_node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
 ) -> LowerResult<(Expr, Block)> {
     let block_children: Vec<Node<'a>> = walker.named_children(&block_node);
 
@@ -493,9 +702,9 @@ fn try_fix_if_condition_parsing<'a>(
                     .iter()
                     .filter_map(|child| {
                         // Try to lower as statement or expression
-                        if let Ok(stmt) = lower_stmt(walker, *child) {
+                        if let Ok(stmt) = lower_stmt_maybe_ctx(walker, *child, lambda_ctx) {
                             Some(stmt)
-                        } else if let Ok(expr) = expr::lower_expr(walker, *child) {
+                        } else if let Ok(expr) = lower_expr_maybe_ctx(walker, *child, lambda_ctx) {
                             Some(Stmt::Expr {
                                 expr,
                                 span: walker.span(child),
@@ -517,8 +726,8 @@ fn try_fix_if_condition_parsing<'a>(
     }
 
     // No fixup needed - use normal lowering
-    let condition_expr = expr::lower_expr(walker, condition_node)?;
-    let then_branch = lower_block(walker, block_node)?;
+    let condition_expr = lower_expr_maybe_ctx(walker, condition_node, lambda_ctx)?;
+    let then_branch = lower_block_maybe_ctx(walker, block_node, lambda_ctx)?;
     Ok((condition_expr, then_branch))
 }
 
@@ -640,6 +849,7 @@ fn lower_elseif_chain<'a>(
     walker: &CstWalker<'a>,
     all_children: &[Node<'a>],
     start: usize,
+    lambda_ctx: Option<&LambdaContext>,
 ) -> LowerResult<Stmt> {
     let mut i = start;
     let mut condition: Option<Node<'a>> = None;
@@ -661,7 +871,7 @@ fn lower_elseif_chain<'a>(
             "elseif" => {
                 if condition.is_some() && then_block.is_some() {
                     // This is a new elseif, parse recursively
-                    let elseif_stmt = lower_elseif_chain(walker, all_children, i + 1)?;
+                    let elseif_stmt = lower_elseif_chain(walker, all_children, i + 1, lambda_ctx)?;
                     else_branch = Some(Block {
                         stmts: vec![elseif_stmt],
                         span: walker.span(&child),
@@ -676,7 +886,7 @@ fn lower_elseif_chain<'a>(
                 if i < all_children.len() {
                     let else_node = all_children[i];
                     if walker.kind(&else_node) == NodeKind::Block {
-                        else_branch = Some(lower_block(walker, else_node)?);
+                        else_branch = Some(lower_block_maybe_ctx(walker, else_node, lambda_ctx)?);
                     }
                 }
                 break;
@@ -686,7 +896,7 @@ fn lower_elseif_chain<'a>(
                 let else_all: Vec<Node<'a>> = walker.children(&child);
                 for else_child in else_all.iter() {
                     if else_child.kind() == "block" {
-                        else_branch = Some(lower_block(walker, *else_child)?);
+                        else_branch = Some(lower_block_maybe_ctx(walker, *else_child, lambda_ctx)?);
                         break;
                     }
                 }
@@ -713,8 +923,8 @@ fn lower_elseif_chain<'a>(
             .with_hint("missing elseif block")
     })?;
 
-    let condition_expr = expr::lower_expr(walker, condition)?;
-    let then_branch = lower_block(walker, then_block)?;
+    let condition_expr = lower_expr_maybe_ctx(walker, condition, lambda_ctx)?;
+    let then_branch = lower_block_maybe_ctx(walker, then_block, lambda_ctx)?;
 
     Ok(Stmt::If {
         condition: condition_expr,
@@ -730,6 +940,7 @@ fn lower_elseif_chain<'a>(
 fn lower_elseif_clause_chain<'a>(
     walker: &CstWalker<'a>,
     clauses: &[Node<'a>],
+    lambda_ctx: Option<&LambdaContext>,
 ) -> LowerResult<Stmt> {
     if clauses.is_empty() {
         // Should not happen - caller should check before calling
@@ -789,8 +1000,8 @@ fn lower_elseif_clause_chain<'a>(
             .with_hint("missing elseif block")
     })?;
 
-    let condition_expr = expr::lower_expr(walker, condition)?;
-    let then_branch = lower_block(walker, then_block)?;
+    let condition_expr = lower_expr_maybe_ctx(walker, condition, lambda_ctx)?;
+    let then_branch = lower_block_maybe_ctx(walker, then_block, lambda_ctx)?;
 
     // Recursively process remaining clauses to build else_branch
     let else_branch = if clauses.len() > 1 {
@@ -804,14 +1015,14 @@ fn lower_elseif_clause_chain<'a>(
             let mut block: Option<Block> = None;
             for else_child in else_children.iter() {
                 if else_child.kind() == "block" {
-                    block = Some(lower_block(walker, *else_child)?);
+                    block = Some(lower_block_maybe_ctx(walker, *else_child, lambda_ctx)?);
                     break;
                 }
             }
             block
         } else {
             // elseif_clause - recursive call
-            let else_stmt = lower_elseif_clause_chain(walker, remaining)?;
+            let else_stmt = lower_elseif_clause_chain(walker, remaining, lambda_ctx)?;
             Some(Block {
                 stmts: vec![else_stmt],
                 span: walker.span(&next),
@@ -836,314 +1047,40 @@ pub fn lower_if_stmt_with_ctx<'a>(
     node: Node<'a>,
     lambda_ctx: &LambdaContext,
 ) -> LowerResult<Stmt> {
-    let span = walker.span(&node);
-    let all_children: Vec<Node<'a>> = walker.children(&node);
-
-    let mut condition: Option<Node<'a>> = None;
-    let mut then_block: Option<Node<'a>> = None;
-    let mut else_branch: Option<Block> = None;
-
-    let mut i = 0;
-    while i < all_children.len() {
-        let child = all_children[i];
-        let kind_str = child.kind();
-
-        match kind_str {
-            "if" | "end" => {}
-            "elseif" => {
-                let elseif_stmt =
-                    lower_elseif_chain_with_ctx(walker, &all_children, i + 1, lambda_ctx)?;
-                else_branch = Some(Block {
-                    stmts: vec![elseif_stmt],
-                    span: walker.span(&child),
-                });
-                break;
-            }
-            "elseif_clause" => {
-                // Parse elseif_clause nodes (tree-sitter format)
-                // Multiple elseif_clauses may appear as siblings - collect them all
-                // and chain them into nested if-else statements
-                let remaining_clauses: Vec<Node<'a>> = all_children[i..]
-                    .iter()
-                    .filter(|n| n.kind() == "elseif_clause" || n.kind() == "else_clause")
-                    .copied()
-                    .collect();
-                let elseif_stmt =
-                    lower_elseif_clause_chain_with_ctx(walker, &remaining_clauses, lambda_ctx)?;
-                else_branch = Some(Block {
-                    stmts: vec![elseif_stmt],
-                    span: walker.span(&child),
-                });
-                break;
-            }
-            "else" => {
-                i += 1;
-                if i < all_children.len() {
-                    let else_node = all_children[i];
-                    if walker.kind(&else_node) == NodeKind::Block {
-                        else_branch = Some(lower_block_with_ctx(walker, else_node, lambda_ctx)?);
-                    }
-                }
-                break;
-            }
-            "else_clause" => {
-                // Parse else_clause node (tree-sitter format)
-                // else_clause contains: else keyword + block
-                let else_all: Vec<Node<'a>> = walker.children(&child);
-                for else_child in else_all.iter() {
-                    if else_child.kind() == "block" {
-                        else_branch = Some(lower_block_with_ctx(walker, *else_child, lambda_ctx)?);
-                        break;
-                    }
-                }
-                break;
-            }
-            _ => {
-                if condition.is_none() {
-                    condition = Some(child);
-                } else if then_block.is_none() && walker.kind(&child) == NodeKind::Block {
-                    then_block = Some(child);
-                }
-            }
-        }
-        i += 1;
-    }
-
-    let condition_node = condition.ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::IfStatement, span)
-            .with_hint("missing condition")
-    })?;
-
-    let then_block_node = then_block.ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::IfStatement, span)
-            .with_hint("missing then block")
-    })?;
-
-    // Check for `if @generated ... else ... end` pattern (Phase 1: fallback execution)
-    // In this pattern, we only execute the else branch (fallback code)
-    if is_generated_macro_call(walker, condition_node) {
-        // Return an if statement with condition=false to execute the else branch
-        // This preserves the expression semantics (if returns a value)
-        if let Some(else_block) = else_branch {
-            let then_branch = lower_block_with_ctx(walker, then_block_node, lambda_ctx)?;
-            return Ok(Stmt::If {
-                condition: Expr::Literal(Literal::Bool(false), span),
-                then_branch,
-                else_branch: Some(else_block),
-                span,
-            });
-        } else {
-            // No else branch means this is `if @generated ... end` without fallback
-            // This requires the generated code to run, which is not supported in Phase 1
-            return Err(UnsupportedFeature::new(
-                UnsupportedFeatureKind::IfStatement,
-                span,
-            )
-            .with_hint(
-                "@generated without fallback is not supported. Use `if @generated ... else fallback end` pattern.",
-            ));
-        }
-    }
-
-    let condition_expr = expr::lower_expr_with_ctx(walker, condition_node, lambda_ctx)?;
-    let then_branch = lower_block_with_ctx(walker, then_block_node, lambda_ctx)?;
-
-    Ok(Stmt::If {
-        condition: condition_expr,
-        then_branch,
-        else_branch,
-        span,
-    })
+    lower_if_stmt_impl(walker, node, Some(lambda_ctx))
 }
 
-fn lower_elseif_chain_with_ctx<'a>(
+fn lower_expr_maybe_ctx<'a>(
     walker: &CstWalker<'a>,
-    all_children: &[Node<'a>],
-    start: usize,
-    lambda_ctx: &LambdaContext,
-) -> LowerResult<Stmt> {
-    let mut i = start;
-    let mut condition: Option<Node<'a>> = None;
-    let mut then_block: Option<Node<'a>> = None;
-    let mut else_branch: Option<Block> = None;
-
-    let span = if i < all_children.len() {
-        walker.span(&all_children[i])
-    } else {
-        walker.span(&all_children[start - 1])
-    };
-
-    while i < all_children.len() {
-        let child = all_children[i];
-        let kind_str = child.kind();
-
-        match kind_str {
-            "end" => break,
-            "elseif" => {
-                if condition.is_some() && then_block.is_some() {
-                    let elseif_stmt =
-                        lower_elseif_chain_with_ctx(walker, all_children, i + 1, lambda_ctx)?;
-                    else_branch = Some(Block {
-                        stmts: vec![elseif_stmt],
-                        span: walker.span(&child),
-                    });
-                    break;
-                }
-            }
-            "else" => {
-                i += 1;
-                if i < all_children.len() {
-                    let else_node = all_children[i];
-                    if walker.kind(&else_node) == NodeKind::Block {
-                        else_branch = Some(lower_block_with_ctx(walker, else_node, lambda_ctx)?);
-                    }
-                }
-                break;
-            }
-            "else_clause" => {
-                // Parse else_clause node (tree-sitter format)
-                let else_all: Vec<Node<'a>> = walker.children(&child);
-                for else_child in else_all.iter() {
-                    if else_child.kind() == "block" {
-                        else_branch = Some(lower_block_with_ctx(walker, *else_child, lambda_ctx)?);
-                        break;
-                    }
-                }
-                break;
-            }
-            _ => {
-                if condition.is_none() {
-                    condition = Some(child);
-                } else if then_block.is_none() && walker.kind(&child) == NodeKind::Block {
-                    then_block = Some(child);
-                }
-            }
-        }
-        i += 1;
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
+    match lambda_ctx {
+        Some(ctx) => expr::lower_expr_with_ctx(walker, node, ctx),
+        None => expr::lower_expr(walker, node),
     }
-
-    let condition = condition.ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::IfStatement, span)
-            .with_hint("missing elseif condition")
-    })?;
-
-    let then_block = then_block.ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::IfStatement, span)
-            .with_hint("missing elseif block")
-    })?;
-
-    let condition_expr = expr::lower_expr_with_ctx(walker, condition, lambda_ctx)?;
-    let then_branch = lower_block_with_ctx(walker, then_block, lambda_ctx)?;
-
-    Ok(Stmt::If {
-        condition: condition_expr,
-        then_branch,
-        else_branch,
-        span,
-    })
 }
 
-/// Lower a chain of elseif_clause and else_clause nodes into nested if-else statements (with lambda context).
-/// This handles the case where tree-sitter produces sibling elseif_clauses instead of nested ones.
-/// Note: This function expects the first clause to be an elseif_clause, not else_clause.
-fn lower_elseif_clause_chain_with_ctx<'a>(
+fn lower_stmt_maybe_ctx<'a>(
     walker: &CstWalker<'a>,
-    clauses: &[Node<'a>],
-    lambda_ctx: &LambdaContext,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
 ) -> LowerResult<Stmt> {
-    if clauses.is_empty() {
-        // Should not happen - caller should check before calling
-        return Err(UnsupportedFeature::new(
-            UnsupportedFeatureKind::IfStatement,
-            Span::new(0, 0, 0, 0, 0, 0),
-        )
-        .with_hint("empty elseif clause chain"));
+    match lambda_ctx {
+        Some(ctx) => lower_stmt_with_ctx(walker, node, ctx),
+        None => lower_stmt(walker, node),
     }
+}
 
-    let first_clause = clauses[0];
-    let kind_str = first_clause.kind();
-
-    // First clause MUST be elseif_clause. else_clause is handled specially below.
-    if kind_str != "elseif_clause" {
-        return Err(UnsupportedFeature::new(
-            UnsupportedFeatureKind::IfStatement,
-            walker.span(&first_clause),
-        )
-        .with_hint("expected elseif_clause at start of chain"));
+fn lower_block_maybe_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Block> {
+    match lambda_ctx {
+        Some(ctx) => lower_block_with_ctx(walker, node, ctx),
+        None => lower_block(walker, node),
     }
-
-    // This is an elseif_clause
-    let span = walker.span(&first_clause);
-    let all_children: Vec<Node<'a>> = walker.children(&first_clause);
-
-    let mut condition: Option<Node<'a>> = None;
-    let mut then_block: Option<Node<'a>> = None;
-
-    for child in all_children.iter() {
-        let child_kind = child.kind();
-        match child_kind {
-            "elseif" => {}
-            "block" => {
-                if condition.is_some() && then_block.is_none() {
-                    then_block = Some(*child);
-                }
-            }
-            _ => {
-                if condition.is_none() {
-                    condition = Some(*child);
-                }
-            }
-        }
-    }
-
-    let condition = condition.ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::IfStatement, span)
-            .with_hint("missing elseif condition")
-    })?;
-
-    let then_block = then_block.ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::IfStatement, span)
-            .with_hint("missing elseif block")
-    })?;
-
-    let condition_expr = expr::lower_expr_with_ctx(walker, condition, lambda_ctx)?;
-    let then_branch = lower_block_with_ctx(walker, then_block, lambda_ctx)?;
-
-    // Recursively process remaining clauses to build else_branch
-    let else_branch = if clauses.len() > 1 {
-        let remaining = &clauses[1..];
-        let next = remaining[0];
-        let next_kind = next.kind();
-
-        if next_kind == "else_clause" {
-            // Get the block directly from else_clause
-            let else_children: Vec<Node<'a>> = walker.children(&next);
-            let mut block: Option<Block> = None;
-            for else_child in else_children.iter() {
-                if else_child.kind() == "block" {
-                    block = Some(lower_block_with_ctx(walker, *else_child, lambda_ctx)?);
-                    break;
-                }
-            }
-            block
-        } else {
-            // elseif_clause - recursive call
-            let else_stmt = lower_elseif_clause_chain_with_ctx(walker, remaining, lambda_ctx)?;
-            Some(Block {
-                stmts: vec![else_stmt],
-                span: walker.span(&next),
-            })
-        }
-    } else {
-        None
-    };
-
-    Ok(Stmt::If {
-        condition: condition_expr,
-        then_branch,
-        else_branch,
-        span,
-    })
 }
 
 #[cfg(test)]
@@ -1165,7 +1102,13 @@ mod tests {
     fn test_if_basic() {
         let stmt = lower_first_stmt("if true\n  1\nend");
         assert!(
-            matches!(stmt, Stmt::If { else_branch: None, .. }),
+            matches!(
+                stmt,
+                Stmt::If {
+                    else_branch: None,
+                    ..
+                }
+            ),
             "Expected If without else branch, got {:?}",
             stmt
         );
@@ -1175,7 +1118,13 @@ mod tests {
     fn test_if_else() {
         let stmt = lower_first_stmt("if true\n  1\nelse\n  2\nend");
         assert!(
-            matches!(stmt, Stmt::If { else_branch: Some(_), .. }),
+            matches!(
+                stmt,
+                Stmt::If {
+                    else_branch: Some(_),
+                    ..
+                }
+            ),
             "Expected If with else branch, got {:?}",
             stmt
         );
@@ -1185,12 +1134,26 @@ mod tests {
     fn test_if_elseif_else() {
         let stmt = lower_first_stmt("if x > 0\n  1\nelseif x < 0\n  2\nelse\n  3\nend");
         assert!(
-            matches!(stmt, Stmt::If { else_branch: Some(_), .. }),
+            matches!(
+                stmt,
+                Stmt::If {
+                    else_branch: Some(_),
+                    ..
+                }
+            ),
             "Expected If with else branch, got {:?}",
             stmt
         );
-        if let Stmt::If { else_branch: Some(ref else_block), .. } = stmt {
-            assert_eq!(else_block.stmts.len(), 1, "Else branch should contain one nested If");
+        if let Stmt::If {
+            else_branch: Some(ref else_block),
+            ..
+        } = stmt
+        {
+            assert_eq!(
+                else_block.stmts.len(),
+                1,
+                "Else branch should contain one nested If"
+            );
             assert!(
                 matches!(else_block.stmts[0], Stmt::If { .. }),
                 "Elseif should be lowered as nested If, got {:?}",

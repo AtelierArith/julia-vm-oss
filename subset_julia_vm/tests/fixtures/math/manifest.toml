@@ -1,6 +1,12 @@
 # Test manifest for math category
 
 [[tests]]
+name = "math_round_mode_5762"
+file = "math_round_mode_5762.jl"
+expected = true
+description = "round(x, RoundingMode) honors the mode: RoundUp=ceil, RoundDown=floor, RoundToZero=trunc, RoundNearest=banker's (Issue #5762)"
+
+[[tests]]
 name = "math_exp2_exp10"
 file = "exp2_exp10.jl"
 expected = true
@@ -29,6 +35,12 @@ name = "math_fma_muladd"
 file = "fma_muladd.jl"
 expected = true
 description = "fma and muladd - fused multiply-add functions (Issue #489)"
+
+[[tests]]
+name = "math_fma_muladd_pure_julia_dispatch"
+file = "fma_muladd_pure_julia_dispatch.jl"
+expected = true
+description = "fma/muladd dispatch through Pure Julia base/math.jl (Issue #3732)"
 
 [[tests]]
 name = "math_deg2rad_rad2deg"
@@ -70,7 +82,13 @@ description = "copysign and minmax functions (Issue #1861)"
 name = "math_divrem_fldmod"
 file = "divrem_fldmod.jl"
 expected = true
-description = "divrem, fldmod, mod1, fld1, fldmod1 functions (Issue #1861)"
+description = "divrem, fldmod, mod1, fld1, fldmod1 functions (Issue #1861); corrected stale expected values (divrem(-7,3), fld1, fldmod1) to match upstream and added a gating tail so wrong results are no longer masked (Issue #6891/#6895)"
+
+[[tests]]
+name = "math_div_trunc_negative_6891"
+file = "div_trunc_negative_6891.jl"
+expected = true
+description = "Generic div(x,y) rounds toward zero (trunc), not floor (Issue #6891): div(-7.0,3.0)==-2.0 (was -3.0), on Float64 and BigFloat; fld/cld stay floor/ceil. divrem also requires the dynamic Float % to be truncated rem, not mod (Issue #6895), so divrem(-7.0,3.0)==(-2.0,-1.0). Gating fixture (final value = AND of all checks) so wrong non-throwing results FAIL. Verified vs julia 1.12.6."
 
 [[tests]]
 name = "math_evalpoly_basic"
@@ -142,7 +160,7 @@ description = "mod, rem, fld - modulo, remainder, floored division (Issue #1877)
 name = "math_mod2pi_rem2pi"
 file = "mod2pi_rem2pi.jl"
 expected = true
-description = "mod2pi, rem2pi - modular arithmetic with 2pi (Issue #1877)"
+description = "mod2pi - upstream-compatible modular arithmetic with 2pi (Issue #1877)"
 
 [[tests]]
 name = "math_expm1_basic"
@@ -167,3 +185,81 @@ name = "math_pythagorean_identity"
 file = "pythagorean_identity.jl"
 expected = true
 description = "Property test: sin(θ)² + cos(θ)² ≈ 1 for random θ"
+
+[[tests]]
+name = "math_isqrt_integer_return_5659"
+file = "math_isqrt_integer_return_5659.jl"
+expected = true
+description = "isqrt(n) returns the largest integer m with m*m <= n as the SAME integer type as n (isqrt(17)===4, not 4.0), preserving narrow/unsigned types (Int8/UInt16/UInt8) and exact near typemax(Int64); negative n throws DomainError. Previously returned floor(sqrt(n)) (Float64). Fix uses oftype(n, trunc(sqrt(n))) with div-based (overflow-safe) correction loops in base/intfuncs.jl. Issue #5659"
+
+[[tests]]
+name = "math_gcd_lcm_collection_5679"
+file = "math_gcd_lcm_collection_5679.jl"
+expected = true
+description = "gcd/lcm accept a collection (gcd([12,18,24])==6) or 3+ arguments (gcd(12,18,24)==6); empty array returns the identity (gcd->0 via zero(eltype), lcm->1 via one(eltype)). Adds gcd/lcm(itr::AbstractArray) and gcd/lcm(a,b,c,rest...) folds in base/intfuncs.jl; 2-arg forms unchanged. Tuples excluded (not a gcd/lcm collection upstream). Issue #5679"
+
+[[tests]]
+name = "math_maximum_minimum_init_5684"
+file = "math_maximum_minimum_init_5684.jl"
+expected = true
+description = "maximum/minimum accept the init keyword, seeding the reduction so an empty collection returns init (maximum(Int[]; init=-99)==-99) and init participates otherwise (maximum([1,2]; init=10)==10). Covers value and f-forms (maximum(abs, v; init=0)). Adds init (sentinel nothing) to maximum/minimum(arr; dims) and maximum/minimum(f, arr) in base/array.jl; the no-init and dims paths are unchanged. Issue #5684"
+
+[[tests]]
+name = "math_floatmax_float32_float16_5688"
+file = "math_floatmax_float32_float16_5688.jl"
+expected = true
+description = "floatmax/floatmin for Float32 and Float16 (only Float64 existed): floatmax(Float32)==3.4028235f38, floatmin(Float32)==1.1754944f-38, floatmax(Float16)==Float16(6.55e4), floatmin(Float16)==Float16(6.104e-5), with correct types. Adds the Type{Float32}/Type{Float16} methods in base/floatfuncs.jl; Float64 forms unchanged. Issue #5688"
+
+[[tests]]
+name = "math_div_rem_roundingmode_5691"
+file = "math_div_rem_roundingmode_5691.jl"
+expected = true
+description = "div(x, y, r::RoundingMode) rounds the quotient per r (RoundUp==cld, RoundDown==fld, RoundToZero==div, RoundFromZero rounds away from zero, RoundNearest half-to-even), and rem(x,y,r)=x-y*div(x,y,r). Adds div/rem(x,y,r::RoundingMode) in base/intfuncs.jl dispatching on RoundingMode.mode; 2-arg div/rem unchanged. Covers sign variations + even-tie cases. Issue #5691"
+
+[[tests]]
+name = "math_digits_pad_5695"
+file = "math_digits_pad_5695.jl"
+expected = true
+description = "digits(n; pad=N) pads the result to at least N digits with trailing zeros (digits(100, base=10, pad=5)==[0,0,1,0,0], digits(0, pad=3)==[0,0,0]); already-long results are unchanged. Adds the pad keyword (default 1, via max(count,pad) allocation) to digits in base/intfuncs.jl; no-pad behavior unchanged. Issue #5695"
+
+[[tests]]
+name = "math_digits_negative_5697"
+file = "math_digits_negative_5697.jl"
+expected = true
+description = "digits of a negative integer returns SIGNED digits (digits(-100)==[0,0,-1], digits(-5,base=2)==[-1,0,-1]), not the digits of abs(n). Fix extracts digits with signed rem/div (truncating toward zero) looping while n!=0, instead of taking abs in base/intfuncs.jl. Positive/zero/base/pad unchanged. Issue #5697"
+
+[[tests]]
+name = "math_nextfloat_width_5690"
+file = "math_nextfloat_width_5690.jl"
+expected = true
+description = "nextfloat/prevfloat preserve the float width (Float32/Float16) and overflow to the per-width Inf (Issue #5690). Previously coerced the arg to Float64. Fix: pass the arg through uncoerced so the runtime builtin dispatches on the actual width (next_up/next_down for f32/f64, bit-stepping for f16). Covers width, precision, per-width Inf overflow, edge cases, and a runtime-Float32 variable."
+
+[[tests]]
+name = "math_nextfloat_int_methoderror_5715"
+file = "math_nextfloat_int_methoderror_5715.jl"
+expected = true
+description = "nextfloat/prevfloat raise a MethodError for integer arguments (Issue #5715) — they are defined only for AbstractFloat. Previously the runtime builtin's fallback coerced integers to Float64. The float paths (incl. width preservation from #5690) are unchanged."
+
+[[tests]]
+name = "math_nextfloat_step_count_5735"
+file = "math_nextfloat_step_count_5735.jl"
+expected = true
+description = "Two-argument nextfloat(x, n)/prevfloat(x, n) step n ULPs (Issue #5735). Previously n was ignored (single step). Fix: compile the 2-arg form to new NextFloatN/PrevFloatN builtins that apply the width-aware single-step n times in the correct direction (negative n reverses). Covers multi-step, n==0 identity, negative n, round-trip, Float32/Float16 width, subnormal step, 1-arg regression, and integer-arg MethodError."
+
+[[tests]]
+name = "math_round_type_conversion_5657"
+file = "math_round_type_conversion_5657.jl"
+expected = true
+description = "round/floor/ceil/trunc(T, x) type-conversion form works inside functions/loops/comprehensions (Issue #5657), where x is Any-typed. Compile path routes the (builtin-type-name, value) form to the builtin in the NoMethodFound dispatch arm (the prior pure-Julia attempt shadowed the 1-arg builtin, #2103). round(x;digits)/round(x,mode) unaffected. A previous fix-attempt was reverted; this is the documented compile-routing fix."
+
+[[tests]]
+name = "math_clamp_unitrange_5736"
+file = "math_clamp_unitrange_5736.jl"
+expected = true
+description = "clamp(x::Integer, r::AbstractUnitRange) constrains an integer to the range's bounds (clamp(x, first(r), last(r))), pure-Julia in base/math.jl. A Float x or a StepRange r has no such method (MethodError), matching upstream. The 3-argument clamp is unchanged."
+
+[[tests]]
+name = "math_exp_real_upstream_shape_7455"
+file = "exp_real_upstream_shape_7455.jl"
+expected = true
+description = "exp(::Real) follows the upstream-shaped Pure Julia behavior for Float64 subnormal boundary/bit patterns and Real forwarding: Float32 preserves width, Int64/Rational forward through Float64, and Bool dispatch works like upstream (Issues #7455/#7484)."

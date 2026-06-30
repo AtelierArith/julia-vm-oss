@@ -114,7 +114,9 @@ impl<'a> Parser<'a> {
         let start_token = self.expect(Token::KwAbstract)?;
         let start = start_token.span.start;
 
-        self.expect(Token::KwType)?;
+        // `type` is lexed as a plain identifier (Issue #8108); it is only the
+        // keyword half of `abstract type` here.
+        self.expect_contextual_keyword("type")?;
 
         let name = self.parse_identifier()?;
 
@@ -156,7 +158,9 @@ impl<'a> Parser<'a> {
         let start_token = self.expect(Token::KwPrimitive)?;
         let start = start_token.span.start;
 
-        self.expect(Token::KwType)?;
+        // `type` is lexed as a plain identifier (Issue #8108); it is only the
+        // keyword half of `primitive type` here.
+        self.expect_contextual_keyword("type")?;
 
         let name = self.parse_identifier()?;
 

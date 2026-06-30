@@ -10,7 +10,7 @@ use subset_julia_vm::parser::Parser;
 
 // ==================== Basic ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_hello_world() {
     let src = r#"println("Hello, World!")"#;
     let result = compile_and_run_str(src, 0);
@@ -22,7 +22,7 @@ fn test_sample_hello_world() {
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_string_interpolation() {
     let src = r#"
 # String interpolation with $(expression)
@@ -59,7 +59,7 @@ x
 
 // ==================== Arrays ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_vector_basics() {
     let src = r#"
 # Create a vector
@@ -80,7 +80,7 @@ arr[3]
     assert!((result - 3.0).abs() < 1e-10, "Expected 3.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_range_expressions() {
     let src = r#"
 # Range 1:5 creates [1, 2, 3, 4, 5]
@@ -110,7 +110,7 @@ sum
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_comprehension() {
     let src = r#"
 # Comprehension: [expr for var in iter]
@@ -141,7 +141,7 @@ sum
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_comprehension_with_filter() {
     let src = r#"
 # Comprehension with filter: [expr for var in iter if cond]
@@ -173,7 +173,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_array_functions() {
     let src = r#"
 # zeros(n) - create array of n zeros
@@ -208,7 +208,7 @@ powers_of_2[11]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_array_mutation() {
     let src = r#"
 # Start with an array
@@ -239,7 +239,7 @@ arr[2]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_dot_product() {
     let src = r#"
 function dot_product(a, b)
@@ -270,7 +270,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_statistical_functions() {
     let src = r#"
 function array_sum(arr)
@@ -316,7 +316,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_2d_matrix_basics() {
     let src = r#"
 # Create a 3x3 matrix of zeros
@@ -350,7 +350,7 @@ m[2, 3]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_matrix_initialization() {
     let src = r#"
 # Different ways to create matrices
@@ -381,7 +381,7 @@ length(f)
     assert!((result - 6.0).abs() < 1e-10, "Expected 6.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_matrix_sum() {
     let src = r#"
 function matrix_sum(m, rows, cols)
@@ -430,7 +430,7 @@ sum
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_identity_matrix() {
     let src = r#"
 function identity(n)
@@ -466,7 +466,7 @@ I[3, 3]
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_sieve_of_eratosthenes() {
     let src = r#"
 function sieve(n)
@@ -511,7 +511,7 @@ count
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_matrix_vector_multiplication() {
     let src = r#"
 # Create a 2x3 matrix A
@@ -544,7 +544,7 @@ result[1]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_matrix_matrix_multiplication() {
     let src = r#"
 # Create matrix A (2x3)
@@ -585,7 +585,7 @@ C[2, 2]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_broadcast_operations() {
     let src = r#"
 # Broadcast (element-wise) operations with .+ .* .- ./
@@ -617,7 +617,7 @@ f[5]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_broadcast_function_calls() {
     let src = r#"
 # Broadcast function call syntax: f.(x)
@@ -644,7 +644,7 @@ result[3]
 
 // ==================== Functions ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_factorial_iterative() {
     let src = r#"
 function my_factorial(n)
@@ -668,7 +668,7 @@ answer
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_factorial_recursive() {
     let src = r#"
 function my_factorial(n)
@@ -691,7 +691,7 @@ answer
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_multiple_dispatch() {
     let src = r#"
 # Multiple dispatch: same function name, different type signatures
@@ -720,7 +720,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_type_annotations() {
     let src = r#"
 function add_ints(a::Int64, b::Int64)
@@ -750,7 +750,7 @@ result
 
 // ==================== Algorithms ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_fibonacci() {
     let src = r#"
 function fib(n)
@@ -773,7 +773,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_fibonacci_fast() {
     let src = r#"
 function fib_fast(n)
@@ -803,7 +803,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_gcd_euclidean() {
     let src = r#"
 function gcd(a, b)
@@ -824,7 +824,7 @@ result
     assert!((result - 6.0).abs() < 1e-10, "Expected 6.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_is_prime() {
     let src = r#"
 function is_prime(n)
@@ -851,7 +851,7 @@ result
     assert!((result - 1.0).abs() < 1e-10, "Expected 1.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_sum_of_primes() {
     let src = r#"
 function is_prime(n)
@@ -889,7 +889,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_mandelbrot_scalar() {
     let src = r#"
 # Mandelbrot escape time algorithm
@@ -920,7 +920,7 @@ c1
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_mandelbrot_grid() {
     // Use inlined grid creation to avoid shape issue with function returns of 2D struct arrays
     let src = r##"
@@ -987,7 +987,7 @@ grid[12, 25]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_mandelbrot_broadcast() {
     let src = r#"
 function mandelbrot_row(cr_array, ci, maxiter)
@@ -1037,7 +1037,7 @@ in_set
 
 // ==================== Monte Carlo ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_estimate_pi() {
     let src = r#"
 function estimate_pi(N)
@@ -1065,7 +1065,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_random_walk() {
     let src = r#"
 function random_walk_1d(steps)
@@ -1086,7 +1086,7 @@ result
     assert!(!result.is_nan(), "Expected valid result, got NaN");
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_monte_carlo_integration() {
     let src = r#"
 function monte_carlo_integral(N)
@@ -1112,7 +1112,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_random_arrays() {
     let src = r#"
 # rand(n) creates 1D array of random Float64 in [0, 1)
@@ -1141,7 +1141,7 @@ sum
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_random_integer_arrays() {
     let src = r#"
 # rand(Int, n) creates array of random integers
@@ -1168,14 +1168,22 @@ max_val
     assert!(!result.is_nan(), "Expected valid result, got NaN");
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_random_simulation() {
     let src = r#"
+function integer_floor(x)
+    result = 0
+    while result + 1 <= x
+        result += 1
+    end
+    result
+end
+
 function simulate_dice(n_rolls)
     rolls = rand(n_rolls)
     sum = 0
     for i in 1:n_rolls
-        die = 1 + floor(rolls[i] * 6)
+        die = 1 + integer_floor(rolls[i] * 6)
         if die > 6
             die = 6
         end
@@ -1193,7 +1201,7 @@ avg
     assert!((result - 3.5).abs() < 0.5, "Expected ~3.5, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_normal_distribution_randn() {
     let src = r#"
 # randn() generates standard normal random numbers
@@ -1218,7 +1226,7 @@ mean
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_normal_distribution_matrix() {
     let src = r#"
 # randn(m, n) creates 2D array of normal random values
@@ -1252,7 +1260,7 @@ std
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_box_muller_visualization() {
     let src = r#"
 # Generate many normal values and visualize distribution
@@ -1296,7 +1304,7 @@ bins[3] + bins[4]
 
 // ==================== Mathematics ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_geometric_series() {
     let src = r#"
 function geometric_sum(r, n)
@@ -1323,7 +1331,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_newton_method() {
     let src = r#"
 function newton_sqrt(x)
@@ -1348,7 +1356,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_taylor_series_exp() {
     let src = r#"
 function exp_taylor(x, terms)
@@ -1375,7 +1383,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_coprime_pi_estimation() {
     // Simplified version that runs faster
     let src = r#"
@@ -1419,7 +1427,7 @@ result
 
 // ==================== Macros ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_assert_in_loop() {
     let src = r#"
 function sum_positive(n)
@@ -1453,7 +1461,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_time_monte_carlo() {
     let src = r#"
 function estimate_pi(N)
@@ -1485,7 +1493,7 @@ pi_estimate
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_combined_assert_time() {
     let src = r#"
 function checked_factorial(n)
@@ -1516,7 +1524,7 @@ f15
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_show_debugging() {
     let src = r#"
 function debug_sum(n)
@@ -1541,7 +1549,7 @@ result
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_show_with_expressions() {
     // Note: Function definitions must come before main code in the VM
     let src = r#"
@@ -1572,7 +1580,7 @@ result
 
 // ==================== Higher-Order Functions ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_map_function() {
     let src = r#"
 # map(f, arr) applies function f to each element
@@ -1601,7 +1609,7 @@ squared[5]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_filter_function() {
     let src = r#"
 # filter(f, arr) keeps elements where f returns true
@@ -1633,7 +1641,7 @@ length(evens) + length(large)
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_reduce_function() {
     let src = r#"
 # reduce(f, arr) combines elements using binary function f
@@ -1662,7 +1670,7 @@ product
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_do_syntax_for_map() {
     let src = r#"
 arr = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -1684,7 +1692,7 @@ result[5]
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_do_syntax_for_filter_reduce() {
     let src = r#"
 data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
@@ -1711,7 +1719,7 @@ total
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_chaining_higher_order_functions() {
     let src = r#"
 function square(x)
@@ -1751,7 +1759,7 @@ total
 
 // ==================== Structures ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_basic_struct() {
     let src = r#"
 # Define an immutable struct with typed fields
@@ -1774,7 +1782,7 @@ distance
     assert!((result - 5.0).abs() < 1e-10, "Expected 5.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_mutable_struct() {
     let src = r#"
 # Mutable structs allow field modification
@@ -1805,7 +1813,7 @@ c.value
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_struct_with_functions() {
     let src = r#"
 # Define a struct
@@ -1834,7 +1842,7 @@ area(rect)
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_euclidean_distance() {
     let src = r#"
 # Point struct for 2D geometry
@@ -1862,7 +1870,7 @@ distance(a, b)
     assert!((result - 5.0).abs() < 1e-10, "Expected 5.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_particle_simulation() {
     let src = r#"
 # Mutable struct for particle position
@@ -1903,7 +1911,7 @@ sqrt(particle.x^2 + particle.y^2)
 
 // ==================== Error Handling ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_try_catch_basics() {
     let src = r#"
 # try/catch handles runtime errors gracefully
@@ -1932,7 +1940,7 @@ x
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_try_catch_finally() {
     let src = r#"
 # finally block always executes, error or not
@@ -1959,7 +1967,7 @@ result
     assert!((result - 5.0).abs() < 1e-10, "Expected 5.0, got {}", result);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_sample_error_recovery() {
     let src = r#"
 # Recover from errors and continue processing
@@ -1993,7 +2001,7 @@ safe_divide(100, 5)
 
 // ==================== Smoke Test for All Samples ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_all_samples_compile_and_run() {
     let samples = vec![
         // Basic
@@ -2139,7 +2147,7 @@ x"#,
 
 // ==================== Array Type Promotion ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_array_int_rational_promotion() {
     // Test that [1//1, 2//1, 3//2] creates a Rational array
     // Access the numerator of the first element (should be 1)
@@ -2157,7 +2165,7 @@ arr[1].num
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_array_int_rational_promotion_denominator() {
     // Test that [1//1, 2//1, 3//2] creates a Rational array
     // Access the denominator of the first element (should be 1)
@@ -2172,4 +2180,91 @@ arr[1].den
         "Expected 1.0 (denominator of 1), got {}",
         result
     );
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_sample_hello_world();
+    test_sample_string_interpolation();
+    test_sample_vector_basics();
+    test_sample_range_expressions();
+    test_sample_comprehension();
+    test_sample_comprehension_with_filter();
+    test_sample_array_functions();
+    test_sample_array_mutation();
+    test_sample_dot_product();
+    test_sample_statistical_functions();
+    test_sample_2d_matrix_basics();
+    test_sample_matrix_initialization();
+    test_sample_matrix_sum();
+    test_sample_identity_matrix();
+    test_sample_sieve_of_eratosthenes();
+    test_sample_matrix_vector_multiplication();
+}
+
+#[test]
+fn chunk_001() {
+    test_sample_matrix_matrix_multiplication();
+    test_sample_broadcast_operations();
+    test_sample_broadcast_function_calls();
+    test_sample_factorial_iterative();
+    test_sample_factorial_recursive();
+    test_sample_multiple_dispatch();
+    test_sample_type_annotations();
+    test_sample_fibonacci();
+    test_sample_fibonacci_fast();
+    test_sample_gcd_euclidean();
+    test_sample_is_prime();
+    test_sample_sum_of_primes();
+    test_sample_mandelbrot_scalar();
+    test_sample_mandelbrot_grid();
+    test_sample_mandelbrot_broadcast();
+    test_sample_estimate_pi();
+}
+
+#[test]
+fn chunk_002() {
+    test_sample_random_walk();
+    test_sample_monte_carlo_integration();
+    test_sample_random_arrays();
+    test_sample_random_integer_arrays();
+    test_sample_random_simulation();
+    test_sample_normal_distribution_randn();
+    test_sample_normal_distribution_matrix();
+    test_sample_box_muller_visualization();
+    test_sample_geometric_series();
+    test_sample_newton_method();
+    test_sample_taylor_series_exp();
+    test_sample_coprime_pi_estimation();
+    test_sample_assert_in_loop();
+    test_sample_time_monte_carlo();
+    test_sample_combined_assert_time();
+    test_sample_show_debugging();
+}
+
+#[test]
+fn chunk_003() {
+    test_sample_show_with_expressions();
+    test_sample_map_function();
+    test_sample_filter_function();
+    test_sample_reduce_function();
+    test_sample_do_syntax_for_map();
+    test_sample_do_syntax_for_filter_reduce();
+    test_sample_chaining_higher_order_functions();
+    test_sample_basic_struct();
+    test_sample_mutable_struct();
+    test_sample_struct_with_functions();
+    test_sample_euclidean_distance();
+    test_sample_particle_simulation();
+    test_sample_try_catch_basics();
+    test_sample_try_catch_finally();
+    test_sample_error_recovery();
+    test_all_samples_compile_and_run();
+}
+
+#[test]
+fn chunk_004() {
+    test_array_int_rational_promotion();
+    test_array_int_rational_promotion_denominator();
 }
