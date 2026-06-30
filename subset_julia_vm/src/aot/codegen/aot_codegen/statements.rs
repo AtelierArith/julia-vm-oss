@@ -1,8 +1,9 @@
 use super::escape_rust_ident;
 use super::AotCodeGenerator;
+use crate::aot::abi::AotAbiValue;
 use crate::aot::ir::{AotExpr, AotStmt};
 use crate::aot::types::StaticType;
-use crate::aot::AotResult;
+use crate::aot::{AotError, AotResult};
 
 impl AotCodeGenerator {
     // ========== Statement Generation ==========
@@ -16,18 +17,49 @@ impl AotCodeGenerator {
                 value,
                 is_mutable,
             } => {
-                let rust_ty = self.type_to_rust(ty);
-                let value_str = self.emit_expr_to_string(value)?;
-                let mut_kw = if *is_mutable { "mut " } else { "" };
-                self.write_line(&format!(
-                    "let {}{}: {} = {};",
-                    mut_kw, escape_rust_ident(name), rust_ty, value_str
-                ));
+                let value_str = self.emit_value_for_binding_type(value, ty, "let binding")?;
+                if self.current_function_hoisted_locals.contains(name) {
+                    // Declaration was hoisted to a deferred `let mut` at function
+                    // top (Issue #8181); emit this in-block initialization as a
+                    // plain assignment so it does not re-shadow inside the block.
+                    self.write_line(&format!("{} = {};", escape_rust_ident(name), value_str));
+                } else {
+                    let rust_ty = self.type_to_rust(ty);
+                    let mut_kw = if *is_mutable { "mut " } else { "" };
+                    self.write_line(&format!(
+                        "let {}{}: {} = {};",
+                        mut_kw,
+                        escape_rust_ident(name),
+                        rust_ty,
+                        value_str
+                    ));
+                }
             }
 
             AotStmt::Assign { target, value } => {
+                if let AotExpr::Index {
+                    array,
+                    indices,
+                    elem_ty,
+                    ..
+                } = target
+                {
+                    if matches!(array.get_type(), StaticType::Dict { .. }) && indices.len() == 1 {
+                        let dict_str = self.emit_expr_to_string(array)?;
+                        let key_str = self.emit_expr_to_string(&indices[0])?;
+                        let value_str =
+                            self.emit_value_for_binding_type(value, elem_ty, "Dict assignment")?;
+                        self.write_line(&format!(
+                            "let _ = {}.insert({}, {});",
+                            dict_str, key_str, value_str
+                        ));
+                        return Ok(());
+                    }
+                }
                 let target_str = self.emit_expr_to_string(target)?;
-                let value_str = self.emit_expr_to_string(value)?;
+                let target_ty = target.get_type();
+                let value_str =
+                    self.emit_value_for_binding_type(value, &target_ty, "assignment")?;
                 self.write_line(&format!("{} = {};", target_str, value_str));
             }
 
@@ -41,7 +73,15 @@ impl AotCodeGenerator {
             }
 
             AotStmt::Return(Some(expr)) => {
-                let expr_str = self.emit_expr_to_string(expr)?;
+                let expr_str = if self
+                    .current_function_return_type
+                    .as_ref()
+                    .is_some_and(|ty| AotAbiValue::from_static_type(ty).needs_runtime_value())
+                {
+                    self.emit_expr_as_value(expr)?
+                } else {
+                    self.emit_expr_to_string(expr)?
+                };
                 self.write_line(&format!("return {};", expr_str));
             }
 
@@ -58,8 +98,12 @@ impl AotCodeGenerator {
             }
 
             AotStmt::While { condition, body } => {
-                let cond_str = self.emit_expr_to_string(condition)?;
-                self.write_line(&format!("while {} {{", cond_str));
+                if matches!(condition, AotExpr::LitBool(true)) {
+                    self.write_line("loop {");
+                } else {
+                    let cond_str = self.emit_condition_expr(condition)?;
+                    self.write_line(&format!("while {} {{", cond_str));
+                }
                 self.indent();
                 for stmt in body {
                     self.emit_stmt(stmt)?;
@@ -103,14 +147,18 @@ impl AotCodeGenerator {
         return_type: &StaticType,
     ) -> AotResult<()> {
         // Skip implicit return handling for Nothing/Unit return types
-        if *return_type == StaticType::Nothing || *return_type == StaticType::Any {
+        if *return_type == StaticType::Nothing {
             return self.emit_stmt(stmt);
         }
 
         match stmt {
             // Expression statement - emit without semicolon
             AotStmt::Expr(expr) => {
-                let expr_str = self.emit_expr_to_string(expr)?;
+                let expr_str = if AotAbiValue::from_static_type(return_type).needs_runtime_value() {
+                    self.emit_expr_as_value(expr)?
+                } else {
+                    self.emit_expr_to_string(expr)?
+                };
                 self.write_line(&expr_str);
                 Ok(())
             }
@@ -135,7 +183,7 @@ impl AotCodeGenerator {
         else_branch: &Option<Vec<AotStmt>>,
         return_type: &StaticType,
     ) -> AotResult<()> {
-        let cond_str = self.emit_expr_to_string(condition)?;
+        let cond_str = self.emit_condition_expr(condition)?;
         self.write_line(&format!("if {} {{", cond_str));
         self.indent();
 
@@ -160,7 +208,7 @@ impl AotCodeGenerator {
                     else_branch: else_else,
                 } = &else_stmts[0]
                 {
-                    let else_cond_str = self.emit_expr_to_string(else_cond)?;
+                    let else_cond_str = self.emit_condition_expr(else_cond)?;
                     self.write_line(&format!("}} else if {} {{", else_cond_str));
                     self.indent();
 
@@ -217,7 +265,7 @@ impl AotCodeGenerator {
                 else_branch: else_else,
             } = &else_stmts[0]
             {
-                let else_cond_str = self.emit_expr_to_string(else_cond)?;
+                let else_cond_str = self.emit_condition_expr(else_cond)?;
                 self.write_line(&format!("}} else if {} {{", else_cond_str));
                 self.indent();
 
@@ -257,5 +305,30 @@ impl AotCodeGenerator {
         self.dedent();
         self.write_line("}");
         Ok(())
+    }
+
+    pub(super) fn emit_value_for_binding_type(
+        &self,
+        value: &AotExpr,
+        target_ty: &StaticType,
+        context: &str,
+    ) -> AotResult<String> {
+        if AotAbiValue::from_static_type(target_ty).needs_runtime_value() {
+            return self.emit_expr_as_value(value);
+        }
+
+        let value_ty = value.get_type();
+        if &value_ty == target_ty {
+            return self.emit_expr_to_string(value);
+        }
+
+        self.emit_expr_as_static_type(value, target_ty)
+            .map_err(|err| {
+                AotError::CodegenError(format!(
+                    "AoT {} cannot store value of type {} in slot type {}; type-unstable \
+                 variables must use an Any/Union runtime Value boundary (Issue #6978): {}",
+                    context, value_ty, target_ty, err
+                ))
+            })
     }
 }

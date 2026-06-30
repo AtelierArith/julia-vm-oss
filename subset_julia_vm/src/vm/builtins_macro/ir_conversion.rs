@@ -124,7 +124,7 @@ impl<R: RngLike> Vm<R> {
     /// Convert an ExprValue to source string representation.
     fn expr_to_source_string(&self, expr: &ExprValue) -> String {
         let head = expr.head.as_str();
-        let args = &expr.args;
+        let args = expr.args_snapshot();
 
         match head {
             "call" => {
@@ -244,6 +244,13 @@ impl<R: RngLike> Vm<R> {
         match stmt {
             Stmt::Block(block) => self.ir_block_to_expr(block),
             Stmt::Expr { expr, .. } => self.ir_expr_to_value(expr),
+            Stmt::Meta { annotation, .. } => {
+                let mut args = vec![Value::Symbol(SymbolValue::new(&annotation.name))];
+                for arg in &annotation.args {
+                    args.push(Value::Symbol(SymbolValue::new(arg)));
+                }
+                Ok(Value::Expr(ExprValue::from_head("meta", args)))
+            }
             Stmt::Assign { var, value, .. } => {
                 let name_val = Value::Symbol(SymbolValue::new(var));
                 let val_val = self.ir_expr_to_value(value)?;
@@ -373,7 +380,7 @@ impl<R: RngLike> Vm<R> {
                 try_block,
                 catch_var,
                 catch_block,
-                else_block: _,
+                else_block,
                 finally_block,
                 ..
             } => {
@@ -388,8 +395,22 @@ impl<R: RngLike> Vm<R> {
                     args.push(catch_val);
                 }
 
-                if let Some(finally_b) = finally_block {
-                    args.push(self.ir_block_to_expr(finally_b)?);
+                if catch_block.is_none() && (finally_block.is_some() || else_block.is_some()) {
+                    args.push(Value::Bool(false));
+                    args.push(Value::Bool(false));
+                }
+
+                match (finally_block, else_block) {
+                    (Some(finally_b), Some(else_b)) => {
+                        args.push(self.ir_block_to_expr(finally_b)?);
+                        args.push(self.ir_block_to_expr(else_b)?);
+                    }
+                    (Some(finally_b), None) => args.push(self.ir_block_to_expr(finally_b)?),
+                    (None, Some(else_b)) => {
+                        args.push(Value::Bool(false));
+                        args.push(self.ir_block_to_expr(else_b)?);
+                    }
+                    (None, None) => {}
                 }
 
                 Ok(Value::Expr(ExprValue::from_head("try", args)))
@@ -520,7 +541,7 @@ impl<R: RngLike> Vm<R> {
                     .collect();
                 Ok(Value::Expr(ExprValue::from_head("export", name_vals)))
             }
-            Stmt::FunctionDef { func, .. } => {
+            Stmt::FunctionDef { func, .. } | Stmt::EvalFunctionDef { func, .. } => {
                 // Simplified function definition representation
                 let func_name = Value::Symbol(SymbolValue::new(&func.name));
                 Ok(Value::Expr(ExprValue::from_head(
@@ -550,6 +571,14 @@ impl<R: RngLike> Vm<R> {
                     args.push(Value::Symbol(SymbolValue::new(&member.name)));
                 }
                 Ok(Value::Expr(ExprValue::from_head("macrocall", args)))
+            }
+            Stmt::Global { names, .. } => {
+                // Convert `global x, y` to Expr(:global, :x, :y).
+                let args = names
+                    .iter()
+                    .map(|name| Value::Symbol(SymbolValue::new(name)))
+                    .collect();
+                Ok(Value::Expr(ExprValue::from_head("global", args)))
             }
         }
     }
@@ -878,12 +907,24 @@ impl<R: RngLike> Vm<R> {
                 Ok(Value::Expr(ExprValue::from_head("call", call_args)))
             }
             IrExpr::DynamicTypeConstruct {
-                base, type_args, ..
+                base,
+                base_expr: _,
+                type_args,
+                splat_mask,
+                ..
             } => {
-                // Convert to a curly expression: Base{type_arg1, type_arg2, ...}
+                // Convert to a curly expression: Base{type_arg1, type_arg2, ...}.
+                // A splatted argument (`Tuple{xs...}`) is re-wrapped in a
+                // `:(...)` splat Expr so the quoted AST round-trips faithfully
+                // (Issue #5112).
                 let mut curly_args = vec![Value::Symbol(SymbolValue::new(base))];
-                for arg in type_args {
-                    curly_args.push(self.ir_expr_to_value(arg)?);
+                for (idx, arg) in type_args.iter().enumerate() {
+                    let arg_val = self.ir_expr_to_value(arg)?;
+                    if splat_mask.get(idx).copied().unwrap_or(false) {
+                        curly_args.push(Value::Expr(ExprValue::from_head("...", vec![arg_val])));
+                    } else {
+                        curly_args.push(arg_val);
+                    }
                 }
                 Ok(Value::Expr(ExprValue::from_head("curly", curly_args)))
             }
@@ -912,6 +953,9 @@ impl<R: RngLike> Vm<R> {
                 Ok(Value::Expr(ExprValue::from_head("undef", vec![])))
             }
             Literal::Module(name) => Ok(Value::Symbol(SymbolValue::new(name))),
+            Literal::DataType(name) => Ok(Value::DataType(Box::new(
+                crate::types::JuliaType::from_name_or_struct(name),
+            ))),
             Literal::Array(data, _shape) => {
                 // Convert array literal data to a vect expression
                 let elems: Vec<Value> = data.iter().map(|f| Value::F64(*f)).collect();
@@ -950,7 +994,7 @@ impl<R: RngLike> Vm<R> {
             Literal::Regex { pattern, flags } => {
                 use crate::vm::value::RegexValue;
                 match RegexValue::new(pattern, flags) {
-                    Ok(regex) => Ok(Value::Regex(regex)),
+                    Ok(regex) => Ok(Value::Regex(Box::new(regex))),
                     Err(e) => Err(VmError::TypeError(format!("Invalid regex: {}", e))),
                 }
             }

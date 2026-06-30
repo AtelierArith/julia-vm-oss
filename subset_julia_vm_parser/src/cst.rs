@@ -345,6 +345,11 @@ impl CstBuilder {
 ///
 /// Provides helper macros and functions for debugging parser test failures.
 #[cfg(any(test, feature = "testing"))]
+// Test-only assertion helpers legitimately dump AST diagnostics to stderr just
+// before panicking, so the failure output reaches the test runner. This is the
+// idiomatic test-helper pattern and is exempt from the Issue #2888 policy that
+// targets production library code paths.
+#[allow(clippy::print_stderr)]
 pub mod testing {
     use super::*;
 

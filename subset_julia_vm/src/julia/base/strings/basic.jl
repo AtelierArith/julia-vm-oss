@@ -8,6 +8,26 @@
 
 # ndigits: moved to intfuncs.jl with keyword argument support (Issue #2020)
 
+# Julia's string element type is Char. Upstream defines
+# `eltype(::Type{<:AbstractString}) = Char`; keep the value method in
+# Pure Julia so `eltype(itr)` works when `itr` is a runtime String.
+function eltype(s::String)
+    return Char
+end
+
+# Type form `eltype(String) === Char` (Issue #5116): the VM cannot bind a
+# covariant `::Type{<:AbstractString}` type parameter, so dispatch on the
+# concrete `String` type. Mirrors upstream `eltype(::Type{<:AbstractString})`.
+eltype(::Type{String}) = Char
+
+# Julia Base defines this as a Union-typed vararg method in
+# `base/strings/basic.jl`. sjulia does not support AnnotatedString yet, so the
+# subset implementation keeps the same dispatch shape and uses the plain string
+# branch.
+function Base.:*(s::Union{AbstractChar, AbstractString}, t::Union{AbstractChar, AbstractString}...)
+    return string(s, t...)
+end
+
 # isdigit: check if character code is a digit
 # ASCII: '0' = 48, '9' = 57
 function isdigit(c)
@@ -15,28 +35,117 @@ function isdigit(c)
     return c >= 48 && c <= 57
 end
 
-# isletter: check if character code is a letter (ASCII)
+# isletter: check if character code is a letter.
+# Conservative subset of Unicode "Letter" categories — covers ASCII,
+# Latin-1, Greek, Cyrillic, plus the main CJK / Hangul / Kana ranges
+# (matching the wide-char ranges in `textwidth`). Full coverage would
+# require utf8proc tables. (Issue #3601)
 function isletter(c)
-    c = Int(c)
-    if c >= 65 && c <= 90
-        return true  # A-Z
+    cp = Int(c)
+    # ASCII A-Z and a-z
+    if cp >= 65 && cp <= 90
+        return true
     end
-    if c >= 97 && c <= 122
-        return true  # a-z
+    if cp >= 97 && cp <= 122
+        return true
+    end
+    # Latin-1 Supplement letters: À-Ö (192-214), Ø-ö (216-246), ø-ÿ (248-255)
+    # Excluding × (215) and ÷ (247).
+    if cp >= 192 && cp <= 214
+        return true
+    end
+    if cp >= 216 && cp <= 246
+        return true
+    end
+    if cp >= 248 && cp <= 255
+        return true
+    end
+    # Latin Extended-A and Latin Extended-B (most are letters)
+    if cp >= 256 && cp <= 696
+        return true
+    end
+    # Greek and Coptic letters (excluding punctuation / symbols)
+    if cp >= 880 && cp <= 1023
+        return true
+    end
+    # Cyrillic, Cyrillic Supplement
+    if cp >= 1024 && cp <= 1279
+        return true
+    end
+    # CJK Unified Ideographs (mirrors the wide-char ranges in textwidth #3598)
+    if cp >= 0x3041 && cp <= 0x33FF
+        return true
+    end
+    if cp >= 0x3400 && cp <= 0x4DBF
+        return true
+    end
+    if cp >= 0x4E00 && cp <= 0x9FFF
+        return true
+    end
+    # Hangul Syllables
+    if cp >= 0xAC00 && cp <= 0xD7A3
+        return true
+    end
+    # CJK Compatibility Ideographs
+    if cp >= 0xF900 && cp <= 0xFAFF
+        return true
     end
     return false
 end
 
-# isuppercase: check if character is uppercase
+# isuppercase: check if character is uppercase. Covers ASCII + Latin-1 +
+# common Greek/Cyrillic uppercase ranges. (#3601 sister coverage)
 function isuppercase(c)
-    c = Int(c)
-    return c >= 65 && c <= 90
+    cp = Int(c)
+    # ASCII A-Z
+    if cp >= 65 && cp <= 90
+        return true
+    end
+    # Latin-1: À-Ö (192-214), Ø-Þ (216-222)
+    if cp >= 192 && cp <= 214
+        return true
+    end
+    if cp >= 216 && cp <= 222
+        return true
+    end
+    # Greek capital letters (Α-Ρ 913-929, Σ-Ω 931-937; 930 is gap)
+    if cp >= 913 && cp <= 929
+        return true
+    end
+    if cp >= 931 && cp <= 937
+        return true
+    end
+    # Cyrillic capital letters (А-Я: 1040-1071)
+    if cp >= 1040 && cp <= 1071
+        return true
+    end
+    return false
 end
 
-# islowercase: check if character is lowercase
+# islowercase: check if character is lowercase. Covers ASCII + Latin-1 +
+# common Greek/Cyrillic lowercase ranges. (#3601 sister coverage)
 function islowercase(c)
-    c = Int(c)
-    return c >= 97 && c <= 122
+    cp = Int(c)
+    # ASCII a-z
+    if cp >= 97 && cp <= 122
+        return true
+    end
+    # Latin-1: ß-ö (223-246), ø-ÿ (248-255)
+    if cp >= 223 && cp <= 246
+        return true
+    end
+    if cp >= 248 && cp <= 255
+        return true
+    end
+    # Greek small letters (α-ρ 945-961, σ-ω 963-969; 962 ς is also lowercase)
+    if cp >= 945 && cp <= 969
+        return true
+    end
+    # Cyrillic small letters (а-я: 1072-1103)
+    if cp >= 1072 && cp <= 1103
+        return true
+    end
+    return false
 end
 
 # Note: uppercase(s::String) and lowercase(s::String) are builtins
@@ -135,12 +244,9 @@ end
 # Based on Julia's base/char.jl
 # For ASCII characters, this is just the character code
 function codepoint(c::Char)
-    # In SubsetJuliaVM, Char is represented as UInt32 code point
-    # We can use the character directly as its code point
-    # For now, we'll use a simple implementation that works with ASCII
-    # Note: This is a simplified version. Full Unicode support would require
-    # proper UTF-8 decoding, but for ASCII characters this works.
-    return Int64(c)
+    # Unicode codepoint as UInt32 (upstream returns UInt32). Char is the UInt32
+    # codepoint in the subset; UInt32(c) is unsupported so go via Int64. (#6747)
+    return UInt32(Int64(c))
 end
 
 # =============================================================================
@@ -149,35 +255,86 @@ end
 
 # textwidth: get display width of string (for monospace fonts)
 # Based on Julia's base/strings/width.jl
-# Simplified version: ASCII characters have width 1, others have width 2
-# This is a basic implementation. Full Unicode support would require
-# proper East Asian Width property handling.
+#
+# Iterates characters (not bytes) and delegates to the per-character
+# textwidth, which classifies wide (width-2) characters by a conservative
+# subset of the Unicode East Asian Width "Wide" / "Fullwidth" ranges.
+# (Issue #3598)
 function textwidth(s::String)
     width = 0
-    n = length(s)
-    i = 1
-    while i <= n
-        c = codeunit(s, i)
-        # ASCII printable characters (32-126) have width 1
-        if c >= 32 && c < 127
-            width = width + 1
-        else
-            # Non-ASCII characters have width 2 (simplified)
-            width = width + 2
-        end
-        i = i + 1
+    for c in s
+        width = width + textwidth(c)
     end
     return width
 end
 
-# textwidth for single character
+# textwidth for single character — conservative East Asian Width approximation.
+# Returns 0 for control characters, 2 for the main CJK / Hangul / Kana / Fullwidth
+# ranges, and 1 for everything else (including Latin-1 letters like 'é' that the
+# previous all-non-ASCII-is-width-2 version misclassified as 2). (Issue #3598)
 function textwidth(c::Char)
     cp = codepoint(c)
-    if cp >= 32 && cp < 127
-        return 1
-    else
+    # Control characters (C0/C1) have zero display width
+    if cp < 32 || (cp >= 0x7F && cp < 0xA0)
+        return 0
+    end
+    # Wide ranges (East Asian Width = Wide or Fullwidth, conservative subset).
+    # Covers Chinese, Japanese (Hiragana/Katakana/Kanji), Korean (Hangul
+    # Syllables), CJK punctuation, fullwidth forms, and CJK Extensions A and B.
+    # Specific ranges (codepoint inclusive lo .. hi):
+    #   0x1100..0x115F   Hangul Jamo init consonants
+    #   0x2E80..0x303E   CJK Radicals / Kangxi / CJK Symbols (subset)
+    #   0x3041..0x33FF   Hiragana .. Enclosed CJK
+    #   0x3400..0x4DBF   CJK Extension A
+    #   0x4E00..0x9FFF   CJK Unified Ideographs
+    #   0xA000..0xA4CF   Yi Syllables / Yi Radicals
+    #   0xAC00..0xD7A3   Hangul Syllables
+    #   0xF900..0xFAFF   CJK Compatibility Ideographs
+    #   0xFE30..0xFE4F   CJK Compatibility Forms
+    #   0xFF00..0xFF60   Fullwidth Forms (excl. halfwidth)
+    #   0xFFE0..0xFFE6   Fullwidth Signs
+    #   0x20000..0x2FFFD CJK Extensions B–F
+    #   0x30000..0x3FFFD CJK Extension G
+    if cp >= 0x1100 && cp <= 0x115F
         return 2
     end
+    if cp >= 0x2E80 && cp <= 0x303E
+        return 2
+    end
+    if cp >= 0x3041 && cp <= 0x33FF
+        return 2
+    end
+    if cp >= 0x3400 && cp <= 0x4DBF
+        return 2
+    end
+    if cp >= 0x4E00 && cp <= 0x9FFF
+        return 2
+    end
+    if cp >= 0xA000 && cp <= 0xA4CF
+        return 2
+    end
+    if cp >= 0xAC00 && cp <= 0xD7A3
+        return 2
+    end
+    if cp >= 0xF900 && cp <= 0xFAFF
+        return 2
+    end
+    if cp >= 0xFE30 && cp <= 0xFE4F
+        return 2
+    end
+    if cp >= 0xFF00 && cp <= 0xFF60
+        return 2
+    end
+    if cp >= 0xFFE0 && cp <= 0xFFE6
+        return 2
+    end
+    if cp >= 0x20000 && cp <= 0x2FFFD
+        return 2
+    end
+    if cp >= 0x30000 && cp <= 0x3FFFD
+        return 2
+    end
+    return 1
 end
 
 # =============================================================================
@@ -234,6 +391,16 @@ function last(s::String)
         throw(ArgumentError("string must be non-empty"))
     end
     return s[lastindex(s)]
+end
+
+# String indexing is byte-based, so `lastindex(s::String)` must return the
+# last valid byte index (== `ncodeunits(s)`), not the character count
+# (`length(s)`). The generic `lastindex(arr) = length(arr)` was producing
+# the wrong value for non-ASCII strings, causing `s[i:end]` to truncate by
+# however many extra UTF-8 continuation bytes the string contained.
+# (Issue #3662)
+function lastindex(s::String)
+    return ncodeunits(s)
 end
 
 # Based on Julia's base/strings/basic.jl
@@ -341,7 +508,10 @@ function nextind(s::String, i::Int64)
         return 1
     end
     n = ncodeunits(s)
-    if i >= n
+    if i < 0 || i > n
+        throw(BoundsError(s, i))
+    end
+    if i == n
         return n + 1
     end
     i += 1
@@ -353,7 +523,10 @@ end
 
 # prevind(s, i) - previous valid string index before i
 function prevind(s::String, i::Int64)
-    if i <= 1
+    if i < 1
+        throw(BoundsError(s, i))
+    end
+    if i == 1
         return 0
     end
     n = ncodeunits(s)
@@ -377,3 +550,24 @@ end
 # reverseind(s, i) - index in s corresponding to index i in reverse(s)
 # Julia's actual implementation: thisind(s, ncodeunits(s) - i + 1)
 reverseind(s::String, i::Int64) = thisind(s, ncodeunits(s) - i + 1)
+
+# isvalid(s, i) — true if `i` is a valid character boundary in `s`.
+# Equivalent to Julia's `isvalid(::String, ::Integer)` (Issue #3726).
+# Mirrors official Julia semantics:
+#   - i < 1 or i > ncodeunits(s) → false
+#   - i is a UTF-8 continuation byte (0x80..=0xBF) → false
+#   - otherwise → true
+function isvalid(s::String, i::Int64)
+    n = ncodeunits(s)
+    if i < 1 || i > n
+        return false
+    end
+    return !_is_continuation_byte(codeunit(s, i))
+end
+
+# Generic Integer overload — covers UInt and other integer widths so callers
+# such as `isvalid("é", 0x1)` resolve to the Pure Julia method instead of
+# falling back to the (now removed) Rust builtin.
+function isvalid(s::String, i::Integer)
+    return isvalid(s, Int64(i))
+end

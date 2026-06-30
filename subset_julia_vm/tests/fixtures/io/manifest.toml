@@ -191,3 +191,231 @@ name = "io_show_pure_julia"
 file = "test_show_pure_julia.jl"
 expected = true
 description = "show/repr Pure Julia: basic types, containers, ranges, numerics (Issue #2583)"
+
+[[tests]]
+name = "io_println_iobuffer"
+file = "println_iobuffer.jl"
+expected = true
+description = "println(io::IOBuffer, ...) routes to buffer with trailing newline (Issue #3573)"
+
+[[tests]]
+name = "io_repr_array_compact_4731"
+file = "repr_array_compact_4731.jl"
+expected = true
+description = "repr(::Array) returns compact '[a, b, c]' / '[a b; c d]' form, and println(io::IOBuffer) writes only a newline (Issue #4731)"
+
+[[tests]]
+name = "io_repr_typed_empty_array_4733"
+file = "repr_typed_empty_array_4733.jl"
+expected = true
+description = "repr/string of typed empty vector returns '<eltype>[]' (e.g. 'Int64[]') instead of dropping the type prefix (Issue #4733)"
+
+[[tests]]
+name = "io_repr_bool_array_prefix_5159"
+file = "repr_bool_array_prefix_5159.jl"
+expected = true
+description = "repr/print/string of Bool vectors and matrices render the Bool[...] type prefix with elements as integers 1/0, matching upstream (Issue #5159)"
+
+[[tests]]
+name = "io_dict_string_key_no_debug_leak_4735"
+file = "dict_string_key_no_debug_leak_4735.jl"
+expected = true
+description = "string(Dict) renders String keys quoted, Symbol keys with ':' prefix, and String values quoted instead of leaking Rust Debug form (Issue #4735)"
+
+[[tests]]
+name = "io_repr_dict_no_crash_4737"
+file = "repr_dict_no_crash_4737.jl"
+expected = true
+description = "repr(Dict) routes through show(io, ::AbstractDict) and produces the same compact form as string(Dict) instead of crashing into show(IO, CartesianIndex) (Issue #4737)"
+
+[[tests]]
+name = "io_show_set_namedtuple_4739"
+file = "show_set_namedtuple_4739.jl"
+expected = true
+description = "repr(Set) doesn't crash and repr(NamedTuple) uses bare field names like (x = 1) instead of (:x = 1) (Issue #4739)"
+
+[[tests]]
+name = "io_show_container_sweep_4739"
+file = "show_container_sweep_4739.jl"
+expected = true
+description = "Prevention matrix: show(io, ::T) for the container/wrapper/index family (empty/nested tuples, NamedTuple, Pair, ranges, Dict/Set, CartesianIndex(es), arrays-of-containers, Complex/Rational) routes to the correct method and never mis-dispatches CartesianIndex-style; empty tuple shows as () not Tuple{}() (Issue #4739)"
+
+[[tests]]
+name = "io_print_symbol_bare_4741"
+file = "print_symbol_bare_4741.jl"
+expected = true
+description = "print(io, :foo) writes the bare 'foo', show(io, :foo) keeps ':foo', and interpolation strips the ':' (Issue #4741)"
+
+[[tests]]
+name = "io_repr_missing_4743"
+file = "repr_missing_4743.jl"
+expected = true
+description = "show(io, ::Missing) makes repr(missing) return 'missing' instead of crashing into show(IO, CartesianIndex) (Issue #4743)"
+
+[[tests]]
+name = "io_neg_zero_sign_4745"
+file = "neg_zero_sign_4745.jl"
+expected = true
+description = "repr/string/print/show of -0.0 preserve the negative-zero sign instead of dropping it via the i64 whole-number cast (Issue #4745)"
+
+[[tests]]
+name = "io_typed_float_repr_4747"
+file = "typed_float_repr_4747.jl"
+expected = true
+description = "repr(Float32) keeps the 'f0' suffix and repr(Float16) keeps the 'Float16(...)' wrapper so element type round-trips through Meta.parse (Issue #4747)"
+
+[[tests]]
+name = "io_repr_string_char_escape_4749"
+file = "repr_string_char_escape_4749.jl"
+expected = true
+description = "repr(::String) and repr(::Char) escape special chars (newline, quote, backslash, etc.) so the output is a parseable Julia literal, while print/string keep raw form (Issue #4749)"
+
+[[tests]]
+name = "io_repr_meta_parse_roundtrip_4751"
+file = "repr_meta_parse_roundtrip_4751.jl"
+expected = true
+description = "Matrix regression guard for the repr/show fix family (#4725–#4749): asserts exact repr(x) output for numeric primitives, escaped strings/chars, symbols, Bool, Nothing, Missing, Pair, and small containers (Issue #4751)"
+
+[[tests]]
+name = "io_meta_parse_typemin_4753"
+file = "meta_parse_typemin_4753.jl"
+expected = true
+description = "Meta.parse promotes overflowing integer literals to Int128/BigInt and unary minus on Int128 narrows to Int64 when the result fits, so repr(typemin(Int64)) round-trips (Issue #4753)"
+
+[[tests]]
+name = "io_expr_display_no_debug_leak_4755"
+file = "expr_display_no_debug_leak_4755.jl"
+expected = true
+description = "ExprValue Display does not leak Rust Debug tokens like I128(...)/I32(...)/Str(...) into user-visible Expr output (Issue #4755)"
+
+[[tests]]
+name = "io_no_rust_debug_leak_4757"
+file = "no_rust_debug_leak_4757.jl"
+expected = true
+description = "Matrix regression guard for Rust Debug catch-all leaks across string/repr/interpolation entry points for common Value variants and containers (Issue #4757)"
+
+[[tests]]
+name = "io_show_steprangelen_4759"
+file = "show_steprangelen_4759.jl"
+expected = true
+description = "show/repr for StepRangeLen with float step (1:0.5:3) and LinRange routes through Pure-Julia show via untyped dynamic-dispatch forwarder, fixing the GetField crash on VM-native Value::Range (Issue #4759)"
+
+[[tests]]
+name = "io_print_iobuffer_structref_4761"
+file = "print_iobuffer_structref_4761.jl"
+expected = true
+description = "print(io, struct) for StructRef-heaped values (Pair, user structs) resolves StructRef before formatting so output is the proper Julia form instead of leaking Rust debug StructRef(heap_idx=N) (Issue #4761)"
+
+[[tests]]
+name = "io_struct_field_show_form_4764"
+file = "struct_field_show_form_4764.jl"
+expected = true
+description = "string/print(::struct) renders String/Char fields in show form (quoted/single-quoted, with escape) matching upstream Julia's default struct show fallback (Issue #4764)"
+
+[[tests]]
+name = "io_no_rust_debug_leak_iobuf_4766"
+file = "no_rust_debug_leak_iobuf_4766.jl"
+expected = true
+description = "Sibling matrix to #4757 covering the IOBuffer / sprint / multi-arg print entry points: print(buf, x), write(buf, x), sprint(io -> print(io, x)), print(buf, lit, x, lit) must not leak Rust Debug tokens like StructRef(heap_idx=N) for Pair / user structs / Int128 / Symbol / Char (Issue #4766)"
+
+[[tests]]
+name = "io_show_fallback_user_struct_4768"
+file = "show_fallback_user_struct_4768.jl"
+expected = true
+description = "Generic show(io::IO, x) fallback emits typeof(x)(field1, ...) in show form for user-defined structs so repr(user_struct) no longer crashes with 'indexing not supported for I64(N)' on the misrouted Tuple/Array show dispatch (Issue #4768)"
+
+[[tests]]
+name = "io_print_vector_compact_4770"
+file = "print_vector_compact_4770.jl"
+expected = true
+description = "print(::Vector) / string(::Vector) / print(::Matrix) routes the Pure-Julia Array{T} wrapper struct through a compact [a, b, c] / [a b; c d] / T[] form via format_struct_instance's new Array-wrapper arm instead of dumping the internal Memory{T} carrier and shape tuple (Issue #4770)"
+
+[[tests]]
+name = "io_vector_struct_no_leak_4772"
+file = "vector_struct_no_leak_4772.jl"
+expected = true
+description = "resolve_struct_refs_for_format recurses into Value::ExprArgs (and Value::Memory) so Vector{T} of heap-allocated struct elements (user structs, Pair) no longer leak StructRef(heap_idx=N) inside the compact print form (regression from PR #4771, Issue #4772)"
+
+[[tests]]
+name = "io_no_leak_container_struct_matrix_4774"
+file = "no_leak_container_struct_matrix_4774.jl"
+expected = true
+description = "Prevention matrix sibling of #4757/#4766/#4772: 7 container shapes (Vector/Tuple/NamedTuple/Dict/Pair/Ref + Set of primitives) × 6 display entry points (string/repr/print(buf)/multi-arg print/sprint/interpolation) must not leak Rust Debug tokens. Fixes Dict<value=struct> via new resolve arm and Set<primitive> via format_dict_key reuse (Issue #4774)"
+
+[[tests]]
+name = "io_no_leak_symbol_entry_point_4766"
+file = "no_leak_symbol_entry_point_4766.jl"
+expected = true
+description = "Prevention sibling of #4757/#4766/#4774 covering the Symbol(x) / Symbol(args...) display entry point (BuiltinId::SymbolNew): Symbol(::struct) / Symbol(::Pair) / Symbol(\"a_\", struct, \"_b\") must resolve StructRef before formatting (was leaking StructRef(heap_idx=N) into the symbol name) and round-trip cleanly through string/repr/interpolation. Enforced by scripts/check_format_value_resolves_structref.sh (Issue #4766 / #5038)"
+
+[[tests]]
+name = "io_namedtuple_tuple_show_form_4777"
+file = "namedtuple_tuple_show_form_4777.jl"
+expected = true
+description = "string(::NamedTuple) and string(::Tuple) render String/Char field values in show form (quoted) matching upstream Julia, and single-element Tuple gets the trailing-comma `(1,)` disambiguation form (Issue #4777)"
+
+[[tests]]
+name = "io_linrange_print_string_4761"
+file = "linrange_print_string_4761.jl"
+expected = true
+description = "print(buf, ::LinRange) / string(::LinRange) / println(buf, ::LinRange) match the user-facing show-form LinRange{T}(start, stop, len) instead of leaking the 4-field internal dump that includes the helper `lendiv` field (Issue #4761)"
+
+[[tests]]
+name = "io_print_string_user_show_4761"
+file = "print_string_user_show_4761.jl"
+expected = true
+description = "single-arg print(io, x::UserStruct) and string(x::UserStruct) dispatch through the user-defined Base.show(io::IO, ::T) method via BuiltinId::IOPrint (start_function_call) and BuiltinId::StringNew (start_sprint_call), mirroring the PrintAnyNoNewline dispatch on the stdout path; built-in single-arg string paths and structs without user show fall through to the existing generic formatter (Issue #4761)"
+
+[[tests]]
+name = "io_one_arg_show_4988"
+file = "one_arg_show_4988.jl"
+expected = true
+description = "one-argument show(x) writes a textual representation of x to stdout via show(stdout, x), matching upstream Julia's show(x) = show(stdout::IO, x); lets reflection probes like show(m::Method) run without an explicit IO argument (Issue #4988)"
+
+[[tests]]
+name = "io_show_type_value_5010"
+file = "show_type_value_5010.jl"
+expected = true
+description = "show(io::IO, x::Type)/repr(::Type) print the type name (e.g. \"Symbol\", \"Int64\") instead of the generic struct fallback's \"DataType()\". base/io.jl gains a show(io::IO, x::Type) method routing through string(x), which the most-specific-method rule selects over the generic show(io::IO, x) struct fallback (Issue #5010)"
+
+[[tests]]
+name = "io_parametric_where_show_4853"
+file = "parametric_where_show_4853.jl"
+expected = true
+description = "a parametric Base.show(io::IO, b::Box{T}) where T method dispatches from repr, string, print(io, x) and sprint(show, x); the second param's JuliaType is Struct(\"Box{T}\") so the show-method registration also keys the bare base name (\"Box\") that user_show_method_for falls back to, instead of only the typevar form which never matched the runtime concrete name Box{Int64} (Issue #4853)"
+
+[[tests]]
+name = "io_println_iobuffer_user_show_4853"
+file = "println_iobuffer_user_show_4853.jl"
+expected = true
+description = "println(buf, x) with a single value where buf is a local IOBuffer() (statically Any, not IO) dispatches a user show(io, ::T)/show(io, ::Box{T}) method instead of field-dumping; the single-value println(io_or_val, x) lowering now Dup-splits into IOPrint(2); Pop; IOPrintlnNewline so the two-arg user-show dispatch fires and the trailing newline is routed to the first arg's runtime sink (IO) or stdout (non-IO) without re-printing the value (Issue #4853 follow-up)"
+
+[[tests]]
+name = "io_multiarg_print_io_user_show_4827"
+file = "multiarg_print_io_user_show_4827.jl"
+expected = true
+description = "multi-arg print(io, a, x, b) / println(io, a, x, b) with a statically-IO first arg dispatch each struct value x through a user-defined Base.show(io::IO, ::T) method instead of bundling every value into one IOPrint(N) (which skips dispatch and field-dumps the struct). The compiler now splits the statically-IO multi-arg case into a sequence of `Dup; compile(value); IOPrint(2); Pop` writes (each two-arg IOPrint dispatches show), leaving the IO handle for the trailing newline (println) / result; single-arg print(io, x) and stdout print/println(x) keep working (Issue #4827, follow-up to #4761)"
+
+[[tests]]
+name = "io_println_closure_captured_iobuffer_5035"
+file = "println_closure_captured_iobuffer_5035.jl"
+expected = true
+description = "print/println(buf, ...) where buf is a *top-level* (global) IOBuffer() referenced from inside a function/closure routes to the IO sink instead of dumping the buffer value to stdout. Two fixes: (1) infer_value_type_with_structs maps IOBuffer() -> IO so the global binding is typed IO in global_types (the generic compiler then routes via IOPrint); (2) the runtime function specializer's stdout-only print/println fast path now bails to the generic bytecode whenever the first argument is not a statically-known non-IO primitive, since it has no IO type info for globals (Issue #5035)"
+
+[[tests]]
+name = "io_array_element_structref_5234"
+file = "array_element_structref_5234.jl"
+expected = true
+description = "string/repr/sprint(print, ...) of an array whose ELEMENTS are heap-allocated structs (Pair / Complex / user struct), via literals and comprehensions, resolve each StructRef through the element show form instead of leaking StructRef(heap_idx=N). The bare stdout single-arg print/println (BuiltinId::Print/Println, PrintAny/PrintAnyNoNewline) only did a top-level StructRef deref, not the deep resolve_struct_refs_for_format used by string/repr; #5234 switches all four to the deep resolver so array elements no longer leak. The bare-stdout entry points are also guarded by a Rust stdout-capture integration test (Issue #5234)"
+
+[[tests]]
+name = "io_inline_typed_array_literal_show_5241"
+file = "inline_typed_array_literal_show_5241.jl"
+expected = true
+description = "An INLINE typed-array literal T[...] (Int8[1,2], Float64[1.0], Any[1,\"x\"], String[...], Char[...], Bool[...], user-struct Foo[...]) passed directly to show / repr / sprint(show, ...) / string renders its elements (with the correct eltype prefix) instead of the empty-constructor form Vector{T}(). The literal lowers to Expr::Index { array: Var(\"T\"), .. }; infer_expr_type previously reported ValueType::Any for it, so resolve_sprint_function_ref could not dispatch show(io::IO, ::Array) and fell back to the generic struct show(io, x) which printed typeof(x)() = Vector{T}(). The shared typed_array_literal_element_type helper now makes inference return ValueType::ArrayOf(elem) for the literal, matching the runtime value and the variable-bound form. Includes variable-bound and untyped-literal regression coverage (Issue #5241, follows #5234/#5236)"
+
+[[tests]]
+name = "io_iobuffer_from_string_5686"
+file = "io_iobuffer_from_string_5686.jl"
+expected = true
+description = "IOBuffer(s::AbstractString) constructs a readable buffer initialized with s (Issue #5686); read(io, String) / String(take!(io)) return the content. Adds the IOBufferFromString builtin and routes read(io::IO, String) to take! (returns buffer content). The empty writable IOBuffer() form and read(filename, String) are unaffected."

@@ -12,6 +12,12 @@ using Test
     @assert isabstracttype(Unsigned)
     @assert isabstracttype(AbstractFloat)
     @assert isabstracttype(AbstractString)
+    @assert isabstracttype(AbstractVector)
+    @assert isabstracttype(Function)
+    @assert isabstracttype(IO)
+    @assert isabstracttype(Type)
+    @assert isabstracttype(Type{Int64})
+    @assert isabstracttype(AbstractVector{Int64})
     @assert isabstracttype(Any)
 
     # Concrete types return false
@@ -19,6 +25,10 @@ using Test
     @assert !isabstracttype(Float64)
     @assert !isabstracttype(Bool)
     @assert !isabstracttype(String)
+    @assert !isabstracttype(DataType)
+    @assert !isabstracttype(Tuple)
+    @assert !isabstracttype(Vector)
+    @assert !isabstracttype(Union{Int64, Float64})
 
     @test (true)
 end

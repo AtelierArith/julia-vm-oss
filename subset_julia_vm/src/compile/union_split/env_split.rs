@@ -7,6 +7,7 @@
 use crate::compile::abstract_interp::TypeEnv;
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
 use crate::compile::union_split::detection::SplitCondition;
+use crate::inference_core::{CorePrimitive, CoreType};
 
 /// Result of splitting an environment based on a condition.
 #[derive(Debug, Clone)]
@@ -46,14 +47,14 @@ pub struct SplitEnv {
 /// // Create a type environment with x::Union{Int64, String}
 /// let mut env = TypeEnv::new();
 /// let mut union_members = BTreeSet::new();
-/// union_members.insert(ConcreteType::Int64);
-/// union_members.insert(ConcreteType::String);
+/// union_members.insert(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)));
+/// union_members.insert(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String)));
 /// let union_type = LatticeType::Union(union_members);
 /// env.set("x", union_type.clone());
 ///
 /// // Split on: x isa Int64
 /// let condition = SplitCondition::IsaCheck {
-///     target_type: ConcreteType::Int64,
+///     target_type: ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
 /// };
 /// let split = split_environment(&env, "x", &union_type, &condition);
 ///
@@ -123,7 +124,9 @@ fn split_nothing_check(
     current_type: &LatticeType,
     is_equality: bool,
 ) -> SplitEnv {
-    let nothing_type = LatticeType::Concrete(ConcreteType::Nothing);
+    let nothing_type = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+        CorePrimitive::Nothing,
+    )));
 
     let (then_type, else_type) = if is_equality {
         // x === nothing:
@@ -161,13 +164,17 @@ mod tests {
     fn test_split_isa_int_from_union() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Int64);
-        union_types.insert(ConcreteType::String);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         let union_type = LatticeType::Union(union_types);
         env.set("x", union_type.clone());
 
         let condition = SplitCondition::IsaCheck {
-            target_type: ConcreteType::Int64,
+            target_type: ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
         };
 
         let split = split_environment(&env, "x", &union_type, &condition);
@@ -175,13 +182,17 @@ mod tests {
         // Then-branch: x should be Int64
         assert_eq!(
             split.then_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Int64))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Int64)
+            )))
         );
 
         // Else-branch: x should be String
         assert_eq!(
             split.else_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::String))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::String)
+            )))
         );
     }
 
@@ -191,7 +202,7 @@ mod tests {
         env.set("x", LatticeType::Top);
 
         let condition = SplitCondition::IsaCheck {
-            target_type: ConcreteType::Int64,
+            target_type: ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
         };
 
         let split = split_environment(&env, "x", &LatticeType::Top, &condition);
@@ -199,7 +210,9 @@ mod tests {
         // Then-branch: x should be Int64
         assert_eq!(
             split.then_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Int64))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Int64)
+            )))
         );
 
         // Else-branch: can't subtract from Top
@@ -210,8 +223,12 @@ mod tests {
     fn test_split_nothing_equality() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Int64);
-        union_types.insert(ConcreteType::Nothing);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Nothing,
+        )));
         let union_type = LatticeType::Union(union_types);
         env.set("x", union_type.clone());
 
@@ -222,13 +239,17 @@ mod tests {
         // Then-branch: x === nothing, so x is Nothing
         assert_eq!(
             split.then_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Nothing))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Nothing)
+            )))
         );
 
         // Else-branch: x !== nothing, so x is Int64
         assert_eq!(
             split.else_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Int64))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Int64)
+            )))
         );
     }
 
@@ -236,8 +257,12 @@ mod tests {
     fn test_split_nothing_inequality() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::String);
-        union_types.insert(ConcreteType::Nothing);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Nothing,
+        )));
         let union_type = LatticeType::Union(union_types);
         env.set("x", union_type.clone());
 
@@ -248,13 +273,17 @@ mod tests {
         // Then-branch: x !== nothing, so x is String
         assert_eq!(
             split.then_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::String))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::String)
+            )))
         );
 
         // Else-branch: x === nothing, so x is Nothing
         assert_eq!(
             split.else_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Nothing))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Nothing)
+            )))
         );
     }
 
@@ -262,14 +291,23 @@ mod tests {
     fn test_split_preserves_other_variables() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Int64);
-        union_types.insert(ConcreteType::Float64);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
         let union_type = LatticeType::Union(union_types);
         env.set("x", union_type.clone());
-        env.set("y", LatticeType::Concrete(ConcreteType::String));
+        env.set(
+            "y",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+        );
 
         let condition = SplitCondition::IsaCheck {
-            target_type: ConcreteType::Int64,
+            target_type: ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
         };
 
         let split = split_environment(&env, "x", &union_type, &condition);
@@ -277,11 +315,15 @@ mod tests {
         // Both branches should preserve y unchanged
         assert_eq!(
             split.then_env.get("y"),
-            Some(&LatticeType::Concrete(ConcreteType::String))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::String)
+            )))
         );
         assert_eq!(
             split.else_env.get("y"),
-            Some(&LatticeType::Concrete(ConcreteType::String))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::String)
+            )))
         );
     }
 
@@ -289,13 +331,15 @@ mod tests {
     fn test_split_typeof_check() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Bool);
-        union_types.insert(ConcreteType::Int64);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
         let union_type = LatticeType::Union(union_types);
         env.set("x", union_type.clone());
 
         let condition = SplitCondition::TypeofCheck {
-            target_type: ConcreteType::Bool,
+            target_type: ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)),
         };
 
         let split = split_environment(&env, "x", &union_type, &condition);
@@ -303,13 +347,17 @@ mod tests {
         // Then-branch: typeof(x) == Bool, so x is Bool
         assert_eq!(
             split.then_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Bool))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Bool)
+            )))
         );
 
         // Else-branch: typeof(x) != Bool, so x is Int64
         assert_eq!(
             split.else_env.get("x"),
-            Some(&LatticeType::Concrete(ConcreteType::Int64))
+            Some(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Int64)
+            )))
         );
     }
 }

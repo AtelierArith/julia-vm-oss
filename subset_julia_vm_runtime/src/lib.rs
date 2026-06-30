@@ -1,3 +1,7 @@
+// Prevent accidental debug output in library code (Issue #2888).
+// CLI binaries (bin/) may use eprintln!() for user-facing error messages.
+#![deny(clippy::print_stderr)]
+
 //! SubsetJuliaVM AoT Runtime Library
 //!
 //! This crate provides runtime support for AoT (Ahead-of-Time) compiled
@@ -15,7 +19,15 @@ pub mod convert;
 pub mod dispatch;
 pub mod error;
 pub mod intrinsics;
+#[path = "../../subset_julia_vm/src/rng.rs"]
+pub mod rng;
 pub mod value;
+
+/// ABI contract version consumed by generated AoT Rust.
+///
+/// The compiler emits a compile-time equality check against this value so a
+/// generated file cannot silently link with an incompatible runtime crate.
+pub const AOT_RUNTIME_ABI_VERSION: usize = 1;
 
 /// Prelude module for convenient imports
 ///
@@ -26,7 +38,7 @@ pub mod value;
 pub mod prelude {
     pub use super::array::TypedArray;
     pub use super::dispatch::{dynamic_binop, dynamic_call, BinOp};
-    pub use super::error::RuntimeError;
+    pub use super::error::{RuntimeError, RuntimeResult};
     pub use super::intrinsics::*;
     pub use super::value::Value;
 }

@@ -35,3 +35,21 @@ name = "number_type_param_return_types"
 file = "type_param_return_types.jl"
 expected = true
 description = "Type{T}→T function return types: typemin, typemax, zero, one (Issue #2245)"
+
+[[tests]]
+name = "number_oneunit_imag_type_preserving"
+file = "oneunit_imag_type_preserving.jl"
+expected = true
+description = "oneunit/imag/real are type-preserving, not Int64/Float64 stubs (Issue #5039)"
+
+[[tests]]
+name = "number_zero_one_oneunit_float_type_preserving_5167"
+file = "zero_one_oneunit_float_type_preserving_5167.jl"
+expected = true
+description = "zero/one/oneunit preserve Float16/Float32/Float64 for direct and untyped calls (Issue #5167)"
+
+[[tests]]
+name = "number_zero_one_unsigned_type_preserving_8220"
+file = "zero_one_unsigned_type_preserving_8220.jl"
+expected = true
+description = "zero/one preserve the unsigned integer type (UInt8/16/32/64/128) for direct and untyped calls instead of widening to Int64 (Issue #8220)"

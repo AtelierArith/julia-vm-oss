@@ -1,10 +1,10 @@
 //! @static compile-time conditional evaluation.
 
+use super::super::lower_expr_with_ctx;
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
 use crate::ir::core::{Expr, Literal};
 use crate::lowering::LowerResult;
 use crate::parser::cst::{CstWalker, Node, NodeKind};
-use super::super::lower_expr_with_ctx;
 
 /// Lower @static macro in expression context.
 pub(super) fn lower_static_macro_expr<'a>(
@@ -105,27 +105,94 @@ fn lower_static_if_expr<'a>(
 fn try_eval_compile_time_bool_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> Option<bool> {
     let kind = walker.kind(&node);
     match kind {
-        NodeKind::Identifier | NodeKind::BooleanLiteral => {
-            match walker.text(&node) { "true" => Some(true), "false" => Some(false), _ => None }
-        }
+        NodeKind::Identifier | NodeKind::BooleanLiteral => match walker.text(&node) {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
         NodeKind::CallExpression => {
             let children: Vec<Node<'a>> = walker.named_children(&node);
-            if children.is_empty() { return None; }
+            if children.is_empty() {
+                return None;
+            }
             match walker.text(&children[0]) {
-                "Sys.isapple" => Some(true), "Sys.isunix" => Some(true),
-                "Sys.iswindows" => Some(false), "Sys.islinux" => Some(false),
-                "Sys.isbsd" => Some(true), "Sys.isfreebsd" => Some(false),
-                "Sys.isnetbsd" => Some(false), "Sys.isopenbsd" => Some(false),
-                "Sys.isdragonfly" => Some(false), _ => None,
+                "Sys.isapple" => Some(true),
+                "Sys.isunix" => Some(true),
+                "Sys.iswindows" => Some(false),
+                "Sys.islinux" => Some(false),
+                "Sys.isbsd" => Some(true),
+                "Sys.isfreebsd" => Some(false),
+                "Sys.isnetbsd" => Some(false),
+                "Sys.isopenbsd" => Some(false),
+                "Sys.isdragonfly" => Some(false),
+                _ => None,
             }
         }
-        NodeKind::FieldExpression => {
-            match walker.text(&node) {
-                "Sys.isapple" => Some(true), "Sys.isunix" => Some(true),
-                "Sys.iswindows" => Some(false), "Sys.islinux" => Some(false),
-                "Sys.isbsd" => Some(true), _ => None,
+        NodeKind::FieldExpression => match walker.text(&node) {
+            "Sys.isapple" => Some(true),
+            "Sys.isunix" => Some(true),
+            "Sys.iswindows" => Some(false),
+            "Sys.islinux" => Some(false),
+            "Sys.isbsd" => Some(true),
+            _ => None,
+        },
+        NodeKind::BinaryExpression => try_eval_version_comparison_expr(walker, node),
+        _ => None,
+    }
+}
+
+fn try_eval_version_comparison_expr<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> Option<bool> {
+    let children = walker.named_children(&node);
+    let operands: Vec<Node<'a>> = children
+        .iter()
+        .copied()
+        .filter(|child| walker.kind(child) != NodeKind::Operator)
+        .collect();
+    if operands.len() != 2 {
+        return None;
+    }
+    let op = children
+        .iter()
+        .find(|child| walker.kind(child) == NodeKind::Operator)
+        .map(|child| walker.text(child))?;
+
+    let lhs = compile_time_version_value_expr(walker, operands[0])?;
+    let rhs = compile_time_version_value_expr(walker, operands[1])?;
+    Some(match op {
+        "==" => lhs == rhs,
+        "!=" => lhs != rhs,
+        "<" => lhs < rhs,
+        "<=" => lhs <= rhs,
+        ">" => lhs > rhs,
+        ">=" => lhs >= rhs,
+        _ => return None,
+    })
+}
+
+fn compile_time_version_value_expr<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+) -> Option<(u64, u64, u64)> {
+    match walker.kind(&node) {
+        NodeKind::Identifier if walker.text(&node) == "VERSION" => {
+            parse_version_tuple_expr(env!("CARGO_PKG_VERSION"))
+        }
+        _ if node.kind() == "prefixed_string_literal" => {
+            let children = walker.named_children(&node);
+            if children.len() < 2 || walker.text(&children[0]) != "v" {
+                return None;
             }
+            parse_version_tuple_expr(walker.text(&children[1]).trim_matches('"'))
         }
         _ => None,
     }
+}
+
+fn parse_version_tuple_expr(text: &str) -> Option<(u64, u64, u64)> {
+    let core = text.split(['-', '+']).next().unwrap_or(text);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
 }

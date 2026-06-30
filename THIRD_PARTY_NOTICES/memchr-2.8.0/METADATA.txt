@@ -1,0 +1,5 @@
+crate: memchr
+version: 2.8.0
+license: Unlicense OR MIT
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/BurntSushi/memchr

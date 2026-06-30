@@ -1,0 +1,90 @@
+using Distributions
+
+tol = 1e-6
+ok = true
+
+# Bernoulli(0.3)
+b = Bernoulli(0.3)
+ok = ok && (abs(mean(b) - 0.3) < tol)
+ok = ok && (abs(var(b) - 0.21) < tol)
+ok = ok && (mode(b) == 0)
+ok = ok && (abs(pdf(b, 1) - 0.3) < tol)
+ok = ok && (abs(pdf(b, 0) - 0.7) < tol)
+ok = ok && (abs(pdf(b, 2) - 0.0) < tol)
+ok = ok && (abs(cdf(b, 0) - 0.7) < tol)
+ok = ok && (abs(cdf(b, 1) - 1.0) < tol)
+ok = ok && (abs(succprob(b) - 0.3) < tol)
+ok = ok && (abs(failprob(b) - 0.7) < tol)
+ok = ok && (abs(entropy(b) - 0.6108643020548935) < tol)
+ok = ok && (minimum(b) == 0) && (maximum(b) == 1)
+
+# Binomial(10, 0.3)
+bn = Binomial(10, 0.3)
+ok = ok && (abs(mean(bn) - 3.0) < tol)
+ok = ok && (abs(var(bn) - 2.1) < tol)
+ok = ok && (mode(bn) == 3)
+ok = ok && (ntrials(bn) == 10)
+ok = ok && (abs(pdf(bn, 3) - 0.26682793200000005) < tol)
+ok = ok && (abs(pdf(bn, 0) - 0.02824752489999998) < tol)
+ok = ok && (abs(cdf(bn, 3) - 0.6496107184) < tol)
+ok = ok && (abs(pdf(bn, 2.5) - 0.0) < tol)   # non-integer
+ok = ok && (quantile(bn, 0.5) == 3)
+ok = ok && (minimum(bn) == 0) && (maximum(bn) == 10)
+
+# Poisson(4.0)
+po = Poisson(4.0)
+ok = ok && (abs(mean(po) - 4.0) < tol)
+ok = ok && (abs(var(po) - 4.0) < tol)
+ok = ok && (mode(po) == 4)
+ok = ok && (abs(pdf(po, 4) - 0.19536681481316454) < tol)
+ok = ok && (abs(pdf(po, 0) - 0.01831563888873418) < tol)
+ok = ok && (abs(cdf(po, 4) - 0.6288369351888317) < tol)
+ok = ok && (quantile(po, 0.5) == 4)
+
+# Geometric(0.25) — number of failures before first success
+ge = Geometric(0.25)
+ok = ok && (abs(mean(ge) - 3.0) < tol)
+ok = ok && (abs(var(ge) - 12.0) < tol)
+ok = ok && (abs(pdf(ge, 0) - 0.25) < tol)
+ok = ok && (abs(pdf(ge, 2) - 0.140625) < tol)
+ok = ok && (abs(cdf(ge, 0) - 0.25) < tol)
+ok = ok && (abs(cdf(ge, 2) - 0.578125) < tol)
+ok = ok && (succprob(ge) == 0.25)
+
+# DiscreteUniform(1, 6)
+du = DiscreteUniform(1, 6)
+ok = ok && (abs(mean(du) - 3.5) < tol)
+ok = ok && (abs(var(du) - 2.9166666666666665) < tol)
+ok = ok && (span(du) == 6)
+ok = ok && (abs(pdf(du, 3) - 0.16666666666666666) < tol)
+ok = ok && (abs(pdf(du, 7) - 0.0) < tol)
+ok = ok && (abs(cdf(du, 3) - 0.5) < tol)
+ok = ok && (quantile(du, 0.5) == 3)
+ok = ok && (minimum(du) == 1) && (maximum(du) == 6)
+
+# Categorical([0.2, 0.3, 0.5]) — distribution over 1:k (Issue #7260)
+ca = Categorical([0.2, 0.3, 0.5])
+ok = ok && (ncategories(ca) == 3)
+ok = ok && (probs(ca) == [0.2, 0.3, 0.5])
+ok = ok && (abs(mean(ca) - 2.3) < tol)
+ok = ok && (abs(var(ca) - 0.61) < tol)
+ok = ok && (mode(ca) == 3)
+ok = ok && (abs(pdf(ca, 1) - 0.2) < tol)
+ok = ok && (abs(pdf(ca, 2) - 0.3) < tol)
+ok = ok && (abs(pdf(ca, 4) - 0.0) < tol)   # out of support
+ok = ok && (abs(pdf(ca, 0) - 0.0) < tol)   # out of support
+ok = ok && (abs(pdf(ca, 1.5) - 0.0) < tol) # non-integer
+ok = ok && (abs(cdf(ca, 1) - 0.2) < tol)
+ok = ok && (abs(cdf(ca, 2) - 0.5) < tol)
+ok = ok && (abs(cdf(ca, 3) - 1.0) < tol)
+ok = ok && (quantile(ca, 0.1) == 1)
+ok = ok && (quantile(ca, 0.5) == 2)
+ok = ok && (quantile(ca, 0.6) == 3)
+ok = ok && (abs(entropy(ca) - 1.0296530140645737) < tol)
+ok = ok && (minimum(ca) == 1) && (maximum(ca) == 3)
+# Uniform Categorical(k)
+cu = Categorical(4)
+ok = ok && (probs(cu) == [0.25, 0.25, 0.25, 0.25])
+ok = ok && (abs(mean(cu) - 2.5) < tol)
+
+ok

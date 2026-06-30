@@ -1,0 +1,5 @@
+crate: object
+version: 0.36.7
+license: Apache-2.0 OR MIT
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/gimli-rs/object

@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+#
+# Termux compatibility check for SubsetJuliaVM.
+#
+# Build from the repository root:
+#   docker buildx build -f docker/Dockerfile.termux --target check .
+
+FROM termux/termux-docker:latest AS base
+
+RUN mkdir -p /work/ailujsoi \
+    && chown -R system:system /work
+
+WORKDIR /work/ailujsoi
+
+RUN /entrypoint.sh bash -lc 'pkg update -y \
+    && pkg install -y \
+        clang \
+        git \
+        openssl \
+        pkg-config \
+        rust'
+
+COPY --chown=system:system . .
+
+RUN /entrypoint.sh bash -lc 'rustc -Vv \
+    && cargo -V'
+
+FROM base AS check
+
+RUN /entrypoint.sh bash -lc 'timeout 1800 cargo check -p subset_julia_vm --lib'

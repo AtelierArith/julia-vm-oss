@@ -53,5 +53,18 @@ function log(x::Float64)
     return fk * _LOG_LN2_HI - ((hfsq - (s * (hfsq + R) + fk * _LOG_LN2_LO)) - f)
 end
 
+function log(x::Float32)
+    return Float32(log(Float64(x)))
+end
+
+function log(x::Float16)
+    return Float16(log(Float64(x)))
+end
+
 # Integer conversion
 log(x::Int64) = log(Float64(x))
+
+# Rational conversion (Issue #5356): `float(::Rational)` is Float64, so this
+# reduces to the Float64 method (no recursion); without it `log(::Rational)`
+# hits the Float64 method with a Rational in a Float64 slot (LoadSlotF64).
+log(x::Rational) = log(float(x))

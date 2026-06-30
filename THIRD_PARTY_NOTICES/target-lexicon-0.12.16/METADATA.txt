@@ -1,0 +1,5 @@
+crate: target-lexicon
+version: 0.12.16
+license: Apache-2.0 WITH LLVM-exception
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/bytecodealliance/target-lexicon

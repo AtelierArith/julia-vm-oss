@@ -88,6 +88,13 @@
             border-left-color: #66d9ef;
         }
 
+        .test-item.skip {
+            border-left-color: #75715e;
+            opacity: 0.8;
+        }
+
+        .test-item .status.skip { color: #75715e; }
+
         .test-item .name {
             font-weight: bold;
             margin-bottom: 0.5rem;
@@ -158,7 +165,7 @@
     <div class="results" id="results"></div>
 
     <script type="module">
-        import { samplesIR } from './samples_ir.js?v=23';
+        import { samplesIR } from './samples_ir.js?v=1';
 
         let wasm = null;
         let testResults = [];
@@ -209,6 +216,13 @@
             const oldOutput = testItem.querySelector('.output');
             if (oldError) oldError.remove();
             if (oldOutput) oldOutput.remove();
+
+            if (sample.webUnsupported) {
+                testItem.className = 'test-item skip';
+                statusEl.className = 'status skip';
+                statusEl.textContent = 'SKIP (web)';
+                return { pass: true, skipped: true };
+            }
 
             try {
                 const code = sample.code;
@@ -291,10 +305,12 @@
             }
 
             // Update summary
+            const skipped = testResults.filter((r) => r && r.skipped).length;
             const summary = document.getElementById('summary');
             summary.innerHTML = `
                 <span class="pass">PASS: ${passed}</span> |
                 <span class="fail">FAIL: ${failed}</span> |
+                <span class="skip">SKIP: ${skipped}</span> |
                 Total: ${samplesToRun.length}
             `;
 

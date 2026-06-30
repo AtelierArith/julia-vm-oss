@@ -3,8 +3,10 @@
 
 using Test
 
-# Helper functions defined outside testset
-sum_typed(x::Int64, ys::Int64...) = x + sum(ys)
+# Helper functions defined outside testset. `sum(())` is an upstream Julia
+# error, so the empty-varargs computation path must avoid reducing the empty
+# tuple (Issue #8483).
+sum_typed(x::Int64, ys::Int64...) = length(ys) == 0 ? x : x + sum(ys)
 count_typed(x::Int64, ys::Int64...) = 1 + length(ys)
 mul_typed(x::Float64, ys::Float64...) = x * prod(ys)
 

@@ -1,0 +1,602 @@
+# Fixture tests for bundled third-party package loader (Issue #3438)
+# Example.jl API based on https://github.com/JuliaLang/Example.jl
+
+[[tests]]
+name = "packages_example_hello"
+file = "packages_example_hello.jl"
+expected = true
+description = "using Example; hello(\"world\") returns \"Hello, world\""
+
+[[tests]]
+name = "packages_example_domath"
+file = "packages_example_addone.jl"
+expected = 42
+description = "using Example; domath(37) returns 42"
+
+[[tests]]
+name = "packages_example_qualified"
+file = "packages_example_qualified.jl"
+expected = 42
+description = "using Example; qualified access Example.domath(37) returns 42"
+
+[[tests]]
+name = "packages_example_include"
+file = "packages_example_include.jl"
+expected = 42
+description = "using Example; included_double(21) from include(\"helpers.jl\") returns 42"
+
+[[tests]]
+name = "packages_primes_isprime"
+file = "primes_isprime.jl"
+expected = true
+description = "Primes: isprime for basic cases including negative, 0, 1, primes, composites"
+
+[[tests]]
+name = "packages_primes_generation"
+file = "primes_generation.jl"
+expected = true
+description = "Primes: primes(hi), primes(lo,hi), prime(i) via Sieve of Eratosthenes"
+
+[[tests]]
+name = "packages_primes_nextprev"
+file = "primes_nextprev.jl"
+expected = true
+description = "Primes: nextprime and prevprime"
+
+[[tests]]
+name = "packages_primes_factor"
+file = "primes_factor.jl"
+expected = true
+description = "Primes: factor(Vector, n) and prodfactors"
+
+[[tests]]
+name = "packages_primes_factor_show_7171"
+file = "primes_factor_show_7171.jl"
+expected = true
+description = "Issue #7171: Factorization prints as 2^3 ⋅ 3^2 ⋅ 5 via package Base.show"
+
+[[tests]]
+name = "packages_primes_factor_specials"
+file = "primes_factor_specials.jl"
+expected = true
+description = "Primes: factor special cases (0, negative, Set)"
+
+[[tests]]
+name = "packages_primes_number_theory"
+file = "primes_number_theory.jl"
+expected = true
+description = "Primes: radical and totient"
+
+[[tests]]
+name = "packages_primes_divisors"
+file = "primes_divisors.jl"
+expected = true
+description = "Primes: divisors returns sorted list of divisors (Issue #3442)"
+
+[[tests]]
+name = "packages_data_structures_heap_8141"
+file = "data_structures_heap_8141.jl"
+expected = true
+description = "DataStructures: array-backed heap helpers and Base.Order.Reverse semantics used by QuadGK (Issue #8141)"
+
+[[tests]]
+name = "packages_data_structures_quadgk_segment_heap_8141"
+file = "data_structures_quadgk_segment_heap_8141.jl"
+expected = true
+description = "DataStructures: QuadGK-like Segment heap ordering and bounded percolate_down! (Issues #8141/#8293)"
+
+[[tests]]
+name = "packages_data_structures_heap_validation_8365"
+file = "data_structures_heap_validation_8365.jl"
+expected = true
+description = "DataStructures: focused validation of array-backed heap helpers, orderings, and QuadGK bounded percolation (Issue #8365)"
+
+[[tests]]
+name = "packages_quadgk_scalar_integrals_8140"
+file = "quadgk_scalar_integrals_8140.jl"
+expected = true
+description = "QuadGK: bundled upstream source loads cached rules and integrates scalar functions over a finite interval (Issue #8140)"
+
+[[tests]]
+name = "packages_quadgk_infinite_intervals_8408"
+file = "quadgk_infinite_intervals_8408.jl"
+expected = true
+description = "QuadGK: semi-infinite interval transforms rebuild stale package caches and keep let destructuring bindings visible (Issue #8408)"
+
+[[tests]]
+name = "packages_plots_construct"
+file = "plots_construct.jl"
+expected = true
+description = "Plots: plot(x, y) constructs Plot with one Series"
+
+[[tests]]
+name = "packages_plots_function_sin"
+file = "plots_function_sin.jl"
+expected = true
+description = "Plots: plot(sin) generates 100-point Series"
+
+[[tests]]
+name = "packages_plots_vector"
+file = "plots_vector.jl"
+expected = true
+description = "Plots: plot(y::Vector) generates auto x indices"
+
+[[tests]]
+name = "packages_plots_existing_plot_7026"
+file = "plots_existing_plot_7026.jl"
+expected = true
+description = "Plots: plot(p::Plot) copies an existing plot and makes it current (Issues #7026/#7149)"
+
+[[tests]]
+name = "packages_plots_function_xy_4452"
+file = "plots_function_xy_4452.jl"
+expected = true
+description = "Plots: plot/scatter with x plus f::Function and swapped function/x forms (Issues #4448/#4452)"
+
+[[tests]]
+name = "packages_plots_scatter"
+file = "plots_scatter.jl"
+expected = true
+description = "Plots: scatter(x, y) / scatter(f) tag seriestype = :scatter (Issue #4367)"
+
+[[tests]]
+name = "packages_plots_scatter_rand_7307"
+file = "plots_scatter_rand_7307.jl"
+expected = true
+description = "Plots: scatter/plot over rand(n)/randn(n)/collect carriers dispatch to ::Vector (Issue #7307)"
+
+[[tests]]
+name = "packages_plots_plot_bang"
+file = "plots_plot_bang.jl"
+expected = true
+description = "Plots: plot! appends line series to the current plot (Issue #4410)"
+
+[[tests]]
+name = "packages_plots_scatter_bang"
+file = "plots_scatter_bang.jl"
+expected = true
+description = "Plots: scatter! appends :scatter series to current plot (Issue #4445)"
+
+[[tests]]
+name = "packages_plots_plot3d"
+file = "plots_plot3d.jl"
+expected = true
+description = "Plots: plot(x,y,z) constructs :path3d Series (Issue #5271)"
+
+[[tests]]
+name = "packages_plots_scatter3d"
+file = "plots_scatter3d.jl"
+expected = true
+description = "Plots: scatter(x,y,z) constructs :scatter3d Series (Issue #5271)"
+
+[[tests]]
+name = "packages_plots_plot3d_alias_7270"
+file = "plots_plot3d_alias_7270.jl"
+expected = true
+description = "Plots: plot3d(x,y,z) aliases plot(...; seriestype=:path3d); plot3d(n::Integer) seeds n empty series (Issue #7270)"
+
+[[tests]]
+name = "packages_plots_plot_legend_kwarg_7337"
+file = "plots_plot_legend_kwarg_7337.jl"
+expected = true
+description = "Plots: 2D plot/scatter/plot!/scatter! accept the universal `legend` keyword like plot3d (Issue #7337)"
+
+[[tests]]
+name = "packages_plots_surface"
+file = "plots_surface.jl"
+expected = true
+description = "Plots: surface(x,y,z) and surface(x,y,zf) construct :surface Series (Issues #5271/#5986)"
+
+[[tests]]
+name = "packages_plots_heatmap_6360"
+file = "plots_heatmap_6360.jl"
+expected = true
+description = "Plots: heatmap(z), heatmap(x,y,z), and heatmap! construct :heatmap Series (Issue #6360)"
+
+[[tests]]
+name = "packages_plots_bar_6358"
+file = "plots_bar_6358.jl"
+expected = true
+description = "Plots: bar(x,y), bar(y), bar([(x,y), ...]), and bar! construct :bar Series for iOS/Web Plotly rendering (Issue #6358)"
+
+[[tests]]
+name = "packages_plots_histogram_5575"
+file = "plots_histogram_5575.jl"
+expected = true
+description = "Plots: histogram/histogram! bin x-only data into bar Series with bins, raw weights, weights(...) wrapper, and normalization (Issues #5575/#6451)"
+
+[[tests]]
+name = "packages_plots_aspect_ratio_6353"
+file = "plots_aspect_ratio_6353.jl"
+expected = true
+description = "Plots: aspect_ratio keyword and aliases are stored on Plot values (Issue #6353)"
+
+[[tests]]
+name = "packages_plots_push_point_6355"
+file = "plots_push_point_6355.jl"
+expected = true
+description = "Plots: push!(plt, i, y) extends series i in place, auto-extending x by +1 (Issue #6355)"
+
+[[tests]]
+name = "packages_plots_animate_6355"
+file = "plots_animate_6355.jl"
+expected = true
+description = "Plots: @animate collects one Plot snapshot per loop iteration into an Animation (Issue #6355)"
+
+[[tests]]
+name = "packages_plots_push_xy_point_7271"
+file = "plots_push_xy_point_7271.jl"
+expected = true
+description = "Plots: push!(plt, x, y) / push!(plt, x, y, z) append a single point to the first (mutable) series (Issue #7271)"
+
+[[tests]]
+name = "packages_plots_animate_every_7272"
+file = "plots_animate_every_7272.jl"
+expected = true
+description = "Plots: @animate/@gif accept a trailing `every N` / `when cond` frame-sampling modifier (Issue #7272)"
+
+[[tests]]
+name = "packages_plots_aizawa_attractor_7273"
+file = "plots_aizawa_attractor_7273.jl"
+expected = true
+description = "Plots: Aizawa attractor 3D animation sample — Base.@kwdef struct, plot3d(1), push!(plt,x,y,z), @animate ... every N builds 150 frames (Issue #7273)"
+
+[[tests]]
+name = "packages_plots_push_vector_dispatch_7883"
+file = "plots_push_vector_dispatch_7883.jl"
+expected = true
+description = "Plots: push!(::Vector, x) routed through CallTypedDispatchOrBuiltin (because `using Plots` defines push!(::Plot,::Number)) grows the array wrapper in place and stays correct at scale — guards the O(n^2)->O(1) builtin-Push fallback fix (Issue #7883)"
+
+[[tests]]
+name = "packages_plots_gif_artifact_6355"
+file = "plots_gif_artifact_6355.jl"
+expected = true
+description = "Plots: gif(anim) wraps the frames into an AnimatedGif, with fps keyword (Issue #6355)"
+
+[[tests]]
+name = "packages_plots_gif_macro_6355"
+file = "plots_gif_macro_6355.jl"
+expected = true
+description = "Plots: @gif builds the animation and immediately wraps it as an AnimatedGif (Issue #6355)"
+
+[[tests]]
+name = "packages_plots_gif_title_7030"
+file = "plots_gif_title_7030.jl"
+expected = true
+description = "Plots: plot(...; title=...) carries a title; @gif/@animate over titled plots capture per-frame titles (broadcast + interpolation through the macro quote path) (Issue #7030/#7029)"
+
+[[tests]]
+name = "packages_symbolics_variables"
+file = "symbolics_variables.jl"
+expected = true
+description = "Symbolics: @variables binds Num-wrapped Sym variables in caller scope and returns a vector (Issue #6572)"
+
+[[tests]]
+name = "packages_symbolics_arithmetic"
+file = "symbolics_arithmetic.jl"
+expected = true
+description = "Symbolics: Num arithmetic (mixed-type methods, no #5966 recursion), elementary functions, folding, identities, equality (Issue #6572)"
+
+[[tests]]
+name = "packages_symbolics_show"
+file = "symbolics_show.jl"
+expected = true
+description = "Symbolics: infix pretty-printing via show/string with operator-precedence parenthesization (Issue #6572)"
+
+[[tests]]
+name = "packages_symbolics_matrix_show"
+file = "symbolics_matrix_show.jl"
+expected = true
+description = "Symbolics: Matrix{Num}/Vector{Num} display routes each element through the scalar Num show (Issue #7893)"
+
+[[tests]]
+name = "packages_symbolics_matmul"
+file = "symbolics_matmul.jl"
+expected = true
+description = "Symbolics: symbolic-element matrix products A*v / A*B via element-generic Pure-Julia `*` (similar-based accumulation), value-checked by substitute (Issue #7889)"
+
+[[tests]]
+name = "packages_symbolics_linear_algebra"
+file = "symbolics_linear_algebra.jl"
+expected = true
+description = "Symbolics: symbolic det/inv/\\ via Laplace cofactor expansion (det untyped-generic override, inv eltype-branch workaround for #8025), value-checked by substitute (Issue #7892)"
+
+[[tests]]
+name = "packages_symbolics_canonical_form"
+file = "symbolics_canonical_form.jl"
+expected = true
+description = "Symbolics: canonical-form display — simplify orders sum addends (ascending degree, x^2 before x*y) and show renders negative coefficients as subtraction, so det output matches upstream string x^2 - x*y (Issue #7894)"
+
+[[tests]]
+name = "packages_symbolics_dispatch_bare_alias_bound_8019"
+file = "symbolics_dispatch_bare_alias_bound_8019.jl"
+expected = true
+description = "Symbolics: a parametric bound spelled with the bare imported type-alias `{<:Num}` matches a `Matrix{Symbolics.Num}` actual exactly as the qualified `{<:Symbolics.Num}` spelling does — module qualification is not part of type identity, so the core subtype engine's `(Named, Named)` bound check now equates names differing only by module prefix (Issue #8019)"
+
+[[tests]]
+name = "packages_symbolics_substitute"
+file = "symbolics_substitute.jl"
+expected = true
+description = "Symbolics: substitute replaces symbolic variables (numeric folding, partial/symbolic results, Num as Dict key) (Issue #6572)"
+
+[[tests]]
+name = "packages_symbolics_simplify_expand"
+file = "symbolics_simplify_expand.jl"
+expected = true
+description = "Symbolics: simplify (combine like terms/factors, canonical order) and expand (distribute, polynomial form) (Issue #6572)"
+
+[[tests]]
+name = "packages_symbolics_derivative"
+file = "symbolics_derivative.jl"
+expected = true
+description = "Symbolics: derivative/Differential (sum/product/quotient/power/chain rules, elementary fns, higher order via simplify) (Issue #6572)"
+
+[[tests]]
+name = "packages_jsxgraph_board"
+file = "packages_jsxgraph_board.jl"
+expected = true
+description = "JSXGraph: board() creates an empty Board with boundingbox option (Issue #6357)"
+
+[[tests]]
+name = "packages_jsxgraph_push"
+file = "packages_jsxgraph_push.jl"
+expected = true
+description = "JSXGraph: push!(b, elems...) appends JSXElement objects to Board (Issue #6357)"
+
+[[tests]]
+name = "packages_jsxgraph_elements"
+file = "packages_jsxgraph_elements.jl"
+expected = true
+description = "JSXGraph: point/line/segment/circle/polygon/text constructors and id sequencing (Issue #6357)"
+
+[[tests]]
+name = "packages_jsxgraph_functiongraph"
+file = "packages_jsxgraph_functiongraph.jl"
+expected = true
+description = "JSXGraph: functiongraph samples Julia function into curve element (Issue #6357)"
+
+[[tests]]
+name = "packages_jsxgraph_apollonian"
+file = "packages_jsxgraph_apollonian.jl"
+expected = true
+description = "JSXGraph: Apollonian gasket via linear Descartes swap, circles with coordinate-tuple centers (Issue #6357)"
+
+[[tests]]
+name = "packages_jsxgraph_doblock_7373"
+file = "packages_jsxgraph_doblock_7373.jl"
+expected = true
+description = "JSXGraph: board do-block construction appends elements to the returned Board (Issue #7373)"
+
+[[tests]]
+name = "packages_jsxgraph_view3d_7373"
+file = "packages_jsxgraph_view3d_7373.jl"
+expected = true
+description = "JSXGraph: View3D stores nested point3d/line3d/curve3d elements (Issue #7373)"
+
+[[tests]]
+name = "packages_jsxgraph_jsfunction_7373"
+file = "packages_jsxgraph_jsfunction_7373.jl"
+expected = true
+description = "JSXGraph: curve3d string parents are wrapped as JSFunction values (Issue #7373)"
+
+[[tests]]
+name = "packages_jsxgraph_parametricsurface3d"
+file = "packages_jsxgraph_parametricsurface3d.jl"
+expected = true
+description = "JSXGraph: parametricsurface3d wraps coordinate maps as two-argument (u, v) JSFunctions"
+
+[[tests]]
+name = "packages_interact_manipulate_7275"
+file = "interact_manipulate_7275.jl"
+expected = true
+description = "Interact: @manipulate for var = choices … end evaluates the body once per discrete choice and collects the per-choice Plots + labels into a Manipulate (MVP; Plotly dropdown asserted in plot_artifact_mime_tests) (Issue #7275)"
+
+[[tests]]
+name = "packages_interact_manipulate_nonplot_errors_7338"
+file = "interact_manipulate_nonplot_errors_7338.jl"
+expected = true
+description = "Interact: @manipulate with a non-plot body errors clearly instead of silently building a Manipulate that renders nothing; plot bodies still work (Issue #7338)"
+
+[[tests]]
+name = "packages_interact_manipulate_multi_control_7344"
+file = "interact_manipulate_multi_control_7344.jl"
+expected = true
+description = "Interact: @manipulate for a = …, b = … builds the cartesian product of choices into one combined dropdown (labels a=<va>, b=<vb>), inner var fastest; non-plot body still errors (Issue #7344)"
+
+[[tests]]
+name = "packages_plots_qualified_type_access_7302"
+file = "plots_qualified_type_access_7302.jl"
+expected = true
+description = "Qualified `Plots.Plot` type access resolves the bundled-package type in isa/===/`x isa Module.T`, same as the unqualified exported `Plot` (Issue #7302)"
+
+[[tests]]
+name = "packages_plots_scatter_matrix_7322"
+file = "plots_scatter_matrix_7322.jl"
+expected = true
+description = "Issue #7322: scatter(::AbstractMatrix)/scatter!(::AbstractMatrix) plot one series per column (unblocks the #7275 Interact @manipulate scatter(rand(10,2)) sample)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_skeleton_7362"
+file = "ordinarydiffeq_skeleton_7362.jl"
+expected = true
+description = "OrdinaryDiffEq README MVP skeleton: using OrdinaryDiffEq, ODEProblem construction, and Tsit5() (Issue #7362)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_linear_solve_7363"
+file = "ordinarydiffeq_linear_solve_7363.jl"
+expected = true
+description = "OrdinaryDiffEq README MVP: scalar out-of-place ODE solve returns ODESolution fields via Tsit5 adaptive backend (Issues #7363/#7367)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_lorenz_solve_7363"
+file = "ordinarydiffeq_lorenz_solve_7363.jl"
+expected = true
+description = "OrdinaryDiffEq README MVP: vector in-place Lorenz solve returns ODESolution trajectory via Tsit5 adaptive backend (Issues #7363/#7367)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_plot_solution_7364"
+file = "ordinarydiffeq_plot_solution_7364.jl"
+expected = true
+description = "OrdinaryDiffEq README MVP: plot(sol), plot(sol, idxs=(...)), and plot!(sol.t, f) build normal Plots.Plot values (Issue #7364)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_readme_mvp_7366"
+file = "ordinarydiffeq_readme_mvp_7366.jl"
+expected = true
+description = "OrdinaryDiffEq README MVP completion: linear overlay and Lorenz 3D plot stay runnable together with documented Tsit5 semantics (Issues #7366/#7367)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_tsit5_adaptive_7367"
+file = "ordinarydiffeq_tsit5_adaptive_7367.jl"
+expected = true
+description = "OrdinaryDiffEq Tsit5 backend: reltol/abstol affect adaptive internal steps while saveat keeps stable output times (Issue #7367)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_integrator_7981"
+file = "ordinarydiffeq_integrator_7981.jl"
+expected = true
+description = "OrdinaryDiffEq integrator interface subset: init/step!/solve!/reinit!/remake/successful_retcode reproduce solve(prob, alg; ...) (Issue #7981)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_dense_output_7982"
+file = "ordinarydiffeq_dense_output_7982.jl"
+expected = true
+description = "OrdinaryDiffEq dense output: callable ODESolution sol(t)/sol(t; idxs=...)/sol(ts) via linear interpolation between saved grid points (Issue #7982)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_secondorder_7985"
+file = "ordinarydiffeq_secondorder_7985.jl"
+expected = true
+description = "OrdinaryDiffEq SecondOrderODEProblem + VelocityVerlet symplectic integrator: harmonic oscillator analytic match and bounded energy (Issue #7985)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_callbacks_7983"
+file = "ordinarydiffeq_callbacks_7983.jl"
+expected = true
+description = "OrdinaryDiffEq callbacks & events: ContinuousCallback (bouncing ball, bisection root-find), DiscreteCallback, CallbackSet via solve(...; callback=...) (Issue #7983)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_staticarrays_7984"
+file = "ordinarydiffeq_staticarrays_7984.jl"
+expected = true
+description = "OrdinaryDiffEq StaticArrays README variant: out-of-place SVector RHS, static-state type preserved end-to-end, trajectory parity with the dynamic Vector version (Issue #7984)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_view_state_7986"
+file = "ordinarydiffeq_view_state_7986.jl"
+expected = true
+description = "OrdinaryDiffEq broader array surfaces: view/SubArray states densify through the stepper (in-place, out-of-place, integrator) without mutating the backing buffer; out-of-place vector RHS correctness (Issues #7986, #8163)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_remake_7981"
+file = "ordinarydiffeq_remake_7981.jl"
+expected = true
+description = "OrdinaryDiffEq integrator interface: remake(prob; u0/tspan/f) overrides fields, re-derives isinplace, keeps unspecified fields; remade problem solves to the new fields (Issue #7981)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_retcode_7981"
+file = "ordinarydiffeq_retcode_7981.jl"
+expected = true
+description = "OrdinaryDiffEq integrator interface: sol.retcode is a real ReturnCode value (successful_retcode + :Success parity), user tstops land a step on requested times, step!(integ, dt, stop_at_tdt) advances by dt (Issue #7981)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_recipe_plot_7987"
+file = "ordinarydiffeq_recipe_plot_7987.jl"
+expected = true
+description = "OrdinaryDiffEq plot(sol) through the apply_recipe recipe pipeline (registered on AbstractODESolution) — scalar/vector Series shape matches the former direct conversion, no regression (Issue #7987)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_recipe_idxs_7987"
+file = "ordinarydiffeq_recipe_idxs_7987.jl"
+expected = true
+description = "OrdinaryDiffEq plot recipe attributes through the pipeline: idxs (phase plots), vars alias, denseplot/plotdensity (sol(t) sampling), plot!(sol) overlay (Issue #7987)"
+
+[[tests]]
+name = "packages_ordinarydiffeq_alg_dispatch_7996"
+file = "ordinarydiffeq_alg_dispatch_7996.jl"
+expected = true
+description = "OrdinaryDiffEq alg dispatch: solve(prob, Tsit5()) dispatches on alg type; unsupported algorithm raises explicit error (Issue #7996)"
+
+[[tests]]
+name = "packages_plots_label_kwarg_7998"
+file = "plots_label_kwarg_7998.jl"
+expected = true
+description = "Plots: plot/plot! label keyword is stored on Series and emitted as Plotly trace name with legend enabled (Issue #7998)"
+
+[[tests]]
+name = "packages_plots_title_bang_7850"
+file = "plots_title_bang_7850.jl"
+expected = true
+description = "Plots: title!(plt, s) and title!(s) update Plot.title; current() reflects the new title (Issue #7850)"
+
+[[tests]]
+name = "packages_plots_xlims_ylims_7850"
+file = "plots_xlims_ylims_7850.jl"
+expected = true
+description = "Plots: xlims!/ylims! setters and xlims/ylims getters (explicit range or data-derived) (Issue #7850)"
+
+[[tests]]
+name = "packages_plots_xlims_ylims_kwarg"
+file = "plots_xlims_ylims_kwarg.jl"
+expected = true
+description = "Plots: xlims=/ylims= keyword arguments to plot()/scatter() are stored and inherited by plot!() (Issue #8108)"
+
+[[tests]]
+name = "packages_plots_hline_vline_bang_7850"
+file = "plots_hline_vline_bang_7850.jl"
+expected = true
+description = "Plots: hline!/vline! append reference-line values to Plot.hlines/vlines; plot! carries them forward (Issue #7850)"
+
+[[tests]]
+name = "packages_plots_hline_vline_7850"
+file = "plots_hline_vline_7850.jl"
+expected = true
+description = "Plots: non-bang hline/vline create a new plot with hlines/vlines set (Issue #7850)"
+
+[[tests]]
+name = "packages_abstract_algebra_poly_mvp_7491"
+file = "abstract_algebra_poly_mvp_7491.jl"
+expected = true
+description = "AbstractAlgebra Phase 5 seed: univariate polynomial rings over ZZ/QQ with basic arithmetic, display, degree, coeff, evaluate, derivative, and exact division (Issue #7491)"
+
+[[tests]]
+name = "packages_abstract_algebra_fraction_residue_7491"
+file = "abstract_algebra_fraction_residue_7491.jl"
+expected = true
+description = "AbstractAlgebra Phase 5 seed: fraction field of a univariate polynomial ring and integer residue ring constructors with small arithmetic (Issue #7491)"
+
+[[tests]]
+name = "packages_abstract_algebra_poly_residue_ring_8299"
+file = "abstract_algebra_poly_residue_ring_8299.jl"
+expected = true
+description = "AbstractAlgebra polynomial residue ring MVP: R[x]/(x^2 + x + 1), generator arithmetic, reduction, lift/data, and display (Issue #8299)"
+
+[[tests]]
+name = "packages_abstract_algebra_matrix_module_map_7492"
+file = "abstract_algebra_matrix_module_map_7492.jl"
+expected = true
+description = "AbstractAlgebra Phase 6 seed: matrix spaces, dense matrices, free modules, and simple maps over the AbstractAlgebra MVP rings (Issue #7492)"
+
+[[tests]]
+name = "packages_abstract_algebra_perm_mvp_8306"
+file = "abstract_algebra_perm_mvp_8306.jl"
+expected = true
+description = "AbstractAlgebra permutation group MVP: Perm, SymmetricGroup, composition, inverse, powers, sign, parity, cycle type, and display helpers (Issue #8306)"
+
+[[tests]]
+name = "packages_abstract_algebra_young_tableau_mvp_8302"
+file = "abstract_algebra_young_tableau_mvp_8302.jl"
+expected = true
+description = "AbstractAlgebra Young diagram/tableau MVP: Partition, YoungTableau, shape metadata, linear indexing, and ASCII diagram helpers (Issue #8302)"
+
+[[tests]]
+name = "packages_quadgk_domains_segbuf_8288"
+file = "quadgk_domains_segbuf_8288.jl"
+expected = true
+description = "QuadGK finite multi-domain integration plus quadgk_segbuf/eval_segbuf/segbuf reuse support (Issue #8288)"
+
+[[tests]]
+name = "packages_quadgk_inplace_batch_8289"
+file = "quadgk_inplace_batch_8289.jl"
+expected = true
+description = "QuadGK in-place vector integration and direct BatchIntegrand dispatch with kwargs through partial parametric wrapper selection (Issues #8289, #8407)"

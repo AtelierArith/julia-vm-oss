@@ -4,6 +4,8 @@
 //! from specialized branches back into a unified result.
 
 use crate::compile::lattice::types::LatticeType;
+#[cfg(test)]
+use crate::inference_core::{CorePrimitive, CoreType};
 
 /// Effects that may occur during execution.
 ///
@@ -94,8 +96,8 @@ pub struct MergedResult {
 ///
 /// // Then-branch returns Int64, else-branch returns String
 /// let merged = merge_split_results(
-///     LatticeType::Concrete(ConcreteType::Int64),
-///     LatticeType::Concrete(ConcreteType::String),
+///     LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))),
+///     LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))),
 ///     Effects::new(),
 ///     Effects::new(),
 /// );
@@ -176,8 +178,12 @@ mod tests {
 
     #[test]
     fn test_merge_concrete_types() {
-        let then_result = LatticeType::Concrete(ConcreteType::Int64);
-        let else_result = LatticeType::Concrete(ConcreteType::String);
+        let then_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        let else_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         let then_effects = Effects::new();
         let else_effects = Effects::new();
 
@@ -191,8 +197,12 @@ mod tests {
         );
         if let LatticeType::Union(types) = merged.return_type {
             assert_eq!(types.len(), 2);
-            assert!(types.contains(&ConcreteType::Int64));
-            assert!(types.contains(&ConcreteType::String));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String
+            ))));
         }
 
         assert!(!merged.effects.may_throw);
@@ -200,11 +210,15 @@ mod tests {
 
     #[test]
     fn test_merge_with_union() {
-        let then_result = LatticeType::Concrete(ConcreteType::Int64);
+        let then_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
 
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Float64);
-        union_types.insert(ConcreteType::Bool);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)));
         let else_result = LatticeType::Union(union_types);
 
         let merged = merge_split_results(then_result, else_result, Effects::new(), Effects::new());
@@ -217,16 +231,26 @@ mod tests {
         );
         if let LatticeType::Union(types) = merged.return_type {
             assert_eq!(types.len(), 3);
-            assert!(types.contains(&ConcreteType::Int64));
-            assert!(types.contains(&ConcreteType::Float64));
-            assert!(types.contains(&ConcreteType::Bool));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Bool
+            ))));
         }
     }
 
     #[test]
     fn test_merge_effects_throwing() {
-        let then_result = LatticeType::Concrete(ConcreteType::Int64);
-        let else_result = LatticeType::Concrete(ConcreteType::Int64);
+        let then_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        let else_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
         let then_effects = Effects::new();
         let else_effects = Effects::throwing();
 
@@ -238,8 +262,12 @@ mod tests {
 
     #[test]
     fn test_merge_effects_all_flags() {
-        let then_result = LatticeType::Concrete(ConcreteType::Int64);
-        let else_result = LatticeType::Concrete(ConcreteType::Int64);
+        let then_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        let else_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
 
         let then_effects = Effects {
             may_throw: true,
@@ -266,8 +294,12 @@ mod tests {
 
     #[test]
     fn test_merge_effects_non_terminating() {
-        let then_result = LatticeType::Concrete(ConcreteType::Int64);
-        let else_result = LatticeType::Concrete(ConcreteType::Int64);
+        let then_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        let else_result = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
 
         let then_effects = Effects {
             may_throw: false,
@@ -300,9 +332,15 @@ mod tests {
     #[test]
     fn test_merge_multiple_paths_three() {
         let results = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Float64),
-            LatticeType::Concrete(ConcreteType::String),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
         ];
 
         let effects_list = vec![Effects::new(), Effects::throwing(), Effects::new()];
@@ -317,9 +355,15 @@ mod tests {
         );
         if let LatticeType::Union(types) = merged.return_type {
             assert_eq!(types.len(), 3);
-            assert!(types.contains(&ConcreteType::Int64));
-            assert!(types.contains(&ConcreteType::Float64));
-            assert!(types.contains(&ConcreteType::String));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            ))));
+            assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String
+            ))));
         }
 
         // Should propagate throwing effect

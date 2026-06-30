@@ -79,6 +79,7 @@ fn test_field_expression_with_call() {
 fn test_index_expression() {
     assert_root_child_kind("a[1]", NodeKind::IndexExpression);
     assert_root_child_kind("a[1, 2]", NodeKind::IndexExpression);
+    assert_root_child_kind("a[]", NodeKind::IndexExpression);
     // a[1:end] - end keyword not yet supported
 }
 
@@ -230,6 +231,144 @@ fn test_macro_broadcast() {
     assert_parses("@. a * x + b");
 }
 
+// Braces-argument macro calls (e.g. @NamedTuple{a::Int, b}) (Issue #5120).
+#[test]
+fn test_macro_call_braces() {
+    assert_root_child_kind(
+        "@NamedTuple{a::Int, b::String}",
+        NodeKind::MacrocallExpression,
+    );
+    assert_root_child_kind("@NamedTuple{a, b}", NodeKind::MacrocallExpression);
+    assert_root_child_kind("@NamedTuple{}", NodeKind::MacrocallExpression);
+    assert_parses("@NamedTuple{x::Float64}");
+    assert_parses("println(@NamedTuple{a::Int, b::String})");
+}
+
+// The braces argument is parsed into a CurlyExpression carrying the field decls.
+#[test]
+fn test_macro_call_braces_structure() {
+    let cst = parse("@NamedTuple{a::Int, b::String}").expect("parse braces macro");
+    let macrocall = &cst.children[0];
+    assert_eq!(macrocall.kind, NodeKind::MacrocallExpression);
+    // children: [MacroIdentifier, CurlyExpression]
+    let braces = macrocall
+        .children
+        .iter()
+        .find(|c| c.kind == NodeKind::CurlyExpression)
+        .expect("braces argument should be a CurlyExpression");
+    // Two field declarations.
+    assert_eq!(braces.children.len(), 2, "expected two field decls");
+}
+
+// Space-separated macro arguments are whitespace-sensitive at the `(`/`[`
+// boundary, just like upstream Julia (Issue #5494):
+//   `@m foo (bar)` -> two arguments (`foo`, `bar`)
+//   `@m foo(bar)`  -> one call argument (`foo(bar)`)
+// Returns the argument kinds (excluding the leading MacroIdentifier).
+fn macro_argument_kinds(source: &str) -> Vec<NodeKind> {
+    let cst = parse(source).unwrap_or_else(|e| panic!("Failed to parse {source:?}: {e:?}"));
+    let macrocall = &cst.children[0];
+    assert_eq!(
+        macrocall.kind,
+        NodeKind::MacrocallExpression,
+        "expected a macrocall for {source:?}"
+    );
+    macrocall
+        .children
+        .iter()
+        .skip(1) // skip MacroIdentifier
+        .map(|c| c.kind)
+        .collect()
+}
+
+#[test]
+fn test_macro_arg_space_before_paren_is_separate_arg() {
+    // `@m Ident (expr)`: the space before `(` separates arguments, so this is
+    // two macro arguments, NOT one call `Ident(expr)`.
+    let kinds = macro_argument_kinds("@m Ident (expr)");
+    assert_eq!(
+        kinds,
+        vec![NodeKind::Identifier, NodeKind::ParenthesizedExpression],
+        "`@m Ident (expr)` must parse as two arguments"
+    );
+}
+
+#[test]
+fn test_macro_arg_no_space_before_paren_is_call() {
+    // `@m foo(bar)`: no space, so `foo(bar)` is a single call argument.
+    let kinds = macro_argument_kinds("@m foo(bar)");
+    assert_eq!(
+        kinds,
+        vec![NodeKind::CallExpression],
+        "`@m foo(bar)` must parse as one call argument"
+    );
+}
+
+#[test]
+fn test_macro_arg_test_throws_typed_paren() {
+    // Regression for Issue #5494: `@test_throws TypeError (1 + 1)::Float64`
+    // must be two arguments (`TypeError` and `(1 + 1)::Float64`), not one
+    // argument `(TypeError(1 + 1))::Float64`.
+    let kinds = macro_argument_kinds("@test_throws TypeError (1 + 1)::Float64");
+    assert_eq!(
+        kinds,
+        vec![NodeKind::Identifier, NodeKind::TypedExpression],
+        "`@test_throws TypeError (1 + 1)::Float64` must parse as two arguments"
+    );
+}
+
+#[test]
+fn test_macro_arg_space_sensitivity_more_cases() {
+    // `@m foo[1] (bar)`: index fuses (adjacent), then `(bar)` is a new arg.
+    assert_eq!(
+        macro_argument_kinds("@m foo[1] (bar)"),
+        vec![NodeKind::IndexExpression, NodeKind::ParenthesizedExpression]
+    );
+    // `@m foo(bar) (baz)`: call fuses (adjacent), then `(baz)` is a new arg.
+    assert_eq!(
+        macro_argument_kinds("@m foo(bar) (baz)"),
+        vec![NodeKind::CallExpression, NodeKind::ParenthesizedExpression]
+    );
+    // `@m foo (bar)[1]`: `foo` is its own arg, `(bar)[1]` is the next arg.
+    assert_eq!(
+        macro_argument_kinds("@m foo (bar)[1]"),
+        vec![NodeKind::Identifier, NodeKind::IndexExpression]
+    );
+    // `@m foo (bar) baz`: three arguments.
+    assert_eq!(
+        macro_argument_kinds("@m foo (bar) baz"),
+        vec![
+            NodeKind::Identifier,
+            NodeKind::ParenthesizedExpression,
+            NodeKind::Identifier
+        ]
+    );
+}
+
+// Guard: macro-argument whitespace sensitivity must NOT regress sjulia's
+// lenient `f (x)` call parsing at ordinary expression position, nor inside a
+// grouping that is itself a macro argument (Issue #5494).
+#[test]
+fn test_macro_arg_space_sensitivity_does_not_leak_into_groupings() {
+    // `f (x)` at expression position still parses as a call in sjulia.
+    let cst = parse("y = f (x)").expect("parse `y = f (x)`");
+    let assignment = &cst.children[0];
+    let call = assignment
+        .children
+        .iter()
+        .find(|c| c.kind == NodeKind::CallExpression)
+        .expect("`f (x)` should still be a call at expression position");
+    assert_eq!(call.kind, NodeKind::CallExpression);
+
+    // Inside an adjacent call argument, `g (x)` is still leniently a call.
+    let kinds = macro_argument_kinds("@m f(g (x))");
+    assert_eq!(
+        kinds,
+        vec![NodeKind::CallExpression],
+        "`@m f(g (x))` should be one call argument; the interior stays lenient"
+    );
+}
+
 // =============================================================================
 // Quote Expression
 // =============================================================================
@@ -296,6 +435,15 @@ fn test_arrow_function_simple() {
 #[test]
 fn test_arrow_function_multiple_args() {
     assert_root_child_kind("(x, y) -> x + y", NodeKind::ArrowFunctionExpression);
+}
+
+#[test]
+fn test_arrow_function_pair_body_precedence() {
+    let cst = parse("(x, y) -> x => y").expect("parse arrow function with pair body");
+    let arrow = &cst.children[0];
+    assert_eq!(arrow.kind, NodeKind::ArrowFunctionExpression);
+    assert_eq!(arrow.children[1].kind, NodeKind::BinaryExpression);
+    assert_eq!(arrow.children[1].children[1].text.as_deref(), Some("=>"));
 }
 
 #[test]
@@ -395,6 +543,17 @@ fn test_splat_expression() {
 fn test_pair_expression() {
     assert_parses("a => b");
     assert_parses(":key => value");
+
+    let cst = parse(":f => +").expect("parse Pair with bare operator RHS");
+    assert_eq!(cst.children.len(), 1);
+    let pair = &cst.children[0];
+    assert_eq!(pair.kind, NodeKind::BinaryExpression);
+    assert_eq!(pair.children.len(), 3);
+    assert_eq!(pair.children[0].kind, NodeKind::QuoteExpression);
+    assert_eq!(pair.children[1].kind, NodeKind::Operator);
+    assert_eq!(pair.children[1].text.as_deref(), Some("=>"));
+    assert_eq!(pair.children[2].kind, NodeKind::Operator);
+    assert_eq!(pair.children[2].text.as_deref(), Some("+"));
 }
 
 // =============================================================================

@@ -39,6 +39,11 @@ end
     @assert isa(fieldname(FieldTestPoint, 1), Symbol)
     @assert isa(fieldtype(FieldTestPoint, 1), DataType)
 
+    # Test 5: Builtin fieldnames return Symbols and still support name lookup
+    @assert Base.fieldindex(LineNumberNode, :file) == 2
+    @assert fieldname(GlobalRef, 3) == :binding
+    @assert isequal(string(fieldtype(GlobalRef, 3)), "Core.Binding")
+
     @test (true)
 end
 

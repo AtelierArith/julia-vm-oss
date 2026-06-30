@@ -3,7 +3,6 @@
 use crate::rng::RngLike;
 
 use crate::vm::error::VmError;
-use crate::vm::frame::Frame;
 use crate::vm::util::bind_value_to_slot;
 use crate::vm::value::{Value, ValueType};
 use crate::vm::Vm;
@@ -15,27 +14,28 @@ impl<R: RngLike> Vm<R> {
         func_index: usize,
         arg: f64,
     ) -> Result<(), VmError> {
-        let func = self.get_function_checked(func_index)?;
+        let func = self.get_function_checked(func_index)?.clone();
         let local_slot_count = func.local_slot_count;
         let first_param_type = func.params.first().map(|(_, ty)| ty.clone());
         let first_slot = func.param_slots.first().copied();
-        let entry = func.entry;
 
-        let mut frame = Frame::new_with_slots(local_slot_count, Some(func_index));
+        let mut frame = self.acquire_frame(local_slot_count, Some(func_index));
+        let mut args = Vec::with_capacity(1);
         if let Some(ty) = first_param_type {
             let val = match ty {
                 ValueType::I64 => Value::I64(arg as i64),
                 _ => Value::F64(arg),
             };
             if let Some(slot) = first_slot {
-                bind_value_to_slot(&mut frame, slot, val, &mut self.struct_heap);
+                bind_value_to_slot(&mut frame, slot, val.clone(), &mut self.struct_heap);
             }
+            args.push(val);
         }
 
-        self.return_ips.push(self.ip);
-        self.frames.push(frame);
-        self.ip = entry;
-        Ok(())
+        let target_entry = self
+            .try_specialized_entry_for_runtime_call(func_index, &args)
+            .unwrap_or(func.entry);
+        self.push_hof_call_frame_with_generated(func_index, &func, &args, frame, target_entry)
     }
 
     /// Call a function with two arguments (for reduce)
@@ -45,34 +45,36 @@ impl<R: RngLike> Vm<R> {
         arg1: f64,
         arg2: f64,
     ) -> Result<(), VmError> {
-        let func = self.get_function_checked(func_index)?;
+        let func = self.get_function_checked(func_index)?.clone();
         let local_slot_count = func.local_slot_count;
         let param1_type = func.params.first().map(|(_, ty)| ty.clone());
         let param2_type = func.params.get(1).map(|(_, ty)| ty.clone());
         let slot1 = func.param_slots.first().copied();
         let slot2 = func.param_slots.get(1).copied();
-        let entry = func.entry;
 
-        let mut frame = Frame::new_with_slots(local_slot_count, Some(func_index));
+        let mut frame = self.acquire_frame(local_slot_count, Some(func_index));
+        let mut args = Vec::with_capacity(2);
         if let (Some(ty1), Some(s1)) = (param1_type, slot1) {
             let val = match ty1 {
                 ValueType::I64 => Value::I64(arg1 as i64),
                 _ => Value::F64(arg1),
             };
-            bind_value_to_slot(&mut frame, s1, val, &mut self.struct_heap);
+            bind_value_to_slot(&mut frame, s1, val.clone(), &mut self.struct_heap);
+            args.push(val);
         }
         if let (Some(ty2), Some(s2)) = (param2_type, slot2) {
             let val = match ty2 {
                 ValueType::I64 => Value::I64(arg2 as i64),
                 _ => Value::F64(arg2),
             };
-            bind_value_to_slot(&mut frame, s2, val, &mut self.struct_heap);
+            bind_value_to_slot(&mut frame, s2, val.clone(), &mut self.struct_heap);
+            args.push(val);
         }
 
-        self.return_ips.push(self.ip);
-        self.frames.push(frame);
-        self.ip = entry;
-        Ok(())
+        let target_entry = self
+            .try_specialized_entry_for_runtime_call(func_index, &args)
+            .unwrap_or(func.entry);
+        self.push_hof_call_frame_with_generated(func_index, &func, &args, frame, target_entry)
     }
 
     // Note: call_function_with_two_values removed - was used by value-based reduce
@@ -85,13 +87,13 @@ impl<R: RngLike> Vm<R> {
         first_arg: Value,
         extra_args: &[Value],
     ) -> Result<(), VmError> {
-        let func = self.get_function_checked(func_index)?;
+        let func = self.get_function_checked(func_index)?.clone();
         let local_slot_count = func.local_slot_count;
         let params: Vec<(String, ValueType)> = func.params.clone();
         let param_slots: Vec<usize> = func.param_slots.clone();
-        let entry = func.entry;
+        let mut args = Vec::with_capacity(1 + extra_args.len());
 
-        let mut frame = Frame::new_with_slots(local_slot_count, Some(func_index));
+        let mut frame = self.acquire_frame(local_slot_count, Some(func_index));
 
         if let (Some((_, ty)), Some(&slot)) = (params.first(), param_slots.first()) {
             let val = match (&first_arg, ty) {
@@ -99,7 +101,8 @@ impl<R: RngLike> Vm<R> {
                 (Value::I64(v), ValueType::F64) => Value::F64(*v as f64),
                 _ => first_arg.clone(),
             };
-            bind_value_to_slot(&mut frame, slot, val, &mut self.struct_heap);
+            bind_value_to_slot(&mut frame, slot, val.clone(), &mut self.struct_heap);
+            args.push(val);
         }
 
         // Set extra parameters
@@ -110,13 +113,14 @@ impl<R: RngLike> Vm<R> {
                     (Value::I64(v), ValueType::F64) => Value::F64(*v as f64),
                     _ => arg.clone(),
                 };
-                bind_value_to_slot(&mut frame, slot, val, &mut self.struct_heap);
+                bind_value_to_slot(&mut frame, slot, val.clone(), &mut self.struct_heap);
+                args.push(val);
             }
         }
 
-        self.return_ips.push(self.ip);
-        self.frames.push(frame);
-        self.ip = entry;
-        Ok(())
+        let target_entry = self
+            .try_specialized_entry_for_runtime_call(func_index, &args)
+            .unwrap_or(func.entry);
+        self.push_hof_call_frame_with_generated(func_index, &func, &args, frame, target_entry)
     }
 }

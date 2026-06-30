@@ -1,5 +1,5 @@
 # Test @inbounds macro (related to Issue #890)
-# - @inbounds is a no-op in SubsetJuliaVM (bounds checking is runtime)
+# - @inbounds marks local indexing expressions for inbounds codegen (Issue #4286)
 # - @inbounds expr should execute normally
 # - @inbounds for loop should execute normally
 
@@ -20,6 +20,28 @@ end
         arr[i] = i * 10
     end
     @test arr == [10, 20, 30, 40, 50]
+end
+
+@testset "@inbounds statement body indexing" begin
+    vals = Float64[1.0, 2.0, 3.0]
+    idxs = [3, 1]
+    @inbounds for i in idxs
+        vals[i] = vals[i] + 10.0
+    end
+    @test vals == Float64[11.0, 2.0, 13.0]
+end
+
+@testset "@inbounds with direct indexing expressions" begin
+    arr = Int32[10, 20, 30]
+    @test @inbounds arr[2] == Int32(20)
+    @test @inbounds getindex(arr, 3) == Int32(30)
+    @test @inbounds Base.getindex(arr, 1) == Int32(10)
+
+    vals = Float64[1.0, 2.0, 3.0]
+    @inbounds vals[2] = 4.5
+    @test vals == Float64[1.0, 4.5, 3.0]
+    @inbounds setindex!(vals, 6.5, 3)
+    @test vals == Float64[1.0, 4.5, 6.5]
 end
 
 @testset "@inbounds with while loop" begin

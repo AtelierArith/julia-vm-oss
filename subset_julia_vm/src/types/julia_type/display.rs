@@ -39,7 +39,7 @@ impl JuliaType {
             }
             JuliaType::NamedTuple => "NamedTuple".into(),
             JuliaType::Dict => "Dict".into(),
-            JuliaType::Set => "Set{Any}".into(),
+            JuliaType::Set => "Set".into(),
             JuliaType::UnitRange => "UnitRange".into(),
             JuliaType::StepRange => "StepRange".into(),
             // Abstract types
@@ -75,8 +75,18 @@ impl JuliaType {
             JuliaType::Generator => "Base.Generator".into(),
             JuliaType::Struct(name) => name.clone().into(),
             JuliaType::AbstractUser(name, _) => name.clone().into(),
+            // An ANONYMOUS bounded typevar — the internal placeholder name `_`,
+            // produced when parsing the covariant shorthand `Vector{<:Integer}` —
+            // prints with the bound-only shorthand upstream (`<:Upper`), never
+            // echoing the `_` placeholder. A named typevar keeps its name
+            // (`T<:Integer`) (Issue #5644).
             JuliaType::TypeVar(name, bound) => match bound {
-                Some(b) => format!("{}<:{}", name, b).into(),
+                // A `>:`-prefixed bound encodes the anonymous contravariant
+                // shorthand `Vector{>:Int}` (a lower bound on an unnamed var);
+                // render it verbatim (already normalized to `>:Int64`) (#5650).
+                Some(b) if name == "_" && b.starts_with(">:") => b.clone().into(),
+                Some(b) if name == "_" => format!("<:{}", normalize_bound(b)).into(),
+                Some(b) => format!("{}<:{}", name, normalize_bound(b)).into(),
                 None => name.clone().into(),
             },
             // Bottom type
@@ -89,17 +99,71 @@ impl JuliaType {
             // Type{T} pattern
             JuliaType::TypeOf(inner) => format!("Type{{{}}}", inner.name()).into(),
             // UnionAll type
-            JuliaType::UnionAll { var, bound, body } => {
-                let bound_str = match bound {
-                    Some(b) => format!("{}<:{}", var, b),
-                    None => var.clone(),
-                };
-                format!("{} where {}", body.name(), bound_str).into()
-            }
+            JuliaType::UnionAll {
+                var,
+                lower_bound,
+                bound,
+                body,
+            } => format_unionall_name(
+                var,
+                lower_bound.as_deref().map(String::as_str),
+                bound.as_deref().map(String::as_str),
+                body,
+            )
+            .into(),
             // Enum type
             JuliaType::Enum(name) => name.clone().into(),
         }
     }
+}
+
+fn format_unionall_name(
+    var: &str,
+    lower_bound: Option<&str>,
+    bound: Option<&str>,
+    body: &JuliaType,
+) -> String {
+    let mut clauses = vec![format_where_clause(var, lower_bound, bound)];
+    let mut base = body;
+    while let JuliaType::UnionAll {
+        var,
+        lower_bound,
+        bound,
+        body,
+    } = base
+    {
+        clauses.push(format_where_clause(
+            var,
+            lower_bound.as_deref().map(String::as_str),
+            bound.as_deref().map(String::as_str),
+        ));
+        base = body;
+    }
+
+    if clauses.len() == 1 {
+        format!("{} where {}", base.name(), clauses[0])
+    } else {
+        format!("{} where {{{}}}", base.name(), clauses.join(", "))
+    }
+}
+
+fn format_where_clause(var: &str, lower_bound: Option<&str>, bound: Option<&str>) -> String {
+    match (lower_bound, bound) {
+        (None, None) => var.to_string(),
+        (None, Some(u)) => format!("{}<:{}", var, normalize_bound(u)),
+        // `where var>:Lower` keeps only the lower bound (#5650).
+        (Some(l), None) => format!("{}>:{}", var, normalize_bound(l)),
+        // `where Lower<:var<:Upper`.
+        (Some(l), Some(u)) => format!("{}<:{}<:{}", normalize_bound(l), var, normalize_bound(u)),
+    }
+}
+
+/// Normalize a where-bound type name so nested word aliases like `Int`/`UInt`
+/// render as their canonical `Int64`/`UInt64` spellings (matching how upstream
+/// prints `where Int64<:T<:Real`). A name that is not a known type round-trips
+/// unchanged (Issue #5650).
+fn normalize_bound(bound: &str) -> String {
+    JuliaType::from_name_or_struct(bound).name().to_string()
 }
 
 impl std::fmt::Display for JuliaType {

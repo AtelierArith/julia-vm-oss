@@ -1,0 +1,7 @@
+package: Symbolics
+version: 0.1.0
+local_uuid: 0c5d862f-8b57-4792-8d23-62f2024744c7
+registry_uuid: 0c5d862f-8b57-4792-8d23-62f2024744c7
+repository: https://github.com/JuliaSymbolics/Symbolics.jl
+license: MIT
+license_source: LICENSE.md at ref v0.1.0

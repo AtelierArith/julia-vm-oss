@@ -15,6 +15,8 @@ use std::path::PathBuf;
 /// that appear BEFORE any `#[cfg(test)]` block, excluding:
 /// - `unwrap_or`, `unwrap_or_else`, `unwrap_or_default` (safe alternatives)
 /// - Doc comments (lines starting with `///`)
+/// - Files named `tests.rs` (test-only modules declared as
+///   `#[cfg(test)] mod tests;` in their parent, per repo convention)
 fn count_in_non_test_code(dir: &PathBuf, pattern: &str) -> usize {
     let mut total = 0;
 
@@ -24,6 +26,10 @@ fn count_in_non_test_code(dir: &PathBuf, pattern: &str) -> usize {
                 let path = entry.path();
                 if path.is_dir() {
                     visit_dir(&path, pattern, total);
+                } else if path.file_name().is_some_and(|name| name == "tests.rs") {
+                    // Skip test-only modules split into their own file; they are
+                    // compiled only under `#[cfg(test)] mod tests;` in the parent.
+                    continue;
                 } else if path.extension().is_some_and(|ext| ext == "rs") {
                     if let Ok(contents) = fs::read_to_string(&path) {
                         let count = count_pattern_before_test_block(&contents, pattern);

@@ -1,0 +1,17 @@
+[[tests]]
+name = "stats_base_histogram"
+file = "stats_base_histogram.jl"
+expected = true
+description = "StatsBase: fit(Histogram, x) returns correct weights"
+
+[[tests]]
+name = "stats_base_sample"
+file = "stats_base_sample.jl"
+expected = true
+description = "StatsBase: sample without replacement"
+
+[[tests]]
+name = "stats_base_moments"
+file = "stats_base_moments.jl"
+expected = true
+description = "StatsBase: mode and entropy"

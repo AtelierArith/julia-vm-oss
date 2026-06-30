@@ -6,6 +6,8 @@
 #![allow(clippy::cast_sign_loss)]
 
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// RNG interface used by the VM (deterministic).
 pub trait RngLike {
@@ -163,37 +165,181 @@ impl RngLike for Xoshiro {
 }
 
 // -------------------------
+// MersenneTwister (MT19937-64)
+// -------------------------
+/// `MersenneTwister` RNG.
+///
+/// IMPORTANT: upstream Julia's `MersenneTwister` is backed by dSFMT, so its
+/// generated stream is *not* reproduced bit-for-bit here (matching dSFMT in a
+/// no-JIT VM is infeasible and not required — Issue #7306). The VM backs
+/// `MersenneTwister` with a standard, deterministic MT19937-64 engine instead:
+/// the same seed always yields the same sequence, distinct seeds differ, and
+/// every draw is finite and in range. The type is constructible, usable with
+/// `rand`/`randn`/`rand(m, n)`, satisfies `isa AbstractRNG`, and threads through
+/// explicit-RNG params — it is just not bit-identical to upstream's dSFMT.
+#[derive(Debug, Clone)]
+pub struct MersenneTwister {
+    mt: [u64; Self::NN],
+    mti: usize,
+}
+
+impl MersenneTwister {
+    const NN: usize = 312;
+    const MM: usize = 156;
+    const MATRIX_A: u64 = 0xB502_6F5A_A966_19E9;
+    const UM: u64 = 0xFFFF_FFFF_8000_0000; // most significant 33 bits
+    const LM: u64 = 0x0000_0000_7FFF_FFFF; // least significant 31 bits
+
+    /// Create a new MT19937-64 RNG seeded with `seed`.
+    pub fn new(seed: u64) -> Self {
+        let mut rng = Self {
+            mt: [0u64; Self::NN],
+            mti: Self::NN + 1,
+        };
+        rng.seed(seed);
+        rng
+    }
+
+    /// Reseed the engine in place (standard MT19937-64 init_genrand64).
+    fn seed(&mut self, seed: u64) {
+        self.mt[0] = seed;
+        for i in 1..Self::NN {
+            self.mt[i] = (6_364_136_223_846_793_005u64)
+                .wrapping_mul(self.mt[i - 1] ^ (self.mt[i - 1] >> 62))
+                .wrapping_add(i as u64);
+        }
+        self.mti = Self::NN;
+    }
+
+    /// Generate the next 64-bit word (standard MT19937-64 genrand64_int64).
+    #[inline]
+    fn next_u64_inner(&mut self) -> u64 {
+        const MAG01: [u64; 2] = [0, MersenneTwister::MATRIX_A];
+
+        if self.mti >= Self::NN {
+            // Generate NN words at one time.
+            for i in 0..Self::NN - Self::MM {
+                let x = (self.mt[i] & Self::UM) | (self.mt[i + 1] & Self::LM);
+                self.mt[i] = self.mt[i + Self::MM] ^ (x >> 1) ^ MAG01[(x & 1) as usize];
+            }
+            for i in Self::NN - Self::MM..Self::NN - 1 {
+                let x = (self.mt[i] & Self::UM) | (self.mt[i + 1] & Self::LM);
+                self.mt[i] = self.mt[i + Self::MM - Self::NN] ^ (x >> 1) ^ MAG01[(x & 1) as usize];
+            }
+            let x = (self.mt[Self::NN - 1] & Self::UM) | (self.mt[0] & Self::LM);
+            self.mt[Self::NN - 1] = self.mt[Self::MM - 1] ^ (x >> 1) ^ MAG01[(x & 1) as usize];
+
+            self.mti = 0;
+        }
+
+        let mut x = self.mt[self.mti];
+        self.mti += 1;
+
+        // Tempering.
+        x ^= (x >> 29) & 0x5555_5555_5555_5555;
+        x ^= (x << 17) & 0x71D6_7FFF_EDA6_0000;
+        x ^= (x << 37) & 0xFFF7_EEE0_0000_0000;
+        x ^= x >> 43;
+
+        x
+    }
+}
+
+impl RngLike for MersenneTwister {
+    #[inline]
+    fn next_f64(&mut self) -> f64 {
+        // Same UInt64 -> [0,1) conversion as Julia's other RNGs so randn()'s
+        // Ziggurat tail path behaves consistently.
+        uint_to_float64_julia(self.next_u64_inner())
+    }
+
+    #[inline]
+    fn next_u64(&mut self) -> u64 {
+        self.next_u64_inner()
+    }
+
+    #[inline]
+    fn reseed(&mut self, seed: u64) {
+        self.seed(seed);
+    }
+}
+
+// -------------------------
 // RngInstance (unified RNG type)
 // -------------------------
 /// Unified RNG instance type for VM
 #[derive(Debug, Clone)]
 pub enum RngInstance {
-    Stable(StableRng),
-    Xoshiro(Xoshiro),
+    Stable(Rc<RefCell<StableRng>>),
+    Xoshiro(Rc<RefCell<Xoshiro>>),
+    /// `MersenneTwister` backed by a deterministic MT19937-64 engine. The stream
+    /// is NOT bit-identical to upstream Julia's dSFMT-backed `MersenneTwister`
+    /// (Issue #7306); see [`MersenneTwister`] for the rationale.
+    ///
+    /// Stored behind a shared mutable handle because Julia RNGs are mutable
+    /// objects: passing one through a user function must advance the caller's
+    /// visible state too (Issue #7751). This also keeps the 312-word MT state out
+    /// of the hot `Value` enum.
+    Mersenne(Rc<RefCell<MersenneTwister>>),
+    /// Handle to the VM's global RNG (`Random.default_rng()` / `GLOBAL_RNG`).
+    ///
+    /// This variant carries no state of its own: it is a marker that the VM's
+    /// explicit-RNG instruction handlers (`RngRandF64`, `RngRandnF64`,
+    /// `RngRandArray*`, `RngRandnArray*`) recognize and route to the VM's
+    /// own global `rng` field, so that `rand(default_rng())` / `randn(default_rng())`
+    /// advance the SAME stream as bare `rand()` / `randn()` (Issue #7230).
+    /// The `RngLike` methods below are never called on `Global` directly
+    /// because every handler intercepts it first.
+    Global,
+}
+
+impl RngInstance {
+    pub fn stable(seed: u64) -> Self {
+        Self::Stable(Rc::new(RefCell::new(StableRng::new(seed))))
+    }
+
+    pub fn xoshiro(seed: u64) -> Self {
+        Self::Xoshiro(Rc::new(RefCell::new(Xoshiro::new(seed))))
+    }
+
+    pub fn mersenne(seed: u64) -> Self {
+        Self::Mersenne(Rc::new(RefCell::new(MersenneTwister::new(seed))))
+    }
 }
 
 impl RngLike for RngInstance {
     #[inline]
     fn next_f64(&mut self) -> f64 {
         match self {
-            RngInstance::Stable(rng) => rng.next_f64(),
-            RngInstance::Xoshiro(rng) => rng.next_f64(),
+            RngInstance::Stable(rng) => rng.borrow_mut().next_f64(),
+            RngInstance::Xoshiro(rng) => rng.borrow_mut().next_f64(),
+            RngInstance::Mersenne(rng) => rng.borrow_mut().next_f64(),
+            // The global handle is intercepted by the VM before reaching here;
+            // a draw should never be requested from the marker itself.
+            RngInstance::Global => 0.0,
         }
     }
 
     #[inline]
     fn next_u64(&mut self) -> u64 {
         match self {
-            RngInstance::Stable(rng) => rng.next_u64(),
-            RngInstance::Xoshiro(rng) => rng.next_u64(),
+            RngInstance::Stable(rng) => rng.borrow_mut().next_u64(),
+            RngInstance::Xoshiro(rng) => rng.borrow_mut().next_u64(),
+            RngInstance::Mersenne(rng) => rng.borrow_mut().next_u64(),
+            RngInstance::Global => 0,
         }
     }
 
     #[inline]
     fn reseed(&mut self, seed: u64) {
         match self {
-            RngInstance::Stable(rng) => rng.reseed(seed),
-            RngInstance::Xoshiro(rng) => rng.reseed(seed),
+            RngInstance::Stable(rng) => rng.borrow_mut().reseed(seed),
+            RngInstance::Xoshiro(rng) => rng.borrow_mut().reseed(seed),
+            RngInstance::Mersenne(rng) => rng.borrow_mut().reseed(seed),
+            // Reseeding the global handle marker is a no-op; use SeedGlobalRng.
+            RngInstance::Global => {
+                let _ = seed;
+            }
         }
     }
 }

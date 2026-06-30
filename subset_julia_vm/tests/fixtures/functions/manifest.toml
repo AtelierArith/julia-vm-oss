@@ -19,7 +19,85 @@ expected = true
 description = "Function composition using ∘ operator"
 
 [[tests]]
+name = "functions_callable_value_resolver_3910"
+file = "callable_value_resolver_3910.jl"
+expected = true
+description = "Callable function variables use shared resolver scoring for overloaded methods (Issue #3910)"
+
+[[tests]]
+name = "functions_callable_value_single_candidate_vararg_3910"
+file = "callable_value_single_candidate_vararg_3910.jl"
+expected = true
+description = "Callable function variables route single typed-vararg candidates through shared resolver checks (Issue #3910)"
+
+[[tests]]
+name = "functions_callable_value_splat_resolver_3910"
+file = "callable_value_splat_resolver_3910.jl"
+expected = true
+description = "Callable function variables with splatted args use shared resolver scoring (Issue #3910)"
+
+[[tests]]
 name = "functions_anonymous"
 file = "functions_anonymous.jl"
 expected = true
 description = "Anonymous functions (lambdas) and higher-order usage"
+
+[[tests]]
+name = "functions_anonymous_function_expression_7518"
+file = "anonymous_function_expression_7518.jl"
+expected = true
+description = "Block-form anonymous function expressions are first-class callable values in assignment, call, and closure positions (Issue #7518)"
+
+[[tests]]
+name = "functions_length_any_range_rhs_4317"
+file = "length_any_range_rhs_4317.jl"
+expected = true
+description = "length(::Any range) on RHS of typed arithmetic evaluates its argument once (Issue #4317)"
+
+[[tests]]
+name = "functions_frame_pool_reuse_5172"
+file = "functions_frame_pool_reuse_5172.jl"
+expected = true
+description = "Recycled call frames are fully reset so locals never leak across calls (Issue #5172)"
+
+[[tests]]
+name = "functions_inline_small_pure_5184"
+file = "functions_inline_small_pure_5184.jl"
+expected = true
+description = "Small pure function inlining preserves single evaluation of call arguments (Issue #5184)"
+
+[[tests]]
+name = "functions_pure_cse_licm_5185"
+file = "functions_pure_cse_licm_5185.jl"
+expected = true
+description = "Pure call CSE and loop-invariant hoisting preserve source semantics (Issue #5185)"
+
+[[tests]]
+name = "functions_parameter_destructuring_5760"
+file = "parameter_destructuring_5760.jl"
+expected = true
+description = "Tuple destructuring in full-form, short-form, and arrow function parameters works by lowering to synthetic parameter prologues (Issue #5760)"
+
+[[tests]]
+name = "functions_function_egal_identity_7993"
+file = "function_egal_identity_7993.jl"
+expected = true
+description = "=== (object identity) on a generic function holds for f === f and is preserved through struct fields (Issue #7993)"
+
+[[tests]]
+name = "functions_block_form_identifier_default_8017"
+file = "block_form_identifier_default_8017.jl"
+expected = true
+description = "Block (function … end) form optional params with bare-identifier/global defaults (nothing, missing, a const, a type) generate default-arg stubs and dispatch correctly (Issue #8017)"
+
+[[tests]]
+name = "functions_default_arg_form_value_matrix_8040"
+file = "default_arg_form_value_matrix_8040.jl"
+expected = true
+description = "Systematic (definition-form × default-value node-kind) matrix: short form and block form crossed with int/float/string/bool/symbol literal, bare-identifier (nothing/missing/const), type name, call, and typed-param defaults all generate stubs so reduced- and full-arity calls dispatch (prevention for Issue #8017, anonymous form covered by #8047) (Issue #8040)"
+
+[[tests]]
+name = "functions_anonymous_default_arg_8047"
+file = "anonymous_default_arg_8047.jl"
+expected = true
+description = "Anonymous/arrow functions with optional positional default args ((x, d=2) -> ...) generate reduced-arity stubs so the default binds in shorter calls and is overridden at full arity; covers int/float/string/bool/symbol/nothing/missing/const/type/call/typed defaults, multiple defaults, typed params, and the IIFE form (Issue #8047)"

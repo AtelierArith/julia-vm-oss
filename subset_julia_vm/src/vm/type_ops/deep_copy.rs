@@ -3,14 +3,24 @@
 use crate::rng::RngLike;
 use crate::vm::error::VmError;
 use crate::vm::value::{
-    new_array_ref, ClosureValue, ComposedFunctionValue, DictValue, ExprValue,
-    NamedTupleValue, PairsValue, SetValue, StructInstance, TupleValue, Value,
+    ArrayValue, ClosureValue, ComposedFunctionValue, ExprValue, NamedTupleValue, PairsValue,
+    StructInstance, TupleValue, Value,
 };
 use crate::vm::Vm;
 
 impl<R: RngLike> Vm<R> {
     /// Recursively deep copy a value.
     pub(in crate::vm) fn deep_copy_value(&mut self, val: &Value) -> Result<Value, VmError> {
+        // A native-array *input* (transient host/cache carrier) deep-copies to
+        // the MemoryRef-backed `Array{T,N}` wrapper so this method no longer
+        // *produces* the carrier (Issue #6806). Wrapper inputs are deep-copied by
+        // the `Struct`/`StructRef` arms of the match below. `arr` borrows `val`
+        // (a parameter, not `self`), so the owned `copied` can be wrapped through
+        // the `&mut self` helper without a borrow conflict.
+        if let Some(arr) = crate::vm::value::native_array_value_ref(val) {
+            let copied = ArrayValue::memory_first_copy_from_array(&arr.borrow())?;
+            return self.array_value_to_wrapper(copied);
+        }
         Ok(match val {
             // Primitive types - just clone
             Value::I8(v) => Value::I8(*v),
@@ -35,15 +45,6 @@ impl<R: RngLike> Vm<R> {
             Value::Missing => Value::Missing,
             Value::Undef => Value::Undef,
             Value::SliceAll => Value::SliceAll,
-
-            // Array - deep copy elements
-            Value::Array(arr) => {
-                let borrowed = arr.borrow();
-                Value::Array(new_array_ref(crate::vm::value::ArrayValue::new(
-                    borrowed.data.clone(),
-                    borrowed.shape.clone(),
-                )))
-            }
 
             // Tuple - deep copy elements
             Value::Tuple(t) => {
@@ -101,35 +102,25 @@ impl<R: RngLike> Vm<R> {
                 Value::StructRef(new_idx)
             }
 
-            // Dict - deep copy entries
-            Value::Dict(d) => {
-                let mut new_dict =
-                    DictValue::with_type_params_opt(d.key_type.clone(), d.value_type.clone());
-                for (k, v) in d.iter() {
-                    let new_v = self.deep_copy_value(v)?;
-                    new_dict.insert(k.clone(), new_v);
-                }
-                Value::Dict(Box::new(new_dict))
-            }
+            // Dict - deep copy entries into an INDEPENDENT shared dict (#5675).
 
-            // Set - just clone elements (DictKey is cloneable)
-            Value::Set(s) => Value::Set(SetValue {
-                elements: s.elements.clone(),
-            }),
+            // Set - just clone elements and element type carrier (DictKey is cloneable)
 
             // Range - just clone (immutable)
             Value::Range(r) => Value::Range(r.clone()),
 
-            // Ref - deep copy inner
+            // Ref - deep copy inner into a fresh cell (Issue #5130)
             Value::Ref(inner) => {
-                let new_inner = self.deep_copy_value(inner)?;
-                Value::Ref(Box::new(new_inner))
+                let new_inner = self.deep_copy_value(&inner.borrow())?;
+                crate::vm::value::new_ref(new_inner)
             }
 
             // Complex types that are typically not deep copied
             Value::Rng(rng) => Value::Rng(rng.clone()),
             Value::Generator(g) => Value::Generator(g.clone()),
             Value::DataType(dt) => Value::DataType(dt.clone()),
+            Value::RuntimeTypeVar(tv) => Value::RuntimeTypeVar(tv.clone()),
+            Value::RuntimeTypeName(tn) => Value::RuntimeTypeName(tn.clone()),
             Value::Module(m) => Value::Module(m.clone()),
             Value::Function(f) => Value::Function(f.clone()),
             Value::Closure(c) => {
@@ -152,12 +143,12 @@ impl<R: RngLike> Vm<R> {
             // Macro system types - deep copy
             Value::Symbol(s) => Value::Symbol(s.clone()),
             Value::Expr(e) => {
-                let new_args: Result<Vec<Value>, VmError> =
-                    e.args.iter().map(|a| self.deep_copy_value(a)).collect();
-                Value::Expr(ExprValue {
-                    head: e.head.clone(),
-                    args: new_args?,
-                })
+                let new_args: Result<Vec<Value>, VmError> = e
+                    .args_snapshot()
+                    .iter()
+                    .map(|a| self.deep_copy_value(a))
+                    .collect();
+                Value::Expr(ExprValue::new(e.head.clone(), new_args?))
             }
             Value::QuoteNode(inner) => {
                 let new_inner = self.deep_copy_value(inner)?;
@@ -194,7 +185,44 @@ impl<R: RngLike> Vm<R> {
                 let mem_borrow = mem.borrow();
                 Value::Memory(crate::vm::value::new_memory_ref(mem_borrow.copy()))
             }
+            Value::MemoryRef(memref) => Value::MemoryRef(memref.clone()),
+            // The legacy native-array carrier is filtered out by the
+            // early-return above (Issue #3908). This wildcard satisfies
+            // Rust's exhaustiveness checking and provides a safe default
+            // for any future `Value` variant: clone the value as-is.
+            other => other.clone(),
         })
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use crate::rng::StableRng;
+    use crate::vm::value::{
+        array_wrapper_value_to_array_value, native_array_value_from_array, ArrayElementType,
+        ArrayValue,
+    };
+    use crate::vm::Vm;
+
+    #[test]
+    fn deep_copy_array_uses_logical_memory_first_copy() {
+        let mut vm = Vm::new(vec![], StableRng::new(0));
+        let original = ArrayValue::complex_f64(vec![1.0, 2.0, 3.0, 4.0], vec![2]);
+        // A native-array input now deep-copies to the `Array{T,N}` wrapper
+        // (Issue #6806); materialize it back to an `ArrayValue` for the asserts.
+        let copied = vm
+            .deep_copy_value(&native_array_value_from_array(original))
+            .unwrap();
+
+        let arr = array_wrapper_value_to_array_value(&copied, &vm.struct_heap)
+            .unwrap()
+            .expect("deep copy of a native array should produce an Array wrapper");
+        assert_eq!(arr.shape, vec![2]);
+        assert_eq!(arr.element_type(), ArrayElementType::ComplexF64);
+        assert_eq!(
+            arr.element_type_override,
+            Some(ArrayElementType::ComplexF64)
+        );
+        assert_eq!(arr.to_logical_value_vec().unwrap().len(), 2);
+    }
 }

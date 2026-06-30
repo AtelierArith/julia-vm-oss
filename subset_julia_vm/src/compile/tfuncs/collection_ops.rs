@@ -5,6 +5,7 @@
 
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
 use crate::compile::lattice::widening::MAX_UNION_LENGTH;
+use crate::inference_core::{CorePrimitive, CoreType};
 use std::collections::BTreeSet;
 
 /// Computes the element type for heterogeneous field types.
@@ -18,7 +19,7 @@ use std::collections::BTreeSet;
 /// information instead of collapsing to a representative type.
 fn compute_field_type_union(fields: &[(String, ConcreteType)]) -> ConcreteType {
     if fields.is_empty() {
-        return ConcreteType::Nothing;
+        return ConcreteType::Core(CoreType::Primitive(CorePrimitive::Nothing));
     }
 
     // Collect unique types
@@ -32,7 +33,7 @@ fn compute_field_type_union(fields: &[(String, ConcreteType)]) -> ConcreteType {
         if let Some(only) = unique_types.into_iter().next() {
             return only;
         }
-        return ConcreteType::Nothing;
+        return ConcreteType::Core(CoreType::Primitive(CorePrimitive::Nothing));
     }
 
     // If too many unique types, apply widening
@@ -42,13 +43,13 @@ fn compute_field_type_union(fields: &[(String, ConcreteType)]) -> ConcreteType {
         if all_numeric {
             let has_float = unique_types.iter().any(|t| t.is_float());
             if has_float {
-                return ConcreteType::Float64;
+                return ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64));
             } else {
-                return ConcreteType::Int64;
+                return ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64));
             }
         }
         // Return Any for very heterogeneous types
-        return ConcreteType::Any;
+        return ConcreteType::Core(CoreType::Any);
     }
 
     // For a small number of unique types, return a UnionOf to preserve type information
@@ -83,13 +84,16 @@ pub fn tfunc_keys(args: &[LatticeType]) -> LatticeType {
         }
         LatticeType::Concrete(ConcreteType::NamedTuple { fields }) => {
             // keys of NamedTuple returns tuple of symbols
-            let symbols = vec![ConcreteType::Symbol; fields.len()];
+            let symbols =
+                vec![ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol)); fields.len()];
             LatticeType::Concrete(ConcreteType::Tuple { elements: symbols })
         }
         LatticeType::Concrete(ConcreteType::Array { .. }) => {
             // keys of Array returns range of indices
             LatticeType::Concrete(ConcreteType::Range {
-                element: Box::new(ConcreteType::Int64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64,
+                ))),
             })
         }
         _ => LatticeType::Top,
@@ -125,10 +129,11 @@ pub fn tfunc_values(args: &[LatticeType]) -> LatticeType {
             let types: Vec<ConcreteType> = fields.iter().map(|(_, ty)| ty.clone()).collect();
             LatticeType::Concrete(ConcreteType::Tuple { elements: types })
         }
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             // values of Array returns the array itself
             LatticeType::Concrete(ConcreteType::Array {
                 element: element.clone(),
+                ndims: None,
             })
         }
         _ => LatticeType::Top,
@@ -138,13 +143,13 @@ pub fn tfunc_values(args: &[LatticeType]) -> LatticeType {
 /// Transfer function for `pairs` (get key-value pairs).
 ///
 /// Type rules:
-/// - pairs(Dict{K,V}) → PairIterator{K,V}
+/// - pairs(Dict{K,V}) → Dict{K,V}
 /// - pairs(NamedTuple{...}) → PairIterator{Symbol, T}
 /// - pairs(Array{T}) → PairIterator{Int64, T}
 ///
 /// # Examples
 /// ```text
-/// pairs(Dict{String,Int64}) → Generator{Tuple{String, Int64}}
+/// pairs(Dict{String,Int64}) → Dict{String,Int64}
 /// pairs([1,2,3]) → Generator{Tuple{Int64, Int64}}
 /// ```
 pub fn tfunc_pairs(args: &[LatticeType]) -> LatticeType {
@@ -154,11 +159,10 @@ pub fn tfunc_pairs(args: &[LatticeType]) -> LatticeType {
 
     match &args[0] {
         LatticeType::Concrete(ConcreteType::Dict { key, value }) => {
-            // pairs returns a Generator of (key, value) tuples
-            LatticeType::Concrete(ConcreteType::Generator {
-                element: Box::new(ConcreteType::Tuple {
-                    elements: vec![*key.clone(), *value.clone()],
-                }),
+            // Julia's pairs(::AbstractDict) returns the dictionary itself.
+            LatticeType::Concrete(ConcreteType::Dict {
+                key: key.clone(),
+                value: value.clone(),
             })
         }
         LatticeType::Concrete(ConcreteType::NamedTuple { fields }) => {
@@ -166,7 +170,10 @@ pub fn tfunc_pairs(args: &[LatticeType]) -> LatticeType {
             if fields.is_empty() {
                 LatticeType::Concrete(ConcreteType::Generator {
                     element: Box::new(ConcreteType::Tuple {
-                        elements: vec![ConcreteType::Symbol, ConcreteType::Nothing],
+                        elements: vec![
+                            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol)),
+                            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Nothing)),
+                        ],
                     }),
                 })
             } else {
@@ -181,16 +188,22 @@ pub fn tfunc_pairs(args: &[LatticeType]) -> LatticeType {
                 };
                 LatticeType::Concrete(ConcreteType::Generator {
                     element: Box::new(ConcreteType::Tuple {
-                        elements: vec![ConcreteType::Symbol, value_type],
+                        elements: vec![
+                            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol)),
+                            value_type,
+                        ],
                     }),
                 })
             }
         }
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             // pairs of Array returns Generator of (Int64, element) tuples
             LatticeType::Concrete(ConcreteType::Generator {
                 element: Box::new(ConcreteType::Tuple {
-                    elements: vec![ConcreteType::Int64, *element.clone()],
+                    elements: vec![
+                        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                        *element.clone(),
+                    ],
                 }),
             })
         }
@@ -208,9 +221,17 @@ pub fn tfunc_pairs(args: &[LatticeType]) -> LatticeType {
 /// ```text
 /// haskey(Dict{String,Int64}, "key") → Bool
 /// ```
-pub fn tfunc_haskey(_args: &[LatticeType]) -> LatticeType {
-    // haskey always returns Bool
-    LatticeType::Concrete(ConcreteType::Bool)
+pub fn tfunc_haskey(args: &[LatticeType]) -> LatticeType {
+    // `haskey` returns Bool over a concrete Dict/NamedTuple receiver. For an
+    // unknown (Top/Any) or struct receiver it must defer: a user override on a
+    // custom type may return a non-Bool value, and pinning Bool here propagated
+    // a typed `ReturnI64` that crashed on the override's value (Issue #6610).
+    match args.first() {
+        Some(LatticeType::Concrete(
+            ConcreteType::Dict { .. } | ConcreteType::NamedTuple { .. },
+        )) => LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
+        _ => LatticeType::Top,
+    }
 }
 
 /// Transfer function for `get` (get with default).
@@ -360,9 +381,23 @@ pub fn tfunc_merge_bang(args: &[LatticeType]) -> LatticeType {
 /// isempty(Dict{String,Int64}) → Bool
 /// isempty("") → Bool
 /// ```
-pub fn tfunc_isempty(_args: &[LatticeType]) -> LatticeType {
-    // isempty always returns Bool
-    LatticeType::Concrete(ConcreteType::Bool)
+pub fn tfunc_isempty(args: &[LatticeType]) -> LatticeType {
+    // `isempty` returns Bool over built-in collections. A user type may override
+    // it with a non-Bool return, so defer for a struct/unknown receiver: pinning
+    // Bool there constant-folded a String comparison on the override's value
+    // (Issue #6610). `isempty`'s result is a Bool branch condition, never stored
+    // in a native-array `_mem` field, so deferring an unknown receiver is safe
+    // (unlike `empty!`, which returns the collection and must stay precise).
+    match args.first() {
+        Some(LatticeType::Concrete(
+            ConcreteType::Struct { .. } | ConcreteType::Core(CoreType::Any),
+        ))
+        | Some(LatticeType::Top)
+        | None => LatticeType::Top,
+        Some(_) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        }
+    }
 }
 
 /// Transfer function for `in` operator (membership check).
@@ -378,7 +413,7 @@ pub fn tfunc_isempty(_args: &[LatticeType]) -> LatticeType {
 /// ```
 pub fn tfunc_in(_args: &[LatticeType]) -> LatticeType {
     // in always returns Bool
-    LatticeType::Concrete(ConcreteType::Bool)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
 }
 
 /// Transfer function for `eltype` (element type of collection).
@@ -427,12 +462,12 @@ pub fn tfunc_set(args: &[LatticeType]) -> LatticeType {
     if args.is_empty() {
         // Empty set defaults to Set{Any}
         return LatticeType::Concrete(ConcreteType::Set {
-            element: Box::new(ConcreteType::Any),
+            element: Box::new(ConcreteType::Core(CoreType::Any)),
         });
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(ConcreteType::Set {
                 element: element.clone(),
             })
@@ -460,14 +495,123 @@ pub fn tfunc_dict(args: &[LatticeType]) -> LatticeType {
     if args.is_empty() {
         // Empty dict defaults to Dict{Any,Any}
         return LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::Any),
-            value: Box::new(ConcreteType::Any),
+            key: Box::new(ConcreteType::Core(CoreType::Any)),
+            value: Box::new(ConcreteType::Core(CoreType::Any)),
         });
     }
 
-    // For pairs, try to infer key/value types
-    // This is a simplified implementation
-    LatticeType::Top
+    let mut key_type: Option<LatticeType> = None;
+    let mut value_type: Option<LatticeType> = None;
+    for arg in args {
+        let Some((key, value)) = pair_arg_types(arg) else {
+            return LatticeType::Top;
+        };
+        key_type = Some(match key_type {
+            Some(existing) => existing.join(&key),
+            None => key,
+        });
+        value_type = Some(match value_type {
+            Some(existing) => existing.join(&value),
+            None => value,
+        });
+    }
+
+    let Some(key) = key_type.and_then(|ty| concrete_from_lattice(&ty)) else {
+        return LatticeType::Top;
+    };
+    let Some(value) = value_type.and_then(|ty| concrete_from_lattice(&ty)) else {
+        return LatticeType::Top;
+    };
+
+    LatticeType::Concrete(ConcreteType::Dict {
+        key: Box::new(key),
+        value: Box::new(value),
+    })
+}
+
+fn pair_arg_types(arg: &LatticeType) -> Option<(LatticeType, LatticeType)> {
+    let LatticeType::Concrete(ConcreteType::Struct { name, .. }) = arg else {
+        return None;
+    };
+    let (base, params) = split_parametric_type_name(name)?;
+    if base != "Pair" || params.len() != 2 {
+        return None;
+    }
+
+    Some((
+        concrete_name_to_lattice(&params[0]),
+        concrete_name_to_lattice(&params[1]),
+    ))
+}
+
+fn split_parametric_type_name(name: &str) -> Option<(&str, Vec<String>)> {
+    let open = name.find('{')?;
+    let close = name.rfind('}')?;
+    if close <= open {
+        return None;
+    }
+    let base = &name[..open];
+    let mut params = Vec::new();
+    let mut depth = 0usize;
+    let mut start = open + 1;
+    let inner = &name[start..close];
+    for (offset, ch) in inner.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let end = open + 1 + offset;
+                params.push(name[start..end].trim().to_string());
+                start = end + 1;
+            }
+            _ => {}
+        }
+    }
+    params.push(name[start..close].trim().to_string());
+    Some((base, params))
+}
+
+fn concrete_name_to_lattice(name: &str) -> LatticeType {
+    LatticeType::Concrete(match name {
+        "Int8" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8)),
+        "Int16" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int16)),
+        "Int32" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int32)),
+        "Int" if crate::types::native_int_type_name() == "Int32" => {
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int32))
+        }
+        "Int64" | "Int" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+        "Int128" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int128)),
+        "UInt8" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt8)),
+        "UInt16" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt16)),
+        "UInt32" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt32)),
+        "UInt" if crate::types::native_uint_type_name() == "UInt32" => {
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt32))
+        }
+        "UInt64" | "UInt" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt64)),
+        "UInt128" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt128)),
+        "Float16" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float16)),
+        "Float32" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float32)),
+        "Float64" | "Float" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+        "Bool" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)),
+        "String" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::String)),
+        "Char" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)),
+        "Symbol" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol)),
+        "Nothing" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Nothing)),
+        "Missing" => ConcreteType::Core(CoreType::Primitive(CorePrimitive::Missing)),
+        "Any" => ConcreteType::Core(CoreType::Any),
+        other => ConcreteType::Struct {
+            name: other.to_string(),
+            type_id: 0,
+        },
+    })
+}
+
+fn concrete_from_lattice(ty: &LatticeType) -> Option<ConcreteType> {
+    match ty {
+        LatticeType::Concrete(concrete) => Some(concrete.clone()),
+        LatticeType::Union(types) => Some(ConcreteType::UnionOf(types.iter().cloned().collect())),
+        _ => None,
+    }
 }
 
 /// Transfer function for `union` (set union).
@@ -539,7 +683,7 @@ pub fn tfunc_symdiff(args: &[LatticeType]) -> LatticeType {
 /// - issubset(Set{T}, Set{T}) → Bool
 /// - ⊆(Set{T}, Set{T}) → Bool
 pub fn tfunc_issubset(_args: &[LatticeType]) -> LatticeType {
-    LatticeType::Concrete(ConcreteType::Bool)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
 }
 
 #[cfg(test)]
@@ -549,15 +693,21 @@ mod tests {
     #[test]
     fn test_keys_dict() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         let args = vec![dict];
         let result = tfunc_keys(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Set {
-                element: Box::new(ConcreteType::String)
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::String
+                )))
             })
         );
     }
@@ -566,8 +716,14 @@ mod tests {
     fn test_keys_named_tuple() {
         let named_tuple = LatticeType::Concrete(ConcreteType::NamedTuple {
             fields: vec![
-                ("x".to_string(), ConcreteType::Int64),
-                ("y".to_string(), ConcreteType::Float64),
+                (
+                    "x".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "y".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+                ),
             ],
         });
         let args = vec![named_tuple];
@@ -581,8 +737,12 @@ mod tests {
     #[test]
     fn test_values_dict() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         let args = vec![dict];
         let result = tfunc_values(&args);
@@ -595,7 +755,10 @@ mod tests {
     #[test]
     fn test_pairs_array() {
         let array = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         });
         let args = vec![array];
         let result = tfunc_pairs(&args);
@@ -608,36 +771,66 @@ mod tests {
     #[test]
     fn test_haskey() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
-        let key = LatticeType::Concrete(ConcreteType::String);
+        let key = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         let args = vec![dict, key];
         let result = tfunc_haskey(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_get_same_types() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
-        let key = LatticeType::Concrete(ConcreteType::String);
-        let default = LatticeType::Concrete(ConcreteType::Int64);
+        let key = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
+        let default = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
         let args = vec![dict, key, default];
         let result = tfunc_get(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_get_different_types() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
-        let key = LatticeType::Concrete(ConcreteType::String);
-        let default = LatticeType::Concrete(ConcreteType::String);
+        let key = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
+        let default = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         let args = vec![dict, key, default];
         let result = tfunc_get(&args);
         assert!(matches!(result, LatticeType::Union(_)));
@@ -646,14 +839,27 @@ mod tests {
     #[test]
     fn test_get_bang() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
-        let key = LatticeType::Concrete(ConcreteType::String);
-        let default = LatticeType::Concrete(ConcreteType::Int64);
+        let key = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
+        let default = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
         let args = vec![dict, key, default];
         let result = tfunc_get_bang(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
@@ -661,8 +867,14 @@ mod tests {
         // NamedTuple with all Int64 fields
         let named_tuple = LatticeType::Concrete(ConcreteType::NamedTuple {
             fields: vec![
-                ("a".to_string(), ConcreteType::Int64),
-                ("b".to_string(), ConcreteType::Int64),
+                (
+                    "a".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "b".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
             ],
         });
         let args = vec![named_tuple];
@@ -670,7 +882,10 @@ mod tests {
 
         // Should return Generator{Tuple{Symbol, Int64}}
         assert!(
-            matches!(&result, LatticeType::Concrete(ConcreteType::Generator { .. })),
+            matches!(
+                &result,
+                LatticeType::Concrete(ConcreteType::Generator { .. })
+            ),
             "Expected Generator type, got {:?}",
             result
         );
@@ -682,8 +897,14 @@ mod tests {
             );
             if let ConcreteType::Tuple { elements } = element.as_ref() {
                 assert_eq!(elements.len(), 2);
-                assert_eq!(elements[0], ConcreteType::Symbol);
-                assert_eq!(elements[1], ConcreteType::Int64);
+                assert_eq!(
+                    elements[0],
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol))
+                );
+                assert_eq!(
+                    elements[1],
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+                );
             }
         }
     }
@@ -693,8 +914,14 @@ mod tests {
         // NamedTuple with mixed numeric types (Int64, Float64)
         let named_tuple = LatticeType::Concrete(ConcreteType::NamedTuple {
             fields: vec![
-                ("x".to_string(), ConcreteType::Int64),
-                ("y".to_string(), ConcreteType::Float64),
+                (
+                    "x".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ),
+                (
+                    "y".to_string(),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+                ),
             ],
         });
         let args = vec![named_tuple];
@@ -707,7 +934,10 @@ mod tests {
             "Should not return Top for heterogeneous numeric NamedTuple"
         );
         assert!(
-            matches!(&result, LatticeType::Concrete(ConcreteType::Generator { .. })),
+            matches!(
+                &result,
+                LatticeType::Concrete(ConcreteType::Generator { .. })
+            ),
             "Expected Generator type, got {:?}",
             result
         );
@@ -719,7 +949,10 @@ mod tests {
             );
             if let ConcreteType::Tuple { elements } = element.as_ref() {
                 assert_eq!(elements.len(), 2);
-                assert_eq!(elements[0], ConcreteType::Symbol);
+                assert_eq!(
+                    elements[0],
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol))
+                );
                 // Should be UnionOf(Int64, Float64) - preserving type information
                 assert!(
                     matches!(&elements[1], ConcreteType::UnionOf(_)),
@@ -728,8 +961,12 @@ mod tests {
                 );
                 if let ConcreteType::UnionOf(types) = &elements[1] {
                     assert_eq!(types.len(), 2);
-                    assert!(types.contains(&ConcreteType::Int64));
-                    assert!(types.contains(&ConcreteType::Float64));
+                    assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Int64
+                    ))));
+                    assert!(types.contains(&ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Float64
+                    ))));
                 }
             }
         }
@@ -743,7 +980,10 @@ mod tests {
 
         // Should return Generator{Tuple{Symbol, Nothing}}
         assert!(
-            matches!(&result, LatticeType::Concrete(ConcreteType::Generator { .. })),
+            matches!(
+                &result,
+                LatticeType::Concrete(ConcreteType::Generator { .. })
+            ),
             "Expected Generator type, got {:?}",
             result
         );
@@ -755,8 +995,14 @@ mod tests {
             );
             if let ConcreteType::Tuple { elements } = element.as_ref() {
                 assert_eq!(elements.len(), 2);
-                assert_eq!(elements[0], ConcreteType::Symbol);
-                assert_eq!(elements[1], ConcreteType::Nothing);
+                assert_eq!(
+                    elements[0],
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Symbol))
+                );
+                assert_eq!(
+                    elements[1],
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Nothing))
+                );
             }
         }
     }
@@ -764,10 +1010,16 @@ mod tests {
     #[test]
     fn test_delete() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
-        let key = LatticeType::Concrete(ConcreteType::String);
+        let key = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         let args = vec![dict.clone(), key];
         let result = tfunc_delete(&args);
         assert_eq!(result, dict);
@@ -776,8 +1028,12 @@ mod tests {
     #[test]
     fn test_merge() {
         let dict = LatticeType::Concrete(ConcreteType::Dict {
-            key: Box::new(ConcreteType::String),
-            value: Box::new(ConcreteType::Int64),
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         let args = vec![dict.clone(), dict.clone()];
         let result = tfunc_merge(&args);
@@ -787,35 +1043,78 @@ mod tests {
     #[test]
     fn test_isempty() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_isempty(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
+    }
+
+    #[test]
+    fn test_isempty_defers_for_struct_and_unknown_receiver_6610() {
+        // A user struct may override `isempty` with a non-Bool return → defer.
+        let struct_arg = vec![LatticeType::Concrete(ConcreteType::Struct {
+            name: "Tagged".to_string(),
+            type_id: 1,
+        })];
+        assert_eq!(tfunc_isempty(&struct_arg), LatticeType::Top);
+        // Unknown receivers (Any / Top) also defer — the result is a Bool branch
+        // condition, never stored in a native-array `_mem` field.
+        assert_eq!(
+            tfunc_isempty(&[LatticeType::Concrete(ConcreteType::Core(CoreType::Any))]),
+            LatticeType::Top
+        );
+        assert_eq!(tfunc_isempty(&[LatticeType::Top]), LatticeType::Top);
+        // Built-in collections still return Bool.
+        assert_eq!(
+            tfunc_isempty(&[LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::String)
+            ))]),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_in() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
             LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ConcreteType::Int64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64,
+                ))),
+                ndims: None,
             }),
         ];
         let result = tfunc_in(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_set_constructor() {
         let array = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         let args = vec![array];
         let result = tfunc_set(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Set {
-                element: Box::new(ConcreteType::Int64)
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                )))
             })
         );
     }
@@ -823,7 +1122,9 @@ mod tests {
     #[test]
     fn test_union_sets() {
         let set = LatticeType::Concrete(ConcreteType::Set {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         let args = vec![set.clone(), set.clone()];
         let result = tfunc_union(&args);
@@ -833,10 +1134,15 @@ mod tests {
     #[test]
     fn test_issubset() {
         let set = LatticeType::Concrete(ConcreteType::Set {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         });
         let args = vec![set.clone(), set];
         let result = tfunc_issubset(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 }

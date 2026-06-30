@@ -3,7 +3,7 @@
 //! Contains basic block, instruction, terminator, variable reference,
 //! constant value, and IR function/module types.
 
-use super::super::types::JuliaType;
+use super::super::types::StaticType;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -63,6 +63,19 @@ pub enum Instruction {
         func: String,
         args: Vec<VarRef>,
     },
+    /// Function call with multiple return values.
+    CallMulti {
+        dests: Vec<VarRef>,
+        func: String,
+        args: Vec<VarRef>,
+    },
+    /// Stack-allocated isbits struct construction.
+    StructNew {
+        dest: VarRef,
+        size: u32,
+        align: u8,
+        fields: Vec<StructFieldInit>,
+    },
     /// Array/collection access
     GetIndex {
         dest: VarRef,
@@ -81,17 +94,29 @@ pub enum Instruction {
         object: VarRef,
         field: String,
     },
+    /// Field access with a precomputed byte offset.
+    GetFieldOffset {
+        dest: VarRef,
+        object: VarRef,
+        offset: i32,
+    },
     /// Field mutation
     SetField {
         object: VarRef,
         field: String,
         value: VarRef,
     },
+    /// Field mutation with a precomputed byte offset.
+    SetFieldOffset {
+        object: VarRef,
+        offset: i32,
+        value: VarRef,
+    },
     /// Type assertion/check
     TypeAssert {
         dest: VarRef,
         src: VarRef,
-        ty: JuliaType,
+        ty: StaticType,
     },
     /// Phi node for SSA form
     Phi {
@@ -100,11 +125,19 @@ pub enum Instruction {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct StructFieldInit {
+    pub offset: i32,
+    pub value: VarRef,
+}
+
 /// Block terminator instruction
 #[derive(Debug, Clone)]
 pub enum Terminator {
     /// Return from function
     Return(Option<VarRef>),
+    /// Return multiple values from a tuple-returning function.
+    ReturnMany(Vec<VarRef>),
     /// Unconditional jump
     Jump(String),
     /// Conditional branch
@@ -129,12 +162,12 @@ pub struct VarRef {
     /// SSA version (for SSA form)
     pub version: usize,
     /// Type of this variable
-    pub ty: JuliaType,
+    pub ty: StaticType,
 }
 
 impl VarRef {
     /// Create a new variable reference
-    pub fn new(name: String, ty: JuliaType) -> Self {
+    pub fn new(name: String, ty: StaticType) -> Self {
         Self {
             name,
             version: 0,
@@ -177,16 +210,16 @@ pub enum ConstValue {
 
 impl ConstValue {
     /// Get the type of this constant
-    pub fn get_type(&self) -> JuliaType {
+    pub fn get_type(&self) -> StaticType {
         match self {
-            ConstValue::Int64(_) => JuliaType::Int64,
-            ConstValue::Int32(_) => JuliaType::Int32,
-            ConstValue::Float64(_) => JuliaType::Float64,
-            ConstValue::Float32(_) => JuliaType::Float32,
-            ConstValue::Bool(_) => JuliaType::Bool,
-            ConstValue::Char(_) => JuliaType::Char,
-            ConstValue::String(_) => JuliaType::String,
-            ConstValue::Nothing => JuliaType::Nothing,
+            ConstValue::Int64(_) => StaticType::I64,
+            ConstValue::Int32(_) => StaticType::I32,
+            ConstValue::Float64(_) => StaticType::F64,
+            ConstValue::Float32(_) => StaticType::F32,
+            ConstValue::Bool(_) => StaticType::Bool,
+            ConstValue::Char(_) => StaticType::Char,
+            ConstValue::String(_) => StaticType::Str,
+            ConstValue::Nothing => StaticType::Nothing,
         }
     }
 }
@@ -233,18 +266,20 @@ pub struct IrFunction {
     /// Function name
     pub name: String,
     /// Parameter names and types
-    pub params: Vec<(String, JuliaType)>,
+    pub params: Vec<(String, StaticType)>,
     /// Return type
-    pub return_type: JuliaType,
+    pub return_type: StaticType,
     /// Basic blocks
     pub blocks: Vec<BasicBlock>,
     /// Entry block label
     pub entry: String,
+    /// Source line used for native debug information, when available.
+    pub debug_line: Option<u32>,
 }
 
 impl IrFunction {
     /// Create a new IR function
-    pub fn new(name: String, params: Vec<(String, JuliaType)>, return_type: JuliaType) -> Self {
+    pub fn new(name: String, params: Vec<(String, StaticType)>, return_type: StaticType) -> Self {
         let entry = "entry".to_string();
         Self {
             name,
@@ -252,6 +287,7 @@ impl IrFunction {
             return_type,
             blocks: vec![BasicBlock::new(entry.clone())],
             entry,
+            debug_line: None,
         }
     }
 

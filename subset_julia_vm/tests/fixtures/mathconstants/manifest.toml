@@ -23,3 +23,15 @@ name = "mathconstants_precision"
 file = "mathconstants_precision.jl"
 expected = true
 description = "Mathematical constant precision and relationships (golden ratio, Euler-Mascheroni)"
+
+[[tests]]
+name = "mathconstants_irrational_singletons_5133"
+file = "irrational_singletons_5133.jl"
+expected = true
+description = "Irrational{sym} singleton constants and Float64/Float32/BigFloat conversion (Issue #5133)"
+
+[[tests]]
+name = "mathconstants_irrational_display_5656"
+file = "irrational_display_5656.jl"
+expected = true
+description = "Irrational singletons π/ℯ display as their symbol name across print/string/show/repr/interpolation, not Irrational{:π}() (Issue #5656)"

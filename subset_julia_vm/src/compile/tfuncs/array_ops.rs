@@ -4,6 +4,8 @@
 //! including indexing, length, and construction.
 
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
+use crate::inference_core::{CorePrimitive, CoreType};
+use std::collections::BTreeSet;
 
 /// Transfer function for `getindex` (array indexing: `arr[i]`).
 ///
@@ -23,9 +25,15 @@ pub fn tfunc_getindex(args: &[LatticeType]) -> LatticeType {
 
     match &args[0] {
         // Array{T}[i] → T
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
-            LatticeType::Concrete(*element.clone())
-        }
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => match &**element {
+            ConcreteType::UnionOf(types) if types.is_empty() => {
+                LatticeType::Concrete(ConcreteType::Core(CoreType::Any))
+            }
+            ConcreteType::UnionOf(types) => {
+                LatticeType::Union(types.iter().cloned().collect::<BTreeSet<_>>())
+            }
+            other => LatticeType::Concrete(other.clone()),
+        },
 
         // Tuple{T1, T2, ...}[i] → Union of element types (conservative)
         LatticeType::Concrete(ConcreteType::Tuple { elements }) => {
@@ -43,6 +51,11 @@ pub fn tfunc_getindex(args: &[LatticeType]) -> LatticeType {
             }
         }
 
+        // Issue #6601: `String[i]` (scalar integer index) yields a `Char`.
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        }
+
         // Unknown collection type
         _ => LatticeType::Top,
     }
@@ -50,19 +63,19 @@ pub fn tfunc_getindex(args: &[LatticeType]) -> LatticeType {
 
 /// Transfer function for `setindex!` (array assignment: `arr[i] = val`).
 ///
-/// In Julia, `setindex!` returns the assigned value.
+/// Julia rule: `setindex!(collection, value, indices...) → collection`
 ///
 /// # Examples
 /// ```text
-/// setindex!(Array{Int64}, Int64, Int64) → Int64
+/// setindex!(Array{Int64}, Int64, Int64) → Array{Int64}
 /// ```
 pub fn tfunc_setindex(args: &[LatticeType]) -> LatticeType {
     if args.len() < 3 {
         return LatticeType::Top;
     }
 
-    // setindex! returns the value being assigned (args[1])
-    args[1].clone()
+    // setindex! returns the mutated collection (args[0]), not the value (Issue #3477)
+    args[0].clone()
 }
 
 /// Transfer function for `length` (array/tuple/string length).
@@ -78,15 +91,36 @@ pub fn tfunc_setindex(args: &[LatticeType]) -> LatticeType {
 /// length(Tuple{Int64, Float64}) → Int64
 /// ```
 pub fn tfunc_length(args: &[LatticeType]) -> LatticeType {
+    use crate::compile::lattice::types::ConstValue;
+
     if args.len() != 1 {
         return LatticeType::Top;
     }
 
     match &args[0] {
-        // length always returns Int64 for arrays, tuples, strings
+        // Issue #5142: a fixed-arity tuple has a statically known length, so
+        // propagate it as a constant. Mirrors upstream `nfields_tfunc`, which
+        // returns `Const(length(x.types))` for concrete tuple/struct types.
+        // This enables constant folding, branch elimination, and `Val(N)`
+        // specialization downstream.
+        LatticeType::Concrete(ConcreteType::Tuple { elements }) => {
+            LatticeType::Const(ConstValue::Int64(elements.len() as i64))
+        }
+
+        // A tuple with a variadic tail (`Tuple{T..., Vararg{Tail}}`) has a
+        // length that is only known at run time, so widen to Int64 rather than
+        // a constant.
+        LatticeType::Concrete(ConcreteType::TupleVararg { .. }) => LatticeType::Concrete(
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+        ),
+
+        // length always returns Int64 for arrays and strings
         LatticeType::Concrete(ConcreteType::Array { .. })
-        | LatticeType::Concrete(ConcreteType::Tuple { .. })
-        | LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Int64),
+        | LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            )))
+        }
 
         // Unknown type
         _ => LatticeType::Top,
@@ -124,7 +158,7 @@ pub fn tfunc_pop(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(*element.clone())
         }
         _ => LatticeType::Top,
@@ -144,7 +178,7 @@ pub fn tfunc_first(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(*element.clone())
         }
         LatticeType::Concrete(ConcreteType::Tuple { elements }) => {
@@ -165,7 +199,7 @@ pub fn tfunc_last(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(*element.clone())
         }
         LatticeType::Concrete(ConcreteType::Tuple { elements }) => {
@@ -193,12 +227,22 @@ pub fn tfunc_size(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { .. }) => {
-            // Simplified: return a single Int64 for 1D arrays
-            // In full Julia, this would return Tuple{Int64, ...} for multi-dimensional arrays
-            LatticeType::Concrete(ConcreteType::Tuple {
-                elements: vec![ConcreteType::Int64],
-            })
+        LatticeType::Concrete(ConcreteType::Array { .. })
+        | LatticeType::Concrete(ConcreteType::Tuple { .. })
+        | LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            if args.len() >= 2 {
+                // size(arr, dim) -> Int64
+                LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64,
+                )))
+            } else {
+                // size(arr) -> Tuple{Int64, ...}; conservatively single Int64
+                LatticeType::Concrete(ConcreteType::Tuple {
+                    elements: vec![ConcreteType::Core(CoreType::Primitive(
+                        CorePrimitive::Int64,
+                    ))],
+                })
+            }
         }
         _ => LatticeType::Top,
     }
@@ -220,17 +264,70 @@ pub fn tfunc_map(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Top;
     }
 
-    // map(f, arr) - second argument is the array
+    // map(f, arr) - first argument is the function, second is the array
+    let fn_name = match &args[0] {
+        LatticeType::Concrete(ConcreteType::Function { name }) => Some(name.as_str()),
+        LatticeType::Concrete(ConcreteType::DataType { name }) => Some(name.as_str()),
+        _ => None,
+    };
+
+    let elem_from_fn = fn_name.and_then(infer_result_for_type_converter);
+
     match &args[1] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
-            // Simplified: return array with same element type
-            // In a more precise implementation, we would analyze the function f
-            // to determine the return type and use that as the element type
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
+            // Use function return type when known; otherwise preserve input element type (Issue #3480)
+            let result_elem = if let Some(out_elem) = elem_from_fn {
+                Box::new(out_elem)
+            } else {
+                element.clone()
+            };
             LatticeType::Concrete(ConcreteType::Array {
-                element: element.clone(),
+                element: result_elem,
+                ndims: None,
             })
         }
         _ => LatticeType::Top,
+    }
+}
+
+/// Map well-known type-converter function names to their output ConcreteType.
+/// Used by tfunc_map and tfunc_broadcast to infer element types (Issue #3480).
+fn infer_result_for_type_converter(name: &str) -> Option<ConcreteType> {
+    match name {
+        "Float64" | "float64" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        ))),
+        "Float32" | "float32" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float32,
+        ))),
+        "Float16" | "float16" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float16,
+        ))),
+        "Int64" | "int64" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        ))),
+        "Int32" | "int32" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int32,
+        ))),
+        "Int16" | "int16" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int16,
+        ))),
+        "Int8" | "int8" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8))),
+        "UInt64" | "uint64" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt64,
+        ))),
+        "UInt32" | "uint32" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt32,
+        ))),
+        "UInt16" | "uint16" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt16,
+        ))),
+        "UInt8" | "uint8" => Some(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::UInt8,
+        ))),
+        "Bool" | "bool" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
+        "abs" | "sign" | "ceil" | "floor" | "round" | "trunc" => None, // depends on input
+        _ => None,
     }
 }
 
@@ -238,6 +335,7 @@ pub fn tfunc_map(args: &[LatticeType]) -> LatticeType {
 ///
 /// Type rules:
 /// - filter(f, Array{T}) → Array{T} (same element type as input)
+/// - filter(f, Dict{K,V}) → Dict{K,V} (same key/value types as input)
 ///
 /// # Examples
 /// ```text
@@ -250,10 +348,17 @@ pub fn tfunc_filter(args: &[LatticeType]) -> LatticeType {
 
     // filter(f, arr) - second argument is the array
     match &args[1] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             // filter returns an array with the same element type as the input
             LatticeType::Concrete(ConcreteType::Array {
                 element: element.clone(),
+                ndims: None,
+            })
+        }
+        LatticeType::Concrete(ConcreteType::Dict { key, value }) => {
+            LatticeType::Concrete(ConcreteType::Dict {
+                key: key.clone(),
+                value: value.clone(),
             })
         }
         _ => LatticeType::Top,
@@ -278,7 +383,7 @@ pub fn tfunc_reduce(args: &[LatticeType]) -> LatticeType {
 
     // reduce(op, arr) or reduce(op, arr, init)
     match &args[1] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             if args.len() >= 3 {
                 // With init value, join element type with init type
                 LatticeType::Concrete(*element.clone()).join(&args[2])
@@ -316,29 +421,42 @@ pub fn tfunc_foldr(args: &[LatticeType]) -> LatticeType {
     tfunc_reduce(args)
 }
 
+/// Apply Julia's reduction widening rules for sum/prod element types. (Issue #3478)
+/// Bool and small integers widen to Int64/UInt64; floats preserve their type.
+fn sum_result_type(elem: &ConcreteType) -> ConcreteType {
+    match elem {
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int16))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int32))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)) => {
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+        }
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt8))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt16))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt32))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt64)) => {
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt64))
+        }
+        // Floats preserve their type
+        other => other.clone(),
+    }
+}
+
 /// Transfer function for `sum` (sum all elements).
 ///
-/// Type rules:
-/// - sum(Array{Int}) → Int64
-/// - sum(Array{Float}) → Float64
-///
-/// # Examples
-/// ```text
-/// sum(Array{Int64}) → Int64
-/// sum(Array{Float64}) → Float64
-/// ```
+/// Julia rule: Bool/small-int element types widen; floats preserve. (Issue #3478)
 pub fn tfunc_sum(args: &[LatticeType]) -> LatticeType {
     if args.is_empty() {
         return LatticeType::Top;
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
-            LatticeType::Concrete(*element.clone())
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
+            LatticeType::Concrete(sum_result_type(element))
         }
-        // Range returns element type
         LatticeType::Concrete(ConcreteType::Range { element }) => {
-            LatticeType::Concrete(*element.clone())
+            LatticeType::Concrete(sum_result_type(element))
         }
         _ => LatticeType::Top,
     }
@@ -375,7 +493,7 @@ pub fn tfunc_maximum(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(*element.clone())
         }
         _ => LatticeType::Top,
@@ -411,7 +529,7 @@ pub fn tfunc_any(args: &[LatticeType]) -> LatticeType {
     if args.is_empty() {
         return LatticeType::Top;
     }
-    LatticeType::Concrete(ConcreteType::Bool)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
 }
 
 /// Transfer function for `all` (check if all elements satisfy predicate).
@@ -449,11 +567,13 @@ pub fn tfunc_collect(args: &[LatticeType]) -> LatticeType {
         LatticeType::Concrete(ConcreteType::Range { element }) => {
             LatticeType::Concrete(ConcreteType::Array {
                 element: element.clone(),
+                ndims: None,
             })
         }
         LatticeType::Concrete(ConcreteType::Generator { element }) => {
             LatticeType::Concrete(ConcreteType::Array {
                 element: element.clone(),
+                ndims: None,
             })
         }
         _ => LatticeType::Top,
@@ -490,7 +610,9 @@ pub fn tfunc_colon(args: &[LatticeType]) -> LatticeType {
         }),
         // If element type is not concrete (e.g., Union or Top), default to Int64
         _ => LatticeType::Concrete(ConcreteType::Range {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         }),
     }
 }
@@ -605,7 +727,7 @@ pub fn tfunc_popfirst(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(*element.clone())
         }
         _ => LatticeType::Top,
@@ -645,8 +767,17 @@ pub fn tfunc_empty_bang(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Top;
     }
 
-    // empty! returns the emptied collection (same type)
-    args[0].clone()
+    // empty! returns the emptied collection (same type) for built-in
+    // collections. A user *struct* may override it with a different return type,
+    // so defer only for a struct receiver instead of assuming the receiver type
+    // — otherwise the override's value is constant-folded (Issue #6610). Only a
+    // struct reaches this tfunc at the comparison site (call-site inference
+    // specializes wrappers to the concrete argument type); leaving other
+    // receivers untouched avoids widening native-array `_mem` inference.
+    match &args[0] {
+        LatticeType::Concrete(ConcreteType::Struct { .. }) => LatticeType::Top,
+        other => other.clone(),
+    }
 }
 
 /// Transfer function for `resize!` (resize array).
@@ -684,11 +815,21 @@ pub fn tfunc_splice(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Top;
     }
 
+    let is_range_index =
+        args.len() >= 2 && matches!(&args[1], LatticeType::Concrete(ConcreteType::Range { .. }));
+
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
-            // For simplicity, return element type (single index case)
-            // In full implementation, would check if index is single or range
-            LatticeType::Concrete(*element.clone())
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
+            if is_range_index {
+                // splice!(arr, range) or splice!(arr, range, ins) returns Array{T} (Issue #3481)
+                LatticeType::Concrete(ConcreteType::Array {
+                    element: element.clone(),
+                    ndims: None,
+                })
+            } else {
+                // splice!(arr, i::Integer) returns element T
+                LatticeType::Concrete(*element.clone())
+            }
         }
         _ => LatticeType::Top,
     }
@@ -801,6 +942,7 @@ pub fn tfunc_unique_bang(args: &[LatticeType]) -> LatticeType {
 ///
 /// Type rules:
 /// - copy(Array{T}) → Array{T}
+/// - copy(Dict{K,V}) → Any
 ///
 /// # Examples
 /// ```text
@@ -811,8 +953,15 @@ pub fn tfunc_copy(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Top;
     }
 
-    // copy returns same type
-    args[0].clone()
+    match &args[0] {
+        // Issue #5867: the current pure-Julia `copy(::Dict)` method returns the
+        // legacy VM Dict value, not the `Dict{K,V}` struct representation.
+        // Keeping the input type here lets nested calls such as
+        // `length(copy(Dict{String,Int64}()))` compile to struct-field access
+        // and then fail at runtime on Value::Dict.
+        LatticeType::Concrete(ConcreteType::Dict { .. }) => LatticeType::Top,
+        _ => args[0].clone(),
+    }
 }
 
 /// Transfer function for `deepcopy` (deep copy).
@@ -864,6 +1013,7 @@ pub fn tfunc_fill(args: &[LatticeType]) -> LatticeType {
     match &args[0] {
         LatticeType::Concrete(ct) => LatticeType::Concrete(ConcreteType::Array {
             element: Box::new(ct.clone()),
+            ndims: None,
         }),
         _ => LatticeType::Top,
     }
@@ -885,19 +1035,26 @@ pub fn tfunc_zeros(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Top;
     }
 
-    // Check if first argument is a type (we default to Float64)
+    // Match Julia's base/array.jl:
+    //   zeros(dims...) -> zeros(Float64, dims)
+    //   zeros(::Type{T}, dims...) -> Array{T}
+    // A concrete numeric first argument is a dimension value, not a type object.
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => {
-            // First arg might be the type or a dimension
-            // For simplicity, if it's a concrete type, use it
+        LatticeType::Concrete(ConcreteType::DataType { name }) => {
+            let element =
+                ConcreteType::from_type_name(name).unwrap_or(ConcreteType::Core(CoreType::Any));
             LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ct.clone()),
+                element: Box::new(element),
+                ndims: None,
             })
         }
         _ => {
             // Default to Float64
             LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ConcreteType::Float64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64,
+                ))),
+                ndims: None,
             })
         }
     }
@@ -928,13 +1085,29 @@ pub fn tfunc_similar(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ConcreteType::Array { element }) => {
+        LatticeType::Concrete(ConcreteType::Array { element, .. }) => {
             LatticeType::Concrete(ConcreteType::Array {
                 element: element.clone(),
+                ndims: None,
             })
         }
         _ => LatticeType::Top,
     }
+}
+
+/// Transfer function for `trues` / `falses` (BitArray-family constructors).
+///
+/// Type rules (Issue #5922): the dimension count selects the container:
+/// - 1 argument → `BitVector`
+/// - 2 arguments → `BitMatrix`
+/// - n arguments → `BitArray{n}`
+pub fn tfunc_trues(args: &[LatticeType]) -> LatticeType {
+    let name = match args.len() {
+        1 => "BitVector".to_string(),
+        2 => "BitMatrix".to_string(),
+        n => format!("BitArray{{{n}}}"),
+    };
+    LatticeType::Concrete(ConcreteType::Struct { name, type_id: 0 })
 }
 
 #[cfg(test)]
@@ -945,21 +1118,62 @@ mod tests {
     fn test_getindex_array() {
         let args = vec![
             LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ConcreteType::Int64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64,
+                ))),
+                ndims: None,
             }),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_getindex(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
+    }
+
+    #[test]
+    fn test_issue_4270_getindex_preserves_union_element() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Array {
+                element: Box::new(ConcreteType::UnionOf(vec![
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Nothing)),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ])),
+                ndims: None,
+            }),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        ];
+        let result = tfunc_getindex(&args);
+
+        let mut expected = BTreeSet::new();
+        expected.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Nothing,
+        )));
+        expected.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        assert_eq!(result, LatticeType::Union(expected));
     }
 
     #[test]
     fn test_getindex_tuple() {
         let args = vec![
             LatticeType::Concrete(ConcreteType::Tuple {
-                elements: vec![ConcreteType::Int64, ConcreteType::Float64],
+                elements: vec![
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+                ],
             }),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_getindex(&args);
         // Should join Int64 and Float64
@@ -969,27 +1183,95 @@ mod tests {
     #[test]
     fn test_length_array() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_length(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_length_string() {
-        let args = vec![LatticeType::Concrete(ConcreteType::String)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::String),
+        ))];
         let result = tfunc_length(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
+    }
+
+    #[test]
+    fn test_length_fixed_tuple_is_const() {
+        // Issue #5142: length of a fixed-arity tuple has a statically known
+        // value, so inference must propagate it as Const(N), matching upstream
+        // `nfields_tfunc` which returns `Const(length(x.types))`.
+        use crate::compile::lattice::types::ConstValue;
+        let args = vec![LatticeType::Concrete(ConcreteType::Tuple {
+            elements: vec![
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)),
+            ],
+        })];
+        let result = tfunc_length(&args);
+        assert_eq!(result, LatticeType::Const(ConstValue::Int64(2)));
+    }
+
+    #[test]
+    fn test_length_empty_tuple_is_const_zero() {
+        // Issue #5142: `length(())` folds to Const(0).
+        use crate::compile::lattice::types::ConstValue;
+        let args = vec![LatticeType::Concrete(ConcreteType::Tuple {
+            elements: vec![],
+        })];
+        let result = tfunc_length(&args);
+        assert_eq!(result, LatticeType::Const(ConstValue::Int64(0)));
+    }
+
+    #[test]
+    fn test_length_vararg_tuple_stays_int64() {
+        // Issue #5142: a tuple with a variadic tail has an unknown length, so
+        // it must NOT be folded to a constant — it widens to Int64.
+        let args = vec![LatticeType::Concrete(ConcreteType::TupleVararg {
+            elements: vec![ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))],
+            tail: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        })];
+        let result = tfunc_length(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_push_returns_array() {
         let array_type = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         let args = vec![
             array_type.clone(),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_push(&args);
         assert_eq!(result, array_type);
@@ -998,31 +1280,73 @@ mod tests {
     #[test]
     fn test_pop_returns_element() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_pop(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+    }
+
+    #[test]
+    fn test_empty_bang_returns_collection_but_defers_for_struct_6610() {
+        // Built-in collection: empty! returns the emptied collection (same type).
+        let array_type = LatticeType::Concrete(ConcreteType::Array {
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
+        });
+        assert_eq!(
+            tfunc_empty_bang(std::slice::from_ref(&array_type)),
+            array_type
+        );
+        // A user struct may override empty! with a different return type → defer.
+        let struct_arg = LatticeType::Concrete(ConcreteType::Struct {
+            name: "Tagged".to_string(),
+            type_id: 1,
+        });
+        assert_eq!(tfunc_empty_bang(&[struct_arg]), LatticeType::Top);
     }
 
     #[test]
     fn test_first_array() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_first(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_size_array() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_size(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Tuple {
-                elements: vec![ConcreteType::Int64]
+                elements: vec![ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                ))]
             })
         );
     }
@@ -1030,7 +1354,10 @@ mod tests {
     #[test]
     fn test_map_preserves_element_type() {
         let array_type = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         let args = vec![
             LatticeType::Top, // function type (unknown)
@@ -1043,7 +1370,10 @@ mod tests {
     #[test]
     fn test_filter_preserves_element_type() {
         let array_type = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         });
         let args = vec![
             LatticeType::Top, // predicate function type (unknown)
@@ -1056,14 +1386,20 @@ mod tests {
     #[test]
     fn test_colon_int() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_colon(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Range {
-                element: Box::new(ConcreteType::Int64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                ))),
             })
         );
     }
@@ -1071,14 +1407,20 @@ mod tests {
     #[test]
     fn test_colon_float() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Float64),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_colon(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Range {
-                element: Box::new(ConcreteType::Float64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64
+                ))),
             })
         );
     }
@@ -1086,15 +1428,23 @@ mod tests {
     #[test]
     fn test_colon_with_step() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_colon(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Range {
-                element: Box::new(ConcreteType::Int64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                ))),
             })
         );
     }
@@ -1102,14 +1452,20 @@ mod tests {
     #[test]
     fn test_range_function() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Float64),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_range(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Range {
-                element: Box::new(ConcreteType::Float64),
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64
+                ))),
             })
         );
     }
@@ -1117,7 +1473,10 @@ mod tests {
     #[test]
     fn test_append_returns_array() {
         let array_type = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         let args = vec![array_type.clone(), array_type.clone()];
         let result = tfunc_append(&args);
@@ -1127,20 +1486,33 @@ mod tests {
     #[test]
     fn test_popfirst_returns_element() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_popfirst(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
     fn test_pushfirst_returns_array() {
         let array_type = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         let args = vec![
             array_type.clone(),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_pushfirst(&args);
         assert_eq!(result, array_type);
@@ -1149,7 +1521,10 @@ mod tests {
     #[test]
     fn test_sort_returns_array() {
         let array_type = LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Int64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
         });
         let args = vec![array_type.clone()];
         let result = tfunc_sort(&args);
@@ -1157,41 +1532,96 @@ mod tests {
     }
 
     #[test]
+    fn test_copy_dict_widens_to_top_issue_5867() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Dict {
+            key: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            value: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        })];
+        let result = tfunc_copy(&args);
+        assert_eq!(result, LatticeType::Top);
+    }
+
+    #[test]
     fn test_fill() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_fill(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ConcreteType::Int64)
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                ))),
+                ndims: None
             })
         );
     }
 
     #[test]
     fn test_zeros_default() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_zeros(&args);
-        // Returns Array{Int64} when given numeric type
-        assert!(matches!(
+        assert_eq!(
             result,
-            LatticeType::Concrete(ConcreteType::Array { .. })
-        ));
+            LatticeType::Concrete(ConcreteType::Array {
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64
+                ))),
+                ndims: None
+            })
+        );
+    }
+
+    #[test]
+    fn test_zeros_typed_prefix() {
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::DataType {
+                name: "Int64".to_string(),
+            }),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        ];
+        let result = tfunc_zeros(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Array {
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Int64
+                ))),
+                ndims: None
+            })
+        );
     }
 
     #[test]
     fn test_similar() {
         let args = vec![LatticeType::Concrete(ConcreteType::Array {
-            element: Box::new(ConcreteType::Float64),
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            ndims: None,
         })];
         let result = tfunc_similar(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Array {
-                element: Box::new(ConcreteType::Float64)
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64
+                ))),
+                ndims: None
             })
         );
     }

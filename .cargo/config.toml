@@ -1,0 +1,21 @@
+# Workspace build defaults for faster sjulia iteration.
+#
+# sccache is optional locally: `brew install sccache` / `cargo install sccache`,
+# then `export RUSTC_WRAPPER=sccache`. CI sets RUSTC_WRAPPER via workflow env.
+#
+# Linux dev boxes need `lld` for the linker settings below
+# (`sudo apt-get install -y lld clang` on Debian/Ubuntu).
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "split-debuginfo=unpacked"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "split-debuginfo=unpacked"]
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]

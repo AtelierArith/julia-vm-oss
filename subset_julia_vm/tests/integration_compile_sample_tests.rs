@@ -1,15 +1,14 @@
 //! Integration tests: IR compilation, compile module, program compilation, code samples, macros
+#![allow(dead_code)]
 
 mod common;
 use common::*;
 
-use std::ffi::{CStr, CString};
 use subset_julia_vm::vm::Value;
 use subset_julia_vm::*;
 
 // ==================== IR Compilation ====================
 
-#[test]
 fn test_compile_to_ir() {
     let src = r#"
 function f(N)
@@ -29,7 +28,6 @@ end
     assert!(json.contains("\"name\":\"f\""));
 }
 
-#[test]
 fn test_run_ir_json() {
     // The run_ir_json_str function runs the main block, not a function call
     // So we need to include the function call in the source
@@ -46,14 +44,12 @@ f(50)
 
 // ==================== Error Handling ====================
 
-#[test]
 fn test_invalid_syntax_returns_nan() {
     let src = "this is not valid julia code";
     let result = compile_and_run_str(src, 0);
     assert!(result.is_nan());
 }
 
-#[test]
 fn test_empty_function_call_wrong_name() {
     // Function is named 'f' but called as 'g'
     let src = r#"
@@ -68,7 +64,6 @@ g(100)
 
 // ==================== Edge Cases ====================
 
-#[test]
 fn test_zero_iterations() {
     let src = r#"
 function f(N)
@@ -85,7 +80,6 @@ f(0)
     assert!((result - 0.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_single_iteration() {
     let src = r#"
 function f(N)
@@ -101,7 +95,6 @@ f(1)
     assert!((result - 1.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_large_n() {
     let src = r#"
 function f(N)
@@ -115,7 +108,6 @@ f(1000000)
 
 // ==================== Float Operations ====================
 
-#[test]
 fn test_float_literal() {
     let src = r#"
 function f(N)
@@ -128,7 +120,6 @@ f(1)
     assert!((result - expected).abs() < 1e-10);
 }
 
-#[test]
 fn test_float_arithmetic() {
     // Test float addition directly without variable assignment
     let src = r#"
@@ -143,7 +134,6 @@ f(1)
 
 // ==================== Implicit Multiplication ====================
 
-#[test]
 fn test_implicit_mult_4n() {
     let src = r#"
 function f(N)
@@ -155,7 +145,6 @@ f(10)
     assert!((result - 40.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_implicit_mult_in_expression() {
     let src = r#"
 function f(N)
@@ -171,7 +160,6 @@ f(20)
 
 // ==================== Program Tests (println) ====================
 
-#[test]
 fn test_compile_and_run_auto_println() {
     let src = r#"println("Hello")"#;
     let result = compile_and_run_auto_str(src, 0);
@@ -179,7 +167,6 @@ fn test_compile_and_run_auto_println() {
     assert!((result - (-4.0)).abs() < 1e-10);
 }
 
-#[test]
 fn test_compile_and_run_auto_function() {
     let src = r#"
 function f(N)
@@ -193,7 +180,6 @@ f(100)
 
 // ==================== Edge Cases ====================
 
-#[test]
 fn test_zero_loop_iterations() {
     let src = r#"
 function f(N)
@@ -210,7 +196,6 @@ f(1)
     assert!((result - 100.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_one_loop_iteration() {
     let src = r#"
 function f(N)
@@ -228,7 +213,6 @@ f(1)
 
 // ==================== Compile Module Tests ====================
 
-#[test]
 fn test_compile_simple_return() {
     let src = r#"
 function f(N)
@@ -242,7 +226,6 @@ f(42)
     }
 }
 
-#[test]
 fn test_compile_constant_return() {
     let src = r#"
 function f(N)
@@ -256,7 +239,6 @@ f(0)
     }
 }
 
-#[test]
 fn test_compile_division_direct() {
     let src = r#"
 function f(N)
@@ -270,21 +252,20 @@ f(10)
     }
 }
 
-#[test]
 fn test_compile_power_direct() {
     let src = r#"
 function f(N)
     return N^2
 end
-f(7)
-"#;
+    f(7)
+    "#;
     match compile_and_run_func(src, 7, 0) {
-        Value::F64(v) => assert!((v - 49.0).abs() < 1e-10),
-        _ => panic!("Expected F64"),
+        // Julia preserves integer exponentiation for `Int ^ Int` (Issue #5608).
+        Value::I64(v) => assert_eq!(v, 49),
+        _ => panic!("Expected I64"),
     }
 }
 
-#[test]
 fn test_compile_sqrt_direct() {
     let src = r#"
 function f(N)
@@ -298,7 +279,6 @@ f(16)
     }
 }
 
-#[test]
 fn test_compile_for_loop_direct() {
     let src = r#"
 function f(N)
@@ -316,7 +296,6 @@ f(5)
     }
 }
 
-#[test]
 fn test_compile_for_loop_sum_direct() {
     let src = r#"
 function f(N)
@@ -335,7 +314,6 @@ f(5)
     }
 }
 
-#[test]
 fn test_compile_rand_direct() {
     let src = r#"
 function f()
@@ -351,7 +329,6 @@ f()
     }
 }
 
-#[test]
 fn test_compile_rand_deterministic_direct() {
     let src = r#"
 function f()
@@ -371,7 +348,6 @@ f()
 
 // ==================== Program Compilation (println) Tests ====================
 
-#[test]
 fn test_compile_println_string() {
     let src = r#"println("Hello")"#;
     let (result, output) = compile_and_run_program_direct(src, 0);
@@ -379,7 +355,6 @@ fn test_compile_println_string() {
     assert_eq!(output, "Hello\n");
 }
 
-#[test]
 fn test_compile_println_multiple() {
     let src = r#"
 println("Line 1")
@@ -389,21 +364,18 @@ println("Line 2")
     assert_eq!(output, "Line 1\nLine 2\n");
 }
 
-#[test]
 fn test_compile_println_escape_newline() {
     let src = r#"println("Hello\nWorld")"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output, "Hello\nWorld\n");
 }
 
-#[test]
 fn test_compile_println_escape_tab() {
     let src = r#"println("A\tB")"#;
     let (_, output) = compile_and_run_program_direct(src, 0);
     assert_eq!(output, "A\tB\n");
 }
 
-#[test]
 fn test_compile_print_no_newline() {
     // Test print() without trailing newline
     let src = r#"
@@ -417,7 +389,6 @@ print("C")
     assert_eq!(output, "ABC");
 }
 
-#[test]
 fn test_compile_print_mixed_with_println() {
     // Test mixing print() and println()
     let src = r#"
@@ -433,7 +404,6 @@ println("B")
     assert_eq!(output, "Hello World\nAB\n");
 }
 
-#[test]
 fn test_compile_print_i64_no_newline() {
     // Test print() with integer without trailing newline
     let src = r#"
@@ -447,7 +417,6 @@ print(3)
     assert_eq!(output, "123");
 }
 
-#[test]
 fn test_compile_print_ascii_art_grid() {
     // Test print() for ASCII art like Mandelbrot sample
     let src = r#"
@@ -468,7 +437,6 @@ end
     assert_eq!(output, "...**\n...**\n...**\n");
 }
 
-#[test]
 fn test_mandelbrot_scalar_sample() {
     // Test the actual Mandelbrot sample from iOS app (now using complex numbers and abs2)
     let src = r#"
@@ -521,7 +489,6 @@ c1
     assert!(output.contains("Mini Mandelbrot"));
 }
 
-#[test]
 fn test_mandelbrot_via_ffi() {
     // Test using the actual FFI function (now using complex numbers and abs2)
     let src = r#"
@@ -552,13 +519,7 @@ for row in 0:2
 end
 0
 "#;
-    let c_src = CString::new(src).unwrap();
-    let result_ptr = compile_and_run_with_output(c_src.as_ptr(), 0);
-    assert!(!result_ptr.is_null(), "FFI returned null");
-    let output = unsafe { CStr::from_ptr(result_ptr) }
-        .to_string_lossy()
-        .to_string();
-    free_string(result_ptr);
+    let output = compile_and_run_str_with_output(src, 0);
     println!("FFI output:\n{}", output);
     assert!(output.contains("Test:"));
     // With complex number implementation, c=-2.0 escapes at iteration 16
@@ -566,7 +527,6 @@ end
     assert!(output.contains("***"));
 }
 
-#[test]
 fn test_mandelbrot_ios_sample_exact() {
     // Test the EXACT iOS sample code (now using complex numbers and abs2)
     let src = r#"
@@ -624,15 +584,7 @@ end
 
 c1
 "#;
-    let c_src = CString::new(src).unwrap();
-    let result_ptr = compile_and_run_with_output(c_src.as_ptr(), 0);
-    if result_ptr.is_null() {
-        panic!("FFI returned null - compilation or parsing failed!");
-    }
-    let output = unsafe { CStr::from_ptr(result_ptr) }
-        .to_string_lossy()
-        .to_string();
-    free_string(result_ptr);
+    let output = compile_and_run_str_with_output(src, 0);
     println!("iOS sample output:\n{}", output);
     assert!(
         output.contains("Testing Mandelbrot escape times:"),
@@ -646,7 +598,6 @@ c1
 
 // ==================== Error Cases ====================
 
-#[test]
 fn test_compile_unknown_variable_error() {
     // Unknown variables should cause a runtime error when the function is actually called
     let src = r#"
@@ -659,7 +610,6 @@ f(1)
     assert!(result.is_err());
 }
 
-#[test]
 fn test_arbitrary_power_cubed() {
     // Test N^3 (arbitrary power support)
     let src = r#"
@@ -679,7 +629,6 @@ f(4)
 
 // ==================== Code Sample Tests ====================
 
-#[test]
 fn test_sample_simple_arithmetic_output() {
     let src = r#"
 x = 10
@@ -695,7 +644,6 @@ sum
     assert_eq!(output, "Sum: 30\nProduct: 200\n");
 }
 
-#[test]
 fn test_sample_countdown_output() {
     let src = r#"
 function countdown(n)
@@ -711,7 +659,6 @@ countdown(5)
     assert_eq!(output, "5\n4\n3\n2\n1\nLiftoff!\n");
 }
 
-#[test]
 fn test_sample_geometric_series_star_eq() {
     let src = r#"
 function geometric_sum(r, n)
@@ -730,7 +677,6 @@ geometric_sum(0.5, 10)
     assert!((result - 1.998046875).abs() < 1e-9);
 }
 
-#[test]
 fn test_sample_sum_primes_script() {
     let src = r#"
 function is_prime(n)
@@ -766,7 +712,6 @@ sum_primes(100)
     assert!((value - 1060.0).abs() < 1e-9);
 }
 
-#[test]
 fn test_samples_smoke() {
     let samples = [
         r#"println("Hello, World!")"#,
@@ -1035,7 +980,6 @@ exp_taylor(1.0, 20)  # Should be close to e ≈ 2.71828
 
 // ==================== Macro Tests ====================
 
-#[test]
 fn test_assert_success() {
     // Assert with true condition should pass
     let src = r#"
@@ -1046,7 +990,6 @@ fn test_assert_success() {
     assert!((result - 42.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_assert_with_message() {
     // Assert with true condition and message
     let src = r#"
@@ -1058,7 +1001,6 @@ x
     assert!((result - 10.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_time_expression() {
     // @time should execute and return the result
     let src = r#"
@@ -1071,7 +1013,6 @@ fn test_time_expression() {
     assert!(!result.is_nan());
 }
 
-#[test]
 fn test_time_block() {
     // @time with begin...end block
     let src = r#"
@@ -1087,7 +1028,6 @@ end
     assert!((result - 100.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_assert_in_function() {
     let src = r#"
 function checked_sqrt(x)
@@ -1102,7 +1042,6 @@ checked_sqrt(16.0)
 
 // ==================== main.jl Syntax Tests ====================
 
-#[test]
 fn test_unicode_function_name_pi() {
     // Test function with π in name (calcπ from main.jl)
     let src = r#"
@@ -1115,11 +1054,10 @@ calcπ(10)
     assert!((result - 30.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_pi_constant_ascii() {
     let src = r#"
 function f(N)
-    return pi
+    return Float64(pi)
 end
 f(0)
 "#;
@@ -1137,11 +1075,10 @@ f(0)
     );
 }
 
-#[test]
 fn test_pi_constant_unicode() {
     let src = r#"
 function f(N)
-    return π
+    return Float64(π)
 end
 f(0)
 "#;
@@ -1149,7 +1086,6 @@ f(0)
     assert!((result - std::f64::consts::PI).abs() < 1e-10);
 }
 
-#[test]
 fn test_pi_shadowed_by_loop_var() {
     // When "pi" is used as a loop variable, it should shadow the builtin constant
     let src = r#"
@@ -1163,7 +1099,6 @@ sum
     assert!((result - 55.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_unicode_for_in_operator() {
     // Test for loop with ∈ instead of 'in'
     let src = r#"
@@ -1181,7 +1116,6 @@ sum_range(5)
     assert!((result - 15.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_mainjl_gcd_function() {
     // Test GCD function from main.jl (uses while, !=, %)
     let src = r#"
@@ -1199,7 +1133,6 @@ mygcd(48, 18)
     assert!((result - 6.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_mainjl_calc_pi() {
     // Test π calculation using coprime probability (main.jl style)
     let src = r#"
@@ -1237,7 +1170,30 @@ calcπ(30)
     );
 }
 
-#[test]
+fn test_unqualified_sqrt_in_function_returns_float64() {
+    let src = r#"
+function f()
+    sqrt(6.0)
+end
+
+f()
+"#;
+    let result = compile_and_run_str(src, 0);
+    assert!(
+        (result - 6.0_f64.sqrt()).abs() < 1e-10,
+        "f() = {}, expected sqrt(6.0)",
+        result
+    );
+}
+
+fn test_vector_intersect_empty_result_dispatches_as_vector() {
+    let src = r#"
+length(intersect([1, 2, 3], [4, 5]))
+"#;
+    let result = compile_and_run_str(src, 0);
+    assert_eq!(result as i64, 0);
+}
+
 fn test_mainjl_with_time() {
     // Test with @time macro (as in main.jl)
     let src = r#"
@@ -1270,7 +1226,6 @@ end
     assert!(!result.is_nan());
 }
 
-#[test]
 fn test_time_with_println() {
     // Test @time with println (as in iOS CodeSample)
     let src = r#"
@@ -1285,7 +1240,6 @@ end
     assert!(!result.is_nan());
 }
 
-#[test]
 fn test_coprime_pi_ios_sample() {
     // Exact code from iOS CodeSample "Coprime π Estimation"
     let src = r#"
@@ -1325,7 +1279,6 @@ Note that it takes a 15 seconds to complete
 
 // ==================== @show Macro Tests ====================
 
-#[test]
 fn test_show_variable() {
     let src = r#"
 x = 42
@@ -1337,7 +1290,6 @@ x
     assert_eq!(output, "x = 42\n");
 }
 
-#[test]
 fn test_show_expression() {
     let src = r#"
 a = 10
@@ -1351,7 +1303,6 @@ a + b
     assert_eq!(output, "a + b = 30\n");
 }
 
-#[test]
 fn test_show_function_call() {
     let src = r#"
 @show sqrt(16.0)
@@ -1366,7 +1317,6 @@ sqrt(16.0)
     assert_eq!(output, "sqrt(16.0) = 4.0\n");
 }
 
-#[test]
 fn test_show_in_function() {
     let src = r#"
 function debug_sum(N)
@@ -1385,7 +1335,6 @@ debug_sum(3)
     assert_eq!(output, "sum = 1\nsum = 3\nsum = 6\n");
 }
 
-#[test]
 fn test_show_with_println() {
     let src = r#"
 x = 100
@@ -1399,7 +1348,6 @@ x
     assert_eq!(output, "Before show\nx = 100\nAfter show\n");
 }
 
-#[test]
 fn test_show_literal_integer() {
     let src = r#"
 println("Hello, World!")
@@ -1411,7 +1359,6 @@ println("Hello, World!")
     assert_eq!(output, "Hello, World!\n1 = 1\n");
 }
 
-#[test]
 fn test_show_literal_float() {
     let src = r#"
 @show 3.14
@@ -1426,4 +1373,134 @@ fn test_show_literal_float() {
         _ => panic!("Expected F64"),
     }
     assert_eq!(output, "3.14 = 3.14\n");
+}
+
+fn test_ffi_output_array_result_uses_formatter() {
+    // The C ABI `compile_and_run_with_output` (moved to the `subset_julia_vm_ffi`
+    // cdylib crate, Issue #7808) builds its `[result] …` line from the shared
+    // `vm_format_value` display. The FFI crate is staticlib/cdylib-only and cannot
+    // be linked as a Rust test dependency (Issue #7821), so test that shared
+    // formatter directly: a Julia array must display as `[1, 2, 3]`, never Rust debug.
+    let (value, _output) = run_pipeline_with_output("[1, 2, 3]", 0);
+    let formatted = subset_julia_vm::ffi_support::vm_format_value(&value);
+    assert!(
+        formatted.contains("[1, 2, 3]"),
+        "expected Julia-like array display, got: {formatted}"
+    );
+    assert!(
+        !formatted.contains("ArrayValue"),
+        "value display should not expose Rust debug formatting: {formatted}"
+    );
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_compile_to_ir();
+    test_run_ir_json();
+    test_invalid_syntax_returns_nan();
+    test_empty_function_call_wrong_name();
+    test_zero_iterations();
+    test_single_iteration();
+    test_large_n();
+    test_float_literal();
+    test_float_arithmetic();
+    test_implicit_mult_4n();
+    test_implicit_mult_in_expression();
+    test_compile_and_run_auto_println();
+    test_compile_and_run_auto_function();
+    test_zero_loop_iterations();
+    test_one_loop_iteration();
+    test_compile_simple_return();
+}
+
+#[test]
+fn chunk_001() {
+    test_compile_constant_return();
+    test_compile_division_direct();
+    test_compile_power_direct();
+    test_compile_sqrt_direct();
+}
+
+#[test]
+fn chunk_008() {
+    test_compile_for_loop_direct();
+    test_compile_for_loop_sum_direct();
+    test_compile_rand_direct();
+    test_compile_rand_deterministic_direct();
+}
+
+#[test]
+fn chunk_009() {
+    test_compile_println_string();
+    test_compile_println_multiple();
+    test_compile_println_escape_newline();
+    test_compile_println_escape_tab();
+}
+
+#[test]
+fn chunk_010() {
+    test_compile_print_no_newline();
+    test_compile_print_mixed_with_println();
+    test_compile_print_i64_no_newline();
+    test_compile_print_ascii_art_grid();
+}
+
+#[test]
+fn chunk_002() {
+    test_mandelbrot_scalar_sample();
+    test_mandelbrot_via_ffi();
+    test_mandelbrot_ios_sample_exact();
+    test_compile_unknown_variable_error();
+}
+
+#[test]
+fn chunk_005() {
+    test_arbitrary_power_cubed();
+    test_sample_simple_arithmetic_output();
+    test_sample_countdown_output();
+    test_sample_geometric_series_star_eq();
+}
+
+#[test]
+fn chunk_006() {
+    test_sample_sum_primes_script();
+    test_samples_smoke();
+    test_assert_success();
+    test_assert_with_message();
+}
+
+#[test]
+fn chunk_007() {
+    test_time_expression();
+    test_time_block();
+    test_assert_in_function();
+    test_unicode_function_name_pi();
+}
+
+#[test]
+fn chunk_003() {
+    test_pi_constant_ascii();
+    test_pi_constant_unicode();
+    test_pi_shadowed_by_loop_var();
+    test_unicode_for_in_operator();
+    test_mainjl_gcd_function();
+    test_mainjl_calc_pi();
+    test_unqualified_sqrt_in_function_returns_float64();
+    test_vector_intersect_empty_result_dispatches_as_vector();
+    test_mainjl_with_time();
+    test_time_with_println();
+    test_coprime_pi_ios_sample();
+    test_show_variable();
+    test_show_expression();
+    test_show_function_call();
+    test_show_in_function();
+    test_show_with_println();
+}
+
+#[test]
+fn chunk_004() {
+    test_show_literal_integer();
+    test_show_literal_float();
+    test_ffi_output_array_result_uses_formatter();
 }

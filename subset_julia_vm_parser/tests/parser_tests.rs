@@ -24,6 +24,24 @@ fn parse_stmt(source: &str) -> CstNode {
         .expect("no statement parsed")
 }
 
+#[test]
+fn parser_recovers_and_formats_multiple_independent_errors_issue_8454() {
+    let source = ")\n]\n";
+    let (_root, errors) = parse_with_errors(source);
+
+    assert_eq!(
+        errors.len(),
+        2,
+        "expected both delimiter errors to be reported, got {:?}",
+        errors.errors()
+    );
+
+    assert_eq!(
+        errors.format_all(source),
+        "Error 1: unexpected token ')' at 1:1..1:2, expected expression\n  1 | )\n    | ^\n\nError 2: unexpected token ']' at 2:1..2:2, expected expression\n  2 | ]\n    | ^"
+    );
+}
+
 // ==================== Literal Tests ====================
 
 #[test]
@@ -407,6 +425,25 @@ fn test_for_loop() {
 }
 
 #[test]
+fn test_for_loop_typed_variable_issue_8208() {
+    // `for i::T in itr` parses the loop variable as a TypedExpression binding
+    // (upstream Julia syntax). Previously this hit "expected 'in' or '='".
+    let node = parse_stmt("for i::Int64 in 1:10 x end");
+    assert_eq!(node.kind, NodeKind::ForStatement);
+    let binding = &node.children[0];
+    assert_eq!(binding.kind, NodeKind::ForBinding);
+    assert_eq!(
+        binding.children[0].kind,
+        NodeKind::TypedExpression,
+        "loop variable should parse as `i::Int64`"
+    );
+    // `=` head form parses the same way.
+    let node = parse_stmt("for i::Int64 = 1:10 x end");
+    assert_eq!(node.kind, NodeKind::ForStatement);
+    assert_eq!(node.children[0].children[0].kind, NodeKind::TypedExpression);
+}
+
+#[test]
 fn test_while_loop() {
     let node = parse_stmt("while x > 0 x -= 1 end");
     assert_eq!(node.kind, NodeKind::WhileStatement);
@@ -575,6 +612,15 @@ fn test_comprehension_simple() {
     let node = parse_expr("[x for x in 1:10]");
     assert_eq!(node.kind, NodeKind::ComprehensionExpression);
     assert_eq!(node.children.len(), 2); // expr + for clause
+}
+
+#[test]
+fn test_typed_comprehension_simple() {
+    let node = parse_expr("Float64[i / 10.0 for i in 1:10]");
+    assert_eq!(node.kind, NodeKind::TypedExpression);
+    assert_eq!(node.children.len(), 2); // type + comprehension
+    assert_eq!(node.children[0].kind, NodeKind::Identifier);
+    assert_eq!(node.children[1].kind, NodeKind::ComprehensionExpression);
 }
 
 #[test]

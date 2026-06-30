@@ -1,6 +1,12 @@
 # Test manifest for struct category
 
 [[tests]]
+name = "indexed_field_assignment_6640"
+file = "indexed_field_assignment_6640.jl"
+expected = true
+description = "obj.field[i] = v and obj.field[i] += v lower to setindex! instead of UnsupportedAssignmentTarget (Issue #6640)"
+
+[[tests]]
 name = "struct_inner_constructor_basic"
 file = "inner_constructor_basic.jl"
 expected = true
@@ -23,6 +29,12 @@ name = "struct_inner_constructor_longform"
 file = "inner_constructor_longform.jl"
 expected = true
 description = "Long-form inner constructor with function...end syntax"
+
+[[tests]]
+name = "struct_inner_constructor_untyped_field_body_7345"
+file = "inner_constructor_untyped_field_body_7345.jl"
+expected = true
+description = "Inner constructor body runs (transform + validation) even when args match the raw untyped field layout (Issue #7345)"
 
 [[tests]]
 name = "untyped_string_field"
@@ -67,7 +79,127 @@ expected = true
 description = "Callable struct syntax: (::Type)(args) = body (Issue #2671)"
 
 [[tests]]
+name = "struct_callable_struct_bound_5126"
+file = "callable_struct_bound_5126.jl"
+expected = true
+description = "Bound callable struct/functor dispatch (obj::T)(args) full form, parametric, accumulator (Issue #5126)"
+
+[[tests]]
 name = "struct_parametric_mutable_struct"
 file = "test_parametric_mutable_struct.jl"
 expected = true
 description = "Parametric mutable struct support (Issue #2744)"
+
+[[tests]]
+name = "struct_field_collect_vector_eq_4446"
+file = "struct_field_collect_vector_eq_4446.jl"
+expected = true
+description = "Vector{Int64} from collect stored in struct field supports == and != (Issue #4446)"
+
+[[tests]]
+name = "struct_typed_uint64_field_4990"
+file = "struct_typed_uint64_field_4990.jl"
+expected = true
+description = "Typed struct constructors preserve declared field value types like UInt64 (Issue #4990)"
+
+[[tests]]
+name = "struct_inner_constructor_parametric_shortform_5059"
+file = "inner_constructor_parametric_shortform_5059.jl"
+expected = true
+description = "Short-form parametric inner constructors run their new{T} body, honoring transforms and field reordering (Issue #5059)"
+
+[[tests]]
+name = "struct_inner_constructor_where_bound_6548"
+file = "inner_constructor_where_bound_6548.jl"
+expected = true
+description = "Parametric inner constructor where-clause bounds reject type arguments outside the bound, matching upstream Julia MethodError behavior (Issue #6548)"
+
+[[tests]]
+name = "struct_parametric_abstract_field_convert_5060"
+file = "parametric_abstract_field_convert.jl"
+expected = true
+description = "Abstract numeric field bounds (Foo{Real}(1), n::Number) preserve the original concrete type instead of force-coercing (Issue #5060)"
+
+[[tests]]
+name = "struct_local_any_carrier_5081"
+file = "struct_local_any_carrier_5081.jl"
+expected = true
+description = "Struct fallback locals use locals_any with VarTypeTag::Struct after legacy locals_struct removal (Issue #5081)"
+
+[[tests]]
+name = "struct_field_assign_specialization_6346"
+file = "field_assign_specialization_6346.jl"
+expected = true
+description = "Mutable-struct field updates in a hot loop specialize to a typed SetField fast path; Int->Float64 field coercion matches the interpreter (Issue #6346)"
+
+[[tests]]
+name = "struct_typeparam_nested_call_7240"
+file = "typeparam_nested_call_7240.jl"
+expected = true
+description = "A parametric constructor type argument computed by a nested function call (Foo{typeof(float(x))}(float(x))) evaluates the inner call instead of failing with 'Undefined variable: float(x)' (Issue #7240)"
+
+[[tests]]
+name = "struct_inline_parametric_ctor_promote_7284"
+file = "inline_parametric_ctor_promote_7284.jl"
+expected = true
+description = "An inline `Foo(3).x` access where the user outer constructor promotes its args (v = float(x); Foo{typeof(v)}(v)) infers the promoted field type, not Foo{Int64}, instead of failing with 'expected I64, got Float64'; the default-constructor path keeps its precise Int field type (Issue #7284)"
+
+[[tests]]
+name = "struct_outer_ctor_default_ctor_reachable_7793"
+file = "outer_ctor_default_ctor_reachable_7793.jl"
+expected = true
+description = "A user OUTER constructor (which registers the struct name as a function) must not hide the synthesized field-count default constructor for a bare or module-qualified top-level call whose arity differs from the outer ctor. Adds the field-count default-ctor fallback to the multi-arg / static-miss NoMethodFound recovery arms and the qualified compile_module_call_via_method_table path; preserves same-arity outer-ctor overloads, the full-arity recursion guard, and inner-constructor structs (Issue #7793, family of #7729)"
+
+[[tests]]
+name = "struct_outer_ctor_nonconvertible_methoderror_7793"
+file = "outer_ctor_nonconvertible_methoderror_7793.jl"
+expected = true
+description = "PR #7826 regression guard: when an outer ctor exists but a matching-arity call's argument types are convertible to NEITHER the outer ctor NOR the concrete field types, the field-count default-constructor fallback must NOT manufacture the default ctor (which would raise an uncatchable compile-time 'Cannot convert ...' error). A side-effect-free coercion_accepts pre-check makes such calls fall through to normal dispatch, producing a CATCHABLE runtime MethodError matching upstream julia, while convertible/declared paths keep working (Issue #7793)"
+
+[[tests]]
+name = "struct_parent_typevar_shadows_global_7840"
+file = "parent_typevar_shadows_global_7840.jl"
+expected = true
+description = "A struct's own declared type parameters are lexically scoped and must shadow any same-named top-level global/alias when the declared parent type is lowered. A global `T = Int64` must NOT freeze `struct Wrap{T} <: AbstractVector{T}` to `AbstractVector{Int64}` (which wrongly made `Wrap{Float64} <: AbstractVector{Float64}` false); the parent template stays parametric (Issue #7840)"
+
+[[tests]]
+name = "struct_multiparam_inner_ctor_typeof_7972"
+file = "multiparam_inner_ctor_typeof_7972.jl"
+expected = true
+description = "Issue #7972: a multi-parameter parametric struct built through its inner constructor new{A,B,...}(...) reports ALL type parameters in typeof (P3{Int64,Float64}, T3{Int64,Float64,Bool}), not just the first; single-parameter structs (S1{T}, Rational, Complex) keep working"
+
+[[tests]]
+name = "struct_guarded_generic_field_assign_7941"
+file = "struct_guarded_generic_field_assign_7941.jl"
+expected = true
+description = "A generic function that guards a field assignment with `isdefined` (e.g. `if !isdefined(G, :__attrs); G.__attrs = ...; end` with `G::T where T`) compiles even though no in-scope struct declares the field; the assignment is deferred to a runtime SetFieldByName instead of being rejected at compile time with \"Unknown field\". Concrete-struct field validation is unchanged (a bad field on a known struct still errors). Also covers the runtime guarded assign to an existing field through a generic receiver (Issue #7941)."
+
+[[tests]]
+name = "struct_dynamic_new_type_params_7935"
+file = "struct_dynamic_new_type_params_7935.jl"
+expected = true
+description = "An inner constructor whose `new{...}` type parameters are computed by calls (e.g. `new{elem_type(R), elem_type(coefficient_ring(R))}(R)`) evaluates each type-arg expression at runtime and builds the COMPUTED concrete parametric type (typeof(r).parameters == (MyElem, MyElem)) instead of collapsing to {Any}. The unqualified type-name display matches the existing `new{T}` inner-ctor path (Issue #7935)."
+
+[[tests]]
+name = "struct_parametric_ctor_no_widen_methoderror_8102"
+file = "parametric_ctor_no_widen_methoderror_8102.jl"
+expected = true
+description = "The default constructor of a parametric struct `Foo{T}; a::T; b::T; end` is `Foo(a::T, b::T) where T`: every `::T` field's argument must unify to ONE concrete T without promotion. `Foo(1, 2.0)` has no matching default method and raises a MethodError (it must NOT widen to `Foo{Float64}`); only the explicit `Foo{Float64}(1, 2.0)` form converts. Same-T constructions, independent type params, and non-`T` free fields still succeed. Verified at parity with upstream Julia (Issue #8102)."
+
+[[tests]]
+name = "struct_parametric_typed_outer_ctor_8103"
+file = "parametric_typed_outer_ctor_8103.jl"
+expected = true
+description = "Issue #8103: a typed parametric outer constructor T{P...}(x::Number) is preferred over the synthesized default field constructor when the argument is not convertible to the field type (parametric analogue of the #7793 guard)"
+
+[[tests]]
+name = "struct_parametric_inner_ctor_with_outer_8121"
+file = "parametric_inner_ctor_with_outer_8121.jl"
+expected = true
+description = "Issue #8121: a parametric struct with an explicit inner constructor has NO synthesized default field constructor, so bare Foo(args) and braces Foo{T}(args) must invoke the user inner/outer ctor. Regression: a same-arity user OUTER constructor made the working method table non-empty and (under the precompiled Base cache) mis-classified the user struct as a cached Base struct, skipping inner-ctor registration and falling back to raw default field construction (incl. a Rotations-style normalizing multi-field inner)."
+
+[[tests]]
+name = "struct_getproperty_override_8127"
+file = "getproperty_override_8127.jl"
+expected = true
+description = "Issue #8127: a custom `Base.getproperty(::T, ::Symbol)` override intercepts property access `x.f` — Julia lowers `x.f` to `getproperty(x, :f)` (default falls back to `getfield`). Computed (non-declared) properties resolve through the override, and declared-field access still works via the override's getfield fallback, both at top level and through a typed function parameter. Covers a Rotations.QuatRotation-style wrapper that stores one field and exposes derived components."

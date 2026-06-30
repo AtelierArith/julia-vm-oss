@@ -4,6 +4,9 @@
 //! type checking, and conversions.
 
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
+use crate::compile::promotion::promote_type;
+use crate::inference_core::CorePrimitive;
+use crate::inference_core::{CoreAbstract, CoreType};
 
 /// Transfer function for `isa` (type checking).
 ///
@@ -16,16 +19,36 @@ use crate::compile::lattice::types::{ConcreteType, LatticeType};
 /// ```
 pub fn tfunc_isa(_args: &[LatticeType]) -> LatticeType {
     // isa always returns Bool
-    LatticeType::Concrete(ConcreteType::Bool)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+}
+
+/// Transfer function for predicates that always return `Bool`.
+pub fn tfunc_bool_predicate(_args: &[LatticeType]) -> LatticeType {
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+}
+
+/// Transfer function for never-returning raisers (`throw`, `rethrow`).
+///
+/// Mirrors upstream `add_tfunc(throw, 1, 1, @nospecs((𝕃, x)->Bottom), 0)` in
+/// `julia/Compiler/src/tfuncs.jl`: a raising call has return type `Union{}`
+/// (Bottom), so a function whose every exit raises infers `Union{}`, and a
+/// raising branch contributes nothing to the join — `x > 0 ? 1.0 : error("neg")`
+/// infers `Float64` (Issue #6532).
+pub fn tfunc_throw(_args: &[LatticeType]) -> LatticeType {
+    LatticeType::Bottom
 }
 
 /// Transfer function for `typeof` (get type of value).
 ///
-/// Returns a Type object (represented conservatively as Top in our system).
-pub fn tfunc_typeof(_args: &[LatticeType]) -> LatticeType {
-    // typeof returns a Type object
-    // In a full system, this would return DataType
-    LatticeType::Top
+/// Julia rule: `typeof(x) → DataType` for concrete values.
+/// When the argument type is known, return a named DataType; otherwise a generic DataType. (Issue #3482)
+pub fn tfunc_typeof(args: &[LatticeType]) -> LatticeType {
+    let name = if let Some(LatticeType::Concrete(ct)) = args.first() {
+        ct.to_type_name().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    LatticeType::Concrete(ConcreteType::DataType { name })
 }
 
 /// Transfer function for `convert` (type conversion).
@@ -42,11 +65,15 @@ pub fn tfunc_convert(args: &[LatticeType]) -> LatticeType {
         return LatticeType::Top;
     }
 
-    // In Julia, convert(T, x) returns type T
-    // For simplicity, we return the target type if we can determine it
-    // In a full implementation, this would inspect the first argument (the type)
-    match &args[1] {
-        LatticeType::Concrete(ct) => LatticeType::Concrete(ct.clone()),
+    // convert(T, x) → T: return the target type T, not the source type x. (Issue #3475)
+    // args[0] is T (a DataType literal), args[1] is the value to convert.
+    match &args[0] {
+        LatticeType::Concrete(ConcreteType::DataType { name }) => {
+            if let Some(ct) = ConcreteType::from_type_name(name) {
+                return LatticeType::Concrete(ct);
+            }
+            LatticeType::Top
+        }
         _ => LatticeType::Top,
     }
 }
@@ -58,8 +85,14 @@ pub fn tfunc_to_int64(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Int64),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Int64),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -71,10 +104,14 @@ pub fn tfunc_to_float64(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => {
-            LatticeType::Concrete(ConcreteType::Float64)
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            )))
         }
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Float64),
         _ => LatticeType::Top,
     }
 }
@@ -82,24 +119,27 @@ pub fn tfunc_to_float64(args: &[LatticeType]) -> LatticeType {
 /// Transfer function for `Bool` (conversion to Bool).
 pub fn tfunc_to_bool(_args: &[LatticeType]) -> LatticeType {
     // Bool() conversion always returns Bool
-    LatticeType::Concrete(ConcreteType::Bool)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
 }
 
 /// Transfer function for `String` (conversion to String).
 pub fn tfunc_to_string(_args: &[LatticeType]) -> LatticeType {
     // String() conversion always returns String
-    LatticeType::Concrete(ConcreteType::String)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+        CorePrimitive::String,
+    )))
 }
 
 /// Transfer function for `sqrt` (square root).
 ///
 /// Type rules:
-/// - sqrt(Numeric) → Float64
+/// - sqrt(Float*) → same concrete float type
+/// - sqrt(Integer/Bool) → Float64
 ///
 /// # Examples
 /// ```text
 /// sqrt(Int64) → Float64
-/// sqrt(Float64) → Float64
+/// sqrt(Float32) → Float32
 /// ```
 pub fn tfunc_sqrt(args: &[LatticeType]) -> LatticeType {
     if args.len() != 1 {
@@ -107,9 +147,18 @@ pub fn tfunc_sqrt(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => {
-            LatticeType::Concrete(ConcreteType::Float64)
+        LatticeType::Concrete(ct) if ct.is_float() => LatticeType::Concrete(ct.clone()),
+        // Issue #6601: sqrt/exp/sin/cos/log preserve `Complex{T}`
+        // (`exp(::ComplexF64)::ComplexF64`). `Complex` structs are not `is_numeric`,
+        // so without this arm they fell through to `Top` (-> `ValueType::Any`).
+        LatticeType::Concrete(ct @ ConcreteType::Struct { name, .. })
+            if name.starts_with("Complex") =>
+        {
+            LatticeType::Concrete(ct.clone())
         }
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        )),
         _ => LatticeType::Top,
     }
 }
@@ -132,7 +181,9 @@ pub fn tfunc_abs(args: &[LatticeType]) -> LatticeType {
         }
         // Complex numbers: abs returns the magnitude (a real number)
         LatticeType::Concrete(ConcreteType::Struct { name, .. }) if name.starts_with("Complex") => {
-            LatticeType::Concrete(ConcreteType::Float64)
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            )))
         }
         _ => LatticeType::Top,
     }
@@ -140,34 +191,139 @@ pub fn tfunc_abs(args: &[LatticeType]) -> LatticeType {
 
 /// Transfer function for `sin` (sine).
 pub fn tfunc_sin(args: &[LatticeType]) -> LatticeType {
-    tfunc_sqrt(args) // Same type rules: Numeric → Float64
+    tfunc_sqrt(args) // Same type rules.
 }
 
 /// Transfer function for `cos` (cosine).
 pub fn tfunc_cos(args: &[LatticeType]) -> LatticeType {
-    tfunc_sqrt(args) // Same type rules
+    tfunc_sqrt(args) // Same type rules.
 }
 
 /// Transfer function for `exp` (exponential).
 pub fn tfunc_exp(args: &[LatticeType]) -> LatticeType {
-    tfunc_sqrt(args) // Same type rules
+    tfunc_sqrt(args) // Same type rules.
 }
 
 /// Transfer function for `log` (natural logarithm).
 pub fn tfunc_log(args: &[LatticeType]) -> LatticeType {
-    tfunc_sqrt(args) // Same type rules
+    tfunc_sqrt(args) // Same type rules.
+}
+
+/// Transfer function for unary math functions that infer `Float64` for numeric inputs.
+pub fn tfunc_unary_float64(args: &[LatticeType]) -> LatticeType {
+    if args.len() != 1 {
+        return LatticeType::Top;
+    }
+
+    match &args[0] {
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        )),
+        _ => LatticeType::Top,
+    }
+}
+
+/// Transfer function for reductions/statistics functions that infer `Float64`.
+pub fn tfunc_float64_result(args: &[LatticeType]) -> LatticeType {
+    if args.is_empty() {
+        return LatticeType::Top;
+    }
+
+    if args.iter().any(|arg| {
+        matches!(
+            arg,
+            LatticeType::Top | LatticeType::Concrete(ConcreteType::Struct { .. })
+        )
+    }) {
+        return LatticeType::Top;
+    }
+
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+        CorePrimitive::Float64,
+    )))
+}
+
+/// Transfer function for functions that infer `Int64`.
+pub fn tfunc_int64_result(args: &[LatticeType]) -> LatticeType {
+    if args.is_empty() {
+        LatticeType::Top
+    } else {
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )))
+    }
+}
+
+/// Transfer function for `big` (widen to an arbitrary-precision type).
+///
+/// Type rules (Issue #5922, mirrors the legacy expression-inference gate):
+/// - `big(::Float32 | ::Float64) → BigFloat`
+/// - `big(::concrete) → BigInt` for the remaining concrete inputs
+/// - `big() → BigInt` (legacy default)
+/// - unknown argument types → Top (the expression adapter falls back to BigInt)
+pub fn tfunc_big(args: &[LatticeType]) -> LatticeType {
+    let first = match args.first() {
+        None => {
+            return LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            )))
+        }
+        Some(LatticeType::Const(cv)) => cv.to_concrete_type(),
+        Some(LatticeType::Concrete(ct)) => ct.clone(),
+        Some(_) => return LatticeType::Top,
+    };
+    match first {
+        ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float32))
+        | ConcreteType::Core(CoreType::Primitive(CorePrimitive::Float64)) => LatticeType::Concrete(
+            ConcreteType::Core(CoreType::Primitive(CorePrimitive::BigFloat)),
+        ),
+        _ => LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::BigInt,
+        ))),
+    }
+}
+
+/// Transfer function for `IOBuffer` (in-memory IO stream constructor).
+///
+/// Julia rule: `IOBuffer(...) → IOBuffer <: IO` for any argument shape.
+pub fn tfunc_iobuffer(_args: &[LatticeType]) -> LatticeType {
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Abstract(CoreAbstract::IO)))
+}
+
+/// Transfer function for type-returning helpers (`promote_type`, `promote_rule`).
+///
+/// These always produce a type object, represented as a generic `DataType`.
+pub fn tfunc_datatype_result(_args: &[LatticeType]) -> LatticeType {
+    LatticeType::Concrete(ConcreteType::DataType {
+        name: String::new(),
+    })
 }
 
 /// Transfer function for `min` (minimum of two values).
 ///
-/// Returns the common type of the inputs.
+/// Julia rule: `min(a, b)` returns the promoted numeric type, not a Union. (Issue #3479)
 pub fn tfunc_min(args: &[LatticeType]) -> LatticeType {
     if args.len() != 2 {
         return LatticeType::Top;
     }
 
-    // min returns the common type of its arguments
-    args[0].join(&args[1])
+    match (&args[0], &args[1]) {
+        // Same concrete type: return it directly
+        (LatticeType::Concrete(a), LatticeType::Concrete(b)) if a == b => {
+            LatticeType::Concrete(a.clone())
+        }
+        // Different numeric concrete types: use Julia promotion rules
+        (LatticeType::Concrete(a), LatticeType::Concrete(b)) => {
+            if let (Some(name_a), Some(name_b)) = (a.to_type_name(), b.to_type_name()) {
+                let result_name = promote_type(&name_a, &name_b);
+                if let Some(ct) = ConcreteType::from_type_name(&result_name) {
+                    return LatticeType::Concrete(ct);
+                }
+            }
+            LatticeType::Top
+        }
+        _ => LatticeType::Top,
+    }
 }
 
 /// Transfer function for `max` (maximum of two values).
@@ -179,7 +335,9 @@ pub fn tfunc_max(args: &[LatticeType]) -> LatticeType {
 ///
 /// Returns Nothing.
 pub fn tfunc_println(_args: &[LatticeType]) -> LatticeType {
-    LatticeType::Concrete(ConcreteType::Nothing)
+    LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+        CorePrimitive::Nothing,
+    )))
 }
 
 // ============================================================================
@@ -225,9 +383,15 @@ pub fn tfunc_to_int8(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Int8),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Int8),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::Int8),
+        LatticeType::Concrete(ct) if ct.is_numeric() => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8)))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8)))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8)))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -239,9 +403,19 @@ pub fn tfunc_to_int16(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Int16),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Int16),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::Int16),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int16),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int16,
+            )))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int16,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -253,9 +427,19 @@ pub fn tfunc_to_int32(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Int32),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Int32),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::Int32),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int32),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32,
+            )))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -267,8 +451,14 @@ pub fn tfunc_to_int128(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Int128),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Int128),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int128),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int128,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -280,9 +470,19 @@ pub fn tfunc_to_uint8(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::UInt8),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::UInt8),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::UInt8),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::UInt8),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt8,
+            )))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt8,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -294,9 +494,19 @@ pub fn tfunc_to_uint16(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::UInt16),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::UInt16),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::UInt16),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::UInt16),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt16,
+            )))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt16,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -308,9 +518,19 @@ pub fn tfunc_to_uint32(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::UInt32),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::UInt32),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::UInt32),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::UInt32),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt32,
+            )))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt32,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -322,8 +542,14 @@ pub fn tfunc_to_uint64(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::UInt64),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::UInt64),
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::UInt64),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt64,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -335,10 +561,14 @@ pub fn tfunc_to_uint128(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => {
-            LatticeType::Concrete(ConcreteType::UInt128)
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::UInt128),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt128,
+            )))
         }
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::UInt128),
         _ => LatticeType::Top,
     }
 }
@@ -350,10 +580,71 @@ pub fn tfunc_to_float32(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_numeric() => {
-            LatticeType::Concrete(ConcreteType::Float32)
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float32),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32,
+            )))
         }
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Float32),
+        _ => LatticeType::Top,
+    }
+}
+
+/// Transfer function for `Float16` (conversion to Float16).
+pub fn tfunc_to_float16(args: &[LatticeType]) -> LatticeType {
+    if args.len() != 1 {
+        return LatticeType::Top;
+    }
+
+    match &args[0] {
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float16),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float16,
+            )))
+        }
+        _ => LatticeType::Top,
+    }
+}
+
+/// Transfer function for `BigInt` (conversion to BigInt).
+pub fn tfunc_to_bigint(args: &[LatticeType]) -> LatticeType {
+    if args.len() != 1 {
+        return LatticeType::Top;
+    }
+
+    match &args[0] {
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::BigInt),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            )))
+        }
+        _ => LatticeType::Top,
+    }
+}
+
+/// Transfer function for `BigFloat` (conversion to BigFloat).
+pub fn tfunc_to_bigfloat(args: &[LatticeType]) -> LatticeType {
+    if args.len() != 1 {
+        return LatticeType::Top;
+    }
+
+    match &args[0] {
+        LatticeType::Concrete(ct) if ct.is_numeric() => LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::BigFloat),
+        )),
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat,
+            )))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -365,9 +656,15 @@ pub fn tfunc_to_char(args: &[LatticeType]) -> LatticeType {
     }
 
     match &args[0] {
-        LatticeType::Concrete(ct) if ct.is_integer() => LatticeType::Concrete(ConcreteType::Char),
-        LatticeType::Concrete(ConcreteType::String) => LatticeType::Concrete(ConcreteType::Char),
-        LatticeType::Concrete(ConcreteType::Char) => LatticeType::Concrete(ConcreteType::Char),
+        LatticeType::Concrete(ct) if ct.is_integer() => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::String))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        }
+        LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))) => {
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        }
         _ => LatticeType::Top,
     }
 }
@@ -440,55 +737,264 @@ mod tests {
 
     #[test]
     fn test_isa_returns_bool() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64), LatticeType::Top];
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Top,
+        ];
         let result = tfunc_isa(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
+    }
+
+    #[test]
+    fn test_bool_predicate_returns_bool() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        ))];
+        let result = tfunc_bool_predicate(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
+    }
+
+    #[test]
+    fn test_throw_returns_bottom_issue_6532() {
+        // Mirrors upstream `add_tfunc(throw, 1, 1, ->Bottom, 0)`: raisers have
+        // return type `Union{}`, so a raising branch joins away.
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::String),
+        ))];
+        assert_eq!(tfunc_throw(&args), LatticeType::Bottom);
+        assert_eq!(tfunc_throw(&[]), LatticeType::Bottom);
+        assert_eq!(
+            tfunc_throw(&[]).join(&LatticeType::Concrete(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Float64)
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
     fn test_to_int64() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Float64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        ))];
         let result = tfunc_to_int64(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
     }
 
     #[test]
     fn test_to_float64() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_float64(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
-    fn test_sqrt_returns_float() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+    fn test_sqrt_preserves_float_width_and_widens_integer() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_sqrt(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float32),
+        ))];
+        let result = tfunc_sqrt(&args);
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
     }
 
     #[test]
     fn test_abs_preserves_type() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_abs(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
 
-        let args = vec![LatticeType::Concrete(ConcreteType::Float64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        ))];
         let result = tfunc_abs(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
-    fn test_sin_returns_float() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+    fn test_unary_math_preserves_float_width_and_widens_integer() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_sin(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float32),
+        ))];
+        assert_eq!(
+            tfunc_sin(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
+        assert_eq!(
+            tfunc_cos(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
+        assert_eq!(
+            tfunc_exp(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
+        assert_eq!(
+            tfunc_log(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
+    }
+
+    #[test]
+    fn test_unary_float64_returns_float64_for_numeric_inputs() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
+        assert_eq!(
+            tfunc_unary_float64(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float32),
+        ))];
+        assert_eq!(
+            tfunc_unary_float64(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::String),
+        ))];
+        assert_eq!(tfunc_unary_float64(&args), LatticeType::Top);
+    }
+
+    #[test]
+    fn test_float64_result_returns_float64_for_non_struct_inputs() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Array {
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            ndims: None,
+        })];
+        assert_eq!(
+            tfunc_float64_result(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+
+        let args = vec![
+            LatticeType::Concrete(ConcreteType::Function {
+                name: "identity".to_string(),
+            }),
+            LatticeType::Concrete(ConcreteType::Array {
+                element: Box::new(ConcreteType::Core(CoreType::Primitive(
+                    CorePrimitive::Float64,
+                ))),
+                ndims: None,
+            }),
+        ];
+        assert_eq!(
+            tfunc_float64_result(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
+
+        assert_eq!(tfunc_float64_result(&[]), LatticeType::Top);
+
+        let args = vec![LatticeType::Concrete(ConcreteType::Struct {
+            name: "S".to_string(),
+            type_id: 1,
+        })];
+        assert_eq!(tfunc_float64_result(&args), LatticeType::Top);
+    }
+
+    #[test]
+    fn test_int64_result_returns_int64_for_nonempty_args() {
+        let args = vec![LatticeType::Concrete(ConcreteType::Array {
+            element: Box::new(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
+            ndims: None,
+        })];
+        assert_eq!(
+            tfunc_int64_result(&args),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64
+            )))
+        );
+        assert_eq!(tfunc_int64_result(&[]), LatticeType::Top);
     }
 
     #[test]
     fn test_min_joins_types() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_min(&args);
         assert!(result.is_numeric());
@@ -496,36 +1002,62 @@ mod tests {
 
     #[test]
     fn test_println_returns_nothing() {
-        let args = vec![LatticeType::Concrete(ConcreteType::String)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::String),
+        ))];
         let result = tfunc_println(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Nothing));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Nothing
+            )))
+        );
     }
 
     #[test]
     fn test_to_bool() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_bool(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Bool));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool)))
+        );
     }
 
     #[test]
     fn test_to_string() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_string(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::String));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String
+            )))
+        );
     }
 
     #[test]
     fn test_promote_same_types() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int64),
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         ];
         let result = tfunc_promote(&args);
         assert_eq!(
             result,
             LatticeType::Concrete(ConcreteType::Tuple {
-                elements: vec![ConcreteType::Int64, ConcreteType::Int64]
+                elements: vec![
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+                    ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64))
+                ]
             })
         );
     }
@@ -533,8 +1065,12 @@ mod tests {
     #[test]
     fn test_promote_mixed_numeric() {
         let args = vec![
-            LatticeType::Concrete(ConcreteType::Int32),
-            LatticeType::Concrete(ConcreteType::Float64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32,
+            ))),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
         ];
         let result = tfunc_promote(&args);
         // When mixing Int32 and Float64, the join may return Union or Top
@@ -558,43 +1094,81 @@ mod tests {
 
     #[test]
     fn test_to_int8() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_int8(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int8));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8)))
+        );
     }
 
     #[test]
     fn test_to_uint64() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_uint64(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::UInt64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt64
+            )))
+        );
     }
 
     #[test]
     fn test_to_float32() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_float32(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float32));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32
+            )))
+        );
     }
 
     #[test]
     fn test_to_char() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int64),
+        ))];
         let result = tfunc_to_char(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Char));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char)))
+        );
     }
 
     #[test]
     fn test_zero() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Float64)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Float64),
+        ))];
         let result = tfunc_zero(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Float64));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64
+            )))
+        );
     }
 
     #[test]
     fn test_one() {
-        let args = vec![LatticeType::Concrete(ConcreteType::Int32)];
+        let args = vec![LatticeType::Concrete(ConcreteType::Core(
+            CoreType::Primitive(CorePrimitive::Int32),
+        ))];
         let result = tfunc_one(&args);
-        assert_eq!(result, LatticeType::Concrete(ConcreteType::Int32));
+        assert_eq!(
+            result,
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32
+            )))
+        );
     }
 }

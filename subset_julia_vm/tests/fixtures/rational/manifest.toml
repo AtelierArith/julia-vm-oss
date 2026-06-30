@@ -145,6 +145,12 @@ expected = true
 description = "Power with positive exponent: (2//3)^3"
 
 [[tests]]
+name = "rational_power_preserves_int64_8418"
+file = "power_preserves_int64_8418.jl"
+expected = true
+description = "Rational Int64 power preserves Rational{Int64} and Int64 numerator/denominator (Issue #8418)"
+
+[[tests]]
 name = "rational_power_negative"
 file = "power_negative.jl"
 expected = true
@@ -259,13 +265,67 @@ expected = true
 description = "BigInt + Rational mixed-type operations (Issue #2497)"
 
 [[tests]]
+name = "rational_bigint_mixed_promotion_diagonal"
+file = "bigint_mixed_promotion_diagonal.jl"
+expected = true
+description = "BigInt + Rational promotion avoids diagonal same-type dispatch (Issue #3796)"
+
+[[tests]]
 name = "rational_bigint_rational_construction"
 file = "bigint_rational_construction.jl"
 expected = true
 description = "BigInt Rational construction via // operator (Issue #2508)"
 
 [[tests]]
+name = "rational_over_rational_slashslash_8255"
+file = "rational_over_rational_slashslash_8255.jl"
+expected = true
+description = "Rational-over-rational `//` dispatches to Rational methods instead of integer `//` candidates, including Rational{BigInt} exact division (Issue #8255)"
+
+[[tests]]
 name = "rational_cross_type_equality"
 file = "cross_type_equality.jl"
 expected = true
 description = "Cross-type Rational comparisons: Rational{BigInt} == / < / > Rational{Int64} (Issue #2511)"
+
+[[tests]]
+name = "rational_vm_extraction_generic_5160"
+file = "vm_extraction_generic_5160.jl"
+expected = true
+description = "VM Rational num/den extraction centralized on StructInstance helper, generic over integer field types (Issue #5160)"
+
+[[tests]]
+name = "rational_numeric_conversions_5355"
+file = "numeric_conversions_5355.jl"
+expected = true
+description = "Float64/Float32/Int(::Rational) etc. convert via shared as_rational_parts helper; non-integer Rationals throw InexactError (Issue #5355)"
+
+[[tests]]
+name = "rational_math_functions_5356"
+file = "math_functions_5356.jl"
+expected = true
+description = "Transcendental math functions (exp/sin/cos/tan/log/cbrt/...) dispatch Rational args via f(float(x)) instead of LoadSlotF64 error (Issue #5356)"
+
+[[tests]]
+name = "rational_parametric_typed_constructor"
+file = "parametric_typed_constructor.jl"
+expected = true
+description = "Rational{T}(num, den) / Rational{T}(x) / Rational{T}(r::Rational) coerce element type T and normalize, instead of inferring T from args and skipping reduction (Issue #5132)"
+
+[[tests]]
+name = "rational_parametric_method_typevar_constructor_8253"
+file = "parametric_method_typevar_constructor_8253.jl"
+expected = true
+description = "Rational{T}(1) where T is recovered from a parametric method argument constructs a complete Rational{BigInt}, routing non-field-count dynamic parametric constructor calls through DataType dispatch (Issue #8253)"
+
+[[tests]]
+name = "rational_mixed_not_equal_5975"
+file = "mixed_not_equal_5975.jl"
+expected = true
+description = "!= between Rational and Real (Integer/AbstractFloat) returns !(==) instead of raising MethodError (Issue #5975)"
+
+[[tests]]
+name = "rational_rounding_type_6775"
+file = "rounding_type_6775.jl"
+expected = true
+description = "floor/ceil/round/trunc(::Rational) return Rational (not Float64) via integer fld/cld/div; typed forms floor(Int, ::Rational) return the integer type (Issue #6775)"

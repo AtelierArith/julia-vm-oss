@@ -12,7 +12,7 @@
 // (broadcast.jl / Broadcast.jl).
 
 use super::error::VmError;
-use super::value::ArrayValue;
+use super::value::{ArrayValue, MemoryRef, Value};
 
 /// Enum to represent either an array or a scalar for broadcasting.
 ///
@@ -23,21 +23,75 @@ use super::value::ArrayValue;
 #[allow(dead_code)]
 pub(crate) enum Broadcastable {
     Array(ArrayValue),
+    Memory(MemoryRef),
     ScalarF64(f64),
 }
 
 impl Broadcastable {
+    pub(crate) fn shape(&self) -> Vec<usize> {
+        match self {
+            Broadcastable::Array(arr) => arr.shape.clone(),
+            Broadcastable::Memory(mem) => vec![mem.borrow().len()],
+            Broadcastable::ScalarF64(_) => vec![1],
+        }
+    }
+
+    fn element_count(&self) -> usize {
+        match self {
+            Broadcastable::Array(arr) => arr.element_count(),
+            Broadcastable::Memory(mem) => mem.borrow().len(),
+            Broadcastable::ScalarF64(_) => 1,
+        }
+    }
+
+    fn get_linear_f64(&self, linear: usize) -> Result<f64, VmError> {
+        match self {
+            Broadcastable::Array(arr) => arr.get_linear_f64(linear),
+            Broadcastable::Memory(mem) => {
+                let value = mem.borrow().get(linear + 1)?;
+                value_to_f64(value)
+            }
+            Broadcastable::ScalarF64(v) => Ok(*v),
+        }
+    }
+
     /// Check if any operand involves complex numbers
     pub(crate) fn is_complex(&self) -> bool {
         match self {
             Broadcastable::Array(arr) => {
-                // Check if this is an interleaved complex array
-                // Interleaved arrays have data.len() == element_count() * 2
+                if arr.element_type().is_complex() {
+                    return true;
+                }
+                // Legacy interleaved complex arrays may not carry the logical
+                // element tag; keep the raw-length sentinel as a compatibility
+                // fallback while Memory-backed arrays migrate to type tags.
                 let element_count = arr.element_count();
                 element_count > 0 && arr.len() == element_count * 2
             }
+            Broadcastable::Memory(_) => false,
             _ => false,
         }
+    }
+}
+
+fn value_to_f64(value: Value) -> Result<f64, VmError> {
+    match value {
+        Value::F64(v) => Ok(v),
+        Value::F32(v) => Ok(v as f64),
+        Value::F16(v) => Ok(v.to_f64()),
+        Value::I64(v) => Ok(v as f64),
+        Value::I32(v) => Ok(v as f64),
+        Value::I16(v) => Ok(v as f64),
+        Value::I8(v) => Ok(v as f64),
+        Value::U64(v) => Ok(v as f64),
+        Value::U32(v) => Ok(v as f64),
+        Value::U16(v) => Ok(v as f64),
+        Value::U8(v) => Ok(v as f64),
+        Value::Bool(v) => Ok(if v { 1.0 } else { 0.0 }),
+        other => Err(VmError::TypeError(format!(
+            "expected numeric broadcast element, got {:?}",
+            other.value_type()
+        ))),
     }
 }
 
@@ -194,24 +248,26 @@ where
 {
     match (a, b) {
         // Array .op Array - Julia-style broadcasting
-        (Broadcastable::Array(arr_a), Broadcastable::Array(arr_b)) => {
+        (
+            Broadcastable::Array(_) | Broadcastable::Memory(_),
+            Broadcastable::Array(_) | Broadcastable::Memory(_),
+        ) => {
             // Compute result shape using Julia broadcasting rules
-            let result_shape = compute_broadcast_shape(&arr_a.shape, &arr_b.shape)?;
+            let a_shape = a.shape();
+            let b_shape = b.shape();
+            let result_shape = compute_broadcast_shape(&a_shape, &b_shape)?;
             let result_size: usize = result_shape.iter().product();
 
             // Fast path: same shape, no broadcasting needed
-            if arr_a.shape == arr_b.shape {
-                let data: Vec<f64> = arr_a
-                    .try_data_f64()?
-                    .iter()
-                    .zip(arr_b.try_data_f64()?.iter())
-                    .map(|(&x, &y)| op(x, y))
-                    .collect();
-                return Ok(ArrayValue::from_f64(data, arr_a.shape.clone()));
+            if a_shape == b_shape {
+                let data: Vec<f64> = (0..a.element_count())
+                    .map(|i| Ok(op(a.get_linear_f64(i)?, b.get_linear_f64(i)?)))
+                    .collect::<Result<_, VmError>>()?;
+                return Ok(ArrayValue::memory_first_from_f64(data, a_shape));
             }
 
             // Get expanded shapes for Julia-style broadcasting
-            let (a_expanded, b_expanded) = expand_shapes_for_julia(&arr_a.shape, &arr_b.shape);
+            let (a_expanded, b_expanded) = expand_shapes_for_julia(&a_shape, &b_shape);
 
             // Compute strides using expanded shapes
             let result_strides = compute_strides(&result_shape);
@@ -239,28 +295,29 @@ where
                     &b_strides,
                     b_ndims_diff,
                 );
-                data.push(op(
-                    arr_a.try_data_f64()?[a_idx],
-                    arr_b.try_data_f64()?[b_idx],
-                ));
+                data.push(op(a.get_linear_f64(a_idx)?, b.get_linear_f64(b_idx)?));
             }
 
-            Ok(ArrayValue::from_f64(data, result_shape))
+            Ok(ArrayValue::memory_first_from_f64(data, result_shape))
         }
         // Array .op ScalarF64
-        (Broadcastable::Array(arr), Broadcastable::ScalarF64(s)) => {
-            let data: Vec<f64> = arr.try_data_f64()?.iter().map(|&x| op(x, *s)).collect();
-            Ok(ArrayValue::from_f64(data, arr.shape.clone()))
+        (Broadcastable::Array(_) | Broadcastable::Memory(_), Broadcastable::ScalarF64(s)) => {
+            let data: Vec<f64> = (0..a.element_count())
+                .map(|i| Ok(op(a.get_linear_f64(i)?, *s)))
+                .collect::<Result<_, VmError>>()?;
+            Ok(ArrayValue::memory_first_from_f64(data, a.shape()))
         }
         // ScalarF64 .op Array
-        (Broadcastable::ScalarF64(s), Broadcastable::Array(arr)) => {
-            let data: Vec<f64> = arr.try_data_f64()?.iter().map(|&x| op(*s, x)).collect();
-            Ok(ArrayValue::from_f64(data, arr.shape.clone()))
+        (Broadcastable::ScalarF64(s), Broadcastable::Array(_) | Broadcastable::Memory(_)) => {
+            let data: Vec<f64> = (0..b.element_count())
+                .map(|i| Ok(op(*s, b.get_linear_f64(i)?)))
+                .collect::<Result<_, VmError>>()?;
+            Ok(ArrayValue::memory_first_from_f64(data, b.shape()))
         }
         // ScalarF64 .op ScalarF64 - return 1-element array
-        (Broadcastable::ScalarF64(a_val), Broadcastable::ScalarF64(b_val)) => {
-            Ok(ArrayValue::from_f64(vec![op(*a_val, *b_val)], vec![1]))
-        }
+        (Broadcastable::ScalarF64(a_val), Broadcastable::ScalarF64(b_val)) => Ok(
+            ArrayValue::memory_first_from_f64(vec![op(*a_val, *b_val)], vec![1]),
+        ),
     }
 }
 
@@ -301,15 +358,8 @@ where
     F: Fn((f64, f64), (f64, f64)) -> (f64, f64),
 {
     // Helper to get shape
-    let get_shape = |bc: &Broadcastable| -> Vec<usize> {
-        match bc {
-            Broadcastable::Array(arr) => arr.shape.clone(),
-            Broadcastable::ScalarF64(_) => vec![1],
-        }
-    };
-
-    let a_shape = get_shape(a);
-    let b_shape = get_shape(b);
+    let a_shape = a.shape();
+    let b_shape = b.shape();
 
     // Compute result shape using Julia broadcasting rules
     let result_shape = compute_broadcast_shape(&a_shape, &b_shape)?;
@@ -342,9 +392,14 @@ where
                     idx
                 };
 
-                // Check if this is an interleaved complex array
+                // Check if this is an interleaved complex array. Prefer the
+                // logical element type tag when present; retain the raw-length
+                // sentinel for older native carriers that predate the tag.
                 let element_count = arr.element_count();
-                if arr.len() == element_count * 2 {
+                if arr.element_type().is_complex() || arr.len() == element_count * 2 {
+                    // ArrayDataAudit: typed interleaved ComplexF64 fast path.
+                    // The real-valued public broadcast path above uses logical
+                    // get_linear_f64 so reshape shared backing remains visible.
                     // Interleaved complex: [re0, im0, re1, im1, ...]
                     Ok((
                         arr.try_data_f64()?[src_idx * 2],
@@ -352,8 +407,18 @@ where
                     ))
                 } else {
                     // Regular F64 array - treat as real part, imaginary part is 0
-                    Ok((arr.try_data_f64()?[src_idx], 0.0))
+                    Ok((arr.get_linear_f64(src_idx)?, 0.0))
                 }
+            }
+            Broadcastable::Memory(_) => {
+                let src_idx = if let (Some(shape), Some(strides), Some(diff)) =
+                    (orig_shape, orig_strides, ndims_diff)
+                {
+                    broadcast_get_index(idx, &result_shape, &result_strides, shape, strides, diff)
+                } else {
+                    idx
+                };
+                Ok((bc.get_linear_f64(src_idx)?, 0.0))
             }
         }
     };
@@ -362,7 +427,7 @@ where
     let is_scalar = |bc: &Broadcastable| -> bool {
         match bc {
             Broadcastable::ScalarF64(_) => true,
-            Broadcastable::Array(arr) => arr.element_count() == 1,
+            Broadcastable::Array(_) | Broadcastable::Memory(_) => bc.element_count() == 1,
         }
     };
 
@@ -439,7 +504,7 @@ where
         }
     }
 
-    Ok(ArrayValue::from_f64(result_data, result_shape))
+    Ok(ArrayValue::complex_f64(result_data, result_shape))
 }
 
 #[cfg(test)]

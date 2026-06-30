@@ -45,3 +45,16 @@ struct Pair
     second
 end
 
+convert(::Type{Pair}, p::Pair) = p
+convert(::Type{Pair{K,V}}, p::Pair) where {K,V} = p
+
+# Numeric indexing: p[1] == p.first, p[2] == p.second (mirrors Julia's Pair iteration)
+function getindex(p::Pair, i::Int64)
+    if i == 1
+        return p.first
+    elseif i == 2
+        return p.second
+    else
+        error("BoundsError: attempt to access Pair at index $i")
+    end
+end

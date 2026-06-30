@@ -1,0 +1,5 @@
+crate: pretty_assertions
+version: 1.4.1
+license: MIT OR Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/rust-pretty-assertions/rust-pretty-assertions

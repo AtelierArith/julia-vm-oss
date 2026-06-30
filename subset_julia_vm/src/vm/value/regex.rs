@@ -65,6 +65,21 @@ impl RegexValue {
         self.regex.is_match(text)
     }
 
+    /// Test whether this pattern matches ending exactly at the end of `text`.
+    ///
+    /// Emulates PCRE's `ENDANCHORED` option, which Julia's `endswith(s, ::Regex)`
+    /// uses (Issue #5676), by anchoring the pattern with a trailing end-of-text
+    /// `$`. The `regex` crate's `$` matches only the very end of the haystack in
+    /// the default (non-multiline) mode, which is exactly the desired anchor; the
+    /// original flags are preserved. (Patterns compiled with the `m` flag retain
+    /// line-boundary `$` semantics — a known divergence from PCRE ENDANCHORED.)
+    pub fn ends_with_match(&self, text: &str) -> bool {
+        match RegexValue::new(&format!("(?:{})$", self.pattern), &self.flags) {
+            Ok(anchored) => anchored.is_match(text),
+            Err(_) => false,
+        }
+    }
+
     /// Find the first match of this regex in the string.
     pub fn find(&self, text: &str) -> Option<RegexMatchValue> {
         self.regex.captures(text).and_then(|caps| {

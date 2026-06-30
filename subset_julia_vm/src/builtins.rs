@@ -30,6 +30,7 @@ pub enum BuiltinId {
 
     // Note: Sin, Cos, Tan, Asin, Acos, Atan removed — now Pure Julia (base/math.jl)
     // Note: Exp, Log removed — now Pure Julia (base/math.jl)
+    Sqrt, // sqrt(x) fallback after method dispatch
 
     // Rounding (these ARE CPU instructions but we keep them as builtins for consistency)
     Floor,          // floor(x) - round down to nearest integer
@@ -46,32 +47,36 @@ pub enum BuiltinId {
     TruncSigDigits, // trunc(x, sigdigits=N) - trunc to N significant digits (Issue #2059)
 
     // Float adjacency (IEEE 754 bit manipulation)
-    NextFloat, // nextfloat(x) - smallest float > x
-    PrevFloat, // prevfloat(x) - largest float < x
+    // NextFloat removed - pure Julia (base/float.jl, Issue #6740)
+    // PrevFloat removed - pure Julia (base/float.jl, Issue #6740)
 
-    // Bit operations (integer intrinsics)
-    CountOnes,     // popcount - number of 1 bits
-    CountZeros,    // number of 0 bits (bitwidth - count_ones)
-    LeadingZeros,  // leading zero bits
-    LeadingOnes,   // leading 1 bits
-    TrailingZeros, // trailing zero bits
-    TrailingOnes,  // trailing 1 bits
-    Bitreverse,    // reverse all bits
-    Bitrotate,     // rotate bits left (positive k) or right (negative k)
-    Bswap,         // byte swap (reverse byte order)
+    // Bit operations: low-level CPU intrinsics. The public functions count_ones /
+    // leading_zeros / trailing_zeros / bswap / bitreverse are pure Julia
+    // (base/int.jl) and call these via underscored names _ctpop_int / _ctlz_int /
+    // _cttz_int / _bswap_int / _bitreverse_int (Issue #6741). The derived helpers
+    // count_zeros / leading_ones / trailing_ones / bitrotate are pure Julia too
+    // (Issue #6722). These variants keep their identifiers but expose the
+    // underscored intrinsic names through from_name()/name().
+    CountOnes,     // _ctpop_int  - popcount (number of 1 bits)
+    LeadingZeros,  // _ctlz_int   - leading zero bits
+    TrailingZeros, // _cttz_int   - trailing zero bits
+    Bitreverse,    // _bitreverse_int - reverse all bits
+    Bswap,         // _bswap_int  - byte swap (reverse byte order)
 
     // Float decomposition (IEEE 754)
-    Exponent,    // exponent(x) - get exponent part of float
-    Significand, // significand(x) - get significand (mantissa) part
-    Frexp,       // frexp(x) - returns (mantissa, exponent) tuple
+    // Exponent removed - pure Julia (base/float.jl, Issue #6740)
+    // Significand removed - pure Julia (base/float.jl, Issue #6740)
+    // Frexp removed - pure Julia (base/float.jl, Issue #6740)
 
     // Float inspection
-    Issubnormal, // issubnormal(x) - check if subnormal number
-    Maxintfloat, // maxintfloat() - max integer representable as Float64
+    // Issubnormal removed - pure Julia (base/float.jl, Issue #6740)
+    // Note: Maxintfloat removed — Pure Julia (base/floatfuncs.jl, Issue #3732).
 
-    // Fused multiply-add
-    Fma,    // fma(x, y, z) = x*y + z (fused, single rounding)
-    Muladd, // muladd(x, y, z) = x*y + z (may or may not be fused)
+    // Fused multiply-add (internal _fma intrinsic only)
+    // Public fma/muladd are Pure Julia (base/math.jl). The Pure Julia wrapper
+    // for Float64 calls `_fma` to preserve IEEE fused semantics; muladd is
+    // expressed as plain `x*y + z`.
+    Fma, // _fma(x::Float64, y::Float64, z::Float64) = x*y + z (fused, single rounding)
 
     // Note: Abs is now Pure Julia (number.jl, int.jl, float.jl, bool.jl, complex.jl)
 
@@ -87,9 +92,11 @@ pub enum BuiltinId {
 
     // Creation
     Zeros,
-    ZerosF64,        // zeros(Float64, dims...) - create Float64 array
-    ZerosI64,        // zeros(Int64, dims...) - create Int64 array
-    ZerosComplexF64, // zeros(Complex{Float64}, dims...) - create ComplexF64 array
+    ZerosF64, // zeros(Float64, dims...) - create Float64 array
+    ZerosI64, // zeros(Int64, dims...) - create Int64 array
+    // Note: ZerosComplexF64 removed (Issue #5156). `zeros(Complex{Float64}, ...)`
+    // now routes through pure-Julia generic `zeros`/`_array_undef_from_dims`
+    // dispatch + the generic typed-allocation path (interleaved storage).
     Ones,
     OnesF64, // ones(Float64, dims...) - create Float64 array
     OnesI64, // ones(Int64, dims...) - create Int64 array
@@ -98,9 +105,13 @@ pub enum BuiltinId {
     // Uninitialized array allocation: Vector{T}(undef, n), Array{T}(undef, dims...)
     AllocUndefF64, // Array{Float64}(undef, dims...) - create uninitialized Float64 array
     AllocUndefI64, // Array{Int64}(undef, dims...) - create uninitialized Int64 array
-    AllocUndefComplexF64, // Array{Complex{Float64}}(undef, dims...) - create uninitialized ComplexF64 array
-    AllocUndefBool,       // Array{Bool}(undef, dims...) - create uninitialized Bool array
-    AllocUndefAny,        // Array{Any}(undef, dims...) - create uninitialized Any array
+    // Note: AllocUndefComplexF64 removed (Issue #5156).
+    // `Array{Complex{Float64}}(undef, ...)` routes through the generic
+    // typed-allocation path (interleaved storage + Complex struct type_id).
+    AllocUndefBool, // Array{Bool}(undef, dims...) - create uninitialized Bool array
+    AllocUndefAny,  // Array{Any}(undef, dims...) - create uninitialized Any array
+    MarkBitVector,  // _mark_bitvector(v) - retag Bool vector as BitVector (Issue #5484)
+    MarkBitArray, // _mark_bitarray(v) - retag Bool array as BitVector/BitMatrix/BitArray{N} (Issue #5498)
     // Copy: Now implemented in Pure Julia (base/array.jl)
     Reshape,
 
@@ -111,6 +122,11 @@ pub enum BuiltinId {
     Eltype,
     Keytype,
     Valtype,
+    MemoryRefNew,    // memoryref/memoryrefnew - create MemoryRef{T}
+    MemoryRefGet,    // memoryrefget(ref, order, boundscheck)
+    MemoryRefSet,    // memoryrefset!(ref, value, order, boundscheck)
+    MemoryRefOffset, // memoryrefoffset(ref) - 1-based parent offset
+    MemoryRefParent, // memoryrefparent(ref) - parent Memory{T}
 
     // Manipulation
     Push,      // push!
@@ -122,32 +138,26 @@ pub enum BuiltinId {
     Append,    // append!
     Prepend,
     // Reverse: Now implemented in Pure Julia (base/array.jl, base/sort.jl)
-    Sort,
+    // Sort: Now Pure Julia (base/sort.jl) — Issue #3725
 
     // Aggregation
-    // Sum: Now Pure Julia (base/array.jl)
-    Prod,
-    Minimum,
-    Maximum,
+    // Sum, Prod, Minimum, Maximum: Now Pure Julia (base/array.jl). The dead
+    // Prod/Minimum/Maximum BuiltinId variants were removed (Issue #6745).
     // Mean: Now Pure Julia (stdlib/Statistics/src/Statistics.jl)
 
     // Statistics: All now Pure Julia (stdlib/Statistics/src/Statistics.jl)
     // Var, Varm, Std, Stdm, Median, Middle, Cov, Cor, Quantile
 
-    // Search
-    Argmin,
-    Argmax,
-    FindFirst,
-    FindAll,
+    // Search: argmin/argmax/findfirst/findall are Pure Julia (base/array.jl);
+    // their dead BuiltinId variants were removed (Issue #6745).
 
     // =========================================================================
     // Higher-Order Functions
     // =========================================================================
-    // Note: map, filter, reduce, foldl, foldr, foreach are now Pure Julia
+    // Note: map, filter, reduce, foldl, foldr, foreach, ntuple are now Pure Julia
     Any,
     All,
     Count,
-    Ntuple,
     Compose, // compose(f, g) - create composed function f ∘ g
 
     // =========================================================================
@@ -160,8 +170,10 @@ pub enum BuiltinId {
     // =========================================================================
     // Complex Number Operations
     // =========================================================================
-    Complex, // complex(re, im)
-    // Note: Real, Imag, Conj, Angle removed - now Pure Julia (Issue #2640)
+    // Note: the back-compat `Complex` builtin id (no VM handler, not reachable
+    // via `from_name`) was removed (Issue #5156). Public `complex(...)` is Pure
+    // Julia (base/complex.jl, Issue #3727); real/imag/conj/angle are Pure Julia
+    // (Issue #2640).
 
     // =========================================================================
     // String Operations
@@ -170,6 +182,7 @@ pub enum BuiltinId {
     StringFromChars, // String(::Vector{Char}) - char array to string (Issue #2038)
     Repr,            // repr(x)
     Sprintf,         // sprintf(fmt, args...) - formatted string
+    PrintfFmtFloat, // _printf_fmt_float(x, conv::Char, prec::Int) - C float→string boundary (Issue #6746)
 
     // String query methods
     Ncodeunits, // ncodeunits(s) - number of bytes
@@ -201,24 +214,37 @@ pub enum BuiltinId {
 
     // String conversion
     // StringToInt removed - now Pure Julia (base/parse.jl)
-    StringToFloat,   // parse(Float64, s)
-    StringToIntBase, // parse(Int, s; base=N) - kwargs variant kept as Rust builtin
+    // StringToFloat removed - parse(Float64,s) is Pure Julia (base/parse.jl):
+    // tryparse + ArgumentError, over the _tryparse_float64 intrinsic (Issue #6748)
+    // StringToIntBase removed - now Pure Julia (base/parse.jl `_parse_int_base`,
+    // Issue #7875): parse(Int, s; base=N) is rewritten by the compiler to a
+    // positional pure-Julia call wrapping `_tryparse_int`.
     StringIntToBase, // string(x; base=N) (Issue #2036)
     CharToInt,       // Int(c) - char to codepoint
-    Codepoint,       // codepoint(c) - Unicode codepoint as UInt32
-    IntToChar,       // Char(n) - codepoint to char
-    Bitstring,       // bitstring(x) - binary representation as string
+    // Codepoint removed - pure Julia (Issue #6747)
+    IntToChar, // Char(n) - codepoint to char
+    // Bitstring removed - pure Julia (Issue #6747)
     // Ascii removed - now Pure Julia in base/strings/util.jl
     // Nextind, Prevind, Thisind, Reverseind removed - now Pure Julia (base/strings/basic.jl)
     // Bytes2Hex, Hex2Bytes removed - now Pure Julia (base/strings/util.jl)
-    UnescapeString, // unescape_string(s) - unescape string escape sequences
-    Isnumeric,      // isnumeric(c) - check if character is numeric (Unicode)
-    IsvalidIndex,   // isvalid(s, i) - check if index is valid character boundary
+    // UnescapeString removed - now Pure Julia (base/strings/util.jl, Issue #6724)
+    // Isnumeric removed - now Pure Julia (base/strings/unicode.jl, Issue #6752):
+    // isnumeric(c::Char) binary-searches an embedded Nd/Nl/No codepoint range
+    // table generated from upstream utf8proc.
+    /// Retag a `Vector{String}` as `Vector{SubString{String}}` for display
+    /// purposes (Issue #3574). Used by `split`/`rsplit` so their results
+    /// `show` as `SubString{String}["a", "b"]` like Julia 1.12. The underlying
+    /// values stay `Value::Str` — only the array's `element_type_override`
+    /// changes. Internal helper, not part of Julia's public API.
+    SubStringRetag,
+    IsvalidIndex, // isvalid(s, i) - check if index is valid character boundary
     // FindNextString, FindPrevString removed - now Pure Julia (base/strings/search.jl)
     // TryparseInt64 removed - now Pure Julia (base/parse.jl)
-    TryparseFloat64, // tryparse(Float64, s) - parse string as Float64, return nothing on failure
-    StringCount, // count(pattern, string) - count non-overlapping occurrences of pattern in string (Issue #2009)
-    StringFindAll, // findall(pattern, string) - find all non-overlapping occurrences as Vector{UnitRange} (Issue #2013)
+    // _tryparse_float64 intrinsic (libc strtod): the public tryparse/parse
+    // (Float64,s) wrappers are Pure Julia (base/parse.jl, Issue #6748)
+    TryparseFloat64, // _tryparse_float64(s) -> Float64 or nothing
+    // StringCount / StringFindAll removed - dead (count/findall on String/Char
+    // patterns are pure Julia in base/strings/search.jl, Issue #6724)
 
     // =========================================================================
     // I/O Operations
@@ -245,6 +271,7 @@ pub enum BuiltinId {
     // File I/O Operations (read-only; write support tracked in Issue #454)
     ReadFile,   // read(filename, String) - read entire file as String
     ReadLines,  // readlines(filename) - read all lines as Vector{String}
+    Eachline,   // eachline(filename) - iterable lines for file initialization
     Readline,   // readline(filename) - read first line from file
     Countlines, // countlines(filename) - count lines in file
     Isfile,     // isfile(path) - check if path is a file
@@ -288,29 +315,36 @@ pub enum BuiltinId {
     // =========================================================================
     // Type Operations
     // =========================================================================
-    TypeOf,        // typeof(x)
-    Isa,           // isa(x, T)
-    Sizeof,        // sizeof(x) - size in bytes
-    Isbits,        // isbits(x) - is x a bits type instance
+    TypeOf,   // typeof(x)
+    TypeVar,  // TypeVar(name[, lb, ub]) - fresh runtime TypeVar object
+    UnionAll, // UnionAll(var::TypeVar, body) - wrap body in a UnionAll (Issue #4694)
+    Isa,      // isa(x, T)
+    Sizeof,   // sizeof(x) - size in bytes
+    // Isbits removed - pure Julia (Issue #6738)
     Isbitstype,    // isbitstype(T) - is T a bits type
-    Supertype,     // supertype(T) - get parent type
-    Supertypes,    // supertypes(T) - tuple of all supertypes
+    _Supertype,    // _supertype(T) - get parent type (internal, Issue #3762)
+    _Typename,     // _typename(T) - canonical TypeName symbol (internal, Issue #5106)
+    _FunctionName, // _function_name(f) - function name symbol (internal, Issue #5580)
     Subtypes,      // subtypes(T) - vector of direct subtypes
-    Typeintersect, // typeintersect(A, B) - type intersection
-    // Typejoin removed - now Pure Julia (base/reflection.jl)
+    // Typeintersect and Typejoin removed - now Pure Julia (base/reflection.jl)
     // Fieldcount removed - now Pure Julia (base/reflection.jl)
-    Hasfield, // hasfield(T, name) - check if field exists
+    // Hasfield removed - pure Julia (Issue #6738)
     // Isconcretetype, Isabstracttype, Isprimitivetype, Isstructtype, Ismutabletype
-    // removed - now Pure Julia (base/reflection.jl) with _Isabstracttype/_Isconcretetype/_Ismutabletype intrinsics
-    Ismutable, // ismutable(x) - is x mutable
+    // removed - now Pure Julia (base/reflection.jl) with internal type-flag intrinsics
+    // Ismutable removed - pure Julia (Issue #6738)
     // NameOf removed - now Pure Julia (base/reflection.jl)
 
     // =========================================================================
     // Object Identity / Equality
     // =========================================================================
-    Egal,        // === (object identity)
-    NotEgal,     // !== (object non-identity)
-    Isequal,     // isequal(x, y) - NaN-aware equality
+    Egal,    // === (object identity)
+    NotEgal, // !== (object non-identity)
+    Isequal, // isequal(x, y) - NaN-aware equality
+    // Compiler-internal: `==` folded over Tuple/NamedTuple elements (Issue
+    // #5267). Unlike `Isequal` this uses `==` element semantics, so
+    // `(0.0,) == (-0.0,)` is true and `(NaN,) == (NaN,)` is false. Emitted by
+    // the early tuple route in `compile/expr/binary/mod.rs`; not user-callable.
+    TupleEquals,
     Isless,      // isless(x, y) - strict weak ordering for sorting
     Hash,        // hash(x) - compute hash value
     Objectid,    // objectid(x) - unique object identifier
@@ -326,12 +360,13 @@ pub enum BuiltinId {
     // =========================================================================
     // Type Conversion
     // =========================================================================
-    Convert,     // convert(T, x) - convert x to type T
-    Promote,     // promote(x, y, ...) - promote to common type
-    Signed,      // signed(x) - convert to signed integer (same bit width)
-    Unsigned,    // unsigned(x) - convert to unsigned integer (same bit width)
-    FloatConv,   // float(x) - convert to Float64
-    Widemul,     // widemul(a, b) - wide multiplication (no overflow)
+    Convert,   // convert(T, x) - convert x to type T
+    Promote,   // promote(x, y, ...) - promote to common type
+    Signed,    // signed(x) - convert to signed integer (same bit width)
+    Unsigned,  // unsigned(x) - convert to unsigned integer (same bit width)
+    FloatConv, // float(x) - dead: float is Pure Julia (base/number.jl); kept
+    // only because the (unreachable) handler is large. (Issue #3727/#6737)
+    // Widemul removed - Pure Julia (base/number.jl widen(x)*widen(y), Issue #6737)
     Reinterpret, // reinterpret(T, x) - bit-level type reinterpretation
 
     // =========================================================================
@@ -342,35 +377,32 @@ pub enum BuiltinId {
     // =========================================================================
     // Reflection / Introspection (Internal VM builtins)
     // =========================================================================
-    _Fieldnames,     // _fieldnames(T) - tuple of field names (internal)
-    _Fieldtypes,     // _fieldtypes(T) - tuple of field types (internal)
-    _Getfield,       // _getfield(x, i) - get field value by index (internal)
-    _Isabstracttype, // _isabstracttype(T) - check abstract type (internal)
-    _Isconcretetype, // _isconcretetype(T) - check concrete type (internal)
-    _Ismutabletype,  // _ismutabletype(T) - check mutable type (internal)
-    _Hash,           // _hash(x) - compute hash value (internal, Issue #2582)
-    _Eltype,         // _eltype(x) - get element type (internal, Issue #2570)
-    _DictGet,        // _dict_get(d, key) - HashMap lookup (internal, Issue #2572)
-    _DictSet,        // _dict_set!(d, key, value) - HashMap insert (internal, Issue #2572)
-    _DictDelete,     // _dict_delete!(d, key) - HashMap remove (internal, Issue #2572)
-    _DictHaskey,     // _dict_haskey(d, key) - HashMap contains_key (internal, Issue #2572)
-    _DictLength,     // _dict_length(d) - HashMap len (internal, Issue #2572)
-    _DictEmpty,      // _dict_empty!(d) - HashMap clear (internal, Issue #2572)
-    _DictKeys,       // _dict_keys(d) - HashMap keys as Tuple (internal, Issue #2669)
-    _DictValues,     // _dict_values(d) - HashMap values as Tuple (internal, Issue #2669)
-    _DictPairs,      // _dict_pairs(d) - HashMap entries as Tuple of Tuples (internal, Issue #2669)
-    _SetPush,        // _set_push!(s, x) - HashSet insert (internal, Issue #2574)
-    _SetDelete,      // _set_delete!(s, x) - HashSet remove (internal, Issue #2574)
-    _SetIn,          // _set_in(x, s) - HashSet contains (internal, Issue #2574)
-    _SetEmpty,       // _set_empty!(s) - HashSet clear (internal, Issue #2574)
-    _SetLength,      // _set_length(s) - HashSet len (internal, Issue #2574)
+    _Fieldnames,        // _fieldnames(T) - tuple of field names (internal)
+    _Fieldtypes,        // _fieldtypes(T) - tuple of field types (internal)
+    _Fieldoffset,       // _fieldoffset(T, i) - byte offset of a field (internal)
+    _DatatypeAlignment, // _datatype_alignment(T) - byte alignment of a type (internal, Issue #5107)
+    _Allocatedinline,   // _allocatedinline(T) - whether T is stored inline (internal, Issue #5107)
+    _Getfield,          // _getfield(x, i) - get field value by index (internal)
+    _Isabstracttype,    // _isabstracttype(T) - check abstract type (internal)
+    _Isconcretetype,    // _isconcretetype(T) - check concrete type (internal)
+    _Ismutabletype,     // _ismutabletype(T) - check mutable type (internal)
+    _Isprimitivetype,   // _isprimitivetype(T) - check primitive type (internal, Issue #3767)
+    _Isstructtype,      // _isstructtype(T) - check struct type (internal)
+    _Typeintersect,     // _typeintersect(a, b) - type intersection (internal)
+    _TypeUnion,         // _type_union(types...) - construct a small Union type (internal)
+    _MakeTupleType, // _make_tuple_type(types) - construct Tuple{types...} from a collection (internal, Issue #5119)
+    _TypeParameters, // _type_parameters(T) - tuple of type parameters (internal, Issue #3770)
+    _Hash,          // _hash(x) - compute hash value (internal, Issue #2582)
+    _Eltype,        // _eltype(x) - get element type (internal, Issue #2570)
+    // _Dict* carrier intrinsics removed with `Value::Dict` (Issue #6731).
     Getfield,        // getfield(x, name) or getfield(x, i) - get field by name or index
     Setfield,        // setfield!(x, name, v) or setfield!(x, i, v) - set field by name or index
-    Methods,         // methods(f) or methods(f, types) - list of methods
+    _MethodsByFtype, // _methods_by_ftype(f[, types]) - method query intrinsic (Issue #3772)
     HasMethod,       // hasmethod(f, types) - check if method exists
     Which,           // which(f, types) - get specific method
     IsExported,      // isexported(m::Module, s::Symbol) - check if symbol is exported
     IsPublic,        // ispublic(m::Module, s::Symbol) - check if symbol is public (Julia 1.11+)
+    IsdefinedModuleBinding, // _isdefined_module_binding(m::Module, s::Symbol) - check module binding (Issue #5002/#4958)
 
     // =========================================================================
     // Tuple/Dict Operations
@@ -380,17 +412,17 @@ pub enum BuiltinId {
     TupleLast,
     TupleLen,
 
-    DictNew,
+    // Dict ops dispatch to the pure-Julia `Dict{K,V}` methods. These BuiltinIds
+    // are thin struct-dispatch trampolines (no `Value::Dict` carrier, Issue
+    // #6731). DictNew/DictMerge/DictLen had no emit sites and were removed.
     DictGet,       // get(dict, key) or get(dict, key, default)
     DictGetkey,    // getkey(dict, key, default) - return key if exists, else default
     DictSet,       // setindex!(dict, value, key) or dict[key] = value
     DictDelete,    // delete!(dict, key)
     DictHasKey,    // haskey(dict, key)
-    DictLen,       // length(dict) - specialized for dict
     DictKeys,      // keys(dict)
     DictValues,    // values(dict)
     DictPairs,     // pairs(dict)
-    DictMerge,     // merge(dict1, dict2)
     DictGetBang,   // get!(dict, key, default) - get or insert default
     DictMergeBang, // merge!(dict1, dict2) - merge in-place
     DictEmpty,     // empty!(dict) - remove all entries
@@ -399,22 +431,10 @@ pub enum BuiltinId {
     // =========================================================================
     // Set Operations
     // =========================================================================
-    SetNew,          // Set() or Set([...]) - create set
-    SetPush,         // push!(set, x) - add element to set
-    SetDelete,       // delete!(set, x) - remove element from set
-    SetIn,           // in(x, set) or x ∈ set - check membership
-    SetUnion,        // union(a, b) or a ∪ b - set union
-    SetIntersect,    // intersect(a, b) or a ∩ b - set intersection
-    SetSetdiff,      // setdiff(a, b) - set difference
-    SetSymdiff,      // symdiff(a, b) - symmetric difference
-    SetIssubset,     // issubset(a, b) or a ⊆ b - subset check
-    SetIsdisjoint,   // isdisjoint(a, b) - disjoint check
-    SetIssetequal,   // issetequal(a, b) - set equality check
-    SetEmpty,        // empty!(set) - remove all elements
-    SetUnionMut,     // union!(s, itr) - add elements from itr to s in-place
-    SetIntersectMut, // intersect!(s, itr) - keep only elements also in itr
-    SetSetdiffMut,   // setdiff!(s, itr) - remove elements found in itr
-    SetSymdiffMut,   // symdiff!(s, itr) - symmetric difference in-place
+    // Note: SetUnion, SetIntersect, SetSetdiff, SetSymdiff, SetIssubset,
+    // SetIsdisjoint, SetIssetequal, and the mutating variants
+    // (SetUnionMut, SetIntersectMut, SetSetdiffMut, SetSymdiffMut) are now
+    // Pure Julia (subset_julia_vm/src/julia/base/set.jl) — Issue #3724.
 
     // =========================================================================
     // Matrix Operations
@@ -545,814 +565,380 @@ pub enum BuiltinId {
     RegexReplace,   // replace(string, regex => replacement) - replace matches
     RegexSplit,     // split(string, regex) - split string by regex
     RegexEachmatch, // eachmatch(regex, string) - return iterator of all matches (collected as Vector)
+
+    // Appended for bincode compatibility with existing precompiled Base caches.
+    _UnionAllVar,  // _unionall_var(T) - bound TypeVar for UnionAll-like types (internal)
+    _UnionAllBody, // _unionall_body(T) - body type for UnionAll-like types (internal)
+    _TypeVarName,  // _type_var_name(T) - TypeVar name as Symbol (internal)
+    _TypeVarLowerBound, // _type_var_lower_bound(T) - TypeVar lower bound (internal)
+    _TypeVarUpperBound, // _type_var_upper_bound(T) - TypeVar upper bound (internal)
+    // Appended after the above for bincode discriminant compatibility (Issue #5676).
+    EndsWithRegex, // _endswith_regex(string, regex) - true iff regex matches ending at end of string
+    // IOBuffer(s::AbstractString) — a readable buffer initialized with `s` (Issue
+    // #5686). Appended at the end for bincode discriminant compatibility.
+    IOBufferFromString,
+    // NextFloatN removed - pure Julia (base/float.jl, Issue #6740)
+    // PrevFloatN removed - pure Julia (base/float.jl, Issue #6740)
+    // _compose_exception_type(f, types) — interprocedural exception type composed
+    // from a user function body's callees (Issue #5600). Appended at the end for
+    // bincode discriminant compatibility.
+    ComposeExceptionType,
+    // _return_types_by_ftype(f, types) — return-type reflection through the
+    // dispatch resolver, preserving no-method / ambiguous-call emptiness (Issue
+    // #5603). Appended at the end for bincode discriminant compatibility.
+    _ReturnTypesByFtype,
+    // Compiler-internal `@generated` fallback eval that records the returned
+    // staged Expr under the concrete argument tuple key (Issue #5936).
+    // Appended for bincode discriminant compatibility.
+    GeneratedEval,
+    // Native-indexing fallback for `getindex` when a dynamic (`Any`-typed)
+    // receiver reaches the `CallTypedDispatchOrBuiltin` dispatch site but no
+    // user `getindex`/`Base.getindex` override matches at runtime (Issue #6657).
+    // Performs the same operation as the `IndexLoad` instruction.
+    // Appended for bincode discriminant compatibility.
+    GetIndex,
+    // names(m::Module) - module binding names (Issue #7938). Appended for
+    // bincode discriminant compatibility.
+    Names,
+    // Bool(x) numeric constructor (Issue #7971). Mirrors the Int8/Float64/...
+    // constructors: routes through the range-checked `convert(Bool, x)` so only
+    // 0/1 succeed (else InexactError). Appended at the end for bincode
+    // discriminant compatibility.
+    Bool,
+}
+
+/// Generates `BuiltinId::name` and `BuiltinId::from_name` from a single table so
+/// the two directions cannot drift out of sync (Issue #6831). Each row is
+/// `Variant: "canonical_name" => ["from_name", "alias", ...]`: the canonical name
+/// is what `name()` returns; the bracket list is every string `from_name`
+/// accepts for that variant (empty for internal/name-only builtins). Discriminant
+/// order is fixed by the hand-written `enum BuiltinId` above (bincode cache
+/// compatibility), not by this table. The two platform-conditional integer
+/// aliases (`"Int"`/`"UInt"`, which follow the host pointer width) are not
+/// table-expressible and are hardcoded in the generated `from_name`.
+macro_rules! define_builtin_table {
+    ( $( $variant:ident : $canon:literal => [ $( $alias:literal ),* $(,)? ] ),* $(,)? ) => {
+        impl BuiltinId {
+            /// Get builtin from function name.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use subset_julia_vm::builtins::BuiltinId;
+            ///
+            /// assert_eq!(BuiltinId::from_name("round"), Some(BuiltinId::Round));
+            /// assert_eq!(BuiltinId::from_name("unknown"), None);
+            /// ```
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name {
+                    $( $( $alias => Some(Self::$variant), )* )*
+                    // `Int`/`UInt` always alias the 64-bit integer types because
+                    // the VM's integer carrier is uniformly `Int64` (Issue #7310).
+                    "Int" => Some(Self::Int64),
+                    "UInt" => Some(Self::UInt64),
+                    _ => None,
+                }
+            }
+
+            /// Get the canonical name of this builtin.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $( Self::$variant => $canon, )*
+                }
+            }
+        }
+    };
+}
+
+define_builtin_table! {
+    Sqrt: "sqrt" => [],
+    Floor: "floor" => [],
+    FloorDigits: "floor_digits" => [],
+    FloorSigDigits: "floor_sigdigits" => [],
+    Ceil: "ceil" => [],
+    CeilDigits: "ceil_digits" => [],
+    CeilSigDigits: "ceil_sigdigits" => [],
+    Round: "round" => ["round"],
+    RoundDigits: "round_digits" => [],
+    RoundSigDigits: "round_sigdigits" => [],
+    Trunc: "trunc" => ["trunc"],
+    TruncDigits: "trunc_digits" => ["trunc_digits"],
+    TruncSigDigits: "trunc_sigdigits" => ["trunc_sigdigits"],
+    CountOnes: "_ctpop_int" => ["_ctpop_int"],
+    LeadingZeros: "_ctlz_int" => ["_ctlz_int"],
+    TrailingZeros: "_cttz_int" => ["_cttz_int"],
+    Bitreverse: "_bitreverse_int" => ["_bitreverse_int"],
+    Bswap: "_bswap_int" => ["_bswap_int"],
+    Fma: "_fma" => ["_fma"],
+    NegAny: "neg_any" => [],
+    Zeros: "zeros" => ["zeros"],
+    ZerosF64: "zeros_f64" => [],
+    ZerosI64: "zeros_i64" => [],
+    Ones: "ones" => ["ones"],
+    OnesF64: "ones_f64" => [],
+    OnesI64: "ones_i64" => [],
+    Similar: "similar" => ["similar"],
+    AllocUndefF64: "alloc_undef_f64" => [],
+    AllocUndefI64: "alloc_undef_i64" => [],
+    AllocUndefBool: "alloc_undef_bool" => [],
+    AllocUndefAny: "alloc_undef_any" => [],
+    MarkBitVector: "_mark_bitvector" => ["_mark_bitvector"],
+    MarkBitArray: "_mark_bitarray" => ["_mark_bitarray"],
+    Reshape: "reshape" => ["reshape"],
+    Length: "length" => ["length"],
+    Size: "size" => ["size"],
+    Ndims: "ndims" => ["ndims"],
+    Eltype: "eltype" => ["eltype"],
+    Keytype: "keytype" => ["keytype"],
+    Valtype: "valtype" => ["valtype"],
+    MemoryRefNew: "memoryref" => ["memoryref", "memoryrefnew"],
+    MemoryRefGet: "memoryrefget" => ["memoryrefget"],
+    MemoryRefSet: "memoryrefset!" => ["memoryrefset!"],
+    MemoryRefOffset: "memoryrefoffset" => ["memoryrefoffset"],
+    MemoryRefParent: "memoryrefparent" => ["memoryrefparent"],
+    Push: "push!" => ["push!"],
+    Pop: "pop!" => ["pop!"],
+    PushFirst: "pushfirst!" => ["pushfirst!"],
+    PopFirst: "popfirst!" => ["popfirst!"],
+    Insert: "insert!" => ["insert!"],
+    DeleteAt: "deleteat!" => ["deleteat!"],
+    Append: "append!" => ["append!"],
+    Prepend: "prepend!" => ["prepend!"],
+    Any: "any" => ["any"],
+    All: "all" => ["all"],
+    Count: "count" => ["count"],
+    Compose: "compose" => ["compose"],
+    RangeNew: "range" => ["range"],
+    RangeCollect: "collect" => ["collect"],
+    LinRange: "LinRange" => ["LinRange"],
+    StringNew: "string" => ["string"],
+    StringFromChars: "String" => ["String"],
+    Repr: "repr" => ["repr"],
+    Sprintf: "sprintf" => ["sprintf"],
+    PrintfFmtFloat: "_printf_fmt_float" => ["_printf_fmt_float"],
+    Ncodeunits: "ncodeunits" => ["ncodeunits"],
+    Codeunit: "codeunit" => ["codeunit"],
+    CodeUnits: "codeunits" => ["codeunits"],
+    Occursin: "occursin" => ["occursin"],
+    // StringToIntBase removed (Issue #7875) - parse(Int, s; base=N) is now Pure
+    // Julia (`_parse_int_base` in base/parse.jl); the compiler rewrites the
+    // kwargs form to a positional pure-Julia call.
+    StringIntToBase: "string" => [],
+    CharToInt: "Int" => [],
+    IntToChar: "Char" => ["Char"],
+    // Isnumeric removed (Issue #6752) - isnumeric is now Pure Julia
+    // (base/strings/unicode.jl), routed DispatchFirst to the method table.
+    SubStringRetag: "_substring_retag" => ["_substring_retag"],
+    IsvalidIndex: "isvalid" => [],
+    TryparseFloat64: "_tryparse_float64" => ["_tryparse_float64"],
+    Print: "print" => ["print"],
+    Println: "println" => ["println"],
+    IOBufferNew: "IOBuffer" => ["IOBuffer"],
+    TakeString: "take!" => ["take!", "takestring!"],
+    IOWrite: "write" => ["write"],
+    IOPrint: "print" => [],
+    Displaysize: "displaysize" => ["displaysize"],
+    IncludeDependency: "include_dependency" => ["include_dependency"],
+    Precompile: "__precompile__" => ["__precompile__"],
+    Normpath: "normpath" => ["normpath"],
+    Abspath: "abspath" => ["abspath"],
+    Homedir: "homedir" => ["homedir"],
+    ReadFile: "read" => [],
+    ReadLines: "readlines" => ["readlines"],
+    Eachline: "eachline" => ["eachline"],
+    Readline: "readline" => ["readline"],
+    Countlines: "countlines" => ["countlines"],
+    Isfile: "isfile" => ["isfile"],
+    Isdir: "isdir" => ["isdir"],
+    Ispath: "ispath" => ["ispath"],
+    Filesize: "filesize" => ["filesize"],
+    Pwd: "pwd" => ["pwd"],
+    Readdir: "readdir" => ["readdir"],
+    Mkdir: "mkdir" => ["mkdir"],
+    Mkpath: "mkpath" => ["mkpath"],
+    Rm: "rm" => ["rm"],
+    Tempdir: "tempdir" => ["tempdir"],
+    Tempname: "tempname" => ["tempname"],
+    Touch: "touch" => ["touch"],
+    Cd: "cd" => ["cd"],
+    Islink: "islink" => ["islink"],
+    Cp: "cp" => ["cp"],
+    Mv: "mv" => ["mv"],
+    Mtime: "mtime" => ["mtime"],
+    Open: "open" => ["open"],
+    Close: "close" => ["close"],
+    Eof: "eof" => ["eof"],
+    Isopen: "isopen" => ["isopen"],
+    ReadlineIo: "readline" => [],
+    Rand: "rand" => ["rand"],
+    Randn: "randn" => ["randn"],
+    RandInt: "rand" => [],
+    TimeNs: "time_ns" => ["time_ns"],
+    Sleep: "sleep" => ["sleep"],
+    TypeOf: "typeof" => ["typeof"],
+    TypeVar: "TypeVar" => ["TypeVar"],
+    UnionAll: "UnionAll" => ["UnionAll"],
+    Isa: "isa" => ["isa"],
+    Sizeof: "sizeof" => ["sizeof"],
+    Isbitstype: "isbitstype" => ["isbitstype"],
+    _Supertype: "_supertype" => ["_supertype"],
+    _Typename: "_typename" => ["_typename"],
+    _FunctionName: "_function_name" => ["_function_name"],
+    Subtypes: "subtypes" => [],
+    Egal: "===" => [],
+    NotEgal: "!==" => ["!=="],
+    Isequal: "isequal" => ["isequal"],
+    TupleEquals: "_tuple_equals" => [],
+    Isless: "isless" => ["isless"],
+    Hash: "hash" => ["hash"],
+    Objectid: "objectid" => ["objectid"],
+    Isunordered: "isunordered" => ["isunordered"],
+    Subtype: "<:" => ["<:"],
+    SupertypeOp: ">:" => [">:"],
+    In: "in" => ["in"],
+    Convert: "convert" => ["convert"],
+    Promote: "promote" => ["promote"],
+    Signed: "signed" => ["signed"],
+    Unsigned: "unsigned" => ["unsigned"],
+    FloatConv: "float" => [],
+    Reinterpret: "reinterpret" => ["reinterpret"],
+    Deepcopy: "deepcopy" => ["deepcopy"],
+    _Fieldnames: "_fieldnames" => ["_fieldnames"],
+    _Fieldtypes: "_fieldtypes" => ["_fieldtypes"],
+    _Fieldoffset: "_fieldoffset" => ["_fieldoffset"],
+    _DatatypeAlignment: "_datatype_alignment" => ["_datatype_alignment"],
+    _Allocatedinline: "_allocatedinline" => ["_allocatedinline"],
+    _Getfield: "_getfield" => ["_getfield"],
+    _Isabstracttype: "_isabstracttype" => ["_isabstracttype"],
+    _Isconcretetype: "_isconcretetype" => ["_isconcretetype"],
+    _Ismutabletype: "_ismutabletype" => ["_ismutabletype"],
+    _Isprimitivetype: "_isprimitivetype" => ["_isprimitivetype"],
+    _Isstructtype: "_isstructtype" => ["_isstructtype"],
+    _Typeintersect: "_typeintersect" => ["_typeintersect"],
+    _TypeUnion: "_type_union" => ["_type_union"],
+    _MakeTupleType: "_make_tuple_type" => ["_make_tuple_type"],
+    _TypeParameters: "_type_parameters" => ["_type_parameters"],
+    _Hash: "_hash" => ["_hash"],
+    _Eltype: "_eltype" => ["_eltype"],
+    Getfield: "getfield" => ["getfield"],
+    Setfield: "setfield!" => ["setfield!"],
+    _MethodsByFtype: "_methods_by_ftype" => ["_methods_by_ftype"],
+    HasMethod: "hasmethod" => ["hasmethod"],
+    Which: "which" => ["which"],
+    Names: "names" => ["names"],
+    IsExported: "isexported" => ["isexported"],
+    IsPublic: "ispublic" => ["ispublic"],
+    IsdefinedModuleBinding: "_isdefined_module_binding" => ["_isdefined_module_binding"],
+    TupleNew: "tuple" => [],
+    TupleFirst: "first" => ["first", "_tuple_first"],
+    TupleLast: "last" => ["last", "_tuple_last"],
+    TupleLen: "length" => [],
+    DictGet: "get" => ["get"],
+    DictGetkey: "getkey" => ["getkey"],
+    DictSet: "setindex!" => [],
+    DictDelete: "delete!" => ["delete!"],
+    DictHasKey: "haskey" => ["haskey"],
+    DictKeys: "keys" => ["keys"],
+    DictValues: "values" => ["values"],
+    DictPairs: "pairs" => ["pairs"],
+    DictGetBang: "get!" => ["get!"],
+    DictMergeBang: "merge!" => ["merge!"],
+    DictEmpty: "empty!" => ["empty!"],
+    DictPop: "pop!" => [],
+    Lu: "lu" => ["lu"],
+    Det: "det" => ["det"],
+    Inv: "inv" => ["inv"],
+    Ldiv: "\\" => ["\\"],
+    Svd: "svd" => ["svd"],
+    Qr: "qr" => ["qr"],
+    Eigen: "eigen" => ["eigen"],
+    Eigvals: "eigvals" => ["eigvals"],
+    Cholesky: "cholesky" => ["cholesky"],
+    Rank: "rank" => ["rank"],
+    Cond: "cond" => ["cond"],
+    RefNew: "Ref" => ["Ref"],
+    RefUnwrap: "getindex" => [],
+    Zero: "zero" => ["zero"],
+    One: "one" => ["one"],
+    Bool: "Bool" => ["Bool"],
+    Int8: "Int8" => ["Int8"],
+    Int16: "Int16" => ["Int16"],
+    Int32: "Int32" => ["Int32"],
+    Int64: "Int64" => ["Int64"],
+    Int128: "Int128" => ["Int128"],
+    UInt8: "UInt8" => ["UInt8"],
+    UInt16: "UInt16" => ["UInt16"],
+    UInt32: "UInt32" => ["UInt32"],
+    UInt64: "UInt64" => ["UInt64"],
+    UInt128: "UInt128" => ["UInt128"],
+    Float16: "Float16" => ["Float16"],
+    Float32: "Float32" => ["Float32"],
+    Float64: "Float64" => ["Float64"],
+    BigInt: "BigInt" => ["BigInt"],
+    BigFloat: "BigFloat" => ["BigFloat"],
+    BigFloatPrecision: "_bigfloat_precision" => ["_bigfloat_precision"],
+    BigFloatDefaultPrecision: "_bigfloat_default_precision" => ["_bigfloat_default_precision"],
+    SetBigFloatDefaultPrecision: "_set_bigfloat_default_precision!" => ["_set_bigfloat_default_precision!"],
+    BigFloatRounding: "_bigfloat_rounding" => ["_bigfloat_rounding"],
+    SetBigFloatRounding: "_set_bigfloat_rounding!" => ["_set_bigfloat_rounding!"],
+    GetZeroSubnormals: "get_zero_subnormals" => ["get_zero_subnormals"],
+    SetZeroSubnormals: "set_zero_subnormals" => ["set_zero_subnormals"],
+    NonMissingType: "nonmissingtype" => ["nonmissingtype"],
+    Iterate: "iterate" => ["iterate"],
+    SymbolNew: "Symbol" => ["Symbol"],
+    ExprNew: "Expr" => ["Expr"],
+    ExprNewWithSplat: "Expr(with splat)" => [],
+    Gensym: "gensym" => ["gensym"],
+    Esc: "esc" => ["esc"],
+    QuoteNodeNew: "QuoteNode" => ["QuoteNode"],
+    LineNumberNodeNew: "LineNumberNode" => ["LineNumberNode"],
+    GlobalRefNew: "GlobalRef" => ["GlobalRef"],
+    Eval: "eval" => ["eval"],
+    MetaParse: "_meta_parse" => ["_meta_parse"],
+    MetaParseAt: "_meta_parse_at" => ["_meta_parse_at"],
+    MetaIsExpr: "_meta_isexpr" => ["_meta_isexpr"],
+    MetaQuot: "_meta_quot" => ["_meta_quot"],
+    MetaIsIdentifier: "Meta.isidentifier" => ["_meta_isidentifier"],
+    MetaIsOperator: "Meta.isoperator" => ["_meta_isoperator"],
+    MetaIsUnaryOperator: "Meta.isunaryoperator" => ["_meta_isunaryoperator"],
+    MetaIsBinaryOperator: "Meta.isbinaryoperator" => ["_meta_isbinaryoperator"],
+    MetaIsPostfixOperator: "Meta.ispostfixoperator" => ["_meta_ispostfixoperator"],
+    MetaLower: "_meta_lower" => ["_meta_lower"],
+    MacroExpand: "macroexpand" => ["macroexpand"],
+    MacroExpandBang: "macroexpand!" => ["macroexpand!"],
+    IncludeString: "include_string" => ["include_string"],
+    EvalFile: "evalfile" => ["evalfile"],
+    TestRecord: "_test_record!" => ["_test_record!"],
+    TestRecordBroken: "_test_record_broken!" => ["_test_record_broken!"],
+    TestSetBegin: "_testset_begin!" => ["_testset_begin!"],
+    TestSetEnd: "_testset_end!" => ["_testset_end!"],
+    RegexNew: "Regex" => ["Regex"],
+    RegexMatch: "match" => ["match"],
+    RegexOccursin: "occursin" => [],
+    RegexReplace: "_regex_replace" => ["_regex_replace"],
+    RegexSplit: "split" => [],
+    RegexEachmatch: "eachmatch" => ["eachmatch"],
+    _UnionAllVar: "_unionall_var" => ["_unionall_var"],
+    _UnionAllBody: "_unionall_body" => ["_unionall_body"],
+    _TypeVarName: "_type_var_name" => ["_type_var_name"],
+    _TypeVarLowerBound: "_type_var_lower_bound" => ["_type_var_lower_bound"],
+    _TypeVarUpperBound: "_type_var_upper_bound" => ["_type_var_upper_bound"],
+    EndsWithRegex: "_endswith_regex" => ["_endswith_regex"],
+    IOBufferFromString: "IOBuffer" => [],
+    ComposeExceptionType: "_compose_exception_type" => ["_compose_exception_type"],
+    _ReturnTypesByFtype: "_return_types_by_ftype" => ["_return_types_by_ftype"],
+    GeneratedEval: "_generated_eval" => [],
+    GetIndex: "getindex" => [],
 }
 
 impl BuiltinId {
-    /// Get builtin from function name.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use subset_julia_vm::builtins::BuiltinId;
-    ///
-    /// assert_eq!(BuiltinId::from_name("round"), Some(BuiltinId::Round));
-    /// assert_eq!(BuiltinId::from_name("unknown"), None);
-    /// ```
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            // Math - Trigonometric: Now implemented in Pure Julia (base/math.jl)
-            // sin, cos, tan, asin, acos, atan
-
-            // Math - Hyperbolic: Now implemented in Pure Julia (base/math.jl)
-            // sinh, cosh, tanh, asinh, acosh, atanh
-
-            // Math - Exponential/Logarithmic: Now implemented in Pure Julia (base/math.jl)
-            // exp, log
-
-            // Math - Rounding
-            "round" => Some(Self::Round),
-            "trunc" => Some(Self::Trunc),
-            "trunc_digits" => Some(Self::TruncDigits),
-            "trunc_sigdigits" => Some(Self::TruncSigDigits),
-            // Float adjacency
-            "nextfloat" => Some(Self::NextFloat),
-            "prevfloat" => Some(Self::PrevFloat),
-            // Bit operations
-            "count_ones" => Some(Self::CountOnes),
-            "count_zeros" => Some(Self::CountZeros),
-            "leading_zeros" => Some(Self::LeadingZeros),
-            "leading_ones" => Some(Self::LeadingOnes),
-            "trailing_zeros" => Some(Self::TrailingZeros),
-            "trailing_ones" => Some(Self::TrailingOnes),
-            "bitreverse" => Some(Self::Bitreverse),
-            "bitrotate" => Some(Self::Bitrotate),
-            "bswap" => Some(Self::Bswap),
-            // Float decomposition
-            "exponent" => Some(Self::Exponent),
-            "significand" => Some(Self::Significand),
-            "frexp" => Some(Self::Frexp),
-            // Float inspection
-            "issubnormal" => Some(Self::Issubnormal),
-            "maxintfloat" => Some(Self::Maxintfloat),
-            // Fused multiply-add
-            "fma" => Some(Self::Fma),
-            "muladd" => Some(Self::Muladd),
-            // Number theory - now Pure Julia (base/intfuncs.jl)
-            // gcd, lcm, factorial removed
-
-            // Array - Creation
-            "zeros" => Some(Self::Zeros),
-            "ones" => Some(Self::Ones),
-            // trues, falses, fill are now Pure Julia (base/array.jl) — Issue #2640
-            "similar" => Some(Self::Similar),
-            "reshape" => Some(Self::Reshape),
-            // copy: Now implemented in Pure Julia (base/array.jl)
-
-            // Array - Query
-            "length" => Some(Self::Length),
-            "size" => Some(Self::Size),
-            "ndims" => Some(Self::Ndims),
-            "eltype" => Some(Self::Eltype),
-            "keytype" => Some(Self::Keytype),
-            "valtype" => Some(Self::Valtype),
-
-            // Array - Manipulation
-            "push!" => Some(Self::Push),
-            "pop!" => Some(Self::Pop),
-            "pushfirst!" => Some(Self::PushFirst),
-            "popfirst!" => Some(Self::PopFirst),
-            "insert!" => Some(Self::Insert),
-            "deleteat!" => Some(Self::DeleteAt),
-            "append!" => Some(Self::Append),
-            "prepend!" => Some(Self::Prepend),
-            // reverse: Now implemented in Pure Julia (base/array.jl)
-            "sort" => Some(Self::Sort),
-
-            // Array - Aggregation: Now implemented in Pure Julia (base/array.jl)
-            // sum, prod, minimum, maximum, mean
-
-            // Array - Search: argmin, argmax now in Pure Julia (base/array.jl)
-            "findfirst" => Some(Self::FindFirst),
-            "findall" => Some(Self::FindAll),
-
-            // Higher-Order Functions
-            // Note: map, filter, reduce, foldl, foldr, foreach are now Pure Julia
-            "any" => Some(Self::Any),
-            "all" => Some(Self::All),
-            "count" => Some(Self::Count),
-            "ntuple" => Some(Self::Ntuple),
-            "compose" => Some(Self::Compose),
-
-            // Range
-            "range" => Some(Self::RangeNew),
-            "collect" => Some(Self::RangeCollect),
-            "LinRange" => Some(Self::LinRange),
-
-            // Complex
-            "complex" => Some(Self::Complex),
-            // Note: real, imag, conj, angle removed - now Pure Julia — Issue #2640
-
-            // String
-            "string" => Some(Self::StringNew),
-            "String" => Some(Self::StringFromChars),
-            "repr" => Some(Self::Repr),
-            "sprintf" => Some(Self::Sprintf),
-            "ncodeunits" => Some(Self::Ncodeunits),
-            "codeunit" => Some(Self::Codeunit),
-            "codeunits" => Some(Self::CodeUnits),
-            // "uppercase", "lowercase", "titlecase" now Pure Julia - removed builtins
-            // strip, lstrip, rstrip, chomp, chop now Pure Julia - removed builtins
-            "occursin" => Some(Self::Occursin),
-            // "split", "rsplit" now Pure Julia - removed builtins
-            // "repeat" now Pure Julia - removed builtin
-            "Char" => Some(Self::IntToChar),
-            "codepoint" => Some(Self::Codepoint),
-            "bitstring" => Some(Self::Bitstring),
-            // "ascii" now Pure Julia - removed builtin
-            // nextind, prevind, thisind, reverseind now Pure Julia (base/strings/basic.jl)
-            // bytes2hex, hex2bytes now Pure Julia (base/strings/util.jl)
-            "unescape_string" => Some(Self::UnescapeString),
-            "isnumeric" => Some(Self::Isnumeric),
-            // "findnext", "findprev" now Pure Julia (base/strings/search.jl)
-            // tryparse is handled at compile-time with type dispatch
-
-            // I/O
-            "print" => Some(Self::Print),
-            "println" => Some(Self::Println),
-            "IOBuffer" => Some(Self::IOBufferNew),
-            "take!" => Some(Self::TakeString),
-            "takestring!" => Some(Self::TakeString),
-            "write" => Some(Self::IOWrite),
-            "displaysize" => Some(Self::Displaysize),
-            "include_dependency" => Some(Self::IncludeDependency),
-            "__precompile__" => Some(Self::Precompile),
-            // Note: dirname, basename, joinpath, splitext, splitdir, isabspath, isdirpath
-            // are now Pure Julia (base/path.jl) — Issue #2637
-            "normpath" => Some(Self::Normpath),
-            "abspath" => Some(Self::Abspath),
-            "homedir" => Some(Self::Homedir),
-
-            // File I/O
-            "readlines" => Some(Self::ReadLines),
-            "readline" => Some(Self::Readline),
-            "countlines" => Some(Self::Countlines),
-            "isfile" => Some(Self::Isfile),
-            "isdir" => Some(Self::Isdir),
-            "ispath" => Some(Self::Ispath),
-            "filesize" => Some(Self::Filesize),
-            "pwd" => Some(Self::Pwd),
-            "readdir" => Some(Self::Readdir),
-            "mkdir" => Some(Self::Mkdir),
-            "mkpath" => Some(Self::Mkpath),
-            "rm" => Some(Self::Rm),
-            "tempdir" => Some(Self::Tempdir),
-            "tempname" => Some(Self::Tempname),
-            "touch" => Some(Self::Touch),
-            "cd" => Some(Self::Cd),
-            "islink" => Some(Self::Islink),
-            "cp" => Some(Self::Cp),
-            "mv" => Some(Self::Mv),
-            "mtime" => Some(Self::Mtime),
-            "open" => Some(Self::Open),
-            "close" => Some(Self::Close),
-            "eof" => Some(Self::Eof),
-            "isopen" => Some(Self::Isopen),
-
-            // RNG
-            "rand" => Some(Self::Rand),
-            "randn" => Some(Self::Randn),
-
-            // Time
-            "time_ns" => Some(Self::TimeNs),
-            "sleep" => Some(Self::Sleep),
-
-            // Type
-            "typeof" => Some(Self::TypeOf),
-            "isa" => Some(Self::Isa),
-            "sizeof" => Some(Self::Sizeof),
-            "isbits" => Some(Self::Isbits),
-            "isbitstype" => Some(Self::Isbitstype),
-            "supertype" => Some(Self::Supertype),
-            // "fieldcount" removed - now Pure Julia (base/reflection.jl)
-            "hasfield" => Some(Self::Hasfield),
-            // isconcretetype, isabstracttype, isprimitivetype, isstructtype removed
-            // now Pure Julia (base/reflection.jl)
-            "ismutable" => Some(Self::Ismutable),
-            // "ismutabletype" removed - now Pure Julia (base/reflection.jl)
-            // "nameof" removed - now Pure Julia (base/reflection.jl)
-
-            // Object Identity / Equality
-            "isequal" => Some(Self::Isequal),
-            "isless" => Some(Self::Isless),
-            "hash" => Some(Self::Hash),
-            "objectid" => Some(Self::Objectid),
-            "isunordered" => Some(Self::Isunordered),
-            "!==" => Some(Self::NotEgal),
-            ">:" => Some(Self::SupertypeOp),
-
-            // Set Operations
-            "in" => Some(Self::In),
-
-            // Type Conversion
-            "convert" => Some(Self::Convert),
-            "promote" => Some(Self::Promote),
-            "signed" => Some(Self::Signed),
-            "unsigned" => Some(Self::Unsigned),
-            "float" => Some(Self::FloatConv),
-            "widemul" => Some(Self::Widemul),
-            "reinterpret" => Some(Self::Reinterpret),
-
-            // Copy Operations
-            "deepcopy" => Some(Self::Deepcopy),
-
-            // Reflection / Introspection (internal builtins)
-            "_fieldnames" => Some(Self::_Fieldnames),
-            "_fieldtypes" => Some(Self::_Fieldtypes),
-            "_getfield" => Some(Self::_Getfield),
-            "_hash" => Some(Self::_Hash),
-            "_eltype" => Some(Self::_Eltype),
-            "_isabstracttype" => Some(Self::_Isabstracttype),
-            "_isconcretetype" => Some(Self::_Isconcretetype),
-            "_ismutabletype" => Some(Self::_Ismutabletype),
-
-            // Dict internal intrinsics (Issue #2572)
-            "_dict_get" => Some(Self::_DictGet),
-            "_dict_set!" => Some(Self::_DictSet),
-            "_dict_delete!" => Some(Self::_DictDelete),
-            "_dict_haskey" => Some(Self::_DictHaskey),
-            "_dict_length" => Some(Self::_DictLength),
-            "_dict_empty!" => Some(Self::_DictEmpty),
-            "_dict_keys" => Some(Self::_DictKeys),
-            "_dict_values" => Some(Self::_DictValues),
-            "_dict_pairs" => Some(Self::_DictPairs),
-            // Set internal intrinsics (Issue #2574)
-            "_set_push!" => Some(Self::_SetPush),
-            "_set_delete!" => Some(Self::_SetDelete),
-            "_set_in" => Some(Self::_SetIn),
-            "_set_empty!" => Some(Self::_SetEmpty),
-            "_set_length" => Some(Self::_SetLength),
-            "getfield" => Some(Self::Getfield),
-            "setfield!" => Some(Self::Setfield),
-            "methods" => Some(Self::Methods),
-            "hasmethod" => Some(Self::HasMethod),
-            "which" => Some(Self::Which),
-            "isexported" => Some(Self::IsExported),
-            "ispublic" => Some(Self::IsPublic),
-
-            // Tuple
-            "first" => Some(Self::TupleFirst),
-            "last" => Some(Self::TupleLast),
-
-            // Dict
-            "Dict" => Some(Self::DictNew),
-            "get" => Some(Self::DictGet),
-            "getkey" => Some(Self::DictGetkey),
-            "delete!" => Some(Self::DictDelete),
-            "haskey" => Some(Self::DictHasKey),
-            "keys" => Some(Self::DictKeys),
-            "values" => Some(Self::DictValues),
-            "pairs" => Some(Self::DictPairs),
-            "merge" => Some(Self::DictMerge),
-            "get!" => Some(Self::DictGetBang),
-            "merge!" => Some(Self::DictMergeBang),
-            "empty!" => Some(Self::DictEmpty),
-
-            // Set
-            "Set" => Some(Self::SetNew),
-            "union" => Some(Self::SetUnion),
-            "intersect" => Some(Self::SetIntersect),
-            "setdiff" => Some(Self::SetSetdiff),
-            "symdiff" => Some(Self::SetSymdiff),
-            "issubset" => Some(Self::SetIssubset),
-            "isdisjoint" => Some(Self::SetIsdisjoint),
-            "issetequal" => Some(Self::SetIssetequal),
-            "union!" => Some(Self::SetUnionMut),
-            "intersect!" => Some(Self::SetIntersectMut),
-            "setdiff!" => Some(Self::SetSetdiffMut),
-            "symdiff!" => Some(Self::SetSymdiffMut),
-
-            // Note: transpose and adjoint are now Pure Julia functions
-            // (no longer mapped to builtins)
-
-            // Linear algebra (via faer library)
-            "lu" => Some(Self::Lu),
-            "det" => Some(Self::Det),
-            "inv" => Some(Self::Inv),
-            "\\" => Some(Self::Ldiv),
-            "svd" => Some(Self::Svd),
-            "qr" => Some(Self::Qr),
-            "eigen" => Some(Self::Eigen),
-            "eigvals" => Some(Self::Eigvals),
-            "cholesky" => Some(Self::Cholesky),
-            "rank" => Some(Self::Rank),
-            "cond" => Some(Self::Cond),
-
-            // Broadcast control
-            "Ref" => Some(Self::RefNew),
-
-            // Zero/One
-            "zero" => Some(Self::Zero),
-            "one" => Some(Self::One),
-
-            // Numeric Type Constructors
-            "Int8" => Some(Self::Int8),
-            "Int16" => Some(Self::Int16),
-            "Int32" => Some(Self::Int32),
-            "Int64" => Some(Self::Int64),
-            "Int128" => Some(Self::Int128),
-            "UInt8" => Some(Self::UInt8),
-            "UInt16" => Some(Self::UInt16),
-            "UInt32" => Some(Self::UInt32),
-            "UInt64" => Some(Self::UInt64),
-            "UInt128" => Some(Self::UInt128),
-            "Float16" => Some(Self::Float16),
-            "Float32" => Some(Self::Float32),
-            "Float64" => Some(Self::Float64),
-
-            // BigInt
-            "BigInt" => Some(Self::BigInt),
-
-            // BigFloat
-            "BigFloat" => Some(Self::BigFloat),
-            "_bigfloat_precision" => Some(Self::BigFloatPrecision),
-            "_bigfloat_default_precision" => Some(Self::BigFloatDefaultPrecision),
-            "_set_bigfloat_default_precision!" => Some(Self::SetBigFloatDefaultPrecision),
-            "_bigfloat_rounding" => Some(Self::BigFloatRounding),
-            "_set_bigfloat_rounding!" => Some(Self::SetBigFloatRounding),
-
-            // Subnormal Float Control
-            "get_zero_subnormals" => Some(Self::GetZeroSubnormals),
-            "set_zero_subnormals" => Some(Self::SetZeroSubnormals),
-
-            // Missing Value Utilities
-            "nonmissingtype" => Some(Self::NonMissingType),
-
-            // Iterator Protocol
-            "iterate" => Some(Self::Iterate),
-            // Note: "collect" is handled by RangeCollect above
-
-            // Macro System
-            "Symbol" => Some(Self::SymbolNew),
-            "Expr" => Some(Self::ExprNew),
-            "gensym" => Some(Self::Gensym),
-            "esc" => Some(Self::Esc),
-            "QuoteNode" => Some(Self::QuoteNodeNew),
-            "LineNumberNode" => Some(Self::LineNumberNodeNew),
-            "GlobalRef" => Some(Self::GlobalRefNew),
-            "eval" => Some(Self::Eval),
-            "_meta_parse" => Some(Self::MetaParse),
-            "_meta_parse_at" => Some(Self::MetaParseAt),
-            "_meta_isexpr" => Some(Self::MetaIsExpr),
-            "_meta_quot" => Some(Self::MetaQuot),
-            "_meta_isidentifier" => Some(Self::MetaIsIdentifier),
-            "_meta_isoperator" => Some(Self::MetaIsOperator),
-            "_meta_isunaryoperator" => Some(Self::MetaIsUnaryOperator),
-            "_meta_isbinaryoperator" => Some(Self::MetaIsBinaryOperator),
-            "_meta_ispostfixoperator" => Some(Self::MetaIsPostfixOperator),
-            "_meta_lower" => Some(Self::MetaLower),
-            "macroexpand" => Some(Self::MacroExpand),
-            "macroexpand!" => Some(Self::MacroExpandBang),
-            "include_string" => Some(Self::IncludeString),
-            "evalfile" => Some(Self::EvalFile),
-
-            // Test operations
-            "_test_record!" => Some(Self::TestRecord),
-            "_test_record_broken!" => Some(Self::TestRecordBroken),
-            "_testset_begin!" => Some(Self::TestSetBegin),
-            "_testset_end!" => Some(Self::TestSetEnd),
-
-            // Regex operations
-            "Regex" => Some(Self::RegexNew),
-            "match" => Some(Self::RegexMatch),
-            "eachmatch" => Some(Self::RegexEachmatch),
-            "_regex_replace" => Some(Self::RegexReplace),
-
-            _ => None,
-        }
-    }
-
-    /// Get the canonical name of this builtin.
-    pub fn name(&self) -> &'static str {
-        match self {
-            // Math - Trigonometric: Now Pure Julia (base/math.jl)
-            // Math - Exponential/Logarithmic: Now Pure Julia (base/math.jl)
-
-            // Math - Rounding
-            Self::Floor => "floor",
-            Self::FloorDigits => "floor_digits",
-            Self::FloorSigDigits => "floor_sigdigits",
-            Self::Ceil => "ceil",
-            Self::CeilDigits => "ceil_digits",
-            Self::CeilSigDigits => "ceil_sigdigits",
-            Self::Round => "round",
-            Self::RoundDigits => "round_digits",
-            Self::RoundSigDigits => "round_sigdigits",
-            Self::Trunc => "trunc",
-            Self::TruncDigits => "trunc_digits",
-            Self::TruncSigDigits => "trunc_sigdigits",
-            // Float adjacency
-            Self::NextFloat => "nextfloat",
-            Self::PrevFloat => "prevfloat",
-            // Bit operations
-            Self::CountOnes => "count_ones",
-            Self::CountZeros => "count_zeros",
-            Self::LeadingZeros => "leading_zeros",
-            Self::LeadingOnes => "leading_ones",
-            Self::TrailingZeros => "trailing_zeros",
-            Self::TrailingOnes => "trailing_ones",
-            Self::Bitreverse => "bitreverse",
-            Self::Bitrotate => "bitrotate",
-            Self::Bswap => "bswap",
-            // Float decomposition
-            Self::Exponent => "exponent",
-            Self::Significand => "significand",
-            Self::Frexp => "frexp",
-            // Float inspection
-            Self::Issubnormal => "issubnormal",
-            Self::Maxintfloat => "maxintfloat",
-            // Fused multiply-add
-            Self::Fma => "fma",
-            Self::Muladd => "muladd",
-
-            // Note: Abs is now Pure Julia
-
-            // Unary negation with runtime dispatch
-            Self::NegAny => "neg_any",
-
-            // Note: gcd, lcm, factorial removed - now Pure Julia (base/intfuncs.jl)
-
-            // Array
-            Self::Zeros => "zeros",
-            Self::ZerosF64 => "zeros_f64",
-            Self::ZerosI64 => "zeros_i64",
-            Self::ZerosComplexF64 => "zeros_complex_f64",
-            Self::Ones => "ones",
-            Self::OnesF64 => "ones_f64",
-            Self::OnesI64 => "ones_i64",
-            Self::Similar => "similar",
-            Self::AllocUndefF64 => "alloc_undef_f64",
-            Self::AllocUndefI64 => "alloc_undef_i64",
-            Self::AllocUndefComplexF64 => "alloc_undef_complex_f64",
-            Self::AllocUndefBool => "alloc_undef_bool",
-            Self::AllocUndefAny => "alloc_undef_any",
-            // Copy: Now Pure Julia (base/array.jl)
-            Self::Reshape => "reshape",
-            Self::Length => "length",
-            Self::Size => "size",
-            Self::Ndims => "ndims",
-            Self::Eltype => "eltype",
-            Self::Keytype => "keytype",
-            Self::Valtype => "valtype",
-            Self::Push => "push!",
-            Self::Pop => "pop!",
-            Self::PushFirst => "pushfirst!",
-            Self::PopFirst => "popfirst!",
-            Self::Insert => "insert!",
-            Self::DeleteAt => "deleteat!",
-            Self::Append => "append!",
-            Self::Prepend => "prepend!",
-            // Reverse: Now Pure Julia (base/array.jl, base/sort.jl)
-            Self::Sort => "sort",
-            // Sum: Now Pure Julia (base/array.jl)
-            Self::Prod => "prod",
-            Self::Minimum => "minimum",
-            Self::Maximum => "maximum",
-            // Statistics: Now Pure Julia (stdlib/Statistics/src/Statistics.jl)
-            // Mean, Var, Varm, Std, Stdm, Median, Middle, Cov, Cor, Quantile
-            Self::Argmin => "argmin",
-            Self::Argmax => "argmax",
-            Self::FindFirst => "findfirst",
-            Self::FindAll => "findall",
-
-            // Higher-Order
-            // Note: map, filter, reduce, foldl, foldr, foreach are now Pure Julia
-            Self::Any => "any",
-            Self::All => "all",
-            Self::Count => "count",
-            Self::Ntuple => "ntuple",
-
-            // Range
-            Self::RangeNew => "range",
-            Self::RangeCollect => "collect",
-            Self::LinRange => "LinRange",
-
-            // Complex
-            Self::Complex => "complex",
-
-            // String
-            Self::StringNew => "string",
-            Self::StringFromChars => "String",
-            Self::Repr => "repr",
-            Self::Sprintf => "sprintf",
-            Self::Ncodeunits => "ncodeunits",
-            Self::Codeunit => "codeunit",
-            Self::CodeUnits => "codeunits",
-            // StringFirst removed - now Pure Julia
-            // StringLast removed - now Pure Julia
-            // Uppercase, Lowercase, Titlecase removed - now Pure Julia (base/strings/unicode.jl)
-            // Strip, Lstrip, Rstrip, Chomp, Chop removed - now Pure Julia
-            Self::Occursin => "occursin",
-            // Findfirst, Findlast removed - now Pure Julia (base/strings/search.jl)
-            // StringSplit, StringRsplit removed - now Pure Julia
-            // StringRepeat removed - now Pure Julia
-            // StringReverse removed - now Pure Julia
-            // StringToInt removed - now Pure Julia (base/parse.jl)
-            Self::StringToFloat => "parse",
-            Self::StringToIntBase => "parse",
-            Self::StringIntToBase => "string",
-            Self::CharToInt => "Int",
-            Self::Codepoint => "codepoint",
-            Self::IntToChar => "Char",
-            Self::Bitstring => "bitstring",
-            // Ascii, Nextind, Prevind, Thisind, Reverseind removed - now Pure Julia
-            // Bytes2Hex, Hex2Bytes removed - now Pure Julia (base/strings/util.jl)
-            Self::UnescapeString => "unescape_string",
-            Self::Isnumeric => "isnumeric",
-            Self::IsvalidIndex => "isvalid",
-            // FindNextString, FindPrevString removed - now Pure Julia
-            // TryparseInt64 removed - now Pure Julia (base/parse.jl)
-            Self::TryparseFloat64 => "tryparse",
-            Self::StringCount => "count",
-            Self::StringFindAll => "findall",
-
-            // I/O
-            Self::Print => "print",
-            Self::Println => "println",
-            Self::IOBufferNew => "IOBuffer",
-            Self::TakeString => "take!",
-            Self::IOWrite => "write",
-            Self::IOPrint => "print",
-            Self::Displaysize => "displaysize",
-            Self::IncludeDependency => "include_dependency",
-            Self::Precompile => "__precompile__",
-            Self::Normpath => "normpath",
-            Self::Abspath => "abspath",
-            Self::Homedir => "homedir",
-
-            // File I/O
-            Self::ReadFile => "read",
-            Self::ReadLines => "readlines",
-            Self::Readline => "readline",
-            Self::Countlines => "countlines",
-            Self::Isfile => "isfile",
-            Self::Isdir => "isdir",
-            Self::Ispath => "ispath",
-            Self::Filesize => "filesize",
-            Self::Pwd => "pwd",
-            Self::Readdir => "readdir",
-            Self::Mkdir => "mkdir",
-            Self::Mkpath => "mkpath",
-            Self::Rm => "rm",
-            Self::Tempdir => "tempdir",
-            Self::Tempname => "tempname",
-            Self::Touch => "touch",
-            Self::Cd => "cd",
-            Self::Islink => "islink",
-            Self::Cp => "cp",
-            Self::Mv => "mv",
-            Self::Mtime => "mtime",
-            Self::Open => "open",
-            Self::Close => "close",
-            Self::Eof => "eof",
-            Self::Isopen => "isopen",
-            Self::ReadlineIo => "readline",
-
-            // RNG
-            Self::Rand => "rand",
-            Self::Randn => "randn",
-            Self::RandInt => "rand",
-
-            // Time
-            Self::TimeNs => "time_ns",
-            Self::Sleep => "sleep",
-
-            // Type
-            Self::TypeOf => "typeof",
-            Self::Isa => "isa",
-            Self::Sizeof => "sizeof",
-            Self::Isbits => "isbits",
-            Self::Isbitstype => "isbitstype",
-            Self::Supertype => "supertype",
-            Self::Supertypes => "supertypes",
-            Self::Subtypes => "subtypes",
-            Self::Typeintersect => "typeintersect",
-            // Self::Typejoin removed - now Pure Julia (base/reflection.jl)
-            // Self::Fieldcount removed - now Pure Julia (base/reflection.jl)
-            Self::Hasfield => "hasfield",
-            // Isconcretetype, Isabstracttype, Isprimitivetype, Isstructtype removed
-            // now Pure Julia (base/reflection.jl)
-            Self::Ismutable => "ismutable",
-            // Self::Ismutabletype removed - now Pure Julia (base/reflection.jl)
-            // Self::NameOf removed - now Pure Julia (base/reflection.jl)
-
-            // Object Identity / Equality
-            Self::Egal => "===",
-            Self::NotEgal => "!==",
-            Self::Isequal => "isequal",
-            Self::Isless => "isless",
-            Self::Objectid => "objectid",
-            Self::Isunordered => "isunordered",
-            Self::Hash => "hash",
-            Self::SupertypeOp => ">:",
-            Self::Subtype => "<:",
-
-            // Set Operations
-            Self::In => "in",
-
-            // Type Conversion
-            Self::Convert => "convert",
-            Self::Promote => "promote",
-            Self::Signed => "signed",
-            Self::Unsigned => "unsigned",
-            Self::FloatConv => "float",
-            Self::Widemul => "widemul",
-            Self::Reinterpret => "reinterpret",
-
-            // Copy Operations
-            Self::Deepcopy => "deepcopy",
-
-            // Reflection / Introspection (internal builtins)
-            Self::_Fieldnames => "_fieldnames",
-            Self::_Fieldtypes => "_fieldtypes",
-            Self::_Getfield => "_getfield",
-            Self::_Hash => "_hash",
-            Self::_Eltype => "_eltype",
-            Self::_Isabstracttype => "_isabstracttype",
-            Self::_Isconcretetype => "_isconcretetype",
-            Self::_Ismutabletype => "_ismutabletype",
-            Self::_DictGet => "_dict_get",
-            Self::_DictSet => "_dict_set!",
-            Self::_DictDelete => "_dict_delete!",
-            Self::_DictHaskey => "_dict_haskey",
-            Self::_DictLength => "_dict_length",
-            Self::_DictEmpty => "_dict_empty!",
-            Self::_DictKeys => "_dict_keys",
-            Self::_DictValues => "_dict_values",
-            Self::_DictPairs => "_dict_pairs",
-            Self::_SetPush => "_set_push!",
-            Self::_SetDelete => "_set_delete!",
-            Self::_SetIn => "_set_in",
-            Self::_SetEmpty => "_set_empty!",
-            Self::_SetLength => "_set_length",
-            Self::Getfield => "getfield",
-            Self::Setfield => "setfield!",
-            Self::Methods => "methods",
-            Self::HasMethod => "hasmethod",
-            Self::Which => "which",
-            Self::IsExported => "isexported",
-            Self::IsPublic => "ispublic",
-
-            // Tuple
-            Self::TupleNew => "tuple",
-            Self::TupleFirst => "first",
-            Self::TupleLast => "last",
-            Self::TupleLen => "length",
-
-            // Dict
-            Self::DictNew => "Dict",
-            Self::DictGet => "get",
-            Self::DictGetkey => "getkey",
-            Self::DictSet => "setindex!",
-            Self::DictDelete => "delete!",
-            Self::DictHasKey => "haskey",
-            Self::DictLen => "length",
-            Self::DictKeys => "keys",
-            Self::DictValues => "values",
-            Self::DictPairs => "pairs",
-            Self::DictMerge => "merge",
-            Self::DictGetBang => "get!",
-            Self::DictMergeBang => "merge!",
-            Self::DictEmpty => "empty!",
-            Self::DictPop => "pop!",
-
-            // Set
-            Self::SetNew => "Set",
-            Self::SetPush => "push!",
-            Self::SetDelete => "delete!",
-            Self::SetIn => "in",
-            Self::SetUnion => "union",
-            Self::SetIntersect => "intersect",
-            Self::SetSetdiff => "setdiff",
-            Self::SetSymdiff => "symdiff",
-            Self::SetIssubset => "issubset",
-            Self::SetIsdisjoint => "isdisjoint",
-            Self::SetIssetequal => "issetequal",
-            Self::SetEmpty => "empty!",
-            Self::SetUnionMut => "union!",
-            Self::SetIntersectMut => "intersect!",
-            Self::SetSetdiffMut => "setdiff!",
-            Self::SetSymdiffMut => "symdiff!",
-
-            // Note: Transpose and Adjoint removed - now Pure Julia
-
-            // Linear algebra (via faer library)
-            Self::Lu => "lu",
-            Self::Det => "det",
-            Self::Inv => "inv",
-            Self::Ldiv => "\\",
-            Self::Svd => "svd",
-            Self::Qr => "qr",
-            Self::Eigen => "eigen",
-            Self::Eigvals => "eigvals",
-            Self::Cholesky => "cholesky",
-            Self::Rank => "rank",
-            Self::Cond => "cond",
-
-            // Broadcast control
-            Self::RefNew => "Ref",
-            Self::RefUnwrap => "getindex",
-
-            // Zero/One
-            Self::Zero => "zero",
-            Self::One => "one",
-
-            // Numeric Type Constructors
-            Self::Int8 => "Int8",
-            Self::Int16 => "Int16",
-            Self::Int32 => "Int32",
-            Self::Int64 => "Int64",
-            Self::Int128 => "Int128",
-            Self::UInt8 => "UInt8",
-            Self::UInt16 => "UInt16",
-            Self::UInt32 => "UInt32",
-            Self::UInt64 => "UInt64",
-            Self::UInt128 => "UInt128",
-            Self::Float16 => "Float16",
-            Self::Float32 => "Float32",
-            Self::Float64 => "Float64",
-
-            // BigInt
-            Self::BigInt => "BigInt",
-
-            // BigFloat
-            Self::BigFloat => "BigFloat",
-            Self::BigFloatPrecision => "_bigfloat_precision",
-            Self::BigFloatDefaultPrecision => "_bigfloat_default_precision",
-            Self::SetBigFloatDefaultPrecision => "_set_bigfloat_default_precision!",
-            Self::BigFloatRounding => "_bigfloat_rounding",
-            Self::SetBigFloatRounding => "_set_bigfloat_rounding!",
-
-            // Subnormal Float Control
-            Self::GetZeroSubnormals => "get_zero_subnormals",
-            Self::SetZeroSubnormals => "set_zero_subnormals",
-
-            // Missing Value Utilities
-            Self::NonMissingType => "nonmissingtype",
-
-            // Iterator Protocol
-            Self::Iterate => "iterate",
-            // Note: Collect is handled by RangeCollect
-
-            // Macro System
-            Self::SymbolNew => "Symbol",
-            Self::ExprNew => "Expr",
-            Self::ExprNewWithSplat => "Expr(with splat)",
-            Self::Gensym => "gensym",
-            Self::Esc => "esc",
-            Self::QuoteNodeNew => "QuoteNode",
-            Self::LineNumberNodeNew => "LineNumberNode",
-            Self::GlobalRefNew => "GlobalRef",
-            Self::Eval => "eval",
-            Self::MetaParse => "_meta_parse",
-            Self::MetaParseAt => "_meta_parse_at",
-            Self::MetaIsExpr => "_meta_isexpr",
-            Self::MetaQuot => "_meta_quot",
-            Self::MetaIsIdentifier => "Meta.isidentifier",
-            Self::MetaIsOperator => "Meta.isoperator",
-            Self::MetaIsUnaryOperator => "Meta.isunaryoperator",
-            Self::MetaIsBinaryOperator => "Meta.isbinaryoperator",
-            Self::MetaIsPostfixOperator => "Meta.ispostfixoperator",
-            Self::MetaLower => "_meta_lower",
-            Self::MacroExpand => "macroexpand",
-            Self::MacroExpandBang => "macroexpand!",
-            Self::IncludeString => "include_string",
-            Self::EvalFile => "evalfile",
-
-            // Higher-Order Functions
-            Self::Compose => "compose",
-
-            // Test Operations
-            Self::TestRecord => "_test_record!",
-            Self::TestRecordBroken => "_test_record_broken!",
-            Self::TestSetBegin => "_testset_begin!",
-            Self::TestSetEnd => "_testset_end!",
-
-            // Regex Operations
-            Self::RegexNew => "Regex",
-            Self::RegexMatch => "match",
-            Self::RegexOccursin => "occursin",
-            Self::RegexReplace => "_regex_replace",
-            Self::RegexSplit => "split",
-            Self::RegexEachmatch => "eachmatch",
-        }
-    }
-
     /// Check if this builtin is a pure math function (no side effects).
     pub fn is_pure_math(&self) -> bool {
         matches!(
             self,
             // Note: Sin, Cos, Tan, Asin, Acos, Atan, Exp, Log removed — now Pure Julia (base/math.jl)
-            Self::Floor
+            Self::Sqrt
+                | Self::Floor
                 | Self::FloorDigits
                 | Self::FloorSigDigits
                 | Self::Ceil
@@ -1363,9 +949,8 @@ impl BuiltinId {
                 | Self::RoundSigDigits
                 | Self::Trunc
                 | Self::TruncDigits
-                | Self::TruncSigDigits
-                | Self::NextFloat
-                | Self::PrevFloat // Note: Gcd, Lcm, Factorial removed - now Pure Julia (base/intfuncs.jl)
+                | Self::TruncSigDigits // Note: NextFloat/PrevFloat/NextFloatN/PrevFloatN removed - now Pure Julia (base/float.jl, Issue #6740)
+                                       // Note: Gcd, Lcm, Factorial removed - now Pure Julia (base/intfuncs.jl)
         )
     }
 
@@ -1377,7 +962,6 @@ impl BuiltinId {
                 | Self::Pop
                 | Self::Append
                 | Self::Prepend
-                | Self::Sort
                 | Self::Print
                 | Self::Println
                 | Self::Sleep
@@ -1386,12 +970,6 @@ impl BuiltinId {
                 | Self::DictGetBang
                 | Self::DictMergeBang
                 | Self::DictEmpty
-                | Self::SetPush
-                | Self::SetDelete
-                | Self::SetEmpty
-                | Self::_SetPush
-                | Self::_SetDelete
-                | Self::_SetEmpty
         )
     }
 
@@ -1446,6 +1024,53 @@ mod tests {
             let name = builtin.name();
             assert_eq!(BuiltinId::from_name(name), Some(builtin));
         }
+    }
+
+    // ---- `define_builtin_table!` macro edge cases (Issue #6831) ----
+
+    #[test]
+    fn test_table_int_aliases_are_always_64_bit() {
+        // `Int`/`UInt` always alias the 64-bit variants because the VM's integer
+        // carrier is uniformly `Int64`, independent of host pointer width (Issue
+        // #7310). On a 32-bit target this used to resolve to `Int32` and break
+        // dispatch against the `Int64` literals it was compared with.
+        assert_eq!(BuiltinId::from_name("Int"), Some(BuiltinId::Int64));
+        assert_eq!(BuiltinId::from_name("UInt"), Some(BuiltinId::UInt64));
+        // Explicit widths are unconditional.
+        assert_eq!(BuiltinId::from_name("Int64"), Some(BuiltinId::Int64));
+        assert_eq!(BuiltinId::from_name("Int32"), Some(BuiltinId::Int32));
+    }
+
+    #[test]
+    fn test_table_name_vs_from_name_asymmetry() {
+        // `Meta.*` predicates: `name()` returns the dotted form, but `from_name`
+        // only accepts the underscored intrinsic spelling.
+        assert_eq!(BuiltinId::MetaIsIdentifier.name(), "Meta.isidentifier");
+        assert_eq!(
+            BuiltinId::from_name("_meta_isidentifier"),
+            Some(BuiltinId::MetaIsIdentifier)
+        );
+        assert_eq!(BuiltinId::from_name("Meta.isidentifier"), None);
+        // `CharToInt` is name-only: its canonical name is "Int" but `from_name`
+        // never maps "Int" to it (that goes to the integer constructor).
+        assert_eq!(BuiltinId::CharToInt.name(), "Int");
+        assert_ne!(BuiltinId::from_name("Int"), Some(BuiltinId::CharToInt));
+    }
+
+    #[test]
+    fn test_table_name_only_variants_and_aliases() {
+        // Name-only variants have a `name()` but `from_name` returns None.
+        assert_eq!(BuiltinId::Floor.name(), "floor");
+        assert_eq!(BuiltinId::from_name("floor"), None);
+        // Multi-string aliases map to the same variant.
+        assert_eq!(
+            BuiltinId::from_name("memoryref"),
+            BuiltinId::from_name("memoryrefnew")
+        );
+        assert_eq!(
+            BuiltinId::from_name("memoryref"),
+            Some(BuiltinId::MemoryRefNew)
+        );
     }
 
     #[test]

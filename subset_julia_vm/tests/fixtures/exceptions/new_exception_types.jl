@@ -21,25 +21,28 @@ using Test
     err2b = CapturedException(inner_err)
     @test err2b.msg == ""
 
-    # Test CompositeException default constructor
+    # Test CompositeException default constructor (now vector-based)
     err3 = CompositeException()
-    @test err3.count == 0
-    @test err3.first_msg == ""
+    @test length(err3) == 0
     @test isa(err3, Exception)
 
-    # Test CompositeException with data
-    err3b = CompositeException(3, "first of 3 failures")
-    @test err3b.count == 3
-    @test err3b.first_msg == "first of 3 failures"
+    # Test CompositeException with exceptions vector
+    excs = Any[]
+    push!(excs, ErrorException("first"))
+    push!(excs, ErrorException("second"))
+    err3b = CompositeException(excs)
+    @test length(err3b) == 2
+    @test isempty(err3) == true
+    @test isempty(err3b) == false
 
-    # Test TaskFailedException with message
-    err4 = TaskFailedException("task failed with error")
-    @test err4.msg == "task failed with error"
+    # Test TaskFailedException with task (now holds task object, not string)
+    err4 = TaskFailedException(nothing)
+    @test err4.task === nothing
     @test isa(err4, Exception)
 
     # Test TaskFailedException default constructor
     err4b = TaskFailedException()
-    @test err4b.msg == ""
+    @test err4b.task === nothing
 
     # Test ProcessFailedException with exitcode and message
     err5 = ProcessFailedException(127, "command not found")

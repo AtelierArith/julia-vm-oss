@@ -19,6 +19,18 @@ expected = true
 description = "For loop summing 1 to 10"
 
 [[tests]]
+name = "control_flow_outer_for_variable_6414"
+file = "outer_for_variable_6414.jl"
+expected = true
+description = "`outer` is accepted as a normal for-loop variable when followed by `in` (Issue #6414)"
+
+[[tests]]
+name = "control_flow_cartesian_for_6865"
+file = "cartesian_for_6865.jl"
+expected = true
+description = "Cartesian `for x in xs, y in ys ... end` (multiple comma-separated iterators) desugars to nested loops, matching upstream `expand-for`; inner iterators may reference outer loop variables (Issue #6865)"
+
+[[tests]]
 name = "while_loop"
 file = "while_loop.jl"
 expected = true
@@ -89,3 +101,92 @@ name = "scalar_iteration"
 file = "scalar_iteration.jl"
 expected = 6
 description = "Scalar iteration: for x in 6 yields 6 once (Issue #4)"
+
+[[tests]]
+name = "control_flow_inline_float_step_range"
+file = "inline_float_step_range.jl"
+expected = true
+description = "Inline StepRangeLen{Float64} literal in for-head iterates correctly (Issue #3551)"
+
+[[tests]]
+name = "control_flow_multiline_short_circuit"
+file = "multiline_short_circuit.jl"
+expected = true
+description = "Multi-line `||`/`&&`/infix-op chains parse with newline after operator (Issue #3660)"
+
+[[tests]]
+name = "control_flow_for_break_string_eq_4682"
+file = "for_break_string_eq_4682.jl"
+expected = true
+description = "Call-site `==` after a for-loop with break returns the right answer for String (regression after Issue #4680 narrowing fixed Issue #4682)"
+
+[[tests]]
+name = "control_flow_for_break_dynamic_range_4684"
+file = "for_break_dynamic_range_4684.jl"
+expected = true
+description = "For-loop break/continue over a parametric range terminates correctly — the specializer's loop compilers now patch break/continue placeholder jumps (Issue #4684)"
+
+[[tests]]
+name = "control_flow_jump_dispatch_priority_5178"
+file = "jump_dispatch_priority_5178.jl"
+expected = true
+description = "Control-flow opcodes (Jump/JumpIfZero/compare-jump fusion) are dispatched at the top of the VM loop with direct self.ip writes; back-edges stay correct (Issue #5178)"
+[[tests]]
+name = "control_flow_const_bool_dead_branch_5182"
+file = "const_bool_dead_branch_5182.jl"
+expected = true
+description = "Const-foldable Bool conditions (`if 1<2`, `true && false`, `!false`) trigger dead-branch elimination yet preserve the runtime result (Issue #5182)"
+
+[[tests]]
+name = "control_flow_dispatch_hot_path_5175"
+file = "dispatch_hot_path_5175.jl"
+expected = true
+description = "Hot dispatch path (jump/call/return/locals/arithmetic/comparison) stays correct after dispatch_instr handler reordering (Issue #5175)"
+
+[[tests]]
+name = "control_flow_paren_block_expression_5741"
+file = "paren_block_expression_5741.jl"
+expected = true
+description = "Parenthesized multi-statement block (s1; s2; ...) evaluates the statements and yields the last; distinguished from arrow (...; kw)->body and named tuple (; a=1) by the trailing -> and a leading vs non-leading semicolon (Issue #5741)"
+
+[[tests]]
+name = "control_flow_compound_assign_expr_var_7269"
+file = "compound_assign_expr_var_7269.jl"
+expected = true
+description = "Simple-variable compound assignment (`x += y`, `a *= 3`) used in expression position (RHS of another assignment) yields the newly assigned value (Issue #7269)"
+
+[[tests]]
+name = "control_flow_compound_assign_expr_field_7269"
+file = "compound_assign_expr_field_7269.jl"
+expected = true
+description = "Field-access compound assignment (`p.z += 1.0`) used as a return value yields the new value and mutates the field (Issue #7269)"
+
+[[tests]]
+name = "control_flow_compound_assign_expr_index_7269"
+file = "compound_assign_expr_index_7269.jl"
+expected = true
+description = "Indexed compound assignment (`a[i] += 5`) used in expression position yields the new value and mutates the array element (Issue #7269)"
+
+[[tests]]
+name = "control_flow_compound_assign_expr_lorenz_7269"
+file = "compound_assign_expr_lorenz_7269.jl"
+expected = true
+description = "Lorenz-attractor driver `return l.z += l.dt * dz` (field += of a product, as a return value) yields the new value (Issue #7269)"
+
+[[tests]]
+name = "control_flow_compound_assign_expr_nested_7269"
+file = "compound_assign_expr_nested_7269.jl"
+expected = true
+description = "Nested field-access compound assignment (`o.inner.v += 7`) used as a return value yields the new value and mutates the nested field (Issue #7269)"
+
+[[tests]]
+name = "control_flow_if_condition_begin_scope_7617"
+file = "if_condition_begin_scope_7617.jl"
+expected = true
+description = "Assignments in an if-condition begin block stay visible to the selected branch, matching Julia local-scope semantics (Issue #7617)"
+
+[[tests]]
+name = "control_flow_float_hot_loop_recognition_8183"
+file = "float_hot_loop_recognition_8183.jl"
+expected = true
+description = "Dense Float64 while-loops (Aizawa Euler step, Barnsley fern LCG) run on the native typed-loop fast path (DivF64/ModI64/fused I64 loads/NegF64, raised op/slot caps) and stay bit-exact to upstream, both annotated and bare (Issue #8183)"

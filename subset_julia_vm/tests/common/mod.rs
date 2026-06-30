@@ -9,7 +9,8 @@ use subset_julia_vm::ir::core::Program;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{Value, Vm};
+use subset_julia_vm::types::JuliaType;
+use subset_julia_vm::vm::{CompiledProgram, Instr, Value, Vm};
 use subset_julia_vm::*;
 
 /// Helper to run code through the Core IR pipeline (tree-sitter → lowering → compile_core)
@@ -28,8 +29,7 @@ pub fn compile_and_run_str_with_output(src: &str, seed: u64) -> String {
     use subset_julia_vm::pipeline::parse_and_lower;
 
     // Use the proper pipeline that merges with prelude and uses compile cache
-    let program = parse_and_lower(src)
-        .unwrap_or_else(|e| panic!("Pipeline error: {}", e));
+    let program = parse_and_lower(src).unwrap_or_else(|e| panic!("Pipeline error: {}", e));
 
     let compiled = compile_with_cache(&program).expect("Compile failed");
 
@@ -87,6 +87,17 @@ pub fn compile_and_run_func(src: &str, _n: i64, seed: u64) -> Value {
 // Helper to compile and run a program
 pub fn compile_and_run_program_direct(src: &str, seed: u64) -> (Value, String) {
     run_pipeline_with_output(src, seed)
+}
+
+pub fn compile_and_run_program_with_result_output(src: &str, seed: u64) -> String {
+    let (result, mut output) = compile_and_run_program_direct(src, seed);
+    if !matches!(result, Value::Nothing) {
+        output.push_str(&format!(
+            "[result] {}\n",
+            subset_julia_vm::ffi_support::vm_format_value(&result)
+        ));
+    }
+    output
 }
 
 // Helper to compile and run a script (functions + main)
@@ -176,6 +187,27 @@ pub fn assert_i64(result: Value, expected: i64) {
     }
 }
 
+pub fn assert_u8(result: Value, expected: u8) {
+    match result {
+        Value::U8(v) => assert_eq!(v, expected, "Expected U8({}), got U8({})", expected, v),
+        other => panic!("Expected U8({}), got {:?}", expected, other),
+    }
+}
+
+pub fn assert_u16(result: Value, expected: u16) {
+    match result {
+        Value::U16(v) => assert_eq!(v, expected, "Expected U16({}), got U16({})", expected, v),
+        other => panic!("Expected U16({}), got {:?}", expected, other),
+    }
+}
+
+pub fn assert_u32(result: Value, expected: u32) {
+    match result {
+        Value::U32(v) => assert_eq!(v, expected, "Expected U32({}), got U32({})", expected, v),
+        other => panic!("Expected U32({}), got {:?}", expected, other),
+    }
+}
+
 pub fn assert_f64(result: Value, expected: f64) {
     match result {
         Value::F64(v) => assert!(
@@ -198,4 +230,63 @@ pub fn assert_f32(result: Value, expected: f32) {
         ),
         other => panic!("Expected F32({}), got {:?}", expected, other),
     }
+}
+
+pub fn resolved_target_debug(
+    compiled: &CompiledProgram,
+    body: &[Instr],
+) -> Vec<(String, Vec<JuliaType>)> {
+    body.iter()
+        .filter_map(|instr| match instr {
+            Instr::CallResolved(target, _) => {
+                let target_func = &compiled.functions[*target];
+                Some((
+                    target_func.name.clone(),
+                    target_func.param_julia_types.clone(),
+                ))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn has_resolved_or_typed_candidate(
+    compiled: &CompiledProgram,
+    body: &[Instr],
+    function: &str,
+    arity: usize,
+    expected_signature: &[&str],
+) -> bool {
+    body.iter().any(|instr| match instr {
+        // Issue #6496: CallTypedDispatch candidates are function indices; the
+        // runtime derives the expected signature from FunctionInfo, so the
+        // assertion derives it the same way.
+        Instr::CallTypedDispatch(name, arg_count, _, candidates)
+            if name == function && *arg_count == arity =>
+        {
+            candidates.iter().any(|idx| {
+                compiled.functions.get(*idx).is_some_and(|target_func| {
+                    target_func.param_julia_types.len() == arity
+                        && target_func
+                            .param_julia_types
+                            .iter()
+                            .map(|ty| ty.to_string())
+                            .eq(expected_signature.iter().map(|s| s.to_string()))
+                })
+            })
+        }
+        Instr::CallResolved(target, arg_count) if *arg_count == arity => {
+            let target_func = &compiled.functions[*target];
+            target_func.name == function
+                && target_func
+                    .param_julia_types
+                    .iter()
+                    .map(|ty| ty.name())
+                    .map(|name| name.into_owned())
+                    .eq(expected_signature
+                        .iter()
+                        .map(|expected| expected.to_string()))
+        }
+        _ => false,
+    })
 }

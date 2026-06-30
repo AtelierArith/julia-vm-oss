@@ -144,6 +144,9 @@ ceil_llvm(x) = Core.Intrinsics.ceil_llvm(x)
 # trunc_llvm(x) -> trunc(x) (round toward zero)
 trunc_llvm(x) = Core.Intrinsics.trunc_llvm(x)
 
+# rint_llvm(x) -> round(x) to nearest, ties to even (banker's rounding)
+rint_llvm(x) = Core.Intrinsics.rint_llvm(x)
+
 # abs_float(x) -> |x|
 abs_float(x) = Core.Intrinsics.abs_float(x)
 
@@ -214,5 +217,6 @@ ntuple(i -> i^2, Val{3}())  # (1, 4, 9) - N=3 known at compile time
 struct Val{x}
 end
 
-# Convenience constructor: Val(x) -> Val{x}()
+# Convenience constructor: Val(x) -> Val{x}().
+# The compiler lifts the local value parameter at construction time (Issue #4268).
 Val(x) = Val{x}()

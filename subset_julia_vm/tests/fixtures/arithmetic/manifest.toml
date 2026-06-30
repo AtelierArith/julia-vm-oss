@@ -79,7 +79,121 @@ expected = true
 description = "Bit-shift (<<, >>, >>>) and bitwise (&, |, ⊻, ~) operators (Issue #2618)"
 
 [[tests]]
+name = "arithmetic_bitwise_unsigned_widths"
+file = "bitwise_unsigned_widths.jl"
+expected = true
+description = "Bitwise/shift operators preserve UInt8/UInt16/UInt32/UInt64 type (Issue #3565)"
+
+[[tests]]
 name = "arithmetic_promotion_canary"
 file = "test_promotion_canary.jl"
 expected = true
 description = "Canary test: promotion and isequal(nothing,nothing) still work after base changes (Issue #2721)"
+
+[[tests]]
+name = "arithmetic_mixed_width_promotion"
+file = "mixed_width_promotion.jl"
+expected = true
+description = "Mixed-width narrow integer / Int+Float32 promotion preserves promote_type result (Issue #3742)"
+
+[[tests]]
+name = "arithmetic_mixed_width_pow_6390"
+file = "mixed_width_pow_6390.jl"
+expected = true
+description = "Mixed-width primitive integer powers preserve the base type and negative integer exponents raise DomainError instead of recursively dispatching through generic ^ (Issue #6390)"
+
+[[tests]]
+name = "arithmetic_mixed_width_div_6477"
+file = "mixed_width_div_6477.jl"
+expected = true
+description = "Mixed-width integer div and ÷ preserve upstream concrete result types instead of falling through to Float64 (Issue #6477)"
+
+[[tests]]
+name = "arithmetic_float16_float32_promotion"
+file = "float16_float32_promotion.jl"
+expected = true
+description = "Float16 + Float32 promotion produces Float32 not Float64 (Issue #3750)"
+
+[[tests]]
+name = "arithmetic_scalar_getindex_4814"
+file = "scalar_getindex_4814.jl"
+expected = true
+description = "Scalars (Number / AbstractChar subtypes) act as 0-dim collections: `x[1] == x` returns the scalar, `x[i]` for `i != 1` raises `BoundsError`. Unlocks `vcat(scalar, vec, ...)` whose Pure-Julia body indexes each arg via `args[i][j]` (Issue #4814)"
+
+[[tests]]
+name = "arithmetic_length_char_4871"
+file = "length_char_4871.jl"
+expected = true
+description = "`length(::Char)` / `length(::BigInt)` / `length(::BigFloat)` return 1 — completing the `Number ∪ AbstractChar` scalar carrier list used by the `Length` builtin so it matches the same hierarchy `is_scalar_indexable_value` (PR #4870 / Issue #4814) uses for scalar `getindex` (Issue #4871)"
+
+[[tests]]
+name = "arithmetic_ndims_char_4878"
+file = "ndims_char_4878.jl"
+expected = true
+description = "`ndims(::Char)` returns 0 like other scalar carriers (Number subtypes already worked). Same pattern as `length(::Char)` (#4871) — the `Char` carrier was missing from the builtin's allow-list. Now delegates to the shared `is_scalar_carrier` predicate (#4875 / PR #4877) so the `Number ∪ AbstractChar` boundary stays in lock-step across `length`, `getindex`, and `ndims` (Issue #4878)"
+
+[[tests]]
+name = "arithmetic_bigint_egal_4883"
+file = "bigint_egal_4883.jl"
+expected = true
+description = "`x === x` is reflexive for `BigInt` and `BigFloat` bound to the same local (and for `y = x` aliases). Previously fell through the `Egal` builtin's main match to `_ => false` because `BigInt` / `BigFloat` arms were missing — now compares by value via new arms. sjulia stores BigInt/BigFloat as value types, so the fix accepts a documented tradeoff for cross-instance same-value `===` (returns true vs upstream's false) in exchange for self-comparison correctness (Issue #4883)"
+
+[[tests]]
+name = "arithmetic_narrow_int_wrapping_5205"
+file = "narrow_int_wrapping_5205.jl"
+expected = true
+description = "Narrow-integer arithmetic (Int8/Int16/UInt8, +/-/*) wraps modularly like upstream Julia across flattened chains (`a + b + c`), parenthesized chains, runtime dynamic dispatch in untyped functions, callable operator values, and the vararg `map(+, ...)` / `map(*, ...)` paths. Regression from #5192 made the range-checked `convert` throw InexactError when narrow-int arithmetic widened an intermediate to Int64 and converted back; the fix keeps narrow-int compile-time and runtime results in the narrow type while preserving #5192's explicit `convert(Int8, 300)` InexactError (Issues #5205, #6512). Issue #6597 re-evaluates the #6512 `::Function` carve-out (now removed; `type_matches` routes `::Function` through the shared subtype engine) and adds a re-evaluation block covering direct callable operators, `map(op, ...)`, and CRITICALLY empty narrow-int / Bool `reduce` / `mapreduce` (the #6528/#6529 regression must not throw)"
+
+[[tests]]
+name = "arithmetic_narrow_int_local_any_carrier_5081"
+file = "narrow_int_local_any_carrier_5081.jl"
+expected = true
+description = "Narrow integer locals continue to round-trip and reassign correctly after consolidating the legacy locals_narrow_int map into the Any carrier (Issue #5081)"
+
+[[tests]]
+name = "arithmetic_f16_local_any_carrier_5081"
+file = "f16_local_any_carrier_5081.jl"
+expected = true
+description = "Float16 fallback locals store in locals_any with VarTypeTag::F16 (Issue #5081)"
+
+[[tests]]
+name = "arithmetic_f32_local_any_carrier_5081"
+file = "f32_local_any_carrier_5081.jl"
+expected = true
+description = "Float32 fallback locals store in locals_any with VarTypeTag::F32 (Issue #5081)"
+
+[[tests]]
+name = "arithmetic_f64_local_any_carrier_5081"
+file = "f64_local_any_carrier_5081.jl"
+expected = true
+description = "Float64 fallback locals store in locals_any with VarTypeTag::F64 (Issue #5081)"
+
+[[tests]]
+name = "arithmetic_i64_local_any_carrier_5081"
+file = "i64_local_any_carrier_5081.jl"
+expected = true
+description = "Int64 fallback locals store in locals_any with VarTypeTag::I64, including fused += updates (Issue #5081)"
+
+[[tests]]
+name = "arithmetic_literal_pow_negative_exponent_7233"
+file = "literal_pow_negative_exponent_7233.jl"
+expected = true
+description = "Integer base with literal negative exponent routes through literal_pow (Float64); non-literal exponent still throws DomainError (Issue #7233)"
+
+[[tests]]
+name = "arithmetic_float_pow_int_compensated_7308"
+file = "float_pow_int_compensated_7308.jl"
+expected = true
+description = "Float64^Integer uses upstream compensated power-by-squaring (pow_body), matching Julia to the ULP (e.g. 10.0^-2 == 0.010000000000000002) (Issue #7308)"
+
+[[tests]]
+name = "arithmetic_abstractfloat_bigint_pow_7602"
+file = "abstractfloat_bigint_pow_7602.jl"
+expected = true
+description = "AbstractFloat^BigInt preserves the base float type (Float64/Float32/Float16) instead of falling through to an unsupported BigInt power path (Issue #7602)"
+
+[[tests]]
+name = "arithmetic_mixed_int_float_promotion_8183"
+file = "mixed_int_float_promotion_8183.jl"
+expected = true
+description = "Mixed Int/Float scalar arithmetic (Int64/Float64 etc.) is specialized to the typed promote-and-op path instead of a dynamic method Call, staying bit-identical to upstream (Issue #8183)"

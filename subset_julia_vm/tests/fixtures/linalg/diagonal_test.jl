@@ -68,4 +68,13 @@ end
     @test result[3, 3] == 3.0 * 9.0  # S[3] * Vt[3,3]
 end
 
+@testset "Diagonal SVD field dispatch" begin
+    A = rand(3, 4)
+    F = svd(A)
+    D = Diagonal(F.S)
+
+    @test typeof(D) <: Diagonal
+    @test isapprox(A, F.U * D * F.Vt)
+end
+
 true  # Test passed

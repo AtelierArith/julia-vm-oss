@@ -10,13 +10,24 @@ using Test
     @assert string(supertype(Float64)) == "AbstractFloat"
     @assert string(supertype(Bool)) == "Integer"
     @assert string(supertype(Char)) == "AbstractChar"
+    @assert string(supertype(String)) == "AbstractString"
 
     # Abstract types
     @assert string(supertype(Signed)) == "Integer"
     @assert string(supertype(Integer)) == "Real"
     @assert string(supertype(Real)) == "Number"
     @assert string(supertype(Number)) == "Any"
-    @assert string(supertype(AbstractFloat)) == "Number"
+    @assert string(supertype(AbstractFloat)) == "Real"
+    @assert string(supertype(AbstractMatrix)) == "AbstractArray"
+    @assert string(supertype(AbstractRange)) == "AbstractVector"
+    @assert string(supertype(AbstractUnitRange)) == "AbstractRange"
+
+    # Builtin concrete families
+    @assert string(supertype(Vector)) == "DenseArray"
+    @assert string(supertype(Dict)) == "AbstractDict"
+    @assert string(supertype(UnitRange)) == "AbstractUnitRange"
+    @assert string(supertype(IOBuffer)) == "IO"
+    @assert string(supertype(DataType)) == "Type"
 
     # Any is its own supertype
     @assert string(supertype(Any)) == "Any"

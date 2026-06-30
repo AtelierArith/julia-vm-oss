@@ -14,8 +14,230 @@ use crate::rng::RngLike;
 use super::error::VmError;
 use super::stack_ops::StackOps;
 use super::util::{expr_to_julia_string, format_sprintf, format_value};
-use super::value::{new_array_ref, ArrayData, ArrayValue, Value};
+use super::value::{
+    array_wrapper_value_to_array_value, native_array_ref_value as array_value, new_array_ref,
+    ArrayRef, ArrayValue, MemoryValue, StructInstance, TupleValue, Value,
+};
 use super::Vm;
+
+fn char_value_to_char(value: Value) -> Result<char, VmError> {
+    match value {
+        Value::Char(c) => Ok(c),
+        // AUDIT(#4766): error-message path. `other` here is a non-Char
+        // array element being rejected; it is not a user-display sink and
+        // any StructRef would have been peeled by the caller's match.
+        other => Err(VmError::TypeError(format!(
+            "String: expected Vector{{Char}}, got array containing {}",
+            format_value(&other)
+        ))),
+    }
+}
+
+/// Issue #4749: escape a string for inclusion inside `"..."` so the
+/// result round-trips through `Meta.parse`. Mirrors the Pure Julia
+/// `Base.escape_string` helper in `julia/base/strings/util.jl`.
+fn escape_for_repr_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Issue #4749: escape a char for inclusion inside `'...'`. Same
+/// table as `escape_for_repr_str` plus `'` itself.
+fn escape_for_repr_char(c: char) -> String {
+    match c {
+        '\\' => "\\\\".to_string(),
+        '\'' => "\\'".to_string(),
+        '\n' => "\\n".to_string(),
+        '\r' => "\\r".to_string(),
+        '\t' => "\\t".to_string(),
+        '\0' => "\\0".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn array_chars_to_string(arr: &ArrayValue) -> Result<String, VmError> {
+    let mut result = String::with_capacity(arr.element_count());
+    for idx in 0..arr.element_count() {
+        result.push(char_value_to_char(arr.get_linear(idx)?)?);
+    }
+    Ok(result)
+}
+
+fn memory_chars_to_string(mem: &MemoryValue) -> Result<String, VmError> {
+    let mut result = String::with_capacity(mem.len());
+    for idx in 0..mem.len() {
+        result.push(char_value_to_char(mem.get(idx + 1)?)?);
+    }
+    Ok(result)
+}
+
+/// Try to decode a Vector{Char}-like value into a `String` by routing through
+/// `ArrayValue::get_linear` for native Array carriers and `MemoryValue::get`
+/// for Memory carriers. Returns `Ok(None)` for non array-like values so the
+/// caller can fall through to other dispatch arms (e.g. the Pure Julia Array
+/// wrapper bridge or the `Value::Str` identity case).
+///
+/// Centralizing the Array / Memory char dispatch behind one helper lets the
+/// `String(::Vector{Char})` constructor and the Array-wrapper `_mem` reader
+/// stop spelling the native array carrier directly while behavior is
+/// preserved for reshape shared backing and Complex/struct-ref storage
+/// (Issue #3908).
+fn try_chars_to_string_from_array_like(value: &Value) -> Result<Option<String>, VmError> {
+    if let Some(arr) = native_array_ref_from_value(value) {
+        let borrowed = arr.borrow();
+        return Ok(Some(array_chars_to_string(&borrowed)?));
+    }
+    if let Value::Memory(mem) = value {
+        let borrowed = mem.borrow();
+        return Ok(Some(memory_chars_to_string(&borrowed)?));
+    }
+    Ok(None)
+}
+
+/// File-local alias for the shared
+/// [`super::value::native_array_value_ref`] destructure helper. Keeps the
+/// existing call sites in this file (`Expr` splat handlers, `_mem`
+/// readers, etc.) using the same local name (Issue #3908).
+#[inline]
+fn native_array_ref_from_value(value: &Value) -> Option<&ArrayRef> {
+    super::value::native_array_value_ref(value)
+}
+
+fn is_array_wrapper_name(name: &str) -> bool {
+    let base = name.rsplit('.').next().unwrap_or(name);
+    base == "Array" || base.starts_with("Array{")
+}
+
+fn array_wrapper_shape_and_offset(size: &Value) -> Result<(Vec<usize>, usize), VmError> {
+    let Value::Tuple(size_tuple) = size else {
+        return Err(VmError::TypeError(
+            "String: Array wrapper _size must be Tuple".to_string(),
+        ));
+    };
+
+    if let Some(Value::Tuple(dims_tuple)) = size_tuple.elements.first() {
+        let shape = array_wrapper_shape_from_tuple(dims_tuple)?;
+        let offset = match size_tuple.elements.get(1) {
+            Some(Value::I64(i)) if *i >= 1 => usize::try_from(*i).map_err(|_| {
+                VmError::TypeError(format!(
+                    "String: Array wrapper offset must fit usize, got {i}"
+                ))
+            })?,
+            Some(other) => {
+                return Err(VmError::TypeError(format!(
+                    "String: Array wrapper offset must be positive Int64, got {:?}",
+                    other.value_type()
+                )))
+            }
+            None => {
+                return Err(VmError::TypeError(
+                    "String: Array wrapper offset-encoded _size missing offset".to_string(),
+                ))
+            }
+        };
+        return Ok((shape, offset));
+    }
+
+    Ok((array_wrapper_shape_from_tuple(size_tuple)?, 1))
+}
+
+fn array_wrapper_shape_from_tuple(dims_tuple: &TupleValue) -> Result<Vec<usize>, VmError> {
+    dims_tuple
+        .elements
+        .iter()
+        .map(|dim| match dim {
+            Value::I64(i) if *i >= 0 => usize::try_from(*i).map_err(|_| {
+                VmError::TypeError(format!(
+                    "String: Array wrapper dimension must fit usize, got {i}"
+                ))
+            }),
+            other => Err(VmError::TypeError(format!(
+                "String: Array wrapper dimensions must be non-negative Int64 values, got {:?}",
+                other.value_type()
+            ))),
+        })
+        .collect()
+}
+
+fn array_wrapper_chars_to_string(
+    instance: &StructInstance,
+    struct_heap: &[StructInstance],
+) -> Result<Option<String>, VmError> {
+    if !is_array_wrapper_name(&instance.struct_name) {
+        return Ok(None);
+    }
+
+    let Some(mem) = instance.values.first() else {
+        return Err(VmError::TypeError(
+            "String: Array wrapper missing _mem field".to_string(),
+        ));
+    };
+    let Some(size) = instance.values.get(1) else {
+        return Err(VmError::TypeError(
+            "String: Array wrapper missing _size field".to_string(),
+        ));
+    };
+    let (shape, offset) = array_wrapper_shape_and_offset(size)?;
+    let len: usize = shape.iter().product();
+
+    let mut result = String::with_capacity(len);
+    // Route both the Memory primitive and the transitional native Array
+    // carrier through `ArrayValue::get_linear` / `MemoryValue::get` so the
+    // Pure Julia `Array{Char}` wrapper boundary stops pattern-matching the
+    // native array carrier directly while reshape offset semantics stay
+    // correct (Issue #3908).
+    if let Value::Memory(mem_ref) = mem {
+        let mem_borrow = mem_ref.borrow();
+        for linear in 0..len {
+            result.push(char_value_to_char(mem_borrow.get(offset + linear)?)?);
+        }
+    } else if let Value::MemoryRef(memref) = mem {
+        // Faithful `Array{Char,N}` (Issue #6648) stores `ref::MemoryRef`. The
+        // reference's 1-based `memory_index()` already encodes its start offset
+        // into the parent `Memory`, so read `len` elements from there (the size
+        // field carries only the plain dims for this storage form, Issue #6663).
+        let parent = memref.parent();
+        let mem_borrow = parent.borrow();
+        let base = memref.memory_index();
+        for linear in 0..len {
+            result.push(char_value_to_char(mem_borrow.get(base + linear)?)?);
+        }
+    } else if let Some(array_ref) = native_array_ref_from_value(mem) {
+        let array_borrow = array_ref.borrow();
+        for linear in 0..len {
+            result.push(char_value_to_char(
+                array_borrow.get_linear(offset - 1 + linear)?,
+            )?);
+        }
+    } else if let Ok(arr) = super::builtins_linalg::linalg_value_to_array_value(
+        mem.clone(),
+        struct_heap,
+        "String",
+        None,
+    ) {
+        for linear in 0..len {
+            result.push(char_value_to_char(arr.get_linear(offset - 1 + linear)?)?);
+        }
+    } else {
+        return Err(VmError::TypeError(format!(
+            "String: Array wrapper _mem must be Memory or Array, got {:?}",
+            mem.value_type()
+        )));
+    }
+
+    Ok(Some(result))
+}
 
 impl<R: RngLike> Vm<R> {
     /// Execute string builtin functions.
@@ -32,84 +254,120 @@ impl<R: RngLike> Vm<R> {
                 // Note: Julia's string() outputs the content WITHOUT the :() wrapper
                 //   string(:foo) => "foo" (not ":foo")
                 //   string(:(x + 1)) => "x + 1" (not ":(x + 1)")
-                let mut parts = Vec::with_capacity(argc);
-                for _ in 0..argc {
+                // Issue #4725: dereference Value::StructRef (top-level and
+                // nested inside Tuples / NamedTuples / Ref / QuoteNode) so
+                // heap-allocated structs like `Pair(1, 2)` get their proper
+                // Julia format ("1 => 2") instead of leaking the Rust
+                // `StructRef(heap_idx=N)` debug repr.
+                //
+                // Issue #4761: when a single struct arg has a user-defined
+                // `show(io::IO, ::T)` method, route through that method via
+                // a sprint-style IOBuffer so `string(x)` matches `repr(x)`
+                // for the user-customized shape (e.g. `LinRange{Float64}(0.0,
+                // 1.0, 5)` instead of the raw 4-field dump). Multi-arg
+                // `string(x, y, ...)` keeps the existing per-value Rust
+                // formatting so the join behavior is preserved.
+                if argc == 1 {
                     let val = self.stack.pop_value()?;
-                    let s = match &val {
-                        // Expr: format as Julia code (no :() wrapper)
+                    let resolved = crate::vm::formatting::resolve_struct_refs_for_format(
+                        &val,
+                        &self.struct_heap,
+                    );
+                    if !matches!(resolved, Value::Expr(_) | Value::Symbol(_)) {
+                        if let Some(func_index) = self.user_show_method_for(&resolved) {
+                            let io = super::value::IOValue::buffer_ref();
+                            self.start_sprint_call(func_index, io, vec![resolved])?;
+                            return Ok(Some(()));
+                        }
+                        // Issue #7893: `string([x y; x x])` of an array whose
+                        // struct elements have a registered `Base.show` renders
+                        // each element via that method (upstream array `string`
+                        // calls `show` per element).
+                        if let Some(s) = self.render_array_via_user_show(&resolved) {
+                            self.stack.push(Value::Str(s));
+                            return Ok(Some(()));
+                        }
+                    }
+                    let s = match &resolved {
                         Value::Expr(e) => expr_to_julia_string(e),
-                        // Symbol: format as name (no : prefix)
                         Value::Symbol(s) => s.as_str().to_string(),
-                        // Other values: use standard formatting
-                        _ => format_value(&val),
+                        _ => format_value(&resolved),
                     };
-                    parts.push(s);
+                    self.stack.push(Value::Str(s));
+                } else {
+                    let mut parts = Vec::with_capacity(argc);
+                    for _ in 0..argc {
+                        let val = self.stack.pop_value()?;
+                        let s = match &val {
+                            // Expr: format as Julia code (no :() wrapper)
+                            Value::Expr(e) => expr_to_julia_string(e),
+                            // Symbol: format as name (no : prefix)
+                            Value::Symbol(s) => s.as_str().to_string(),
+                            // Other values: resolve any StructRefs against the
+                            // heap then use standard formatting.
+                            _ => format_value(
+                                &crate::vm::formatting::resolve_struct_refs_for_format(
+                                    &val,
+                                    &self.struct_heap,
+                                ),
+                            ),
+                        };
+                        parts.push(s);
+                    }
+                    parts.reverse();
+                    self.stack.push(Value::Str(parts.join("")));
                 }
-                parts.reverse();
-                self.stack.push(Value::Str(parts.join("")));
             }
 
             BuiltinId::StringFromChars => {
                 // String(chars) - construct string from Vector{Char} (Issue #2038)
                 let val = self.stack.pop_value()?;
+                // Route native Array / Memory Char carriers through a single
+                // shared helper that decodes each element via
+                // `ArrayValue::get_linear` / `MemoryValue::get`, so this
+                // constructor stops pattern-matching the native array carrier
+                // directly while reshape shared backing stays correct
+                // (Issue #3908).
+                if let Some(s) = try_chars_to_string_from_array_like(&val)? {
+                    self.stack.push(Value::Str(s));
+                    return Ok(Some(()));
+                }
                 let s = match &val {
-                    Value::Array(arr) => {
-                        let borrowed = arr.borrow();
-                        match &borrowed.data {
-                            ArrayData::Char(chars) => chars.iter().collect::<String>(),
-                            ArrayData::Any(vals) => {
-                                // Handle Vector{Any} containing Char values
-                                let mut result = String::new();
-                                for v in vals {
-                                    match v {
-                                        Value::Char(c) => result.push(*c),
-                                        _ => {
-                                            return Err(VmError::TypeError(format!(
-                                                "String: expected Vector{{Char}}, got array containing {}",
-                                                format_value(v)
-                                            )));
-                                        }
-                                    }
-                                }
-                                result
-                            }
-                            _ => {
-                                return Err(VmError::TypeError(
-                                    "String: expected Vector{Char}".to_string(),
-                                ));
-                            }
+                    Value::StructRef(idx) => {
+                        let instance = self.struct_heap.get(*idx).ok_or_else(|| {
+                            VmError::TypeError(format!(
+                                "String: invalid StructRef({idx}) for Array wrapper conversion"
+                            ))
+                        })?;
+                        if let Some(s) = array_wrapper_chars_to_string(instance, &self.struct_heap)?
+                        {
+                            s
+                        } else {
+                            // AUDIT(#4766): error-message path (failed
+                            // Vector{Char}->String conversion), not a display
+                            // sink.
+                            return Err(VmError::TypeError(format!(
+                                "String: cannot convert {} to String",
+                                format_value(&val)
+                            )));
                         }
                     }
-                    // Memory → Array (Issue #2764)
-                    Value::Memory(mem) => {
-                        let arr = super::util::memory_to_array_ref(mem);
-                        let borrowed = arr.borrow();
-                        match &borrowed.data {
-                            ArrayData::Char(chars) => chars.iter().collect::<String>(),
-                            ArrayData::Any(vals) => {
-                                let mut result = String::new();
-                                for v in vals {
-                                    match v {
-                                        Value::Char(c) => result.push(*c),
-                                        _ => {
-                                            return Err(VmError::TypeError(format!(
-                                                "String: expected Vector{{Char}}, got array containing {}",
-                                                format_value(v)
-                                            )));
-                                        }
-                                    }
-                                }
-                                result
-                            }
-                            _ => {
-                                return Err(VmError::TypeError(
-                                    "String: expected Vector{Char}".to_string(),
-                                ));
-                            }
+                    Value::Struct(instance) => {
+                        if let Some(s) = array_wrapper_chars_to_string(instance, &self.struct_heap)?
+                        {
+                            s
+                        } else {
+                            // AUDIT(#4766): error-message path, not a display
+                            // sink.
+                            return Err(VmError::TypeError(format!(
+                                "String: cannot convert {} to String",
+                                format_value(&val)
+                            )));
                         }
                     }
                     Value::Str(s) => s.clone(), // String(s) is identity for strings
                     _ => {
+                        // AUDIT(#4766): error-message path, not a display sink.
                         return Err(VmError::TypeError(format!(
                             "String: cannot convert {} to String",
                             format_value(&val)
@@ -120,17 +378,37 @@ impl<R: RngLike> Vm<R> {
             }
 
             BuiltinId::Repr => {
-                // repr(x) - return string representation with quotes for strings
+                // repr(x) - return string representation with quotes for strings.
+                // Issue #4725: same StructRef-resolution as `string(...)` so
+                // `repr(Pair(1,2))` returns `"1 => 2"` instead of leaking
+                // `StructRef(heap_idx=N)`.
+                // Issue #4749: escape special chars in strings and chars so
+                // the result round-trips through `Meta.parse` — wrap the
+                // escaped form in `"..."` for strings and `'...'` for chars.
                 let val = self.stack.pop_value()?;
                 let s = match &val {
-                    Value::Str(s) => format!("\"{}\"", s),
-                    _ => format_value(&val),
+                    Value::Str(s) => format!("\"{}\"", escape_for_repr_str(s)),
+                    Value::Char(c) => format!("'{}'", escape_for_repr_char(*c)),
+                    _ => {
+                        let resolved = crate::vm::formatting::resolve_struct_refs_for_format(
+                            &val,
+                            &self.struct_heap,
+                        );
+                        // Issue #7893: `repr([x y; x x])` renders array struct
+                        // elements via their registered `Base.show`.
+                        self.render_array_via_user_show(&resolved)
+                            .unwrap_or_else(|| format_value(&resolved))
+                    }
                 };
                 self.stack.push(Value::Str(s));
             }
 
             BuiltinId::Sprintf => {
-                // sprintf(fmt, args...) - C-style formatted string
+                // sprintf(fmt, args...) - C-style formatted string.
+                // Issue #4729 sweep (follows #4725 / #4727): pre-resolve each
+                // arg through resolve_struct_refs_for_format so `%s` against
+                // a heap-allocated struct like `Pair(1, 2)` renders as
+                // `"1 => 2"` instead of leaking `StructRef(heap_idx=N)`.
                 let mut values = Vec::with_capacity(argc);
                 for _ in 0..argc {
                     values.push(self.stack.pop_value()?);
@@ -152,8 +430,54 @@ impl<R: RngLike> Vm<R> {
                     }
                 };
 
-                let args = &values[1..];
-                let result = format_sprintf(&fmt, args);
+                let resolved_args: Vec<Value> = values[1..]
+                    .iter()
+                    .map(|v| {
+                        crate::vm::formatting::resolve_struct_refs_for_format(v, &self.struct_heap)
+                    })
+                    .collect();
+                let result = format_sprintf(&fmt, &resolved_args);
+                self.stack.push(Value::Str(result));
+            }
+
+            BuiltinId::PrintfFmtFloat => {
+                // _printf_fmt_float(x, conv::Char, precision::Int) -> String
+                // The C float→string boundary for the pure-Julia Printf engine
+                // (Issue #6746). Args are pushed x, conv, precision (so popped in
+                // reverse). precision < 0 means the C default (6).
+                let prec = self.stack.pop_i64()?;
+                let conv_v = self.stack.pop_value()?;
+                let x_v = self.stack.pop_value()?;
+                let conv = match conv_v {
+                    Value::Char(c) => c,
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "_printf_fmt_float: conv must be a Char, got {:?}",
+                            other.value_type()
+                        )))
+                    }
+                };
+                let x = match x_v {
+                    Value::F64(x) => x,
+                    Value::F32(x) => f64::from(x),
+                    Value::F16(x) => f64::from(x),
+                    Value::I64(n) => n as f64,
+                    Value::I32(n) => f64::from(n),
+                    Value::I16(n) => f64::from(n),
+                    Value::I8(n) => f64::from(n),
+                    Value::U64(n) => n as f64,
+                    Value::U32(n) => f64::from(n),
+                    Value::U16(n) => f64::from(n),
+                    Value::U8(n) => f64::from(n),
+                    Value::Bool(b) => f64::from(b),
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "_printf_fmt_float: x must be a real number, got {:?}",
+                            other.value_type()
+                        )))
+                    }
+                };
+                let result = crate::vm::formatting::format_printf_float(x, conv, prec);
                 self.stack.push(Value::Str(result));
             }
 
@@ -174,7 +498,7 @@ impl<R: RngLike> Vm<R> {
                         shape: vec![bytes.len()],
                     });
                 }
-                self.stack.push(Value::I64(bytes[(i - 1) as usize] as i64));
+                self.stack.push(Value::U8(bytes[(i - 1) as usize]));
             }
 
             BuiltinId::CodeUnits => {
@@ -182,13 +506,8 @@ impl<R: RngLike> Vm<R> {
                 let s = self.stack.pop_str()?;
                 let bytes: Vec<u8> = s.as_bytes().to_vec();
                 let len = bytes.len();
-                let arr = ArrayValue {
-                    data: ArrayData::U8(bytes),
-                    shape: vec![len],
-                    struct_type_id: None,
-                    element_type_override: None,
-                };
-                self.stack.push(Value::Array(new_array_ref(arr)));
+                let arr = ArrayValue::memory_first_from_u8(bytes, vec![len]);
+                self.stack.push(array_value(new_array_ref(arr)));
             }
 
             // BuiltinId::StringFirst removed - now Pure Julia in base/strings/basic.jl
@@ -234,88 +553,100 @@ impl<R: RngLike> Vm<R> {
 
             // BuiltinId::StringReverse removed - now Pure Julia in base/strings/basic.jl
 
-            // BuiltinId::StringToInt removed - now Pure Julia (base/parse.jl)
-            BuiltinId::StringToFloat => {
-                // parse(Float64, s)
-                let s = self.stack.pop_str()?;
-                match s.trim().parse::<f64>() {
-                    Ok(n) => self.stack.push(Value::F64(n)),
-                    Err(_) => {
-                        return Err(VmError::TypeError(format!(
-                            "cannot parse \"{}\" as Float64",
-                            s
-                        )))
-                    }
-                }
-            }
-
-            BuiltinId::StringToIntBase => {
-                // parse(Int, s; base=N) - parse string in given base (Issue #2036)
-                // Kept as Rust builtin because kwargs dispatch not supported in Pure Julia Base
-                let base = self.stack.pop_i64()? as u32;
-                let s = self.stack.pop_str()?;
-                match i64::from_str_radix(s.trim(), base) {
-                    Ok(n) => self.stack.push(Value::I64(n)),
-                    Err(_) => {
-                        return Err(VmError::TypeError(format!(
-                            "cannot parse \"{}\" as Int64 in base {}",
-                            s, base
-                        )))
-                    }
-                }
-            }
-
+            // BuiltinId::StringToInt / StringToFloat removed - now Pure Julia
+            // (base/parse.jl, Issue #6748). parse(Float64,s) = pure wrapper over
+            // the _tryparse_float64 intrinsic (TryparseFloat64) + ArgumentError.
+            // BuiltinId::StringToIntBase removed - now Pure Julia (base/parse.jl,
+            // Issue #7875). `parse(Int, s; base=N)` is rewritten by the compiler
+            // (compile_parse_tryparse) to `_parse_int_base(s, base)`, which wraps
+            // the existing pure-Julia `_tryparse_int` base-parsing logic. The
+            // kwargs-dispatch limitation that originally kept this in Rust no
+            // longer applies (the compiler extracts the base kwarg and emits a
+            // positional call).
             BuiltinId::StringIntToBase => {
-                // string(x; base=N) - convert integer to string in given base (Issue #2036)
+                // string(x; base=N) - convert integer to string in given base
+                // (Issue #2036, widened in Issue #4723 to cover all integer
+                // widths). Signed integer widths and F64 normalize to i128
+                // (sign-preserving); unsigned widths and Bool normalize to
+                // u128 (no sign, full bit range), matching upstream Julia's
+                // `string(n::Integer; base, pad)` which prints unsigned types
+                // without a leading `-`.
                 let base = self.stack.pop_i64()?;
                 let val = self.stack.pop_value()?;
-                let n = match &val {
-                    Value::I64(n) => *n,
-                    Value::F64(f) => *f as i64,
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "string: cannot convert {} to integer for base conversion",
-                            format_value(&val)
-                        )))
-                    }
+                let signed_n: Option<i128> = match &val {
+                    Value::I8(n) => Some(i128::from(*n)),
+                    Value::I16(n) => Some(i128::from(*n)),
+                    Value::I32(n) => Some(i128::from(*n)),
+                    Value::I64(n) => Some(i128::from(*n)),
+                    Value::I128(n) => Some(*n),
+                    Value::F64(f) => Some(*f as i128),
+                    _ => None,
                 };
-                let s = match base {
-                    2 => format!("{:b}", n),
-                    8 => format!("{:o}", n),
-                    10 => format!("{}", n),
-                    16 => format!("{:x}", n),
-                    _ => {
-                        // Generic base conversion for bases 2-36
-                        if !(2..=36).contains(&base) {
-                            return Err(VmError::TypeError(format!(
-                                "string: base must be between 2 and 36, got {}",
-                                base
-                            )));
-                        }
-                        let base_u = base as u64;
-                        let negative = n < 0;
-                        let mut num = n.unsigned_abs();
-                        if num == 0 {
-                            "0".to_string()
-                        } else {
-                            let mut digits = Vec::with_capacity(65);
-                            while num > 0 {
-                                let d = (num % base_u) as u8;
+                let unsigned_n: Option<u128> = match &val {
+                    Value::U8(n) => Some(u128::from(*n)),
+                    Value::U16(n) => Some(u128::from(*n)),
+                    Value::U32(n) => Some(u128::from(*n)),
+                    Value::U64(n) => Some(u128::from(*n)),
+                    Value::U128(n) => Some(*n),
+                    Value::Bool(b) => Some(u128::from(*b)),
+                    _ => None,
+                };
+                if signed_n.is_none() && unsigned_n.is_none() {
+                    // AUDIT(#4766): error-message path. `val` here is a
+                    // non-integer rejected for base conversion, not a display
+                    // sink.
+                    return Err(VmError::TypeError(format!(
+                        "string: cannot convert {} to integer for base conversion",
+                        format_value(&val)
+                    )));
+                }
+
+                if !(2..=36).contains(&base) {
+                    return Err(VmError::TypeError(format!(
+                        "string: base must be between 2 and 36, got {}",
+                        base
+                    )));
+                }
+
+                fn format_unsigned(num: u128, base: i64) -> String {
+                    match base {
+                        2 => format!("{:b}", num),
+                        8 => format!("{:o}", num),
+                        10 => format!("{}", num),
+                        16 => format!("{:x}", num),
+                        _ => {
+                            let base_u = base as u128;
+                            if num == 0 {
+                                return "0".to_string();
+                            }
+                            let mut digits = Vec::with_capacity(129);
+                            let mut n = num;
+                            while n > 0 {
+                                let d = (n % base_u) as u8;
                                 digits.push(if d < 10 {
                                     (b'0' + d) as char
                                 } else {
                                     (b'a' + d - 10) as char
                                 });
-                                num /= base_u;
+                                n /= base_u;
                             }
                             digits.reverse();
-                            let result: String = digits.into_iter().collect();
-                            if negative {
-                                format!("-{}", result)
-                            } else {
-                                result
-                            }
+                            digits.into_iter().collect()
                         }
+                    }
+                }
+
+                let s = if let Some(num) = unsigned_n {
+                    format_unsigned(num, base)
+                } else {
+                    let n = signed_n.unwrap_or(0);
+                    let negative = n < 0;
+                    let abs = n.unsigned_abs();
+                    let body = format_unsigned(abs, base);
+                    if negative {
+                        format!("-{}", body)
+                    } else {
+                        body
                     }
                 };
                 self.stack.push(Value::Str(s));
@@ -335,21 +666,7 @@ impl<R: RngLike> Vm<R> {
                 }
             }
 
-            BuiltinId::Codepoint => {
-                // codepoint(c) - Unicode codepoint as UInt32
-                // In Julia, codepoint(c::Char) returns the Unicode codepoint as UInt32.
-                let val = self.stack.pop_value()?;
-                match val {
-                    Value::Char(c) => self.stack.push(Value::U32(c as u32)),
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "codepoint: expected Char, got {:?}",
-                            val
-                        )))
-                    }
-                }
-            }
-
+            // BuiltinId::Codepoint removed - pure Julia (Issue #6747)
             BuiltinId::IntToChar => {
                 // Char(n) - codepoint to char
                 let n = self.stack.pop_i64()?;
@@ -361,143 +678,46 @@ impl<R: RngLike> Vm<R> {
                 }
             }
 
-            BuiltinId::Bitstring => {
-                // bitstring(x) - binary representation as string
-                let val = self.stack.pop_value()?;
-                let result = match val {
-                    Value::I64(n) => format!("{:064b}", n as u64),
-                    Value::F64(f) => format!("{:064b}", f.to_bits()),
-                    Value::Bool(b) => {
-                        if b {
-                            "1".to_string()
-                        } else {
-                            "0".to_string()
-                        }
-                    }
-                    Value::Char(c) => format!("{:032b}", c as u32),
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "bitstring: unsupported type {:?}",
-                            val
-                        )))
-                    }
-                };
-                self.stack.push(Value::Str(result));
-            }
-
+            // BuiltinId::Bitstring removed - pure Julia (Issue #6747)
             // BuiltinId::Ascii removed - now Pure Julia in base/strings/util.jl
             // BuiltinId::Nextind, Prevind, Thisind, Reverseind removed - now Pure Julia (base/strings/basic.jl)
             // BuiltinId::Bytes2Hex, Hex2Bytes removed - now Pure Julia (base/strings/util.jl)
-            BuiltinId::UnescapeString => {
-                // unescape_string(s) - unescape escape sequences in string
-                let s = self.stack.pop_str()?;
-                let mut result = String::with_capacity(s.len());
-                let mut chars = s.chars().peekable();
-
-                while let Some(c) = chars.next() {
-                    if c == '\\' {
-                        if let Some(&next) = chars.peek() {
-                            chars.next();
-                            match next {
-                                'n' => result.push('\n'),
-                                't' => result.push('\t'),
-                                'r' => result.push('\r'),
-                                '\\' => result.push('\\'),
-                                '"' => result.push('"'),
-                                '\'' => result.push('\''),
-                                '0' => result.push('\0'),
-                                'a' => result.push('\x07'), // bell
-                                'b' => result.push('\x08'), // backspace
-                                'f' => result.push('\x0C'), // form feed
-                                'v' => result.push('\x0B'), // vertical tab
-                                'e' => result.push('\x1B'), // escape
-                                'x' => {
-                                    // \xNN - hex escape (2 digits)
-                                    let mut hex = String::new();
-                                    for _ in 0..2 {
-                                        if let Some(&c) = chars.peek() {
-                                            if c.is_ascii_hexdigit() {
-                                                hex.push(c);
-                                                chars.next();
-                                            } else {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if let Ok(n) = u8::from_str_radix(&hex, 16) {
-                                        result.push(n as char);
-                                    } else {
-                                        result.push('\\');
-                                        result.push('x');
-                                        result.push_str(&hex);
-                                    }
-                                }
-                                'u' => {
-                                    // \uNNNN - unicode escape (4 digits)
-                                    let mut hex = String::new();
-                                    for _ in 0..4 {
-                                        if let Some(&c) = chars.peek() {
-                                            if c.is_ascii_hexdigit() {
-                                                hex.push(c);
-                                                chars.next();
-                                            } else {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if let Ok(n) = u32::from_str_radix(&hex, 16) {
-                                        if let Some(c) = char::from_u32(n) {
-                                            result.push(c);
-                                        } else {
-                                            result.push('\\');
-                                            result.push('u');
-                                            result.push_str(&hex);
-                                        }
-                                    } else {
-                                        result.push('\\');
-                                        result.push('u');
-                                        result.push_str(&hex);
-                                    }
-                                }
-                                _ => {
-                                    // Unknown escape, keep as-is
-                                    result.push('\\');
-                                    result.push(next);
-                                }
-                            }
-                        } else {
-                            result.push('\\');
-                        }
-                    } else {
-                        result.push(c);
-                    }
-                }
-                self.stack.push(Value::Str(result));
-            }
-
-            BuiltinId::Isnumeric => {
-                // isnumeric(c) - check if character is numeric (Unicode)
+            // UnescapeString removed - now Pure Julia (base/strings/util.jl, Issue #6724)
+            // BuiltinId::Isnumeric removed - now Pure Julia (base/strings/unicode.jl,
+            // Issue #6752). `isnumeric(c::Char)` binary-searches an embedded
+            // Nd/Nl/No codepoint range table (generated from upstream utf8proc),
+            // correct for non-ASCII numerics. Routed DispatchFirst to the method
+            // table; the compiler no longer intercepts the name.
+            BuiltinId::SubStringRetag => {
+                // _substring_retag(v) — retag a Vector{String} as
+                // Vector{SubString{String}} for display (Issue #3574).
+                // The VM has no separate substring runtime type, so this only
+                // changes the array's `element_type_override`. The same
+                // `Rc<RefCell<ArrayValue>>` is pushed back so callers see the
+                // mutation; this matches `split`'s "build then return" usage
+                // where the caller uses the return value directly.
                 let val = self.stack.pop_value()?;
-                let result = match val {
-                    Value::Char(c) => c.is_numeric(),
-                    Value::Str(s) => {
-                        let mut iter = s.chars();
-                        match (iter.next(), iter.next()) {
-                            (Some(c), None) => c.is_numeric(),
-                            _ => {
-                                return Err(VmError::ErrorException(
-                                    "isnumeric: expected a single character".to_string(),
-                                ));
-                            }
-                        }
+                let retagged = if let Some(arr) = native_array_ref_from_value(&val).cloned() {
+                    {
+                        let mut borrow = arr.borrow_mut();
+                        borrow.element_type_override =
+                            Some(super::value::ArrayElementType::SubString);
                     }
-                    _ => {
-                        return Err(VmError::ErrorException(
-                            "isnumeric: expected Char".to_string(),
-                        ));
-                    }
+                    array_value(arr)
+                } else if let Some(mut arr) =
+                    array_wrapper_value_to_array_value(&val, &self.struct_heap)?
+                {
+                    arr.element_type_override = Some(super::value::ArrayElementType::SubString);
+                    self.array_wrapper_value(arr)?
+                } else {
+                    // AUDIT(#4766): error-message path (non-Vector rejected),
+                    // not a display sink.
+                    return Err(VmError::TypeError(format!(
+                        "_substring_retag: expected Vector, got {}",
+                        format_value(&val)
+                    )));
                 };
-                self.stack.push(Value::Bool(result));
+                self.stack.push(retagged);
             }
 
             BuiltinId::IsvalidIndex => {
@@ -526,84 +746,9 @@ impl<R: RngLike> Vm<R> {
             // BuiltinId::FindNextString removed - now Pure Julia in base/strings/search.jl
 
             // BuiltinId::FindPrevString removed - now Pure Julia in base/strings/search.jl
-            BuiltinId::StringFindAll => {
-                // findall(pattern, string) - find all non-overlapping occurrences (Issue #2013)
-                // Returns Vector{UnitRange{Int64}} matching Julia's behavior
-                let s = self.stack.pop_str()?;
-                let pattern = self.stack.pop_value()?;
-
-                let mut ranges = Vec::new();
-                match pattern {
-                    Value::Str(needle) => {
-                        if !needle.is_empty() {
-                            let needle_len = needle.len();
-                            let mut start = 0;
-                            while start <= s.len().saturating_sub(needle_len) {
-                                if let Some(idx) = s[start..].find(&needle) {
-                                    let match_start = start + idx;
-                                    let match_end = match_start + needle_len - 1;
-                                    // Julia uses 1-based indexing
-                                    ranges.push(Value::Range(
-                                        super::value::RangeValue::unit_range(
-                                            (match_start + 1) as f64,
-                                            (match_end + 1) as f64,
-                                        ),
-                                    ));
-                                    start = match_start + needle_len; // non-overlapping
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Value::Char(c) => {
-                        for (byte_idx, ch) in s.char_indices() {
-                            if ch == c {
-                                let pos = byte_idx + 1; // 1-based
-                                ranges.push(Value::Range(super::value::RangeValue::unit_range(
-                                    pos as f64, pos as f64,
-                                )));
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "findall: pattern must be String or Char, got {:?}",
-                            crate::vm::util::value_type_name(&pattern)
-                        )));
-                    }
-                }
-                self.stack
-                    .push(Value::Array(new_array_ref(ArrayValue::any_vector(ranges))));
-            }
-
-            BuiltinId::StringCount => {
-                // count(pattern, string) - count non-overlapping occurrences (Issue #2009)
-                // Pattern can be String or Char
-                let s = self.stack.pop_str()?;
-                let pattern = self.stack.pop_value()?;
-
-                let count = match pattern {
-                    Value::Str(needle) => {
-                        if needle.is_empty() {
-                            // Julia: count("", s) returns length(s) + 1
-                            // (counts the empty string between each character and at boundaries)
-                            s.chars().count() + 1
-                        } else {
-                            s.matches(&needle).count()
-                        }
-                    }
-                    Value::Char(c) => s.chars().filter(|&ch| ch == c).count(),
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "count: pattern must be String or Char, got {:?}",
-                            crate::vm::util::value_type_name(&pattern)
-                        )));
-                    }
-                };
-                self.stack.push(Value::I64(count as i64));
-            }
-
+            // StringFindAll / StringCount removed - dead (findall/count on
+            // String/Char patterns are pure Julia in base/strings/search.jl,
+            // Issue #6724)
             _ => return Ok(None),
         }
         Ok(Some(()))

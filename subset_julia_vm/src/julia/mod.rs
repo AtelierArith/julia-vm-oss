@@ -7,4 +7,5 @@
 
 pub mod base;
 pub mod internal;
+pub mod packages;
 pub mod stdlib;

@@ -7,6 +7,24 @@ expected = true
 description = "promote_type(Float64, Int64) returns Float64 via Type{T} dispatch"
 
 [[tests]]
+name = "promotion_promote_type_matrix"
+file = "promote_type_matrix.jl"
+expected = true
+description = "promote_type matrix over the full numeric lattice matches upstream and is symmetric (Issue #5070)"
+
+[[tests]]
+name = "promotion_mixed_integer_promote_type_6487"
+file = "mixed_integer_promote_type_6487.jl"
+expected = true
+description = "Mixed concrete integer promote_type/promote uses upstream concrete result types instead of abstract typejoin fallback (Issue #6487)"
+
+[[tests]]
+name = "promotion_bigint_narrow_promote_6489"
+file = "bigint_narrow_promote_6489.jl"
+expected = true
+description = "BigInt constructors and promote(BigInt, narrow integer) convert primitive integer widths to BigInt (Issue #6489)"
+
+[[tests]]
 name = "promotion_promote_rule_basic"
 file = "promote_rule_basic.jl"
 expected = true
@@ -258,3 +276,33 @@ name = "promotion_promote_complex_bool"
 file = "promote_complex_bool.jl"
 expected = true
 description = "promote correctly handles Complex with Bool/Int64 (Issue #2257)"
+
+[[tests]]
+name = "promotion_promote_typejoin_5113"
+file = "promote_typejoin_5113.jl"
+expected = true
+description = "Base.promote_typejoin keeps Nothing/Missing as a small Union, else falls back to typejoin (Issue #5113)"
+
+[[tests]]
+name = "promotion_promote_op_5114"
+file = "promote_op_5114.jl"
+expected = true
+description = "Base.promote_op infers operation result type from argument types (Issue #5114)"
+
+[[tests]]
+name = "promotion_promote_type_pure_julia_6735"
+file = "promote_type_pure_julia_6735.jl"
+expected = true
+description = "promote_type's numeric promotion is driven by the registered promote_rule network (base/promotion.jl), not a hardcoded Rust priority table (Issue #6735, #6727 slice 1/4). The compile-time type_priority table in compile/promotion.rs was removed; numeric pairs resolve via the promote_rule registry with the shared inference_core::PrimitiveNumeric taxonomy as the cache-less bootstrap fallback. Covers int width/sign rules (Int8+Int16→Int16, Int8+UInt8→UInt8), Float×Float via the taxonomy, Float×Int, Bool, Complex, and Bottom/Union{} identity. Values verified vs julia 1.12. (User promote_rule coexistence is covered by promotion_user_promote_rule_coexists_6782 now that #6782 is fixed.)"
+
+[[tests]]
+name = "promotion_user_promote_rule_coexists_6782"
+file = "user_promote_rule_coexists_6782.jl"
+expected = true
+description = "Defining a user promote_rule method does not corrupt promote_type dispatch for unrelated numeric pairs (Issue #6782). A blanket base/user-boundary fence in the runtime metadata dispatcher (Vm::find_best_method_index_from_candidates) disabled the only channel that resolves where-bounded Type{T} parametric promote_rule methods (Bool/T<:Number, Complex{T}/S, Rational{T}/...) once any user promote_rule method was added, so those pairs widened to the typejoin (Integer/Number) instead of the specific rule. The fence was redundant given the per-candidate native-array wrapper guard (#6202) and the #5926 origin dominance fence already in the function body. Verified vs upstream julia."
+
+[[tests]]
+name = "promotion_bigfloat_promote_type_6781"
+file = "bigfloat_promote_type_6781.jl"
+expected = true
+description = "promote_type/promote_rule(BigFloat|BigInt, <Float>) return BigFloat (Issue #6781). A method whose parameter is a Union of concrete Type{} entries (the BigFloat/BigInt/Rational promote_rule methods, Issue #5070) is now matched at runtime (value_matches_param) and compile-time (core_match) against a type-object argument that is one of the Union members, so promote_rule no longer falls through to the generic Union{} rule and promote_type no longer widens to the typejoin (AbstractFloat/Real). Also covers user-defined Union{Type{A},Type{B}} method dispatch. Verified vs upstream julia."

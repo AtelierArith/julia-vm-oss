@@ -224,3 +224,22 @@ x + y
     let result = run_with_base_dir(main_code, temp_dir.path().to_path_buf());
     assert_eq!(result, 30.0);
 }
+
+#[test]
+fn test_eval_include_file_path_in_expression_position_7766() {
+    use subset_julia_vm::compile::compile_with_cache;
+    use subset_julia_vm::pipeline::parse_and_lower;
+    use subset_julia_vm::rng::StableRng;
+    use subset_julia_vm::vm::Vm;
+
+    let temp_dir = create_test_files(&[("included.jl", "ok = true\nok\n")]);
+    let include_path = temp_dir.path().join("included.jl");
+    let src = format!("println(include(\"{}\"))", include_path.display());
+
+    let program = parse_and_lower(&src).expect("parse and lower include expression");
+    let compiled = compile_with_cache(&program).expect("compile include expression");
+    let mut vm = Vm::new_program(compiled, StableRng::new(42));
+    vm.run().expect("run include expression");
+
+    assert_eq!(vm.get_output(), "true\n");
+}

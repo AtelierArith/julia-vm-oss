@@ -25,8 +25,34 @@ impl<R: RngLike> Vm<R> {
     pub(super) fn execute_builtin_numeric(
         &mut self,
         builtin: &BuiltinId,
-        _argc: usize,
+        argc: usize,
     ) -> Result<Option<()>, VmError> {
+        if matches!(
+            builtin,
+            BuiltinId::Bool
+                | BuiltinId::BigInt
+                | BuiltinId::BigFloat
+                | BuiltinId::Int8
+                | BuiltinId::Int16
+                | BuiltinId::Int32
+                | BuiltinId::Int64
+                | BuiltinId::Int128
+                | BuiltinId::UInt8
+                | BuiltinId::UInt16
+                | BuiltinId::UInt32
+                | BuiltinId::UInt64
+                | BuiltinId::UInt128
+                | BuiltinId::Float16
+                | BuiltinId::Float32
+                | BuiltinId::Float64
+        ) && argc != 1
+        {
+            return Err(VmError::MethodError(format!(
+                "numeric type constructor requires exactly 1 argument, got {}",
+                argc
+            )));
+        }
+
         match builtin {
             // =========================================================================
             // BigInt Operations
@@ -35,7 +61,17 @@ impl<R: RngLike> Vm<R> {
                 // BigInt(x) - convert to arbitrary precision integer
                 let val = self.stack.pop_value()?;
                 let bigint = match val {
+                    Value::Bool(n) => RustBigInt::from(if n { 1u8 } else { 0u8 }),
+                    Value::I8(n) => RustBigInt::from(n),
+                    Value::I16(n) => RustBigInt::from(n),
+                    Value::I32(n) => RustBigInt::from(n),
                     Value::I64(n) => RustBigInt::from(n),
+                    Value::I128(n) => RustBigInt::from(n),
+                    Value::U8(n) => RustBigInt::from(n),
+                    Value::U16(n) => RustBigInt::from(n),
+                    Value::U32(n) => RustBigInt::from(n),
+                    Value::U64(n) => RustBigInt::from(n),
+                    Value::U128(n) => RustBigInt::from(n),
                     Value::F64(n) => RustBigInt::from(n as i64),
                     Value::Str(s) => s.parse::<RustBigInt>().map_err(|_| {
                         VmError::TypeError(format!("Cannot parse '{}' as BigInt", s))
@@ -58,48 +94,59 @@ impl<R: RngLike> Vm<R> {
                 // BigFloat(x) - convert to arbitrary precision float
                 let val = self.stack.pop_value()?;
                 let precision = get_bigfloat_precision();
+                let parse_bigfloat_decimal = |s: &str| -> Result<RustBigFloat, VmError> {
+                    let mut consts = astro_float::Consts::new().map_err(|e| {
+                        VmError::InternalError(format!(
+                            "Failed to initialize BigFloat constants: {}",
+                            e
+                        ))
+                    })?;
+                    let bf = RustBigFloat::parse(
+                        s,
+                        astro_float::Radix::Dec,
+                        precision,
+                        BigFloatRoundingMode::ToEven,
+                        &mut consts,
+                    );
+                    if bf.is_nan() && !s.to_lowercase().contains("nan") {
+                        return Err(VmError::TypeError(format!(
+                            "Cannot parse '{}' as BigFloat",
+                            s
+                        )));
+                    }
+                    Ok(bf)
+                };
                 let bigfloat = match val {
                     Value::I64(n) => RustBigFloat::from_f64(n as f64, precision),
                     Value::F64(n) => RustBigFloat::from_f64(n, precision),
-                    Value::Str(s) => {
-                        let mut consts = astro_float::Consts::new().map_err(|e| {
-                            VmError::InternalError(format!(
-                                "Failed to initialize BigFloat constants: {}",
-                                e
-                            ))
-                        })?;
-                        let bf = RustBigFloat::parse(
-                            &s,
-                            astro_float::Radix::Dec,
-                            precision,
-                            BigFloatRoundingMode::ToEven,
-                            &mut consts,
-                        );
-                        if bf.is_nan() && !s.to_lowercase().contains("nan") {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot parse '{}' as BigFloat",
-                                s
-                            )));
-                        }
-                        bf
-                    }
+                    Value::Str(s) => parse_bigfloat_decimal(&s)?,
                     Value::BigFloat(n) => n,
                     Value::BigInt(n) => {
                         // Convert BigInt to BigFloat via string
                         let s = n.to_string();
-                        let mut consts = astro_float::Consts::new().map_err(|e| {
-                            VmError::InternalError(format!(
-                                "Failed to initialize BigFloat constants: {}",
-                                e
-                            ))
-                        })?;
-                        RustBigFloat::parse(
-                            &s,
-                            astro_float::Radix::Dec,
-                            precision,
-                            BigFloatRoundingMode::ToEven,
-                            &mut consts,
-                        )
+                        parse_bigfloat_decimal(&s)?
+                    }
+                    Value::Struct(s) => match s.irrational_decimal() {
+                        Some(decimal) => parse_bigfloat_decimal(decimal)?,
+                        None => {
+                            return Err(VmError::TypeError(format!(
+                                "Cannot convert {:?} to BigFloat",
+                                Value::Struct(s)
+                            )));
+                        }
+                    },
+                    Value::StructRef(idx) => {
+                        let decimal = self
+                            .struct_heap
+                            .get(idx)
+                            .and_then(|s| s.irrational_decimal())
+                            .ok_or_else(|| {
+                                VmError::TypeError(format!(
+                                    "Cannot convert StructRef({}) to BigFloat",
+                                    idx
+                                ))
+                            })?;
+                        parse_bigfloat_decimal(decimal)?
                     }
                     other => {
                         return Err(VmError::TypeError(format!(
@@ -227,6 +274,14 @@ impl<R: RngLike> Vm<R> {
             // =========================================================================
             // Numeric Type Constructors
             // =========================================================================
+            // Bool(x) — only 0/1 are valid; routes through the range-checked
+            // shared `convert(Bool, x)` so out-of-range values raise InexactError
+            // (Issue #7971, building on #7970).
+            BuiltinId::Bool => {
+                let val = self.stack.pop_value()?;
+                let result = crate::vm::convert::convert_value("Bool", &val)?;
+                self.stack.push(result);
+            }
             BuiltinId::Int8 => {
                 let val = self.stack.pop_value()?;
                 let result = self.convert_to_i8(&val)?;

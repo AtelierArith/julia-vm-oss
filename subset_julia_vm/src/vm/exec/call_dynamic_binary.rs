@@ -9,11 +9,14 @@
 #![deny(clippy::expect_used)]
 
 use super::super::*;
-use super::call_dynamic::CallDynamicResult;
 #[cfg(debug_assertions)]
 use super::call_dynamic::dispatch_debug_log;
 use super::util::{
-    bind_value_to_slot, extract_base_type, is_rust_dict_parametric_mismatch, score_type_match,
+    bind_value_to_slot, is_rust_dict_parametric_mismatch, is_struct_dict_bare_mismatch,
+};
+use super::DispatchAction;
+use crate::inference_core::dispatch_resolver::{
+    resolve_runtime_core_signature_candidates, RuntimeCoreCandidate,
 };
 use crate::rng::RngLike;
 
@@ -41,7 +44,11 @@ pub(super) fn try_string_char_concat(left: &Value, right: &Value) -> Option<Valu
 }
 
 /// Helper for Char on the left side.
-pub(super) fn try_string_char_concat_with_char(c: char, right: &Value, _left_is_char: bool) -> Option<Value> {
+pub(super) fn try_string_char_concat_with_char(
+    c: char,
+    right: &Value,
+    _left_is_char: bool,
+) -> Option<Value> {
     match right {
         Value::Str(r) => {
             let mut result = String::with_capacity(r.len() + c.len_utf8());
@@ -62,12 +69,12 @@ pub(super) fn try_string_char_concat_with_char(c: char, right: &Value, _left_is_
 impl<R: RngLike> Vm<R> {
     /// Execute binary operator dynamic dispatch instructions.
     ///
-    /// Returns `CallDynamicResult::NotHandled` if the instruction is not a binary dispatch operation.
+    /// Returns an `unhandled` error if the instruction is not a binary dispatch operation.
     #[inline]
     pub(super) fn execute_call_dynamic_binary(
         &mut self,
         instr: &Instr,
-    ) -> Result<CallDynamicResult, VmError> {
+    ) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::CallDynamicBinary(_fallback_func_index, check_position, ref candidates) => {
                 // Runtime method dispatch for binary operators with one Any-typed operand.
@@ -75,30 +82,19 @@ impl<R: RngLike> Vm<R> {
                 let right = self.stack.pop_value()?;
                 let left = self.stack.pop_value()?;
 
-                // Check the type of the argument at check_position
-                let checked_arg = if *check_position == 0 { &left } else { &right };
-                let arg_type_name = self.get_type_name(checked_arg);
-
-                #[cfg(debug_assertions)]
-                if dispatch_debug_enabled() {
-                    let left_type = self.get_type_name(&left);
-                    let right_type = self.get_type_name(&right);
-                    dispatch_debug_log(format_args!(
-                        "[DISPATCH] Binary: ({}, {}) check_pos={}, candidates={}",
-                        left_type,
-                        right_type,
-                        check_position,
-                        candidates.len()
-                    ));
+                if let Some(result) =
+                    super::binary_both::try_matrix_diagonal_mul(self, &left, &right)?
+                {
+                    self.stack.push(result);
+                    return Ok(DispatchAction::Continue);
                 }
 
-                // Check dispatch cache first (Issue #2943, #3355)
+                // Check the type of the argument at check_position
+                let checked_arg = if *check_position == 0 { &left } else { &right };
                 let call_site_ip = self.ip - 1;
-                let type_hash = hash_type_name(&arg_type_name);
-                let selected_func_index = if let Some(&cached) = self
-                    .dispatch_cache
-                    .get(&call_site_ip)
-                    .and_then(|m| m.get(&type_hash))
+                let arg_fingerprint = self.call_site_arg_fingerprint(checked_arg);
+                let selected_func_index = if let Some(cached) = arg_fingerprint
+                    .and_then(|fp| self.lookup_call_site_inline_cache(call_site_ip, fp))
                 {
                     if cached == usize::MAX {
                         None
@@ -106,45 +102,99 @@ impl<R: RngLike> Vm<R> {
                         Some(cached)
                     }
                 } else {
-                    // Find best matching candidate using scored dispatch (Issue #2511, #2517).
-                    // Uses shared score_type_match() for consistent scoring across all handlers.
-                    let arg_base = extract_base_type(&arg_type_name);
-                    let mut best: Option<(usize, u32)> = None;
-                    for (idx, expected_type) in candidates.iter() {
-                        // Value::Dict (Rust-backed) must not match parametric Dict{K,V}
-                        // Pure Julia methods that expect StructRef (Issue #2748).
-                        if is_rust_dict_parametric_mismatch(checked_arg, expected_type) {
-                            continue;
-                        }
-                        let mut score =
-                            score_type_match(expected_type, &arg_type_name, arg_base);
-                        if score == 0 && self.check_subtype(&arg_type_name, expected_type) {
-                            score = 1;
-                        }
-                        if score > 0 && best.is_none_or(|(_, best_score)| score > best_score) {
-                            best = Some((*idx, score));
-                        }
+                    let arg_type_name = self.get_type_name(checked_arg);
+
+                    #[cfg(debug_assertions)]
+                    if dispatch_debug_enabled() {
+                        let left_type = self.get_type_name(&left);
+                        let right_type = self.get_type_name(&right);
+                        dispatch_debug_log(format_args!(
+                            "[DISPATCH] Binary: ({}, {}) check_pos={}, candidates={}",
+                            left_type,
+                            right_type,
+                            check_position,
+                            candidates.len()
+                        ));
                     }
-                    let result = best.map(|(idx, _)| idx);
-                    // Store in cache using hashed key (Issue #3355)
-                    let cache_val = result.unwrap_or(usize::MAX);
-                    self.dispatch_cache
-                        .entry(call_site_ip)
-                        .or_default()
-                        .insert(type_hash, cache_val);
-                    result
+
+                    // Check dispatch cache first (Issue #2943, #3355)
+                    let type_hash = hash_type_name(&arg_type_name);
+                    if let Some(cached) =
+                        self.lookup_call_site_dispatch_cache(call_site_ip, type_hash)
+                    {
+                        self.store_call_site_inline_cache(call_site_ip, arg_fingerprint, cached);
+                        if cached == usize::MAX {
+                            None
+                        } else {
+                            Some(cached)
+                        }
+                    } else {
+                        // Issue #6496: the payload carries only candidate function
+                        // indices; the expected signature at `check_position` is
+                        // derived from each candidate's memoized signature.
+                        // Issue #6502 slice 2: matching runs on the structured
+                        // `core_signature` slot projection. Only one position is
+                        // checked here, so the cross-slot `core_signature` gate
+                        // does not apply (`signature: None`).
+                        self.ensure_binary_candidate_signatures(candidates);
+                        // Find best matching candidate using the shared runtime
+                        // resolver (Issue #3910). VM representation filters stay local.
+                        let actual_core_ty = self.dispatch_julia_type_for_value(checked_arg);
+                        let actual_cores = [crate::vm::dispatch_binding::runtime_actual_core_type(
+                            &actual_core_ty,
+                        )];
+                        let result = resolve_runtime_core_signature_candidates(
+                            &self.struct_hierarchy,
+                            candidates.iter().filter_map(|&func_index| {
+                                let sig = self.binary_candidate_core_signature(func_index)?;
+                                let slot = if *check_position == 0 { 0 } else { 1 };
+                                let expected_type = sig.rendered[slot].as_str();
+                                // Value::Dict (Rust-backed) must not match parametric Dict{K,V}
+                                // Pure Julia methods that expect StructRef (Issue #2748).
+                                if is_rust_dict_parametric_mismatch(checked_arg, expected_type)
+                                    || is_struct_dict_bare_mismatch(
+                                        checked_arg,
+                                        expected_type,
+                                        &self.struct_heap,
+                                    )
+                                {
+                                    return None;
+                                }
+                                Some(RuntimeCoreCandidate {
+                                    idx: func_index,
+                                    slots: [&sig.slots[slot]],
+                                    signature: None,
+                                })
+                            }),
+                            &actual_cores,
+                            |actual, expected| self.check_subtype_core(actual, expected),
+                        )
+                        .map(|(idx, _score)| idx);
+                        // Store in cache using hashed key (Issue #3355)
+                        let cache_val = result.unwrap_or(usize::MAX);
+                        self.store_call_site_dispatch_cache(call_site_ip, type_hash, cache_val);
+                        self.store_call_site_inline_cache(call_site_ip, arg_fingerprint, cache_val);
+                        result
+                    }
                 };
 
                 // If no matching candidate found, check for string concatenation fallback
                 let selected_func_index = match selected_func_index {
                     Some(idx) => idx,
                     None => {
+                        if let Some(result) =
+                            super::binary_both::try_matrix_diagonal_mul(self, &left, &right)?
+                        {
+                            self.stack.push(result);
+                            return Ok(DispatchAction::Continue);
+                        }
                         // Check for String/Char concatenation via * before raising MethodError (Issue #2127)
                         if let Some(result) = try_string_char_concat(&left, &right) {
                             self.stack.push(result);
-                            return Ok(CallDynamicResult::Handled);
+                            return Ok(DispatchAction::Continue);
                         }
                         // No matching method - raise MethodError
+                        let arg_type_name = self.get_type_name(checked_arg);
                         let other_arg = if *check_position == 0 { &right } else { &left };
                         let other_type_name = self.get_type_name(other_arg);
                         let (left_type, right_type) = if *check_position == 0 {
@@ -152,20 +202,18 @@ impl<R: RngLike> Vm<R> {
                         } else {
                             (other_type_name, arg_type_name.clone())
                         };
-                        self.raise(VmError::no_method_matching_op(
-                            &left_type, &right_type,
-                        ))?;
-                        return Ok(CallDynamicResult::Continue);
+                        self.raise(VmError::no_method_matching_op(&left_type, &right_type))?;
+                        return Ok(DispatchAction::Continue);
                     }
                 };
 
                 let func = match self.get_function_cloned_or_raise(selected_func_index)? {
                     Some(f) => f,
-                    None => return Ok(CallDynamicResult::Continue),
+                    None => return Ok(DispatchAction::Continue),
                 };
 
                 let mut frame =
-                    Frame::new_with_slots(func.local_slot_count, Some(selected_func_index));
+                    self.acquire_frame(func.local_slot_count, Some(selected_func_index));
 
                 // Bind type parameters from where clauses (Issue #2468).
                 // Only clone args when type params exist (common case: no type params).
@@ -195,9 +243,9 @@ impl<R: RngLike> Vm<R> {
                 }
 
                 self.return_ips.push(self.ip);
-                self.frames.push(frame);
+                self.try_push_call_frame(frame)?;
                 self.ip = func.entry;
-                Ok(CallDynamicResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::CallDynamicBinaryBoth(ref fallback_intrinsic, ref candidates) => {
@@ -208,7 +256,7 @@ impl<R: RngLike> Vm<R> {
                 self.execute_binary_no_fallback(candidates)
             }
 
-            _ => Ok(CallDynamicResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

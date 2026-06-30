@@ -26,7 +26,7 @@ fn collect_julia_files(dir: &PathBuf) -> Vec<PathBuf> {
     files
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_all_fixtures() {
     let fixtures = fixtures_dir();
     let files = collect_julia_files(&fixtures);
@@ -62,7 +62,7 @@ fn test_parse_all_fixtures() {
     assert!(failed.is_empty(), "Some fixtures failed to parse");
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_ternary() {
     let source = r#"
 x = 5
@@ -77,7 +77,7 @@ x > y ? 1.0 : 0.0
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_for_loop() {
     let source = r#"
 sum = 0
@@ -94,7 +94,7 @@ sum
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_function() {
     let source = r#"
 function factorial(n)
@@ -114,7 +114,7 @@ factorial(5)
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_array_operations() {
     let source = r#"
 arr = [1, 2, 3, 4, 5]
@@ -128,7 +128,7 @@ sum
     assert!(result.is_ok(), "Failed to parse array: {:?}", result.err());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_comprehension() {
     let source = r#"
 squares = [x^2 for x in 1:5]
@@ -142,7 +142,7 @@ sum(squares)
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_struct() {
     let source = r#"
 struct Point
@@ -156,7 +156,7 @@ p.x + p.y
     assert!(result.is_ok(), "Failed to parse struct: {:?}", result.err());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_try_catch() {
     let source = r#"
 try
@@ -176,7 +176,7 @@ x
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_while_loop() {
     let source = r#"
 x = 10
@@ -193,7 +193,7 @@ x
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_string_interpolation() {
     let source = r#"
 name = "World"
@@ -208,7 +208,7 @@ greeting
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_lambda() {
     let source = r#"
 f = x -> x^2
@@ -218,7 +218,7 @@ map(f, [1, 2, 3])
     assert!(result.is_ok(), "Failed to parse lambda: {:?}", result.err());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_do_syntax() {
     let source = r#"
 map([1, 2, 3]) do x
@@ -233,7 +233,7 @@ end
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_broadcast() {
     let source = r#"
 arr = [1, 2, 3]
@@ -248,7 +248,7 @@ sin.(arr)
     );
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_matrix() {
     let source = r#"
 A = [1 2; 3 4]
@@ -259,7 +259,7 @@ A * B
     assert!(result.is_ok(), "Failed to parse matrix: {:?}", result.err());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_module() {
     let source = r#"
 module MyModule
@@ -271,7 +271,7 @@ end
     assert!(result.is_ok(), "Failed to parse module: {:?}", result.err());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_macro_call() {
     let source = r#"
 @time sum(1:1000000)
@@ -281,7 +281,7 @@ fn test_parse_macro_call() {
     assert!(result.is_ok(), "Failed to parse macro: {:?}", result.err());
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_parse_show_macro() {
     let source = r#"@show 1 + 1"#;
     let result = parse(source);
@@ -296,7 +296,7 @@ fn test_parse_show_macro() {
 /// Pure Rust parser -> Lowering -> Compile -> Execute
 /// Note: This test uses compile_core_program directly, bypassing the normal pipeline.
 /// Fixed in Issue #1330: Macro-local variables are now correctly substituted.
-#[test]
+#[allow(dead_code)]
 fn test_show_macro_end_to_end() {
     use subset_julia_vm::compile::compile_core_program;
     use subset_julia_vm::lowering::Lowering;
@@ -339,6 +339,176 @@ f(x) = 2x + 1
         "Expected @show output 'f(3) = 7', got: {}",
         output
     );
+}
+
+#[test]
+fn test_inference_meta_markers_lower_to_meta_stmt_issue_4286() {
+    use subset_julia_vm::ir::core::{Expr, Stmt};
+    use subset_julia_vm::lowering::Lowering;
+    use subset_julia_vm::parser::{ParseOutcome, RustParsedSource};
+
+    let source = r#"
+function meta_marker_4286(x, y)
+    @inline
+    @nospecialize x y
+    Base.@constprop :aggressive
+    Base.@assume_effects :foldable
+    @specialize
+    x + y
+end
+
+@inline function wrapped_meta_4286(x)
+    x + 1
+end
+
+function callsite_meta_4286(x)
+    y = @inline wrapped_meta_4286(x)
+    z = @noinline wrapped_meta_4286(x)
+    y + z
+end
+"#;
+
+    let cst = parse(source).expect("Failed to parse");
+    let parse_outcome = ParseOutcome::Rust(RustParsedSource {
+        cst,
+        source: source.to_string(),
+    });
+    let mut lowering = Lowering::new(source);
+    let program = lowering.lower(parse_outcome).expect("Failed to lower");
+    let func = program
+        .functions
+        .iter()
+        .find(|func| func.name == "meta_marker_4286")
+        .expect("meta_marker_4286 should lower as a function");
+
+    let meta_names: Vec<&str> = func
+        .body
+        .stmts
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::Meta { annotation, .. } => Some(annotation.name.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        meta_names,
+        vec![
+            "inline",
+            "nospecialize",
+            "constprop",
+            "assume_effects",
+            "specialize"
+        ]
+    );
+
+    let wrapped = program
+        .functions
+        .iter()
+        .find(|func| func.name == "wrapped_meta_4286")
+        .expect("wrapped_meta_4286 should lower as a top-level function");
+    let wrapped_meta_name = wrapped.body.stmts.iter().find_map(|stmt| match stmt {
+        Stmt::Meta { annotation, .. } => Some(annotation.name.as_str()),
+        _ => None,
+    });
+    assert_eq!(wrapped_meta_name, Some("inline"));
+
+    let callsite = program
+        .functions
+        .iter()
+        .find(|func| func.name == "callsite_meta_4286")
+        .expect("callsite_meta_4286 should lower as a function");
+    let callsite_wrappers: Vec<&str> = callsite
+        .body
+        .stmts
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::Assign {
+                value: Expr::Call { function, .. },
+                ..
+            } => Some(function.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        callsite_wrappers,
+        vec!["#__sjulia_inline__", "#__sjulia_noinline__"]
+    );
+}
+
+#[test]
+fn test_nospecialize_argument_annotation_short_form_issue_5122() {
+    use subset_julia_vm::lowering::Lowering;
+    use subset_julia_vm::parser::{ParseOutcome, RustParsedSource};
+
+    // Short-form `f(@nospecialize(x)) = ...` keeps `@nospecialize`/`@specialize`
+    // as a MacrocallExpression inside the argument list; lowering must unwrap the
+    // inner parameter so it binds normally (Issue #5122).
+    let source = r#"
+f_short_5122(@nospecialize(x)) = x + 1
+g_short_5122(@nospecialize(x::Number)) = x * 2
+h_short_5122(@nospecialize(x), y::Int) = (x, y)
+k_short_5122(@specialize(x)) = x - 1
+"#;
+
+    let cst = parse(source).expect("Failed to parse");
+    let parse_outcome = ParseOutcome::Rust(RustParsedSource {
+        cst,
+        source: source.to_string(),
+    });
+    let mut lowering = Lowering::new(source);
+    let program = lowering.lower(parse_outcome).expect("Failed to lower");
+
+    let param_names = |name: &str| -> Vec<String> {
+        program
+            .functions
+            .iter()
+            .find(|func| func.name == name)
+            .unwrap_or_else(|| panic!("{} should lower as a function", name))
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect()
+    };
+
+    // The annotated parameter must survive lowering rather than being dropped.
+    assert_eq!(param_names("f_short_5122"), vec!["x".to_string()]);
+    assert_eq!(param_names("g_short_5122"), vec!["x".to_string()]);
+    assert_eq!(
+        param_names("h_short_5122"),
+        vec!["x".to_string(), "y".to_string()]
+    );
+    assert_eq!(param_names("k_short_5122"), vec!["x".to_string()]);
+
+    // The type annotation inside `@nospecialize(x::Number)` is preserved.
+    let g = program
+        .functions
+        .iter()
+        .find(|func| func.name == "g_short_5122")
+        .expect("g_short_5122 should lower as a function");
+    assert!(
+        g.params[0]
+            .type_annotation
+            .as_ref()
+            .is_some_and(|t| t.to_string().contains("Number")),
+        "g_short_5122 should retain the ::Number annotation, got {:?}",
+        g.params[0].type_annotation
+    );
+}
+
+#[test]
+fn test_nospecialize_argument_annotation_executes_issue_5122() {
+    let (output, _) = run_source(
+        r#"
+f_short_5122(@nospecialize(x)) = x + 1
+g_short_5122(@nospecialize(x::Number)) = x * 2
+println(f_short_5122(2))
+println(f_short_5122(2.5))
+println(g_short_5122(4))
+"#,
+    )
+    .expect("short-form @nospecialize argument should run");
+    assert_eq!(output, "3\n3.5\n8\n");
 }
 
 // ==================== Tests for failing web samples ====================
@@ -398,7 +568,7 @@ fn run_source(source: &str) -> Result<(String, f64), String> {
 
 // ==================== #16 Broadcast Operations ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_broadcast_dot_plus() {
     let source = r#"
 a = [1, 2, 3]
@@ -416,7 +586,7 @@ c[1]
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_broadcast_dot_times() {
     let source = r#"
 a = [1, 2, 3]
@@ -434,7 +604,7 @@ d[2]
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_broadcast_scalar() {
     let source = r#"
 a = [1, 2, 3]
@@ -451,7 +621,7 @@ e[3]
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_broadcast_power() {
     let source = r#"
 a = [1, 2, 3]
@@ -468,7 +638,7 @@ f[3]
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_broadcast_function_call() {
     let source = r#"
 squares = [1, 4, 9, 16, 25]
@@ -487,7 +657,7 @@ roots[3]
 
 // ==================== #17 Multiplication Table ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_transpose() {
     let source = r#"
 r = 1:3
@@ -503,7 +673,7 @@ length(rt)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_broadcast_outer_product() {
     let source = r#"
 table = .*((1:3)', 1:3)
@@ -521,7 +691,7 @@ table[2, 3]
 
 // ==================== #32 Do Syntax ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_do_syntax_map() {
     let source = r#"
 arr = [1.0, 2.0, 3.0]
@@ -540,7 +710,7 @@ result[2]
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_do_syntax_filter() {
     let source = r#"
 data = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -559,7 +729,7 @@ length(filtered)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_do_syntax_reduce() {
     let source = r#"
 data = [1.0, 2.0, 3.0, 4.0]
@@ -580,7 +750,7 @@ total
 
 // ==================== #33/#46 Mutable Struct ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_immutable_struct() {
     let source = r#"
 struct Point
@@ -600,7 +770,7 @@ p.x + p.y
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_mutable_struct() {
     let source = r#"
 mutable struct Counter
@@ -622,7 +792,7 @@ c.value
 
 // ==================== #38 Keyword Arguments ====================
 
-#[test]
+#[allow(dead_code)]
 fn test_range_with_keyword() {
     let source = r#"
 xs = range(0.0, 1.0; length=5)
@@ -638,7 +808,7 @@ length(xs)
     }
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_function_with_keyword() {
     let source = r#"
 function foo(x; multiplier=2)
@@ -654,4 +824,57 @@ foo(5; multiplier=3)
         }
         Err(e) => panic!("Failed: {}", e),
     }
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_parse_all_fixtures();
+    test_parse_ternary();
+    test_parse_for_loop();
+    test_parse_function();
+    test_parse_array_operations();
+    test_parse_comprehension();
+    test_parse_struct();
+    test_parse_try_catch();
+    test_parse_while_loop();
+    test_parse_string_interpolation();
+    test_parse_lambda();
+    test_parse_do_syntax();
+    test_parse_broadcast();
+    test_parse_matrix();
+    test_parse_module();
+    test_parse_macro_call();
+}
+
+#[test]
+fn chunk_001() {
+    test_parse_show_macro();
+    test_show_macro_end_to_end();
+    test_broadcast_dot_plus();
+    test_broadcast_dot_times();
+    test_broadcast_scalar();
+}
+
+#[test]
+fn chunk_002() {
+    test_broadcast_power();
+    test_broadcast_function_call();
+    test_transpose();
+    test_broadcast_outer_product();
+}
+
+#[test]
+fn chunk_003() {
+    test_do_syntax_map();
+    test_do_syntax_filter();
+    test_do_syntax_reduce();
+    test_immutable_struct();
+}
+
+#[test]
+fn chunk_004() {
+    test_mutable_struct();
+    test_range_with_keyword();
+    test_function_with_keyword();
 }

@@ -19,11 +19,7 @@ pub struct SpannedToken<'a> {
 
 impl<'a> SpannedToken<'a> {
     pub fn new(token: Token, span: Span, text: &'a str) -> Self {
-        Self {
-            token,
-            span,
-            text,
-        }
+        Self { token, span, text }
     }
 }
 
@@ -148,6 +144,24 @@ impl<'a> Lexer<'a> {
                         Some(Err(e))
                     }
                 }
+            }
+
+            Ok(Token::Identifier)
+                if end > start + 1
+                    && self.source.as_bytes()[end - 1] == b'!'
+                    && self.source.as_bytes().get(end) == Some(&b'=') =>
+            {
+                // The greedy identifier regex folded the `!` of a following `!=`
+                // / `!==` into the name (e.g. `a!=b` lexed as `a!`). Give the `!`
+                // back so it lexes as the operator: emit the name without the
+                // trailing `!` and rewind the lexer to that `!` (Issue #8194).
+                // `push!(x)` / `in!(...)` / `f! = 3` are unaffected because the
+                // char after their `!` is not `=`.
+                let name_end = end - 1;
+                let span = self.make_span(start, name_end);
+                let text = &self.source[start..name_end];
+                self.restart_from(name_end);
+                Some(Ok(SpannedToken::new(Token::Identifier, span, text)))
             }
 
             Ok(token) => {

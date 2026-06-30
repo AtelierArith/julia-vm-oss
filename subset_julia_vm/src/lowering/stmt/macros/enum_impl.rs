@@ -88,45 +88,12 @@ pub(super) fn lower_enum_macro_with_ctx<'a>(
                 next_value = value + 1;
                 (name, value)
             }
-            NodeKind::Assignment => {
-                // member=value
-                let children: Vec<Node<'a>> = walker.named_children(arg);
-                if children.len() >= 2 {
-                    let name = walker.text(&children[0]).to_string();
-                    let value_text = walker.text(&children[1]);
-                    let value: i64 = value_text.parse().map_err(|_| {
-                        UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, arg_span)
-                            .with_hint(format!(
-                                "@enum member value must be an integer: {}",
-                                value_text
-                            ))
-                    })?;
-                    next_value = value + 1;
-                    (name, value)
-                } else {
-                    return Err(UnsupportedFeature::new(
-                        UnsupportedFeatureKind::MacroCall,
-                        arg_span,
-                    )
-                    .with_hint("@enum member assignment must be name=value"));
-                }
-            }
-            NodeKind::BinaryExpression => {
-                // Could be member = value as binary expression
-                let children: Vec<Node<'a>> = walker.named_children(arg);
-                if children.len() >= 2 {
-                    let name = walker.text(&children[0]).to_string();
-                    let value_text = walker.text(&children[1]);
-                    let value: i64 = value_text.parse().map_err(|_| {
-                        UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, arg_span)
-                            .with_hint(format!(
-                                "@enum member value must be an integer: {}",
-                                value_text
-                            ))
-                    })?;
-                    next_value = value + 1;
-                    (name, value)
-                } else {
+            NodeKind::Assignment | NodeKind::BinaryExpression => {
+                // member=value. The CST exposes the `=` operator as a *named*
+                // child for assignment nodes, so `named_children` yields
+                // `[name, =, value]`; locate the LHS/RHS by scanning for the
+                // operator rather than indexing positionally (Issue #5139).
+                let Some((name_node, value_node)) = enum_member_lhs_rhs(walker, arg) else {
                     return Err(UnsupportedFeature::new(
                         UnsupportedFeatureKind::MacroCall,
                         arg_span,
@@ -135,7 +102,16 @@ pub(super) fn lower_enum_macro_with_ctx<'a>(
                         "@enum argument {} must be a member name or name=value",
                         idx
                     )));
-                }
+                };
+                let name = walker.text(&name_node).to_string();
+                let value_text = walker.text(&value_node);
+                let value: i64 = value_text.trim().parse().map_err(|_| {
+                    UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, arg_span).with_hint(
+                        format!("@enum member value must be an integer: {}", value_text),
+                    )
+                })?;
+                next_value = value + 1;
+                (name, value)
             }
             _ => {
                 return Err(
@@ -169,4 +145,33 @@ pub(super) fn lower_enum_macro_with_ctx<'a>(
     };
 
     Ok(Stmt::EnumDef { enum_def, span })
+}
+
+/// Extract the `(name, value)` operand nodes from a `member = value` enum
+/// member argument.
+///
+/// Mirrors the assignment-splitting logic used elsewhere in lowering: scan the
+/// full (named + anonymous) children for the `=` operator and return the
+/// surrounding nodes. This is robust to the grammar exposing the `=` token as a
+/// named child, which previously caused positional indexing to read the
+/// operator itself as the member value (Issue #5139).
+fn enum_member_lhs_rhs<'a>(
+    walker: &CstWalker<'a>,
+    node: &Node<'a>,
+) -> Option<(Node<'a>, Node<'a>)> {
+    let all_children = walker.children(node);
+    for (i, child) in all_children.iter().enumerate() {
+        if walker.text(child) == "=" && i > 0 && i + 1 < all_children.len() {
+            return Some((all_children[i - 1], all_children[i + 1]));
+        }
+    }
+
+    // Fallback for grammars that omit the operator node: take the first and
+    // last named children as `name` and `value`.
+    let named = walker.named_children(node);
+    if named.len() >= 2 {
+        Some((named[0], named[named.len() - 1]))
+    } else {
+        None
+    }
 }

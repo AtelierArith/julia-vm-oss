@@ -15,18 +15,21 @@ end
 
 
 
-    # Get the method for Int64 signature
+    # Get the method for Int64 signature.
+    # Method.nargs includes the function object and is Int32 (Issue #4989),
+    # so a one-explicit-argument method reports nargs == 2.
     m1 = which(bar, Tuple{Int64})
     check1 = m1.name == :bar
-    check2 = m1.nargs == 1
+    check2 = m1.nargs == 2
+    check2b = m1.nargs isa Int32
 
     # Get the method for Float64 signature
     m2 = which(bar, Tuple{Float64})
     check3 = m2.name == :bar
-    check4 = m2.nargs == 1
+    check4 = m2.nargs == 2
 
     # Return final result
-    @test (check1 && check2 && check3 && check4)
+    @test (check1 && check2 && check2b && check3 && check4)
 end
 
 true  # Test passed

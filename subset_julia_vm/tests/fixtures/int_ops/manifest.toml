@@ -17,3 +17,9 @@ name = "int_ops_narrow_int_locals"
 file = "narrow_int_locals.jl"
 expected = true
 description = "Narrow integer types (I8/I16/I32/U8/U16/U32/U64) preserve type through local vars and params (Issue #3255)"
+
+[[tests]]
+name = "int_ops_mixed_type_bitwise_8221"
+file = "mixed_type_bitwise_8221.jl"
+expected = true
+description = "Mixed-type integer bitwise &/|/⊻ promote operands to a common type (0x05 & 5 === 5) per upstream base/promotion.jl, while same-type calls keep their concrete type (exact methods win). Uses direct intrinsic on promoted values to avoid the #5966 BigInt promote-fallback recursion (Issue #8221)"

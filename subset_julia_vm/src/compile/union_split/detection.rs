@@ -5,6 +5,7 @@
 
 use crate::compile::abstract_interp::TypeEnv;
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
+use crate::inference_core::{CorePrimitive, CoreType};
 use crate::ir::core::{BinaryOp, BuiltinOp, Expr, Function, Literal, Stmt};
 
 /// A candidate for union splitting.
@@ -40,7 +41,9 @@ impl SplitCondition {
         match self {
             SplitCondition::IsaCheck { target_type } => Some(target_type.clone()),
             SplitCondition::TypeofCheck { target_type } => Some(target_type.clone()),
-            SplitCondition::NothingCheck { .. } => Some(ConcreteType::Nothing),
+            SplitCondition::NothingCheck { .. } => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Nothing,
+            ))),
         }
     }
 }
@@ -204,32 +207,72 @@ fn extract_type_from_expr(expr: &Expr) -> Option<ConcreteType> {
     match expr {
         Expr::Var(name, _) => match name.as_str() {
             // Signed integers
-            "Int8" => Some(ConcreteType::Int8),
-            "Int16" => Some(ConcreteType::Int16),
-            "Int32" => Some(ConcreteType::Int32),
-            "Int" | "Int64" => Some(ConcreteType::Int64),
-            "Int128" => Some(ConcreteType::Int128),
-            "BigInt" => Some(ConcreteType::BigInt),
+            "Int8" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int8))),
+            "Int16" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int16,
+            ))),
+            "Int32" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int32,
+            ))),
+            "Int" if crate::types::native_int_type_name() == "Int32" => Some(ConcreteType::Core(
+                CoreType::Primitive(CorePrimitive::Int32),
+            )),
+            "Int" | "Int64" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+            "Int128" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int128,
+            ))),
+            "BigInt" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigInt,
+            ))),
 
             // Unsigned integers
-            "UInt8" => Some(ConcreteType::UInt8),
-            "UInt16" => Some(ConcreteType::UInt16),
-            "UInt32" => Some(ConcreteType::UInt32),
-            "UInt" | "UInt64" => Some(ConcreteType::UInt64),
-            "UInt128" => Some(ConcreteType::UInt128),
+            "UInt8" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt8,
+            ))),
+            "UInt16" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt16,
+            ))),
+            "UInt32" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt32,
+            ))),
+            "UInt" if crate::types::native_uint_type_name() == "UInt32" => Some(
+                ConcreteType::Core(CoreType::Primitive(CorePrimitive::UInt32)),
+            ),
+            "UInt" | "UInt64" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt64,
+            ))),
+            "UInt128" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::UInt128,
+            ))),
 
             // Floating point
-            "Float32" => Some(ConcreteType::Float32),
-            "Float" | "Float64" => Some(ConcreteType::Float64),
-            "BigFloat" => Some(ConcreteType::BigFloat),
+            "Float32" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float32,
+            ))),
+            "Float" | "Float64" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+            "BigFloat" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::BigFloat,
+            ))),
 
             // Other types
-            "Bool" => Some(ConcreteType::Bool),
-            "String" => Some(ConcreteType::String),
-            "Char" => Some(ConcreteType::Char),
-            "Nothing" => Some(ConcreteType::Nothing),
-            "Missing" => Some(ConcreteType::Missing),
-            "Symbol" => Some(ConcreteType::Symbol),
+            "Bool" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Bool))),
+            "String" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::String,
+            ))),
+            "Char" => Some(ConcreteType::Core(CoreType::Primitive(CorePrimitive::Char))),
+            "Nothing" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Nothing,
+            ))),
+            "Missing" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Missing,
+            ))),
+            "Symbol" => Some(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Symbol,
+            ))),
             _ => None,
         },
         _ => None,
@@ -256,8 +299,12 @@ mod tests {
     fn test_detect_isa_check() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Int64);
-        union_types.insert(ConcreteType::String);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         env.set("x", LatticeType::Union(union_types));
 
         // if x isa Int64
@@ -292,6 +339,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
@@ -309,8 +357,12 @@ mod tests {
     fn test_detect_nothing_check() {
         let mut env = TypeEnv::new();
         let mut union_types = BTreeSet::new();
-        union_types.insert(ConcreteType::Int64);
-        union_types.insert(ConcreteType::Nothing);
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        union_types.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Nothing,
+        )));
         env.set("x", LatticeType::Union(union_types));
 
         // if x === nothing
@@ -343,6 +395,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
@@ -359,7 +412,12 @@ mod tests {
     #[test]
     fn test_no_split_for_concrete_type() {
         let mut env = TypeEnv::new();
-        env.set("x", LatticeType::Concrete(ConcreteType::Int64));
+        env.set(
+            "x",
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
 
         // if x isa Int64 (but x is already Int64, no split needed)
         let func = Function {
@@ -388,6 +446,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 
@@ -401,13 +460,21 @@ mod tests {
     fn test_detect_multiple_candidates() {
         let mut env = TypeEnv::new();
         let mut union_types1 = BTreeSet::new();
-        union_types1.insert(ConcreteType::Int64);
-        union_types1.insert(ConcreteType::String);
+        union_types1.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        union_types1.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::String,
+        )));
         env.set("x", LatticeType::Union(union_types1));
 
         let mut union_types2 = BTreeSet::new();
-        union_types2.insert(ConcreteType::Float64);
-        union_types2.insert(ConcreteType::Nothing);
+        union_types2.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
+        union_types2.insert(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Nothing,
+        )));
         env.set("y", LatticeType::Union(union_types2));
 
         // if x isa Int64
@@ -457,6 +524,7 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
             span: dummy_span(),
         };
 

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::rng::RngInstance;
 use crate::vm::{
-    ArrayRef, ComposedFunctionValue, DictValue, ExprValue, FunctionValue, LineNumberNodeValue,
-    NamedTupleValue, RangeValue, SymbolValue, TupleValue, TypedArrayRef, Value,
+    ComposedFunctionValue, ExprValue, FunctionValue, LineNumberNodeValue, NamedTupleValue,
+    RangeValue, SymbolValue, TupleValue, Value,
 };
 
 /// Persistent storage for REPL globals.
@@ -14,22 +14,14 @@ pub struct REPLGlobals {
     pub i64_vars: HashMap<String, i64>,
     /// Float variables
     pub f64_vars: HashMap<String, f64>,
-    /// Complex variables (re, im)
-    pub complex_vars: HashMap<String, (f64, f64)>,
     /// String variables
     pub str_vars: HashMap<String, String>,
-    /// Array variables (legacy ArrayValue)
-    pub array_vars: HashMap<String, ArrayRef>,
-    /// TypedArray variables (new element-typed arrays)
-    pub typed_array_vars: HashMap<String, TypedArrayRef>,
     /// Range variables
     pub range_vars: HashMap<String, RangeValue>,
     /// Tuple variables
     pub tuple_vars: HashMap<String, TupleValue>,
     /// Named tuple variables
     pub named_tuple_vars: HashMap<String, NamedTupleValue>,
-    /// Dict variables
-    pub dict_vars: HashMap<String, Box<DictValue>>,
     /// RNG variables
     pub rng_vars: HashMap<String, RngInstance>,
     /// StructRef variables (heap indices)
@@ -57,11 +49,11 @@ pub struct REPLGlobals {
     /// `repl/converters.rs` for the completeness contract (Issue #3298).
     ///
     /// Currently injectable via `value_to_literal()`:
-    ///   Bool, I8–I128, U8–U128, F16 (preserved as Float16, Issue #3309), F32, Char, Regex, Enum
-    /// Injected via `callable_value_to_expr()` (not `value_to_literal()`):
-    ///   Closure
+    ///   Array, Bool, I8–I128, U8–U128, F16 (preserved as Float16, Issue #3309), F32, Char, Regex, Enum
+    /// Injected via specialized REPL reconstruction (not `value_to_literal()`):
+    ///   Closure, Memory
     /// NOT yet injectable (no Literal representation):
-    ///   GlobalRef, Pairs, Set, RegexMatch, Memory (Issue #3301)
+    ///   GlobalRef, Pairs, Set, RegexMatch
     pub other_vars: HashMap<String, Value>,
 }
 
@@ -78,18 +70,8 @@ impl REPLGlobals {
         if let Some(&v) = self.f64_vars.get(name) {
             return Some(Value::F64(v));
         }
-        if let Some(&(re, im)) = self.complex_vars.get(name) {
-            // Use 0 as type_id for REPL session (runtime handles dispatch by struct_name)
-            return Some(Value::new_complex(0, re, im));
-        }
         if let Some(v) = self.str_vars.get(name) {
             return Some(Value::Str(v.clone()));
-        }
-        if let Some(v) = self.array_vars.get(name) {
-            return Some(Value::Array(v.clone()));
-        }
-        if let Some(v) = self.typed_array_vars.get(name) {
-            return Some(Value::Array(v.clone()));
         }
         if let Some(v) = self.range_vars.get(name) {
             return Some(Value::Range(v.clone()));
@@ -99,9 +81,6 @@ impl REPLGlobals {
         }
         if let Some(v) = self.named_tuple_vars.get(name) {
             return Some(Value::NamedTuple(v.clone()));
-        }
-        if let Some(v) = self.dict_vars.get(name) {
-            return Some(Value::Dict(v.clone()));
         }
         if let Some(v) = self.rng_vars.get(name) {
             return Some(Value::Rng(v.clone()));
@@ -128,7 +107,7 @@ impl REPLGlobals {
         if let Some(v) = self.linenumbernode_vars.get(name) {
             return Some(Value::LineNumberNode(v.clone()));
         }
-        // Catch-all: Bool, I8–I128, U8–U128, F16/F32, GlobalRef, Pairs, Set,
+        // Catch-all: Array, Bool, I8–I128, U8–U128, F16/F32, GlobalRef, Pairs, Set,
         //            Regex, RegexMatch, Enum, Memory (Issue #3254)
         if let Some(v) = self.other_vars.get(name) {
             return Some(v.clone());
@@ -141,22 +120,22 @@ impl REPLGlobals {
         // Remove from all maps first to avoid type conflicts
         self.remove(name);
 
-        // Handle Complex struct first before generic struct handling
-        if let Some((re, im)) = value.as_complex_parts() {
-            if value.is_complex() {
-                self.complex_vars.insert(name.to_string(), (re, im));
-                return;
-            }
+        // Route the legacy native-array carrier through the shared
+        // `native_array_value_ref` helper so the match below no longer holds
+        // a native-array variant in any arm (Issue #3908). The native-array
+        // case is persisted via the same `other_vars` catch-all that the
+        // multi-variant arm uses.
+        if crate::vm::value::is_native_array_value(&value) {
+            self.other_vars.insert(name.to_string(), value);
+            return;
         }
         match value {
             Value::I64(v) => { self.i64_vars.insert(name.to_string(), v); }
             Value::F64(v) => { self.f64_vars.insert(name.to_string(), v); }
             Value::Str(v) => { self.str_vars.insert(name.to_string(), v); }
-            Value::Array(v) => { self.array_vars.insert(name.to_string(), v); }
             Value::Range(v) => { self.range_vars.insert(name.to_string(), v); }
             Value::Tuple(v) => { self.tuple_vars.insert(name.to_string(), v); }
             Value::NamedTuple(v) => { self.named_tuple_vars.insert(name.to_string(), v); }
-            Value::Dict(v) => { self.dict_vars.insert(name.to_string(), v); }
             Value::Rng(v) => { self.rng_vars.insert(name.to_string(), v); }
             Value::StructRef(idx) => { self.struct_ref_vars.insert(name.to_string(), idx); }
             Value::Function(v) => { self.function_vars.insert(name.to_string(), v); }
@@ -179,9 +158,9 @@ impl REPLGlobals {
             Value::U8(_) | Value::U16(_) | Value::U32(_) | Value::U64(_) | Value::U128(_) |
             Value::F16(_) | Value::F32(_) |
             Value::Char(_) |  // Literal::Char exists; value_to_literal handles it (Issue #3293)
-            Value::GlobalRef(_) | Value::Pairs(_) | Value::Set(_) |
+            Value::GlobalRef(_) | Value::Pairs(_) | Value::RuntimeTypeVar(_) |
             Value::Regex(_) | Value::RegexMatch(_) |
-            Value::Enum { .. } | Value::Memory(_) => {
+            Value::Enum { .. } | Value::Memory(_) | Value::MemoryRef(_) => {
                 self.other_vars.insert(name.to_string(), value);
             }
             // These types are intentionally NOT stored as globals (Issue #3287, #3295):
@@ -199,6 +178,15 @@ impl REPLGlobals {
             Value::Module(_) |
             Value::BigInt(_) | Value::BigFloat(_) | Value::Undef | Value::IO(_) => {
             }
+            // The legacy native-array carrier is filtered out by the
+            // early-return above (Issue #3908). This wildcard satisfies
+            // Rust's exhaustiveness checking and provides a safe default
+            // for any future `Value` variant: persist via the catch-all
+            // `other_vars` slot, matching the multi-variant "other" arm
+            // above.
+            _ => {
+                self.other_vars.insert(name.to_string(), value);
+            }
         }
     }
 
@@ -206,14 +194,10 @@ impl REPLGlobals {
     fn remove(&mut self, name: &str) {
         self.i64_vars.remove(name);
         self.f64_vars.remove(name);
-        self.complex_vars.remove(name);
         self.str_vars.remove(name);
-        self.array_vars.remove(name);
-        self.typed_array_vars.remove(name);
         self.range_vars.remove(name);
         self.tuple_vars.remove(name);
         self.named_tuple_vars.remove(name);
-        self.dict_vars.remove(name);
         self.rng_vars.remove(name);
         self.struct_ref_vars.remove(name);
         self.function_vars.remove(name);
@@ -231,14 +215,10 @@ impl REPLGlobals {
     pub fn clear(&mut self) {
         self.i64_vars.clear();
         self.f64_vars.clear();
-        self.complex_vars.clear();
         self.str_vars.clear();
-        self.array_vars.clear();
-        self.typed_array_vars.clear();
         self.range_vars.clear();
         self.tuple_vars.clear();
         self.named_tuple_vars.clear();
-        self.dict_vars.clear();
         self.rng_vars.clear();
         self.struct_ref_vars.clear();
         self.function_vars.clear();
@@ -257,14 +237,10 @@ impl REPLGlobals {
         let mut names: Vec<String> = Vec::new();
         names.extend(self.i64_vars.keys().cloned());
         names.extend(self.f64_vars.keys().cloned());
-        names.extend(self.complex_vars.keys().cloned());
         names.extend(self.str_vars.keys().cloned());
-        names.extend(self.array_vars.keys().cloned());
-        names.extend(self.typed_array_vars.keys().cloned());
         names.extend(self.range_vars.keys().cloned());
         names.extend(self.tuple_vars.keys().cloned());
         names.extend(self.named_tuple_vars.keys().cloned());
-        names.extend(self.dict_vars.keys().cloned());
         names.extend(self.rng_vars.keys().cloned());
         names.extend(self.struct_ref_vars.keys().cloned());
         names.extend(self.function_vars.keys().cloned());
@@ -311,13 +287,21 @@ mod tests {
     fn test_other_vars_f32_round_trip() {
         let mut globals = REPLGlobals::new();
         globals.set("f32_val", Value::F32(1.25_f32));
-        assert!(matches!(globals.get("f32_val"), Some(Value::F32(v)) if (v - 1.25_f32).abs() < 1e-5));
+        assert!(
+            matches!(globals.get("f32_val"), Some(Value::F32(v)) if (v - 1.25_f32).abs() < 1e-5)
+        );
     }
 
     #[test]
     fn test_other_vars_enum_round_trip() {
         let mut globals = REPLGlobals::new();
-        globals.set("color", Value::Enum { type_name: "Color".to_string(), value: 1 });
+        globals.set(
+            "color",
+            Value::Enum {
+                type_name: "Color".to_string(),
+                value: 1,
+            },
+        );
         let result = globals.get("color");
         assert!(
             matches!(result, Some(Value::Enum { ref type_name, value: 1 }) if type_name == "Color"),
@@ -331,7 +315,7 @@ mod tests {
         use crate::vm::GlobalRefValue;
         let gref = GlobalRefValue {
             module: "Base".to_string(),
-            name: crate::vm::SymbolValue::new("sqrt".to_string()),
+            name: crate::vm::SymbolValue::new("sqrt"),
         };
         let mut globals = REPLGlobals::new();
         globals.set("gref", Value::GlobalRef(gref));
@@ -510,10 +494,7 @@ mod tests {
         globals.set("f64", Value::F64(1.0));
         globals.set("str", Value::Str("hi".to_string()));
         globals.set("range", Value::Range(RangeValue::unit_range(1.0, 10.0)));
-        globals.set(
-            "tuple",
-            Value::Tuple(TupleValue::new(vec![Value::I64(1)])),
-        );
+        globals.set("tuple", Value::Tuple(TupleValue::new(vec![Value::I64(1)])));
         globals.set("structref", Value::StructRef(0));
         globals.set("func", Value::Function(FunctionValue::new("f")));
         globals.set(
@@ -526,18 +507,15 @@ mod tests {
         globals.set(
             "expr",
             Value::Expr(ExprValue::new(
-                SymbolValue::new("call".to_string()),
-                vec![Value::Symbol(SymbolValue::new("x".to_string()))],
+                SymbolValue::new("call"),
+                vec![Value::Symbol(SymbolValue::new("x"))],
             )),
         );
-        globals.set("sym", Value::Symbol(SymbolValue::new("x".to_string())));
+        globals.set("sym", Value::Symbol(SymbolValue::new("x")));
         globals.set("qn", Value::QuoteNode(Box::new(Value::I64(1))));
         globals.set(
             "lnn",
-            Value::LineNumberNode(LineNumberNodeValue::new(
-                1,
-                Some("test.jl".to_string()),
-            )),
+            Value::LineNumberNode(LineNumberNodeValue::new(1, Some("test.jl".to_string()))),
         );
 
         // other_vars values (stored in catch-all)
@@ -556,7 +534,7 @@ mod tests {
         globals.set("char", Value::Char('a'));
         globals.set(
             "regex",
-            Value::Regex(RegexValue::new("test", "").expect("valid regex")),
+            Value::Regex(Box::new(RegexValue::new("test", "").expect("valid regex"))),
         );
         globals.set(
             "enum_val",
@@ -568,10 +546,7 @@ mod tests {
         globals.set("closure", Value::Closure(ClosureValue::new("f", vec![])));
         globals.set(
             "gref",
-            Value::GlobalRef(GlobalRefValue::new(
-                "M",
-                SymbolValue::new("x".to_string()),
-            )),
+            Value::GlobalRef(GlobalRefValue::new("M", SymbolValue::new("x"))),
         );
 
         // Intentionally not stored (should not appear in variable_names)
@@ -583,14 +558,8 @@ mod tests {
         assert!(globals.get("i64").is_some(), "I64 should be stored");
         assert!(globals.get("bool").is_some(), "Bool should be stored");
         assert!(globals.get("char").is_some(), "Char should be stored");
-        assert!(
-            globals.get("enum_val").is_some(),
-            "Enum should be stored"
-        );
-        assert!(
-            globals.get("closure").is_some(),
-            "Closure should be stored"
-        );
+        assert!(globals.get("enum_val").is_some(), "Enum should be stored");
+        assert!(globals.get("closure").is_some(), "Closure should be stored");
         assert!(globals.get("gref").is_some(), "GlobalRef should be stored");
 
         // Verify intentionally not stored
@@ -602,10 +571,7 @@ mod tests {
             globals.get("missing").is_none(),
             "Missing should NOT be stored"
         );
-        assert!(
-            globals.get("undef").is_none(),
-            "Undef should NOT be stored"
-        );
+        assert!(globals.get("undef").is_none(), "Undef should NOT be stored");
     }
 
     // Issue #3299: Regex persistence
@@ -614,7 +580,7 @@ mod tests {
         use crate::vm::value::RegexValue;
         let rv = RegexValue::new("hello", "").unwrap();
         let mut globals = REPLGlobals::new();
-        globals.set("re", Value::Regex(rv));
+        globals.set("re", Value::Regex(Box::new(rv)));
         assert!(
             matches!(globals.get("re"), Some(Value::Regex(_))),
             "Expected Regex, got {:?}",
@@ -634,6 +600,13 @@ pub struct REPLResult {
     pub output: String,
     /// Error message (if failed)
     pub error: Option<String>,
+    /// Optional display artifact (e.g., SVG plot image)
+    pub display_artifact: Option<crate::plotting::DisplayArtifact>,
+    /// Pre-rendered display string for `value`, produced by the value's
+    /// user-defined `show` method at eval time. When `Some`, REPL/FFI echo
+    /// prefers it over the default struct-field formatter so the result matches
+    /// `string(x)` (Issue #7168). `None` for values without a user `show`.
+    pub value_display: Option<String>,
 }
 
 impl REPLResult {
@@ -647,6 +620,8 @@ impl REPLResult {
             value,
             output,
             error: None,
+            display_artifact: None,
+            value_display: None,
         }
     }
 
@@ -656,6 +631,8 @@ impl REPLResult {
             value: None,
             output,
             error: Some(message),
+            display_artifact: None,
+            value_display: None,
         }
     }
 }

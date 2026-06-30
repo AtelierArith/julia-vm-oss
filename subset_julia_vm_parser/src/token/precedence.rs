@@ -139,9 +139,11 @@ impl Token {
             // Pair
             Token::FatArrow => (Pair, Right),
 
+            // Arrow function
+            Token::Arrow => (Afunc, Right),
+
             // Arrow operators
-            Token::Arrow
-            | Token::LeftArrow
+            Token::LeftArrow
             | Token::RightArrow
             | Token::LeftRightArrow
             | Token::LeftArrow2

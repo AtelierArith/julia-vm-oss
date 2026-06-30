@@ -3,27 +3,13 @@
 # =============================================================================
 # Based on Julia's base/task.jl
 #
-# This implements a simplified cooperative multitasking model suitable for
+# This implements a cooperative multitasking model suitable for
 # single-threaded execution (e.g., iOS without JIT).
-#
-# Note: SubsetJuliaVM runs on a single thread, so this implements a
-# cooperative multitasking model where tasks yield control explicitly.
 
 # =============================================================================
 # Task State Constants
 # =============================================================================
 
-"""
-    TaskState
-
-Enumeration of possible task states.
-Note: These const values are defined for documentation but cannot be accessed
-from function bodies due to SubsetJuliaVM limitations (Issue #1443).
-Functions use literal values (0, 1, 2) instead.
-- 0 = runnable
-- 1 = done
-- 2 = failed
-"""
 const task_state_runnable = Int64(0)
 const task_state_done     = Int64(1)
 const task_state_failed   = Int64(2)
@@ -38,15 +24,15 @@ const task_state_failed   = Int64(2)
 A Task represents a unit of work that can be scheduled and executed.
 
 In SubsetJuliaVM's cooperative multitasking model, tasks are executed
-sequentially - there is no true parallelism. Tasks yield control explicitly
-and are resumed when scheduled.
+sequentially. The cooperative model has no true concurrency.
 
 # Fields
 - `func`: The function to execute
-- `state`: Current state (runnable, done, or failed)
+- `state`: Current state (0=runnable, 1=done, 2=failed)
 - `result`: The return value or exception
 - `_isexception`: Whether result is an exception
 - `started`: Whether the task has been started
+- `storage`: Task-local storage (Dict or nothing)
 
 # Examples
 ```julia
@@ -61,10 +47,10 @@ mutable struct Task
     result
     _isexception::Bool
     started::Bool
+    storage::Any
 
     function Task(f::Function)
-        # Use literal 0 (runnable) instead of task_state_runnable due to VM limitation
-        new(f, 0, nothing, false, false)
+        new(f, 0, nothing, false, false, nothing)
     end
 end
 
@@ -76,30 +62,13 @@ end
     istaskdone(t::Task) -> Bool
 
 Determine whether a task has exited (completed or failed).
-
-# Examples
-```julia
-t = Task(() -> 1 + 1)
-istaskdone(t)  # false
-schedule(t)
-istaskdone(t)  # true
-```
 """
-# Use literal 0 (runnable) instead of task_state_runnable due to VM limitation
 istaskdone(t::Task) = t.state !== 0
 
 """
     istaskstarted(t::Task) -> Bool
 
 Determine whether a task has started executing.
-
-# Examples
-```julia
-t = Task(() -> 1 + 1)
-istaskstarted(t)  # false
-schedule(t)
-istaskstarted(t)  # true
-```
 """
 istaskstarted(t::Task) = t.started
 
@@ -107,15 +76,7 @@ istaskstarted(t::Task) = t.started
     istaskfailed(t::Task) -> Bool
 
 Determine whether a task has exited because an exception was thrown.
-
-# Examples
-```julia
-t = Task(() -> error("oops"))
-schedule(t)
-istaskfailed(t)  # true
-```
 """
-# Use literal 2 (failed) instead of task_state_failed due to VM limitation
 istaskfailed(t::Task) = t.state === 2
 
 # =============================================================================
@@ -123,23 +84,37 @@ istaskfailed(t::Task) = t.state === 2
 # =============================================================================
 
 """
+    _close_bound_channels(t)
+
+Internal: close all channels bound to `t` via `bind(c, t)`.
+Called automatically by `schedule` after the task finishes.
+"""
+function _close_bound_channels(t)
+    if t.storage === nothing
+        return nothing
+    end
+    channels = get(t.storage, :__bound_channels__, nothing)
+    if channels === nothing
+        return nothing
+    end
+    for c in channels
+        if isopen(c)
+            if istaskfailed(t)
+                close(c, TaskFailedException(t))
+            else
+                close(c)
+            end
+        end
+    end
+    return nothing
+end
+
+"""
     schedule(t::Task)
 
-Add a task to the scheduler's queue, or run it immediately in
-SubsetJuliaVM's cooperative model.
-
-In SubsetJuliaVM, this immediately executes the task since there is no
-true task scheduler.
-
-# Examples
-```julia
-t = Task(() -> println("Hello"))
-schedule(t)  # Prints "Hello"
-```
+Execute a task immediately in SubsetJuliaVM's cooperative model.
 """
 function schedule(t::Task)
-    # Use literal values instead of task_state_* due to VM limitation
-    # 0 = runnable, 1 = done, 2 = failed
     if t.state !== 0
         error("schedule: Task not runnable")
     end
@@ -147,10 +122,8 @@ function schedule(t::Task)
         error("schedule: Task already started")
     end
 
-    # Mark as started
     t.started = true
 
-    # Execute immediately (cooperative model)
     try
         t.result = t.func()
         t.state = 1  # done
@@ -160,39 +133,28 @@ function schedule(t::Task)
         t.state = 2  # failed
     end
 
+    _close_bound_channels(t)
+
     return t
 end
 
 """
     schedule(t::Task, val; error=false)
 
-Add a task to the scheduler's queue with an initial value or exception.
-
-# Arguments
-- `t`: The task to schedule
-- `val`: The value to provide to the task
-- `error`: If true, treat `val` as an exception
-
-# Examples
-```julia
-t = Task(() -> 42)
-schedule(t, nothing)
-```
+Schedule a task with an initial value or as failed.
 """
-function schedule(t::Task, val; error::Bool=false)
-    # Use literal values instead of task_state_* due to VM limitation
-    # 0 = runnable, 2 = failed
+function schedule(t::Task, val; _error::Bool=false)
     if t.state !== 0
-        Base.error("schedule: Task not runnable")
+        error("schedule: Task not runnable")
     end
 
-    if error
+    if _error
         t.result = val
         t._isexception = true
         t.state = 2  # failed
         t.started = true
+        _close_bound_channels(t)
     else
-        # For simplicity, ignore the provided value and just run the task
         schedule(t)
     end
 
@@ -206,25 +168,15 @@ end
 """
     wait(t::Task)
 
-Block the current task until the specified task `t` is complete.
-
-In SubsetJuliaVM's cooperative model, since tasks execute immediately when
-scheduled, this function simply checks if the task is done.
-
-# Examples
-```julia
-t = Task(() -> 1 + 1)
-schedule(t)
-wait(t)  # Returns immediately since task is already done
-```
+Block until task `t` is complete. Re-throws any failure as `TaskFailedException`.
 """
 function wait(t::Task)
     if !istaskdone(t)
-        error("wait: Task not done - in cooperative model, tasks must be scheduled first")
+        error("wait: Task not done - schedule the task first")
     end
 
     if istaskfailed(t)
-        throw(TaskFailedException(string(t.result)))
+        throw(TaskFailedException(t))
     end
 
     return nothing
@@ -234,14 +186,7 @@ end
     fetch(t::Task)
 
 Wait for a Task to finish, then return its result value.
-If the task fails with an exception, a `TaskFailedException` is thrown.
-
-# Examples
-```julia
-t = Task(() -> 1 + 1)
-schedule(t)
-fetch(t)  # returns 2
-```
+If the task fails, a `TaskFailedException` is thrown.
 """
 function fetch(t::Task)
     wait(t)
@@ -256,77 +201,278 @@ For non-Task values, simply return the value.
 fetch(x) = x
 
 # =============================================================================
-# Current Task (Stub)
-# =============================================================================
-
-# In SubsetJuliaVM's cooperative model, there is conceptually always a "main" task
-# We use a global to track the current task, but in practice this is rarely needed
-
-"""
-    current_task()
-
-Get a reference to the currently running Task.
-
-Note: In SubsetJuliaVM's cooperative model, this returns a placeholder
-since there is no true task switching.
-"""
-function current_task()
-    # Return a dummy task representing the main execution context
-    # This is a simplified implementation for compatibility
-    error("current_task() is not fully supported in SubsetJuliaVM's cooperative model")
-end
-
-# =============================================================================
-# Yield (Stub)
-# =============================================================================
-
-"""
-    yield()
-
-Switch to the scheduler to allow another scheduled task to run.
-
-In SubsetJuliaVM's cooperative model, this is a no-op since tasks execute
-immediately when scheduled.
-"""
-function yield()
-    # No-op in cooperative model
-    return nothing
-end
-
-"""
-    yield(t::Task)
-
-A fast, unfair-Loss version of `schedule(t); yield()` which
-immediately yields to `t` before calling the scheduler.
-
-In SubsetJuliaVM's cooperative model, this schedules and runs the task.
-"""
-function yield(t::Task)
-    schedule(t)
-    return nothing
-end
-
-# =============================================================================
 # Task Result Access
 # =============================================================================
 
 """
     task_result(t::Task)
 
-Get the result of a completed task. Throws if the task failed.
+Get the result of a completed task. Throws `TaskFailedException` if the task failed.
 """
 function task_result(t::Task)
     if t._isexception
-        throw(TaskFailedException(string(t.result)))
+        throw(TaskFailedException(t))
     end
     return t.result
 end
 
 # =============================================================================
-# @task Macro
+# Current Task
 # =============================================================================
-# Note: This macro is defined but its implementation depends on the lowering
-# layer supporting macro expansion. For now, we provide a function-based API.
 
-# The @task macro would wrap an expression in a Task:
-# @task expr -> Task(() -> expr)
+# Helper for the main task's no-op function (arrow functions not supported at module load)
+_main_task_noop() = nothing
+
+"""
+    current_task() -> Task
+
+Return the currently running Task.
+In SubsetJuliaVM's cooperative model this returns a new main task singleton each call.
+"""
+function current_task()
+    main = Task(_main_task_noop)
+    main.started = true
+    return main
+end
+
+# =============================================================================
+# Task-Local Storage
+# =============================================================================
+
+function get_task_tls(t::Task)
+    if t.storage === nothing
+        t.storage = Dict()
+    end
+    return t.storage
+end
+
+"""
+    task_local_storage() -> Dict
+
+Return the task-local storage dictionary for the current task.
+"""
+task_local_storage() = get_task_tls(current_task())
+
+"""
+    task_local_storage(key)
+
+Look up the value of `key` in the current task's task-local storage.
+"""
+task_local_storage(key) = task_local_storage()[key]
+
+"""
+    task_local_storage(key, value)
+
+Assign `value` to `key` in the current task's task-local storage.
+"""
+function task_local_storage(key, val)
+    tls = task_local_storage()
+    tls[key] = val
+    return val
+end
+
+"""
+    task_local_storage(body, key, value)
+
+Call `body` with a modified task-local storage where `key` is bound to `value`.
+The previous binding is restored afterwards.
+"""
+function task_local_storage(body::Function, key, val)
+    tls = task_local_storage()
+    hadkey = haskey(tls, key)
+    old = get(tls, key, nothing)
+    tls[key] = val
+    try
+        return body()
+    finally
+        if hadkey
+            tls[key] = old
+        else
+            delete!(tls, key)
+        end
+    end
+end
+
+# =============================================================================
+# Yield
+# =============================================================================
+
+"""
+    yield()
+
+No-op in SubsetJuliaVM's cooperative model.
+"""
+function yield()
+    return nothing
+end
+
+"""
+    yield(t::Task)
+
+Schedule `t` and yield to it. In SubsetJuliaVM runs the task immediately.
+"""
+function yield(t::Task)
+    schedule(t)
+    return nothing
+end
+
+"""
+    yieldto(t::Task, val=nothing)
+
+Yield to task `t`. In SubsetJuliaVM this is a no-op.
+"""
+function yieldto(t::Task, val=nothing)
+    return val
+end
+
+# =============================================================================
+# Wait Multiple Tasks
+# =============================================================================
+
+"""
+    waitany(tasks; throw=true) -> (done_tasks, remaining_tasks)
+
+Return tasks partitioned into done and remaining.
+Since SubsetJuliaVM tasks execute immediately on scheduling, all scheduled
+tasks are already done when this is called.
+
+If `throw` is `true`, throws `CompositeException` when any done task failed.
+"""
+function waitany(tasks; _throw::Bool=true)
+    done_tasks = Task[]
+    remaining_tasks = Task[]
+    exceptions = Any[]
+
+    for t in tasks
+        if istaskdone(t)
+            push!(done_tasks, t)
+            if istaskfailed(t)
+                push!(exceptions, TaskFailedException(t))
+            end
+        else
+            push!(remaining_tasks, t)
+        end
+    end
+
+    if _throw && !isempty(exceptions)
+        throw(CompositeException(exceptions))
+    end
+
+    return (done_tasks, remaining_tasks)
+end
+
+"""
+    waitall(tasks; failfast=true, throw=true) -> (done_tasks, remaining_tasks)
+
+Wait for all given tasks to complete.
+Since SubsetJuliaVM tasks execute immediately, this inspects tasks after scheduling.
+
+If `throw` is `true`, throws `CompositeException` on any failure.
+"""
+function waitall(tasks; failfast::Bool=true, _throw::Bool=true)
+    done_tasks = Task[]
+    remaining_tasks = Task[]
+    exceptions = Any[]
+
+    for t in tasks
+        if istaskdone(t)
+            push!(done_tasks, t)
+            if istaskfailed(t)
+                push!(exceptions, TaskFailedException(t))
+                if failfast
+                    break
+                end
+            end
+        else
+            push!(remaining_tasks, t)
+        end
+    end
+
+    if _throw && !isempty(exceptions)
+        throw(CompositeException(exceptions))
+    end
+
+    return (done_tasks, remaining_tasks)
+end
+
+# =============================================================================
+# Error Monitor
+# =============================================================================
+
+"""
+    errormonitor(t::Task) -> Task
+
+If task `t` has failed, print an error to stderr.
+"""
+function errormonitor(t::Task)
+    if istaskfailed(t)
+        println(stderr, "Unhandled Task ERROR: ", string(t.result))
+    end
+    return t
+end
+
+# =============================================================================
+# Condition (notify extension — Condition struct is defined in lock.jl)
+# =============================================================================
+# The Condition struct with `waiting::Int64` is defined in lock.jl.
+# Here we provide a no-op `wait(c::Condition)` override and an extended
+# `notify` that accepts optional value / keyword arguments.
+# Note: Condition in lock.jl does not have a task waitq, so notify is a no-op.
+
+"""
+    wait(c::Condition; first::Bool=false)
+
+No-op in SubsetJuliaVM's cooperative model (true blocking requires coroutines).
+"""
+function wait(c::Condition; first::Bool=false)
+    return nothing
+end
+
+"""
+    notify(c::Condition, val=nothing; all::Bool=true, error::Bool=false) -> Int
+
+No-op in SubsetJuliaVM (no tasks are truly waiting on a Condition).
+Returns 0.
+"""
+function notify(c::Condition, val=nothing; all::Bool=true, _error::Bool=false)
+    return 0
+end
+
+# =============================================================================
+# timedwait (Issue #3501)
+# =============================================================================
+# Based on Julia's base/asyncevent.jl. Polls `testcb()` until it returns true
+# or `timeout` seconds elapse, sleeping `pollint` seconds between polls.
+# Returns `:ok` if the predicate became true, `:timed_out` otherwise.
+#
+# In SubsetJuliaVM's single-threaded cooperative model, `sleep` blocks the
+# whole VM, so the predicate is only re-evaluated after each `sleep(pollint)`
+# returns. This matches Julia's observable behavior for purely time-driven
+# predicates (the common use case).
+
+"""
+    timedwait(testcb, timeout::Real; pollint::Real=0.1)
+
+Wait until `testcb()` returns `true` or `timeout` seconds have elapsed,
+whichever is earlier. `testcb` is polled every `pollint` seconds. The minimum
+value for `pollint` is 0.001 seconds, that is, 1 millisecond.
+
+Returns `:ok` if the test condition was met before timing out, or
+`:timed_out` otherwise.
+"""
+function timedwait(testcb, timeout::Real; pollint::Real=0.1)
+    pollint >= 1e-3 || throw(ArgumentError("pollint must be ≥ 1 millisecond"))
+    start = time_ns()
+    ns_timeout = 1.0e9 * Float64(timeout)
+    testcb() && return :ok
+    while Float64(time_ns() - start) < ns_timeout
+        sleep(pollint)
+        testcb() && return :ok
+    end
+    return :timed_out
+end
+
+# =============================================================================
+# @task, @async, @sync (lowering-implemented)
+# =============================================================================
+# Handled by the lowering layer in src/lowering/expr/macros/mod.rs

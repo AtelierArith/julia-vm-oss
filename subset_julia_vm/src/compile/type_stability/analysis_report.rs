@@ -3,7 +3,58 @@
 //! This module defines the overall analysis report containing results for all functions.
 
 use crate::compile::type_stability::report::{FunctionStabilityReport, StabilityStatus};
+#[cfg(test)]
+use crate::inference_core::{CorePrimitive, CoreType};
 use serde::{Deserialize, Serialize};
+
+/// Provenance for the inferred facts used by the type-stability report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InferenceProvenance {
+    /// Human-readable name of the inference source.
+    pub source: String,
+
+    /// Whether this report is backed by the same inferred facts used by
+    /// production code generation.
+    pub uses_production_inference: bool,
+
+    /// Compatibility notes and known limitations for consumers.
+    pub notes: Vec<String>,
+}
+
+impl InferenceProvenance {
+    /// Current report provenance for the standalone type-stability analyzer.
+    pub fn standalone_type_stability_analyzer() -> Self {
+        Self {
+            source: "standalone type-stability analyzer".to_string(),
+            uses_production_inference: false,
+            notes: vec![
+                "uses production global type collection but not full codegen inference snapshots"
+                    .to_string(),
+                "compare report return types with runtime/reflection fixtures for user-facing guarantees"
+                    .to_string(),
+            ],
+        }
+    }
+
+    /// Report provenance for facts produced by the production shared inference
+    /// engine used by code generation.
+    pub fn production_shared_inference_snapshot() -> Self {
+        Self {
+            source: "production shared inference snapshot".to_string(),
+            uses_production_inference: true,
+            notes: vec![
+                "return-type stability is classified from the shared inference engine used by code generation".to_string(),
+                "statement-level typed IR, effects, cache invalidation, and world-age metadata remain outside this report snapshot".to_string(),
+            ],
+        }
+    }
+}
+
+impl Default for InferenceProvenance {
+    fn default() -> Self {
+        Self::standalone_type_stability_analyzer()
+    }
+}
 
 /// Summary statistics for the type stability analysis.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -44,6 +95,9 @@ impl AnalysisSummary {
 /// Complete type stability analysis report for a program.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TypeStabilityAnalysisReport {
+    /// Where the inferred facts in this report came from.
+    pub inference_provenance: InferenceProvenance,
+
     /// Summary statistics.
     pub summary: AnalysisSummary,
 
@@ -55,6 +109,7 @@ impl TypeStabilityAnalysisReport {
     /// Creates a new empty analysis report.
     pub fn new() -> Self {
         Self {
+            inference_provenance: InferenceProvenance::default(),
             summary: AnalysisSummary::default(),
             functions: Vec::new(),
         }
@@ -108,7 +163,9 @@ mod tests {
             name.to_string(),
             1,
             vec![],
-            LatticeType::Concrete(ConcreteType::Int64),
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
         )
     }
 
@@ -119,9 +176,21 @@ mod tests {
     #[test]
     fn test_empty_report() {
         let report = TypeStabilityAnalysisReport::new();
+        assert_eq!(
+            report.inference_provenance.source,
+            "standalone type-stability analyzer"
+        );
+        assert!(!report.inference_provenance.uses_production_inference);
         assert_eq!(report.summary.total_functions, 0);
         assert!(report.all_stable());
         assert!(!report.has_unstable());
+    }
+
+    #[test]
+    fn test_production_snapshot_provenance() {
+        let provenance = InferenceProvenance::production_shared_inference_snapshot();
+        assert_eq!(provenance.source, "production shared inference snapshot");
+        assert!(provenance.uses_production_inference);
     }
 
     #[test]

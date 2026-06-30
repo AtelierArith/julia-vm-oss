@@ -1,6 +1,12 @@
 # Module syntax tests
 
 [[tests]]
+name = "modules_parametric_inner_ctor_using_8313"
+file = "parametric_inner_ctor_using_8313.jl"
+expected = true
+description = "A parametric struct with an inner constructor, exported and brought in via `using .M`, is callable by its bare name even when it collides with a bundled struct of the same name (Base.Order.Perm); resolution prefers the in-scope struct deterministically (Issue #8313)"
+
+[[tests]]
 name = "import_multiple"
 file = "import_multiple.jl"
 expected = true
@@ -17,3 +23,153 @@ name = "public_keyword"
 file = "public_keyword.jl"
 expected = true
 description = "Test public keyword (Julia 1.11+)"
+
+[[tests]]
+name = "import_multi_macro"
+file = "import_multi_macro.jl"
+expected = true
+description = "Multi-name macro import/export after colon (Issue #3572)"
+
+[[tests]]
+name = "modules_module_closure_hof_helper_7180"
+file = "module_closure_hof_helper_7180.jl"
+expected = true
+description = "Module-level helper resolves from a closure/function value passed to a Base HOF (Issue #7180)"
+
+[[tests]]
+name = "modules_module_nested_closure_scope_7591"
+file = "module_nested_closure_scope_7591.jl"
+expected = true
+description = "Second-level nested closures lifted from module functions keep the parent module scope for private helper lookup (Issue #7591)"
+
+[[tests]]
+name = "modules_module_deep_closure_helper_7591"
+file = "module_deep_closure_helper_7591.jl"
+expected = true
+description = "Module-private helper lookup propagates through second-level nested closures lifted from module functions (Issue #7591)"
+
+[[tests]]
+name = "modules_using_comma_multiple"
+file = "using_comma_multiple.jl"
+expected = true
+description = "Comma-separated using/import lists: `using A, B` lowers to one import per module (Issue #7262)"
+
+[[tests]]
+name = "modules_module_name_shadows_local_var_7245"
+file = "module_name_shadows_local_var_7245.jl"
+expected = true
+description = "A local var named after the enclosing module shadows it in field access (Issue #7245)"
+
+[[tests]]
+name = "modules_module_using_statistics_regression_7245"
+file = "module_using_statistics_regression_7245.jl"
+expected = true
+description = "using Statistics inside a user module stays working after the #7245 fix (Issue #7245)"
+
+[[tests]]
+name = "modules_module_qualified_type_access_7302"
+file = "module_qualified_type_access_7302.jl"
+expected = true
+description = "Qualified `Module.Type` access resolves concrete/abstract/parametric/mutable module types in isa, `::Module.T` annotation, `<:`, `===`, and `x isa Module.T` (Issue #7302)"
+
+[[tests]]
+name = "modules_include_macro_shared_7510"
+file = "include_macro_shared_7510.jl"
+expected = true
+description = "Macros defined by one include remain visible to later includes in the same module scope (Issue #7510)"
+
+[[tests]]
+name = "modules_module_macro_visible_same_body_7525"
+file = "module_macro_visible_same_body_7525.jl"
+expected = true
+description = "Macros defined inside a module are visible to later calls in the same module body (Issue #7525)"
+
+[[tests]]
+name = "modules_module_child_method_shadows_parent_7575"
+file = "module_child_method_shadows_parent_7575.jl"
+expected = true
+description = "A child module's unqualified call to its own function dispatches to the child method, not a same-named typed method in the parent; explicit cross-module imports still pool dispatch candidates (Issue #7575)"
+
+[[tests]]
+name = "modules_module_if_const_binding_7917"
+file = "module_if_const_binding_7917.jl"
+expected = true
+description = "Module top-level `if`/`elseif`/`else` const assignments create module bindings (Issue #7917): `module M; if true; const x = 1; end; end` defines `M.x`, since `if` introduces no new scope at module top level"
+
+[[tests]]
+name = "modules_const_alias_ctor_via_using_8049"
+file = "const_alias_ctor_via_using_8049.jl"
+expected = true
+description = "A `const`-bound type alias re-exported from module B (`const Foo = A.Foo; export Foo`) and brought in via `using .B` is callable as a constructor `Foo()`, not just readable as a value (Issue #8049): the call path now shares the value path's using-import/const-alias resolution"
+
+[[tests]]
+name = "modules_reexported_qualified_access_8053"
+file = "reexported_qualified_access_8053.jl"
+expected = true
+description = "Module-qualified access `Facade.T`/`Facade.g(t)` to a binding re-exported via selective `import/using Src: T, g` resolves to its source definition `Defn.T`/`Defn.g`, including chained re-exports (Issue #8053)"
+
+[[tests]]
+name = "modules_dynamic_const_alias_ctor_8058"
+file = "dynamic_const_alias_ctor_8058.jl"
+expected = true
+description = "Dynamic local-var call `t = Bar; t(7)` of a `using`-imported `const` type alias whose struct has only the default field constructor resolves to that constructor; inner-ctor and qualified-alias value calls still work (Issue #8058)"
+
+[[tests]]
+name = "modules_cross_module_method_extension_8052"
+file = "cross_module_method_extension_8052.jl"
+expected = true
+description = "Extending another module's function with a new method (`function Inner.f(x::Float64)`, short form, and the `import Inner: f; function f(...)` variant) joins the target module's table so both unqualified `f` and qualified `Inner.f` dispatch across all methods (Issue #8052)"
+
+[[tests]]
+name = "modules_inner_ctor_body_module_scope_8069"
+file = "inner_ctor_body_module_scope_8069.jl"
+expected = true
+description = "Names referenced inside an inner constructor body (module-private function call, module-private const, and module-private type as a value) resolve in the struct's DEFINING module, not the caller scope, so `M.UR(...)` works without `using .M` (Issue #8069): inner-constructor bodies are now compiled with the defining module's import/using scope like ordinary module methods"
+
+[[tests]]
+name = "modules_method_body_private_type_object_8410"
+file = "method_body_private_type_object_8410.jl"
+expected = true
+description = "Issue #8410: an ordinary module method body that returns or calls an unqualified module-private type object resolves that type in the defining module, not the caller global scope"
+
+[[tests]]
+name = "modules_dynamic_parametric_ctor_8070"
+file = "dynamic_parametric_ctor_8070.jl"
+expected = true
+description = "Dynamic local-var call `t = A.Pt; t(1.0, 2.0)` of a PARAMETRIC struct's `DataType` value (including a re-exported `const Pt = A.Pt` via `using .B`) infers the type parameters from the argument values and constructs the parametric instance, matching the static `A.Pt(1.0, 2.0)` form; 1- and 2-type-parameter structs and struct-valued fields covered (Issue #8070)"
+
+[[tests]]
+name = "modules_module_qualified_base_shadow_8079"
+file = "module_qualified_base_shadow_8079.jl"
+expected = true
+description = "A module that defines its OWN `log2`/`log10` (shadowing the Base library function) and forwards to the explicitly-qualified `Base.log2`/`Base.log10` reaches the BASE implementation instead of re-dispatching the qualified call to its own same-signature shadow (which self-recurses NaNMath.log2 → Base.log2 → NaNMath.log2 → … into a spurious StackOverflowError). Covers qualified calls, the negative-domain NaN branch, and the `ceil(Int, -log2(eps(Float64)))` expression reached deep inside a nested closure both within the module and qualified across a module boundary — the Optim BFGS line-search context (Issue #8079)"
+
+[[tests]]
+name = "modules_local_datatype_applytype_ctor_8101"
+file = "local_datatype_applytype_ctor_8101.jl"
+expected = true
+description = "Applying explicit type parameters to the runtime `DataType` value of a parametric struct held in a local variable (`t = A.Pt; t{Float64}(1.0, 2.0)`) constructs `A.Pt{Float64}`, honouring the explicit `{Float64}` and converting the arguments (Int → Float64) — the explicit-`{T}` analogue of the no-type-arg dynamic form `t(1.0, 2.0)` (Issue #8070). Previously failed at compile time with `Unknown parametric struct: t`. Covers Int-arg conversion, a non-`T` free field, the re-exported `const` alias, and typeof parity with the static form (Issue #8101)."
+
+[[tests]]
+name = "modules_using_import_as_alias_8117"
+file = "using_import_as_alias_8117.jl"
+expected = true
+description = "`import/using X: y as z` symbol renames and `import X as Y` whole-module renames now bind the alias name to the imported entity instead of being a no-op (Issue #8117). Covers selective symbol aliases via both `using .Mz: q as qq` and `import .Mw: w as ww`, a whole-module alias `import LinearAlgebra as LA` (qualified `LA.dot`), a selective stdlib alias `using LinearAlgebra: dot as ddot`, and a `Base` alias `import Base: sin as mysin` (Base renames bind to the bare global name). The original name stays unbound, matching upstream."
+
+[[tests]]
+name = "modules_qualified_call_runtime_dispatch_8158"
+file = "module_qualified_call_runtime_dispatch_8158.jl"
+expected = true
+description = "Issue #8158: a module-qualified call Module.f(x) defers to runtime multiple dispatch exactly like the unqualified f(x). When the argument is statically Any (an untyped parameter or a keyword arg with a default) and the callee has a catch-all f(::Any) method, the qualified path previously bound the catch-all statically and silently skipped a more-specific method (the SciMLBase _callbacks(::CallbackSet) mis-dispatch that disabled every callback in a CallbackSet). The shared should_runtime_dispatch policy now drives both the bare and qualified call paths. Covers single-arg and multi-arg qualified calls via positional and keyword arguments, the catch-all still winning for a non-matching value, and a precisely-typed direct call; parity-clean with upstream julia."
+
+[[tests]]
+name = "modules_same_module_const_function_alias_8254"
+file = "same_module_const_function_alias_8254.jl"
+expected = true
+description = "A same-module `const` function alias remains callable from later method bodies (`const f = isempty; g(x) = f(x)`) by loading the qualified module binding instead of an unqualified global (Issue #8254)."
+
+[[tests]]
+name = "modules_nested_module_order_binding_8269"
+file = "nested_module_order_binding_8269.jl"
+expected = true
+description = "Nested submodule bindings are available to later parent-module statements, and Base.Order direct access/import resolves ordering constants and helpers after Base preload (Issue #8269)."

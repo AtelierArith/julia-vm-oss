@@ -17,12 +17,52 @@
 //! Note: foreach(f, arr) is now Pure Julia in base/abstractarray.jl
 
 use crate::builtins::BuiltinId;
-use crate::ir::core::Expr;
+use crate::ir::core::{Expr, Stmt};
 use crate::vm::{Instr, ValueType};
 
 use super::super::{err, CResult, CoreCompiler};
 
+fn extract_static_hof_callable(expr: &Expr) -> &Expr {
+    if let Expr::LetBlock { body, .. } = expr {
+        if let Some(Stmt::Expr { expr, .. }) = body.stmts.last() {
+            if matches!(expr, Expr::FunctionRef { .. } | Expr::Var(_, _)) {
+                return expr;
+            }
+        }
+    }
+    expr
+}
+
+fn callable_ref_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::FunctionRef { name, .. } | Expr::Var(name, _) => Some(name),
+        _ => None,
+    }
+}
+
 impl CoreCompiler<'_> {
+    fn ntuple_needs_runtime_callable(&self, expr: &Expr) -> bool {
+        if matches!(expr, Expr::LetBlock { .. }) {
+            return true;
+        }
+
+        let callable = extract_static_hof_callable(expr);
+        let Some(name) = callable_ref_name(callable) else {
+            return true;
+        };
+
+        if self
+            .shared_ctx
+            .closure_captures
+            .get(name)
+            .is_some_and(|captures| !captures.is_empty())
+        {
+            return true;
+        }
+
+        matches!(callable, Expr::Var(_, _)) && self.locals.contains_key(name)
+    }
+
     /// Compile higher-order function calls.
     /// Returns Some(type) if handled, None if not a HOF.
     pub(in super::super) fn compile_builtin_hof(
@@ -38,62 +78,24 @@ impl CoreCompiler<'_> {
                 // Fall through to Pure Julia implementation
                 Ok(None)
             }
-            "findall" => {
-                // findall(f, arr) - return Int64 indices where predicate returns true
-                // findall(A) - single argument form is handled by Pure Julia (base/array.jl)
-                if args.len() == 1 {
-                    // Single argument: fallback to Pure Julia findall(A::Array{Bool})
-                    return Ok(None);
-                }
-                if args.len() != 2 {
-                    return err("findall requires 1 or 2 arguments: findall(A) or findall(f, arr)");
-                }
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::FindAllFunc(func_index));
-                // findall always returns Vector{Int64}
-                use crate::vm::value::ArrayElementType;
-                Ok(Some(ValueType::ArrayOf(ArrayElementType::I64)))
-            }
-            "findfirst" if args.len() == 2 => {
-                // findfirst(f, arr) - return first 1-based index where predicate returns true, or nothing
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::FindFirstFunc(func_index));
-                Ok(Some(ValueType::Any)) // Returns I64 or Nothing
-            }
-            "findlast" if args.len() == 2 => {
-                // findlast(f, arr) - return last 1-based index where predicate returns true, or nothing
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::FindLastFunc(func_index));
-                Ok(Some(ValueType::Any)) // Returns I64 or Nothing
-            }
-            "map!" => {
-                // map!(f, dest, src) - apply f to each element of src and store in dest
-                if args.len() != 3 {
-                    return err("map! requires exactly 3 arguments: map!(f, dest, src)");
-                }
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile dest array
-                self.compile_expr(&args[2])?; // Compile src array
-                self.emit(Instr::MapFuncInPlace(func_index));
-                Ok(Some(ValueType::Array))
-            }
-            "filter!" => {
-                // filter!(f, arr) - filter elements in-place, removing non-matching elements
-                if args.len() != 2 {
-                    return err("filter! requires exactly 2 arguments: filter!(f, arr)");
-                }
-                let func_index = self.resolve_function_ref(&args[0])?;
-                let input_type = self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::FilterFuncInPlace(func_index));
-                // filter! preserves input element type
-                match input_type {
-                    ValueType::ArrayOf(elem) => Ok(Some(ValueType::ArrayOf(elem))),
-                    _ => Ok(Some(ValueType::Array)),
-                }
-            }
+            // findall / findfirst / findlast (all forms) are now Pure Julia
+            // (Issue #3728). The HOF predicate forms `findall(f, arr)`,
+            // `findfirst(f, arr)`, and `findlast(f, arr)` resolve to
+            // base/{array,reduce}.jl methods through normal dispatch.
+            // The VM instructions `FindAllFunc`, `FindFirstFunc`,
+            // `FindLastFunc` remain in place for cache compatibility but
+            // are no longer reachable from new IR.
+            "findall" | "findfirst" | "findlast" => Ok(None),
+            // map! and filter! are now Pure Julia in base/array.jl (Issue #3731).
+            // - filter!(f, a::Array)
+            // - map!(f, a::Array)
+            // - map!(f, dest::Array, src::Array)
+            // Returning Ok(None) lets the call fall through to method dispatch
+            // so the Pure Julia methods take priority over the Rust HOF builtins
+            // (`MapFuncInPlace`, `FilterFuncInPlace`). The VM instructions are
+            // retained as cache-compatibility fallbacks but no longer reachable
+            // from new IR.
+            "map!" | "filter!" => Ok(None),
             // reduce and foldl are now implemented in Pure Julia (iteration.jl)
             "reduce" | "foldl" => {
                 // Fall through to Pure Julia implementation
@@ -104,60 +106,16 @@ impl CoreCompiler<'_> {
                 // Fall through to Pure Julia implementation
                 Ok(None)
             }
-            "mapreduce" | "mapfoldl" => {
-                // mapreduce(f, op, arr) or mapreduce(f, op, arr, init)
-                // mapfoldl is an alias for mapreduce (both are left-associative)
-                if args.len() < 3 || args.len() > 4 {
-                    return err(format!(
-                        "{} requires 3 or 4 arguments: {}(f, op, arr) or {}(f, op, arr, init)",
-                        name, name, name
-                    ));
-                }
-                let map_func_index = self.resolve_function_ref(&args[0])?;
-                // Reduce operator needs binary (2-arg) resolution (Issue #2004)
-                let reduce_func_index = self.resolve_function_ref_with_arity(&args[1], 2)?;
-                self.compile_expr(&args[2])?; // Compile array
-                if args.len() == 4 {
-                    self.compile_expr(&args[3])?; // Compile init value
-                    self.emit(Instr::MapReduceFuncWithInit(
-                        map_func_index,
-                        reduce_func_index,
-                    ));
-                } else {
-                    self.emit(Instr::MapReduceFunc(map_func_index, reduce_func_index));
-                }
-                // Infer return type from reduce function's return type
-                if let Some(return_type) = self.get_function_return_type(&args[1]) {
-                    Ok(Some(return_type))
-                } else {
-                    Ok(Some(ValueType::F64))
-                }
-            }
-            "mapfoldr" => {
-                // mapfoldr(f, op, arr) or mapfoldr(f, op, arr, init) - right-associative
-                if args.len() < 3 || args.len() > 4 {
-                    return err("mapfoldr requires 3 or 4 arguments: mapfoldr(f, op, arr) or mapfoldr(f, op, arr, init)");
-                }
-                let map_func_index = self.resolve_function_ref(&args[0])?;
-                // Reduce operator needs binary (2-arg) resolution (Issue #2004)
-                let reduce_func_index = self.resolve_function_ref_with_arity(&args[1], 2)?;
-                self.compile_expr(&args[2])?; // Compile array
-                if args.len() == 4 {
-                    self.compile_expr(&args[3])?; // Compile init value
-                    self.emit(Instr::MapFoldrFuncWithInit(
-                        map_func_index,
-                        reduce_func_index,
-                    ));
-                } else {
-                    self.emit(Instr::MapFoldrFunc(map_func_index, reduce_func_index));
-                }
-                // Infer return type from reduce function's return type
-                if let Some(return_type) = self.get_function_return_type(&args[1]) {
-                    Ok(Some(return_type))
-                } else {
-                    Ok(Some(ValueType::F64))
-                }
-            }
+            // mapreduce / mapfoldl / mapfoldr are now Pure Julia in
+            // base/iterators.jl (Issue #3731):
+            //   - mapfoldl(f::Function, op::Function, itr [, init])
+            //   - mapfoldr(f::Function, op::Function, itr [, init])
+            //   - mapreduce(f::Function, op::Function, itr [, init])
+            // Falling through to method dispatch lets user-extensible Julia
+            // methods take priority over the Rust HOF instructions
+            // (`MapReduceFunc*`, `MapFoldrFunc*`). The VM instructions remain
+            // for cache-compatibility but are no longer reachable from new IR.
+            "mapreduce" | "mapfoldl" | "mapfoldr" => Ok(None),
             // broadcast/broadcast! are now Pure Julia (base/broadcast.jl, Issue #2548, #2549).
             // Fall through to method table dispatch.
             "broadcast" | "broadcast!" => Ok(None),
@@ -166,40 +124,27 @@ impl CoreCompiler<'_> {
                 // Fall through to method table dispatch
                 Ok(None)
             }
-            "sum" if args.len() == 2 => {
-                // sum(f, arr) - Apply f to each element and sum the results
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::SumFunc(func_index));
-                Ok(Some(ValueType::F64))
-            }
-            "any" if args.len() == 2 => {
-                // any(f, arr) - Check if f returns true for any element
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::AnyFunc(func_index));
-                Ok(Some(ValueType::Bool))
-            }
-            "all" if args.len() == 2 => {
-                // all(f, arr) - Check if f returns true for all elements
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::AllFunc(func_index));
-                Ok(Some(ValueType::Bool))
-            }
-            "count" if args.len() == 2 => {
-                // count(f, arr) - Count elements where f returns true
-                let func_index = self.resolve_function_ref(&args[0])?;
-                self.compile_expr(&args[1])?; // Compile array
-                self.emit(Instr::CountFunc(func_index));
-                Ok(Some(ValueType::I64))
-            }
+            // sum / any / all / count predicate-HOF forms are now Pure
+            // Julia (Issue #3728). They resolve to `base/reduce.jl` methods
+            // (`any(f::Function, arr)`, `all(f::Function, arr)`,
+            // `count(f::Function, ::Array)`, `sum(f::Function, ::Array)`).
+            // The VM instructions `SumFunc`, `AnyFunc`, `AllFunc`,
+            // `CountFunc` are retained as cache-compatibility fallbacks but
+            // no longer emitted from new IR.
+            "sum" | "any" | "all" | "count" if args.len() == 2 => Ok(None),
             "ntuple" => {
                 // ntuple(f, n) - Create tuple by calling f(i) for i in 1:n
                 if args.len() != 2 {
                     return err("ntuple requires exactly 2 arguments: ntuple(f, n)");
                 }
-                let func_index = self.resolve_function_ref(&args[0])?;
+                if self.ntuple_needs_runtime_callable(&args[0]) {
+                    self.compile_expr(&args[0])?; // Compile runtime callable
+                    self.compile_expr(&args[1])?; // Compile n (integer)
+                    self.emit(Instr::NtupleRuntime);
+                    return Ok(Some(ValueType::Tuple));
+                }
+                let func_index =
+                    self.resolve_function_ref(extract_static_hof_callable(&args[0]))?;
                 self.compile_expr(&args[1])?; // Compile n (integer)
                 self.emit(Instr::NtupleFunc(func_index));
                 Ok(Some(ValueType::Tuple))
@@ -212,7 +157,7 @@ impl CoreCompiler<'_> {
                 self.compile_expr(&args[0])?; // Compile outer function
                 self.compile_expr(&args[1])?; // Compile inner function
                 self.emit(Instr::CallBuiltin(BuiltinId::Compose, 2));
-                Ok(Some(ValueType::Any))
+                Ok(Some(ValueType::Function))
             }
             "sprint" => {
                 // sprint(f, args...) - Call f(io, args...) and return the result as a string
@@ -236,8 +181,7 @@ impl CoreCompiler<'_> {
                     // sprint calls f(io, args...) so arity = 1 + extra_args.len().
                     // resolve_sprint_function_ref infers arg types and uses MethodTable::dispatch.
                     let arg_count = args.len() - 1; // Number of additional args (0 for sprint(f))
-                    let func_index =
-                        self.resolve_sprint_function_ref(&args[0], &args[1..])?;
+                    let func_index = self.resolve_sprint_function_ref(&args[0], &args[1..])?;
 
                     // Compile all remaining arguments onto the stack
                     for arg in args.iter().skip(1) {

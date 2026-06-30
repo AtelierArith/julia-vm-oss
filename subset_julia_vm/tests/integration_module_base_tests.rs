@@ -1,4 +1,5 @@
 //! Integration tests: Module support, Base module, basic arithmetic, random numbers
+#![allow(dead_code)]
 
 mod common;
 use common::*;
@@ -8,7 +9,6 @@ use subset_julia_vm::*;
 
 // ==================== Module Support ====================
 
-#[test]
 fn test_simple_module() {
     let src = r#"
 module MyModule
@@ -21,7 +21,6 @@ end
     // Module execution should complete without error
 }
 
-#[test]
 fn test_module_with_function() {
     let src = r#"
 module MyModule
@@ -36,7 +35,6 @@ end
     assert!(result.is_ok());
 }
 
-#[test]
 fn test_module_with_main() {
     // Test that main block runs after module definition
     // Uses function call since Module.constant access isn't supported yet
@@ -52,7 +50,6 @@ MyModule.get_value()
     assert_ok_numeric(result, 100.0);
 }
 
-#[test]
 fn test_module_qualified_call() {
     // Test Module.func() qualified call syntax
     let src = r#"
@@ -72,7 +69,6 @@ result
     assert_ok_numeric(result, 25.0);
 }
 
-#[test]
 fn test_module_qualified_call_with_args() {
     // Test Module.func() with multiple arguments
     let src = r#"
@@ -89,7 +85,6 @@ result
     assert_ok_numeric(result, 56.0);
 }
 
-#[test]
 fn test_module_qualified_call_multiple_functions() {
     // Test calling multiple functions from the same module
     let src = r#"
@@ -110,7 +105,6 @@ a + b
     assert_ok_numeric(result, 50.0); // 20 + 30
 }
 
-#[test]
 fn test_module_qualified_call_unknown_module() {
     // Test error when calling function from unknown module
     let src = r#"
@@ -126,7 +120,6 @@ result = UnknownModule.foo()
     assert!(result.is_err());
 }
 
-#[test]
 fn test_module_qualified_call_unknown_function() {
     // Test error when calling unknown function from module
     let src = r#"
@@ -142,7 +135,27 @@ result = MyModule.bar()
     assert!(result.is_err());
 }
 
-#[test]
+fn test_module_qualified_alias_does_not_fall_back_to_unrelated_bare_alias_7955() {
+    let src = r#"
+module AliasOwner7955
+    const T = Int64
+end
+
+module AliasOther7955
+end
+
+AliasOther7955.T
+"#;
+    let result = run_core_pipeline(src, 0);
+    assert!(result.is_err());
+    let err = format!("{:?}", result.err().unwrap());
+    assert!(
+        err.contains("AliasOther7955") && err.contains("T"),
+        "unexpected error: {}",
+        err
+    );
+}
+
 fn test_using_module() {
     // Test using statement to import module functions
     let src = r#"
@@ -161,7 +174,6 @@ result
     assert_ok_numeric(result, 36.0);
 }
 
-#[test]
 fn test_import_module() {
     // Test import statement (treated same as using in MVP)
     let src = r#"
@@ -180,7 +192,6 @@ result
     assert_ok_numeric(result, 14.0);
 }
 
-#[test]
 fn test_using_with_qualified_call() {
     // Test using combined with qualified call
     let src = r#"
@@ -204,7 +215,6 @@ a + b
     assert_ok_numeric(result, 20.0); // 15 + 5
 }
 
-#[test]
 fn test_export_statement() {
     // Test export statement in module
     let src = r#"
@@ -235,7 +245,6 @@ result
     }
 }
 
-#[test]
 fn test_export_multiple_functions() {
     // Test exporting multiple functions
     let src = r#"
@@ -265,7 +274,6 @@ result
     assert_ok_numeric(result, 17.0); // 7 + 10
 }
 
-#[test]
 fn test_qualified_call_bypasses_export() {
     // Test that Module.func() works even for non-exported functions
     let src = r#"
@@ -289,7 +297,6 @@ result
     assert_ok_numeric(result, 2.0);
 }
 
-#[test]
 fn test_selective_import() {
     // Test using Module: func selective import
     let src = r#"
@@ -319,7 +326,6 @@ result
     assert_ok_numeric(result, 7.0);
 }
 
-#[test]
 fn test_selective_import_multiple() {
     // Test using Module: func1, func2 with multiple functions
     // Note: Use unique function names to avoid collision with Base functions
@@ -350,7 +356,6 @@ result
     assert_ok_numeric(result, 4.0); // 1 + 3
 }
 
-#[test]
 fn test_non_exported_function_blocked() {
     // Test that non-exported functions cannot be called via using
     let src = r#"
@@ -380,7 +385,6 @@ result
     );
 }
 
-#[test]
 fn test_non_imported_function_blocked() {
     // Test that functions not in selective import cannot be called
     let src = r#"
@@ -411,7 +415,6 @@ result
     );
 }
 
-#[test]
 fn test_module_function_without_using() {
     // Test that module functions cannot be called without using
     let src = r#"
@@ -437,7 +440,6 @@ result
 
 // ==================== Relative Imports (using .Module) ====================
 
-#[test]
 fn test_relative_import_basic() {
     // Test using .Module syntax for user-defined modules
     let src = r#"
@@ -457,7 +459,6 @@ greet()
     assert_ok_numeric(result, 42.0);
 }
 
-#[test]
 fn test_relative_import_qualified_call() {
     // Test qualified call with relative import
     let src = r#"
@@ -476,7 +477,6 @@ Math.add(10, 20)
     assert_ok_numeric(result, 30.0);
 }
 
-#[test]
 fn test_relative_import_with_export() {
     // Test relative import respects export statement
     let src = r#"
@@ -501,7 +501,6 @@ public_func()
     assert_ok_numeric(result, 100.0);
 }
 
-#[test]
 fn test_relative_import_selective() {
     // Test selective relative import: using .Module: func
     let src = r#"
@@ -526,7 +525,6 @@ foo()
 
 // ==================== Nested Modules ====================
 
-#[test]
 fn test_nested_module_basic() {
     // Test basic nested module definition
     let src = r#"
@@ -544,7 +542,6 @@ Outer.Inner.greet()
     assert!((result - 42.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_nested_module_multiple_levels() {
     // Test three-level nested module (A.B.C.func)
     let src = r#"
@@ -564,7 +561,6 @@ A.B.C.compute()
     assert!((result - 123.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_nested_module_with_parent_function() {
     // Test nested module where parent also has functions
     let src = r#"
@@ -587,7 +583,6 @@ result
     assert!((result - 30.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_nested_module_with_arguments() {
     // Test nested module function with arguments
     let src = r#"
@@ -610,7 +605,6 @@ result
     assert!((result - 17.0).abs() < 1e-10); // 7 + 10 = 17
 }
 
-#[test]
 fn test_nested_module_sibling_submodules() {
     // Test multiple sibling submodules
     let src = r#"
@@ -635,7 +629,6 @@ result
     assert!((result - 21.0).abs() < 1e-10); // 16 + 5 = 21
 }
 
-#[test]
 fn test_nested_module_unknown_path() {
     // Test error when accessing unknown nested module path
     let src = r#"
@@ -659,7 +652,6 @@ A.C.f()
 
 // ==================== Base Module ====================
 
-#[test]
 fn test_base_sqrt() {
     // Test Base.sqrt() qualified call
     let src = r#"
@@ -669,7 +661,6 @@ Base.sqrt(16)
     assert!((result - 4.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_math_functions() {
     // Test various Base math functions
     // Note: abs is now Pure Julia, so use it directly instead of Base.abs
@@ -682,7 +673,6 @@ result
     assert!((result - 6.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_array_functions() {
     // Test Base array creation functions
     let src = r#"
@@ -693,7 +683,6 @@ Base.length(arr)
     assert!((result - 3.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_println() {
     // Test Base.println()
     let src = r#"
@@ -704,7 +693,6 @@ Base.println("Hello from Base")
     assert!((result - 42.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_unknown_function() {
     // Test error when calling unknown function from Base
     let src = r#"
@@ -718,7 +706,6 @@ Base.unknown_function()
     );
 }
 
-#[test]
 fn test_base_no_implicit_shadowing() {
     // Test that user-defined function does NOT shadow Base function
     // Base functions are always called, even if a user-defined function has the same name
@@ -736,7 +723,6 @@ result
     assert!((result - 4.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_explicit_qualified() {
     // Test that Base.func() works for explicit qualification
     let src = r#"
@@ -748,7 +734,6 @@ result
     assert!((result - 4.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_both_unqualified_and_qualified() {
     // Test that both unqualified and qualified calls work identically
     // (since user-defined functions don't shadow Base)
@@ -765,7 +750,6 @@ result
     assert!((result - 7.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_higher_order_functions() {
     // Test Base higher-order functions
     let src = r#"
@@ -781,7 +765,6 @@ result
     assert!((result - 12.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_in_function() {
     // Test calling Base functions from within a top-level function
     // Using sqrt directly (not Base.sqrt) to isolate the issue
@@ -803,7 +786,6 @@ compute(16)  # sqrt(16) = 4
 
 // ==================== Base Submodules (Phase B3) ====================
 
-#[test]
 fn test_base_math_submodule() {
     // Test Base.Math.sqrt, Base.Math.sin, etc.
     let src = r#"
@@ -814,7 +796,6 @@ result
     assert!((result - 4.0).abs() < 1e-10); // sqrt(16) = 4, sin(0) = 0
 }
 
-#[test]
 fn test_base_math_multiple_functions() {
     // Test multiple Math functions
     // Note: abs is now Pure Julia, so use it directly instead of Base.Math.abs
@@ -828,7 +809,6 @@ a + b + c
     assert!((result - 11.0).abs() < 1e-10); // 5 + 3 + 3 = 11
 }
 
-#[test]
 fn test_base_io_submodule() {
     // Test Base.IO.println (just verify it compiles and runs)
     let src = r#"
@@ -839,7 +819,6 @@ Base.IO.println("Hello from Base.IO")
     assert!((result - 42.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_collections_submodule() {
     // Test Base.Collections functions
     let src = r#"
@@ -851,32 +830,25 @@ len
     assert!((result - 3.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_collections_zeros_ones() {
     // Test Base.Collections.zeros and ones
     let src = r#"
 arr = Base.Collections.zeros(3)
-Base.Collections.length(arr)
+arr2 = Base.Collections.ones(2)
+Base.Collections.length(arr) + Base.Collections.length(arr2)
 "#;
     let result = compile_and_run_str(src, 0);
-    assert!((result - 3.0).abs() < 1e-10);
+    assert!((result - 5.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_base_random_submodule() {
-    // Test Base.Random.rand
-    let src = r#"
-x = Base.Random.rand()
-x >= 0.0 && x < 1.0
-"#;
-    let result = run_core_pipeline(src, 42);
-    match result {
-        Ok(Value::Bool(true)) => {}
-        other => panic!("Expected true, got {:?}", other),
-    }
+    let result = run_core_pipeline("Base.Random.rand()\n", 42);
+    assert!(
+        result.is_err(),
+        "Base.Random.rand() should not bypass the Random stdlib root"
+    );
 }
 
-#[test]
 fn test_base_complex_submodule() {
     // Test Complex functions
     // Note: complex and abs are now Pure Julia functions
@@ -888,7 +860,6 @@ abs(z)
     assert!((result - 5.0).abs() < 1e-10); // |3+4i| = 5
 }
 
-#[test]
 fn test_base_iterators_submodule() {
     // Test Base.Iterators.map and sum
     let src = r#"
@@ -899,19 +870,124 @@ Base.Iterators.sum(arr)
     assert!((result - 10.0).abs() < 1e-10);
 }
 
-#[test]
-fn test_base_linearalgebra_submodule() {
-    // Test Base.LinearAlgebra.transpose
+fn test_base_linearalgebra_is_not_a_submodule() {
+    // LinearAlgebra is a stdlib root module loaded by `using LinearAlgebra`, not
+    // a public Base submodule. This matches upstream Julia's `Base.LinearAlgebra`
+    // UndefVarError behavior.
     let src = r#"
-arr = [1, 2, 3]
-t = Base.LinearAlgebra.transpose(arr)
-Base.Collections.length(t)
+Base.LinearAlgebra
 "#;
-    let result = compile_and_run_str(src, 0);
-    assert!((result - 3.0).abs() < 1e-10);
+    let result = run_core_pipeline(src, 0);
+    assert!(result.is_err(), "Base.LinearAlgebra should be undefined");
+
+    let src = r#"
+using Base.LinearAlgebra
+"#;
+    let result = run_core_pipeline(src, 0);
+    assert!(
+        result.is_err(),
+        "using Base.LinearAlgebra should be undefined"
+    );
 }
 
-#[test]
+fn test_stdlib_roots_are_not_public_base_submodules_8278() {
+    for module in [
+        "Base64",
+        "Dates",
+        "InteractiveUtils",
+        "LinearAlgebra",
+        "Printf",
+        "Random",
+        "Statistics",
+        "Test",
+    ] {
+        let property_src = format!("Base.{module}\n");
+        let property_result = run_core_pipeline(&property_src, 0);
+        assert!(
+            property_result.is_err(),
+            "Base.{module} should be undefined"
+        );
+
+        let using_src = format!("using Base.{module}\ntrue\n");
+        let using_result = run_core_pipeline(&using_src, 0);
+        assert!(
+            using_result.is_err(),
+            "using Base.{module} should be undefined"
+        );
+    }
+}
+
+fn test_linearalgebra_det_smoke_8276() {
+    let src = r#"
+using LinearAlgebra
+det([1.0 2.0; 3.0 4.0])
+"#;
+    let result = compile_and_run_str(src, 0);
+    assert!((result + 2.0).abs() < 1e-10);
+}
+
+fn test_linearalgebra_inv_smoke_8276() {
+    let src = r#"
+using LinearAlgebra
+A = [4.0 7.0; 2.0 6.0]
+B = inv(A)
+abs(B[1, 1] - 0.6) < 1e-10 &&
+    abs(B[1, 2] + 0.7) < 1e-10 &&
+    abs(B[2, 1] + 0.2) < 1e-10 &&
+    abs(B[2, 2] - 0.4) < 1e-10
+"#;
+    let result = run_core_pipeline(src, 0);
+    match result {
+        Ok(Value::Bool(true)) => {}
+        other => panic!("Expected true, got {:?}", other),
+    }
+}
+
+fn test_linearalgebra_svd_smoke_8276() {
+    let src = r#"
+using LinearAlgebra
+A = [1.0 2.0; 3.0 4.0; 5.0 6.0]
+F = svd(A)
+size(F.U, 1) == 3 &&
+    size(F.U, 2) == 2 &&
+    length(F.S) == 2 &&
+    size(F.V, 1) == 2 &&
+    size(F.V, 2) == 2 &&
+    F.S[1] >= F.S[2]
+"#;
+    let result = run_core_pipeline(src, 0);
+    match result {
+        Ok(Value::Bool(true)) => {}
+        other => panic!("Expected true, got {:?}", other),
+    }
+}
+
+fn test_linearalgebra_eigen_smoke_8276() {
+    let src = r#"
+using LinearAlgebra
+A = [2.0 1.0; 1.0 2.0]
+F = eigen(A)
+vals = F.values
+vecs = F.vectors
+v1 = vecs[1, 1]
+v2 = vecs[2, 1]
+lhs1 = A[1, 1] * v1 + A[1, 2] * v2
+lhs2 = A[2, 1] * v1 + A[2, 2] * v2
+rhs1 = vals[1] * v1
+rhs2 = vals[1] * v2
+length(vals) == 2 &&
+    size(vecs, 1) == 2 &&
+    size(vecs, 2) == 2 &&
+    abs(lhs1 - rhs1) < 1e-8 &&
+    abs(lhs2 - rhs2) < 1e-8
+"#;
+    let result = run_core_pipeline(src, 0);
+    match result {
+        Ok(Value::Bool(true)) => {}
+        other => panic!("Expected true, got {:?}", other),
+    }
+}
+
 fn test_base_submodule_unknown_function() {
     // Test error for unknown function in submodule
     let src = r#"
@@ -924,7 +1000,6 @@ Base.Math.unknown_function(1)
     );
 }
 
-#[test]
 fn test_base_unknown_submodule() {
     // Test error for unknown submodule
     let src = r#"
@@ -936,7 +1011,6 @@ Base.Unknown.sqrt(4)
 
 // ==================== Base Functions (Phase B4) ====================
 
-#[test]
 fn test_base_parses() {
     // Test that Base source parses correctly
     use subset_julia_vm::base;
@@ -960,7 +1034,6 @@ fn test_base_parses() {
     assert!(!program.functions.is_empty(), "Base should have functions");
 }
 
-#[test]
 fn test_prelude_prod() {
     // Test prod function from prelude
     let src = r#"
@@ -976,7 +1049,6 @@ prod(arr)
     }
 }
 
-#[test]
 fn test_prelude_minimum_maximum() {
     // Test minimum and maximum functions
     let src = r#"
@@ -987,7 +1059,6 @@ minimum(arr) + maximum(arr)
     assert!((result - 10.0).abs() < 1e-10); // 1 + 9 = 10
 }
 
-#[test]
 fn test_prelude_sign() {
     // Test sign function
     let src = r#"
@@ -997,7 +1068,6 @@ sign(-5) + sign(0) + sign(3)
     assert!((result - 0.0).abs() < 1e-10); // -1 + 0 + 1 = 0
 }
 
-#[test]
 fn test_prelude_clamp() {
     // Test clamp function
     let src = r#"
@@ -1010,7 +1080,6 @@ clamp(5, 0, 10) + clamp(-5, 0, 10) + clamp(15, 0, 10)
 // Note: any, all, and count with function parameters are not yet supported.
 // HOF functions any/all/count with lambda arguments are supported via builtin instructions.
 
-#[test]
 fn test_prelude_any_all() {
     // Test any and all higher-order functions
     let src = r#"
@@ -1026,7 +1095,6 @@ has_even && all_positive
     }
 }
 
-#[test]
 fn test_prelude_count() {
     // Test count higher-order function
     let src = r#"
@@ -1037,7 +1105,6 @@ count(x -> x % 2 == 0, arr)
     assert!((result - 3.0).abs() < 1e-10); // 3 even numbers
 }
 
-#[test]
 fn test_prelude_argmin_argmax() {
     // Test argmin and argmax functions
     let src = r#"
@@ -1048,7 +1115,6 @@ argmin(arr) + argmax(arr)
     assert!((result - 9.0).abs() < 1e-10); // 4 + 5 = 9 (1-indexed)
 }
 
-#[test]
 fn test_prelude_cumsum() {
     // Test cumsum function
     let src = r#"
@@ -1060,7 +1126,6 @@ cs[4]
     assert!((result - 10.0).abs() < 1e-10); // 1+2+3+4 = 10
 }
 
-#[test]
 fn test_statistics_mean() {
     // Test mean function via Statistics stdlib
     let src = r#"
@@ -1072,7 +1137,6 @@ mean(arr)
     assert!((result - 5.0).abs() < 1e-10); // (2+4+6+8)/4 = 5
 }
 
-#[test]
 fn test_prelude_hypot() {
     // Test hypot function (3-4-5 triangle)
     let src = r#"
@@ -1082,7 +1146,6 @@ hypot(3, 4)
     assert!((result - 5.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_prelude_iseven_isodd() {
     // Test iseven and isodd functions
     let src = r#"
@@ -1097,9 +1160,9 @@ iseven(4) && isodd(5) && !iseven(3) && !isodd(6)
 
 // ==================== Include Tests ====================
 
-#[test]
-fn test_include_returns_helpful_error() {
-    // Test that include("file.jl") returns a helpful error message
+fn test_include_lowers_to_program_body() {
+    // include("file.jl") is now a lowered runtime operation; file existence is
+    // checked by include execution, not by this direct lowering pass.
     use subset_julia_vm::lowering::Lowering;
     use subset_julia_vm::parser::Parser;
 
@@ -1107,21 +1170,13 @@ fn test_include_returns_helpful_error() {
     let mut parser = Parser::new().expect("Parser init failed");
     let parsed = parser.parse(src).expect("Parse failed");
     let mut lowering = Lowering::new(src);
-    let result = lowering.lower(parsed);
+    let program = lowering.lower(parsed).expect("include should lower");
 
-    assert!(result.is_err(), "include should return an error");
-    let err = result.unwrap_err();
-    let err_str = format!("{}", err);
-    assert!(err_str.contains("include"), "Error should mention include");
-    assert!(
-        err_str.contains("utils.jl"),
-        "Error should contain the path"
-    );
+    assert_eq!(program.main.stmts.len(), 1);
 }
 
 // ==================== Basic Arithmetic ====================
 
-#[test]
 fn test_return_constant() {
     let src = r#"
 function f(N)
@@ -1133,7 +1188,6 @@ f(1)
     assert!((result - 42.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_simple_multiplication() {
     let src = r#"
 function f(N)
@@ -1145,7 +1199,6 @@ f(100)
     assert!((result - 200.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_addition() {
     let src = r#"
 function f(N)
@@ -1157,7 +1210,6 @@ f(32)
     assert!((result - 42.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_division() {
     let src = r#"
 function f(N)
@@ -1169,7 +1221,6 @@ f(100)
     assert!((result - 25.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_power_of_2() {
     let src = r#"
 function f(N)
@@ -1181,7 +1232,6 @@ f(7)
     assert!((result - 49.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_sqrt() {
     let src = r#"
 function f(N)
@@ -1193,7 +1243,6 @@ f(16)
     assert!((result - 4.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_elementary_functions() {
     // Test sin
     let src = "function f(x) return sin(x) end\nf(0.0)";
@@ -1238,7 +1287,6 @@ fn test_elementary_functions() {
     );
 }
 
-#[test]
 fn test_elementary_functions_broadcast() {
     // Test sin.(array)
     let src = r#"
@@ -1262,7 +1310,6 @@ y[1]
     assert!((result - 1.0).abs() < 1e-10, "exp(0) should be 1");
 }
 
-#[test]
 fn test_inverse_trig_functions() {
     // Test asin(0) = 0
     let src = "asin(0.0)";
@@ -1319,7 +1366,6 @@ fn test_inverse_trig_functions() {
     );
 }
 
-#[test]
 fn test_user_defined_function_broadcast() {
     // Test user-defined function broadcast: square.(arr)
     // First, test that the basic function works
@@ -1372,7 +1418,6 @@ result[1] + result[2] + result[3]
     );
 }
 
-#[test]
 fn test_complex_expression() {
     // sqrt(3^2 + 4^2) = sqrt(9+16) = sqrt(25) = 5
     let src = r#"
@@ -1387,7 +1432,6 @@ f(1)
 
 // ==================== Variables and Assignment ====================
 
-#[test]
 fn test_variable_assignment() {
     // Note: Use for loop to avoid implicit multiplication issue
     // where "10\ny" becomes "10*y"
@@ -1406,7 +1450,6 @@ f(10)
     assert!((result - 65.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_add_assign() {
     // Use for loop to test += without implicit mult issues
     let src = r#"
@@ -1426,7 +1469,6 @@ f(5)
 
 // ==================== Control Flow ====================
 
-#[test]
 fn test_ifelse_true() {
     // Use < comparison (N < 5 is false when N=10)
     let src = r#"
@@ -1439,7 +1481,6 @@ f(10)
     assert!((result - 100.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_ifelse_false() {
     // Use < comparison (5 < N is false when N=3)
     let src = r#"
@@ -1454,7 +1495,6 @@ f(3)
 
 // ==================== Logical Operators ====================
 
-#[test]
 fn test_logical_and_true() {
     // Both conditions true: 5 > 3 && 10 > 5
     let src = r#"
@@ -1470,7 +1510,6 @@ f()
     assert!((result - 1.0).abs() < 1e-10, "Expected 1 for true && true");
 }
 
-#[test]
 fn test_logical_and_false_left() {
     // Left condition false: 3 > 5 && 10 > 5 (short-circuits)
     let src = r#"
@@ -1486,7 +1525,6 @@ f()
     assert!((result - 0.0).abs() < 1e-10, "Expected 0 for false && true");
 }
 
-#[test]
 fn test_logical_and_false_right() {
     // Right condition false: 5 > 3 && 5 > 10
     let src = r#"
@@ -1502,7 +1540,6 @@ f()
     assert!((result - 0.0).abs() < 1e-10, "Expected 0 for true && false");
 }
 
-#[test]
 fn test_logical_or_true_left() {
     // Left condition true: 5 > 3 || 5 > 10 (short-circuits)
     let src = r#"
@@ -1518,7 +1555,6 @@ f()
     assert!((result - 1.0).abs() < 1e-10, "Expected 1 for true || false");
 }
 
-#[test]
 fn test_logical_or_true_right() {
     // Right condition true: 3 > 5 || 10 > 5
     let src = r#"
@@ -1534,7 +1570,6 @@ f()
     assert!((result - 1.0).abs() < 1e-10, "Expected 1 for false || true");
 }
 
-#[test]
 fn test_logical_or_false() {
     // Both conditions false: 3 > 5 || 5 > 10
     let src = r#"
@@ -1553,7 +1588,6 @@ f()
     );
 }
 
-#[test]
 fn test_logical_operators_with_equality() {
     // Test && with == operator (the original bug case)
     let src = r#"
@@ -1574,7 +1608,6 @@ f()
     );
 }
 
-#[test]
 fn test_logical_and_short_circuit_no_eval() {
     let src = r#"
 function f()
@@ -1592,7 +1625,6 @@ f()
     );
 }
 
-#[test]
 fn test_logical_or_short_circuit_no_eval() {
     let src = r#"
 function f()
@@ -1609,7 +1641,6 @@ f()
 
 // ==================== tmp_repros Translations ====================
 
-#[test]
 fn test_tmp_repro_implicit_mult_newline() {
     let src = r#"
 y = 3
@@ -1621,7 +1652,6 @@ println(result)
     assert_eq!(output.trim(), "10");
 }
 
-#[test]
 fn test_tmp_repro_addassign_ifelse() {
     let src = r#"
 cnt = 0
@@ -1632,7 +1662,6 @@ println(cnt)
     assert_eq!(output.trim(), "1");
 }
 
-#[test]
 fn test_tmp_repro_inplace_mutation_persists() {
     let src = r#"
 arr = [1, 2, 3]
@@ -1646,7 +1675,6 @@ println(arr[1])
     assert_eq!(output.trim(), "9");
 }
 
-#[test]
 fn test_tmp_repro_short_circuit_and_print() {
     let src = r#"
 x = 0
@@ -1659,7 +1687,6 @@ println(x)
     assert_eq!(output.trim(), "0");
 }
 
-#[test]
 fn test_tmp_repro_while_if_assignment() {
     let src = r#"
 result = 0
@@ -1676,7 +1703,6 @@ println(result)
     assert_eq!(output.trim(), "2");
 }
 
-#[test]
 fn test_tmp_repro_test_isa_macro() {
     let src = r#"
 using Test
@@ -1691,7 +1717,6 @@ println("done")
     );
 }
 
-#[test]
 fn test_tmp_repro_try_finally_no_error() {
     let src = r#"
 result = 0
@@ -1706,7 +1731,6 @@ println(result)
     assert_eq!(output.trim(), "5");
 }
 
-#[test]
 fn test_tmp_repro_if_elseif_else_prints() {
     let src = r#"
 for i in 1:5
@@ -1724,7 +1748,6 @@ end
     assert_eq!(lines, vec!["1", "2", "Fizz", "4", "Buzz"]);
 }
 
-#[test]
 fn test_tmp_repro_addassign_ifelse_loop() {
     let src = r#"
 cnt = 0
@@ -1739,7 +1762,6 @@ println(cnt)
 
 // ==================== For Loops ====================
 
-#[test]
 fn test_for_loop_sum() {
     // Sum from 1 to N
     let src = r#"
@@ -1757,7 +1779,6 @@ f(10)
     assert!((result - 55.0).abs() < 1e-10);
 }
 
-#[test]
 fn test_for_loop_count() {
     let src = r#"
 function f(N)
@@ -1775,7 +1796,6 @@ f(100)
 
 // ==================== Random Number Generation ====================
 
-#[test]
 fn test_rand_deterministic() {
     let src = r#"
 function f(N)
@@ -1794,7 +1814,6 @@ f(1)
     assert_ne!(r1, r3);
 }
 
-#[test]
 fn test_random_seed_function() {
     // Test Random.seed!() function resets RNG
     let src = r#"
@@ -1814,7 +1833,6 @@ ifelse(test_seed(), 1.0, 0.0)
     );
 }
 
-#[test]
 fn test_random_seed_different_seeds() {
     // Different seeds should produce different results
     let src = r#"
@@ -1834,7 +1852,6 @@ ifelse(test_seed(), 1.0, 0.0)
     );
 }
 
-#[test]
 fn test_random_seed_with_randn() {
     // Test Random.seed!() works with randn as well
     let src = r#"
@@ -1854,7 +1871,6 @@ ifelse(test_seed(), 1.0, 0.0)
     );
 }
 
-#[test]
 fn test_rand_range() {
     let src = r#"
 function f(N)
@@ -1871,7 +1887,6 @@ f(1)
     }
 }
 
-#[test]
 fn test_rand_array_1d() {
     let src = r#"
 # rand(n) creates 1D array of random Float64 values
@@ -1891,7 +1906,6 @@ sum
     assert!((0.0..5.0).contains(&result), "Unexpected sum: {}", result);
 }
 
-#[test]
 fn test_rand_array_2d() {
     let src = r#"
 # rand(m, n) creates 2D array of random Float64 values
@@ -1914,7 +1928,6 @@ sum
     assert!((0.0..12.0).contains(&result), "Unexpected sum: {}", result);
 }
 
-#[test]
 fn test_rand_array_3d() {
     let src = r#"
 # rand(k, m, n) creates 3D array
@@ -1930,7 +1943,6 @@ arr[1, 1, 1]
     );
 }
 
-#[test]
 fn test_rand_int_array() {
     let src = r#"
 # rand(Int, n) creates array of random integers
@@ -1956,7 +1968,6 @@ arr[1]
     );
 }
 
-#[test]
 fn test_rand_int64_array() {
     let src = r#"
 # rand(Int64, m, n) creates 2D array of random integers
@@ -1968,7 +1979,6 @@ mat[1, 1]
     assert!(result >= 0.0, "Expected non-negative integer");
 }
 
-#[test]
 fn test_rand_float64_array() {
     let src = r#"
 # rand(Float64, n) is equivalent to rand(n)
@@ -1989,7 +1999,6 @@ arr[1]
     );
 }
 
-#[test]
 fn test_rand_array_deterministic() {
     let src = r#"
 arr = rand(3)
@@ -2007,7 +2016,6 @@ arr[1] + arr[2] + arr[3]
 
 // ==================== Monte Carlo Pi Estimation ====================
 
-#[test]
 fn test_monte_carlo_pi() {
     // Note: Using explicit variable assignment for ifelse result due to a known
     // issue with `cnt += ifelse(...)` inline syntax (AddAssign accumulation bug)
@@ -2035,7 +2043,6 @@ f(10000)
     );
 }
 
-#[test]
 fn test_monte_carlo_reproducible() {
     let src = r#"
 function f(N)
@@ -2052,4 +2059,162 @@ f(1000)
     let r1 = compile_and_run_str(src, 42);
     let r2 = compile_and_run_str(src, 42);
     assert_eq!(r1, r2);
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_simple_module();
+    test_module_with_function();
+    test_module_with_main();
+    test_module_qualified_call();
+    test_module_qualified_call_with_args();
+    test_module_qualified_call_multiple_functions();
+    test_module_qualified_call_unknown_module();
+    test_module_qualified_call_unknown_function();
+    test_module_qualified_alias_does_not_fall_back_to_unrelated_bare_alias_7955();
+    test_using_module();
+    test_import_module();
+    test_using_with_qualified_call();
+    test_export_statement();
+    test_export_multiple_functions();
+    test_qualified_call_bypasses_export();
+    test_selective_import();
+    test_selective_import_multiple();
+}
+
+#[test]
+fn chunk_001() {
+    test_non_exported_function_blocked();
+    test_non_imported_function_blocked();
+    test_module_function_without_using();
+    test_relative_import_basic();
+    test_relative_import_qualified_call();
+    test_relative_import_with_export();
+    test_relative_import_selective();
+    test_nested_module_basic();
+    test_nested_module_multiple_levels();
+    test_nested_module_with_parent_function();
+    test_nested_module_with_arguments();
+    test_nested_module_sibling_submodules();
+    test_nested_module_unknown_path();
+    test_base_sqrt();
+    test_base_math_functions();
+    test_base_array_functions();
+}
+
+#[test]
+fn chunk_002() {
+    test_base_println();
+    test_base_unknown_function();
+    test_base_no_implicit_shadowing();
+    test_base_explicit_qualified();
+    test_base_both_unqualified_and_qualified();
+    test_base_higher_order_functions();
+    test_base_in_function();
+    test_base_math_submodule();
+    test_base_math_multiple_functions();
+    test_base_io_submodule();
+    test_base_collections_submodule();
+    test_base_collections_zeros_ones();
+    test_base_random_submodule();
+    test_base_complex_submodule();
+    test_base_iterators_submodule();
+    test_base_linearalgebra_is_not_a_submodule();
+    test_linearalgebra_det_smoke_8276();
+    test_linearalgebra_inv_smoke_8276();
+    test_linearalgebra_svd_smoke_8276();
+    test_linearalgebra_eigen_smoke_8276();
+}
+
+#[test]
+fn chunk_003() {
+    test_base_submodule_unknown_function();
+    test_base_unknown_submodule();
+    test_base_parses();
+    test_prelude_prod();
+    test_prelude_minimum_maximum();
+    test_prelude_sign();
+    test_prelude_clamp();
+    test_prelude_any_all();
+    test_prelude_count();
+    test_prelude_argmin_argmax();
+    test_prelude_cumsum();
+    test_statistics_mean();
+    test_prelude_hypot();
+    test_prelude_iseven_isodd();
+    test_include_lowers_to_program_body();
+    test_return_constant();
+}
+
+#[test]
+fn chunk_004() {
+    test_simple_multiplication();
+    test_addition();
+    test_division();
+    test_power_of_2();
+    test_sqrt();
+    test_elementary_functions();
+    test_elementary_functions_broadcast();
+    test_inverse_trig_functions();
+    test_user_defined_function_broadcast();
+    test_complex_expression();
+    test_variable_assignment();
+    test_add_assign();
+    test_ifelse_true();
+    test_ifelse_false();
+    test_logical_and_true();
+    test_logical_and_false_left();
+}
+
+#[test]
+fn chunk_005() {
+    test_logical_and_false_right();
+    test_logical_or_true_left();
+    test_logical_or_true_right();
+    test_logical_or_false();
+}
+
+#[test]
+fn chunk_007() {
+    test_logical_operators_with_equality();
+    test_logical_and_short_circuit_no_eval();
+    test_logical_or_short_circuit_no_eval();
+    test_tmp_repro_implicit_mult_newline();
+}
+
+#[test]
+fn chunk_008() {
+    test_tmp_repro_addassign_ifelse();
+    test_tmp_repro_inplace_mutation_persists();
+    test_tmp_repro_short_circuit_and_print();
+    test_tmp_repro_while_if_assignment();
+}
+
+#[test]
+fn chunk_009() {
+    test_tmp_repro_test_isa_macro();
+    test_tmp_repro_try_finally_no_error();
+    test_tmp_repro_if_elseif_else_prints();
+    test_tmp_repro_addassign_ifelse_loop();
+}
+
+#[test]
+fn chunk_006() {
+    test_for_loop_sum();
+    test_for_loop_count();
+    test_rand_deterministic();
+    test_random_seed_function();
+    test_random_seed_different_seeds();
+    test_random_seed_with_randn();
+    test_rand_range();
+    test_rand_array_1d();
+    test_rand_array_2d();
+    test_rand_array_3d();
+    test_rand_int_array();
+    test_rand_int64_array();
+    test_rand_float64_array();
+    test_rand_array_deterministic();
+    test_monte_carlo_pi();
+    test_monte_carlo_reproducible();
 }

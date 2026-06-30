@@ -5,6 +5,8 @@
 //! argument types.
 
 use crate::compile::lattice::types::LatticeType;
+#[cfg(test)]
+use crate::inference_core::{CorePrimitive, CoreType};
 use std::collections::HashMap;
 
 /// Cache for inference results.
@@ -115,7 +117,9 @@ mod tests {
 
         let func_id = 0;
         let arg_types = vec![];
-        let return_type = LatticeType::Concrete(ConcreteType::Int64);
+        let return_type = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
 
         // Insert
         cache.insert(func_id, arg_types.clone(), return_type.clone());
@@ -140,8 +144,12 @@ mod tests {
     fn test_cache_multiple_functions() {
         let mut cache = InferenceCache::new();
 
-        let return_type1 = LatticeType::Concrete(ConcreteType::Int64);
-        let return_type2 = LatticeType::Concrete(ConcreteType::Float64);
+        let return_type1 = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        let return_type2 = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
 
         cache.insert(0, vec![], return_type1.clone());
         cache.insert(1, vec![], return_type2.clone());
@@ -155,8 +163,12 @@ mod tests {
         let mut cache = InferenceCache::new();
 
         let func_id = 0;
-        let return_type1 = LatticeType::Concrete(ConcreteType::Int64);
-        let return_type2 = LatticeType::Concrete(ConcreteType::Float64);
+        let return_type1 = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Int64,
+        )));
+        let return_type2 = LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+            CorePrimitive::Float64,
+        )));
 
         cache.insert(func_id, vec![], return_type1);
         cache.insert(func_id, vec![], return_type2.clone());
@@ -171,7 +183,13 @@ mod tests {
 
         assert!(!cache.contains(0, &[]));
 
-        cache.insert(0, vec![], LatticeType::Concrete(ConcreteType::Int64));
+        cache.insert(
+            0,
+            vec![],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
 
         assert!(cache.contains(0, &[]));
         assert!(!cache.contains(1, &[]));
@@ -181,8 +199,20 @@ mod tests {
     fn test_cache_clear() {
         let mut cache = InferenceCache::new();
 
-        cache.insert(0, vec![], LatticeType::Concrete(ConcreteType::Int64));
-        cache.insert(1, vec![], LatticeType::Concrete(ConcreteType::Float64));
+        cache.insert(
+            0,
+            vec![],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Int64,
+            ))),
+        );
+        cache.insert(
+            1,
+            vec![],
+            LatticeType::Concrete(ConcreteType::Core(CoreType::Primitive(
+                CorePrimitive::Float64,
+            ))),
+        );
 
         assert_eq!(cache.len(), 2);
 

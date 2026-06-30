@@ -95,3 +95,135 @@ name = "pure_julia_some"
 file = "some_basic.jl"
 expected = true
 description = "Some - optional value wrapper"
+
+[[tests]]
+name = "pure_julia_first_last_dispatch_struct"
+file = "first_last_dispatch_struct.jl"
+expected = true
+description = "first/last dispatch through Pure Julia method tables for user structs (Issue #3734)"
+
+[[tests]]
+name = "pure_julia_first_last_tuple_dispatch"
+file = "first_last_tuple_dispatch.jl"
+expected = true
+description = "first/last on Tuple resolved via Pure Julia base/tuple.jl (Issue #3734)"
+
+[[tests]]
+name = "pure_julia_first_last_string_dispatch"
+file = "first_last_string_dispatch.jl"
+expected = true
+description = "first/last on String resolved via Pure Julia base/strings/basic.jl (Issue #3734)"
+
+[[tests]]
+name = "pure_julia_first_last_array_dispatch"
+file = "first_last_array_dispatch.jl"
+expected = true
+description = "first/last on Array resolved via Pure Julia generic in base/range.jl (Issue #3734)"
+
+[[tests]]
+name = "pure_julia_length_size_ndims_struct_dispatch"
+file = "length_size_ndims_struct_dispatch.jl"
+expected = true
+description = "length/size/ndims dispatch through Pure Julia method tables for user structs (Issue #3736)"
+
+[[tests]]
+name = "pure_julia_length_size_ndims_collections"
+file = "length_size_ndims_collections.jl"
+expected = true
+description = "length/size/ndims fall back to BuiltinId for primitive Array/Tuple/String/Range/Dict/Set (Issue #3736)"
+
+[[tests]]
+name = "pure_julia_iterate_collect_struct_dispatch"
+file = "iterate_collect_struct_dispatch.jl"
+expected = true
+description = "iterate/collect dispatch through Pure Julia method tables for user structs (Issue #3735)"
+
+[[tests]]
+name = "pure_julia_iterate_collect_pure_julia_iterators"
+file = "iterate_collect_pure_julia_iterators.jl"
+expected = true
+description = "collect on Pure Julia Iterators.take/drop/enumerate uses base/iterators.jl method dispatch, including UnitRange Take trait dispatch (Issues #3735, #5605)"
+
+[[tests]]
+name = "pure_julia_getindex_setindex_struct_dispatch"
+file = "getindex_setindex_struct_dispatch.jl"
+expected = true
+description = "user-defined Base.getindex / Base.setindex! on a struct wins over the unconditional builtin route (Issue #3729)"
+
+[[tests]]
+name = "pure_julia_getindex_pair_range_dispatch"
+file = "getindex_pair_range_dispatch.jl"
+expected = true
+description = "explicit getindex(...) calls on Pair, OneTo, LinRange reach Pure Julia method dispatch (Issue #3729)"
+
+[[tests]]
+name = "pure_julia_base_qualified_dispatch_first"
+file = "base_qualified_dispatch_first.jl"
+expected = true
+description = "Base-qualified public calls route through method dispatch before Rust builtin fallback (Issue #3861)"
+
+[[tests]]
+name = "pure_julia_base_qualified_mutation_dispatch_first_3911"
+file = "base_qualified_mutation_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified mutation public calls route through method dispatch before Rust builtin fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_string_codeunit_dispatch_first_3911"
+file = "string_codeunit_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified ncodeunits/codeunit/codeunits route through method dispatch before String builtin fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_string_scalar_routes_dispatch_first_3911"
+file = "string_scalar_routes_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified bitstring/codepoint/isnumeric/unescape_string/parse/tryparse route through method dispatch before scalar string builtin fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_keytype_valtype_dispatch_first_3911"
+file = "keytype_valtype_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified keytype/valtype route through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_eltype_dispatch_first_3911"
+file = "eltype_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified eltype routes through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_base_sizeof_dispatch_first_3911"
+file = "base_sizeof_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified sizeof routes through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_base_hasfield_dispatch_first_3911"
+file = "base_hasfield_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified hasfield routes through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_base_layout_predicates_dispatch_first_3911"
+file = "base_layout_predicates_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified layout predicates route through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_base_objectid_dispatch_first_3911"
+file = "base_objectid_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified objectid routes through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_base_hasmethod_dispatch_first_3911"
+file = "base_hasmethod_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified hasmethod routes through method dispatch before Rust fallback (Issue #3911)"
+
+[[tests]]
+name = "pure_julia_base_in_dispatch_first_3911"
+file = "base_in_dispatch_first_3911.jl"
+expected = true
+description = "Base-qualified in routes through method dispatch before Rust fallback (Issue #3911)"

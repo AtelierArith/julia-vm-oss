@@ -35,6 +35,7 @@ macro_rules! array_data_dispatch {
             $crate::vm::value::ArrayData::U32(v) => v.$method(),
             $crate::vm::value::ArrayData::U64(v) => v.$method(),
             $crate::vm::value::ArrayData::Bool(v) => v.$method(),
+            $crate::vm::value::ArrayData::BitPackedBool(v) => v.$method(),
             $crate::vm::value::ArrayData::String(v) => v.$method(),
             $crate::vm::value::ArrayData::Char(v) => v.$method(),
             $crate::vm::value::ArrayData::StructRefs(v) => v.$method(),
@@ -55,6 +56,7 @@ macro_rules! array_data_dispatch {
             $crate::vm::value::ArrayData::U32(v) => v.$method($($arg),+),
             $crate::vm::value::ArrayData::U64(v) => v.$method($($arg),+),
             $crate::vm::value::ArrayData::Bool(v) => v.$method($($arg),+),
+            $crate::vm::value::ArrayData::BitPackedBool(v) => v.$method($($arg),+),
             $crate::vm::value::ArrayData::String(v) => v.$method($($arg),+),
             $crate::vm::value::ArrayData::Char(v) => v.$method($($arg),+),
             $crate::vm::value::ArrayData::StructRefs(v) => v.$method($($arg),+),
@@ -113,6 +115,9 @@ macro_rules! array_data_get_value {
             }
             $crate::vm::value::ArrayData::Bool(v) => {
                 v.get($index).map(|&x| $crate::vm::value::Value::Bool(x))
+            }
+            $crate::vm::value::ArrayData::BitPackedBool(v) => {
+                v.get($index).map($crate::vm::value::Value::Bool)
             }
             $crate::vm::value::ArrayData::String(v) => v
                 .get($index)
@@ -189,6 +194,10 @@ macro_rules! array_data_pop_value {
                 .map($crate::vm::value::Value::U64)
                 .ok_or($crate::vm::VmError::EmptyArrayPop),
             $crate::vm::value::ArrayData::Bool(v) => v
+                .pop()
+                .map($crate::vm::value::Value::Bool)
+                .ok_or($crate::vm::VmError::EmptyArrayPop),
+            $crate::vm::value::ArrayData::BitPackedBool(v) => v
                 .pop()
                 .map($crate::vm::value::Value::Bool)
                 .ok_or($crate::vm::VmError::EmptyArrayPop),
@@ -280,6 +289,10 @@ macro_rules! array_data_numeric_reduce {
                 let v = v;
                 $op
             }
+            $crate::vm::value::ArrayData::BitPackedBool(v) => {
+                let v = v;
+                $op
+            }
             $crate::vm::value::ArrayData::String(_)
             | $crate::vm::value::ArrayData::Char(_)
             | $crate::vm::value::ArrayData::StructRefs(_)
@@ -317,6 +330,7 @@ macro_rules! array_data_type_name {
             $crate::vm::value::ArrayData::U32(_) => "U32",
             $crate::vm::value::ArrayData::U64(_) => "U64",
             $crate::vm::value::ArrayData::Bool(_) => "Bool",
+            $crate::vm::value::ArrayData::BitPackedBool(_) => "Bool",
             $crate::vm::value::ArrayData::String(_) => "String",
             $crate::vm::value::ArrayData::Char(_) => "Char",
             $crate::vm::value::ArrayData::StructRefs(_) => "StructRefs",
@@ -354,6 +368,7 @@ macro_rules! array_data_with_vec {
             $crate::vm::value::ArrayData::U32($vec_name) => $block,
             $crate::vm::value::ArrayData::U64($vec_name) => $block,
             $crate::vm::value::ArrayData::Bool($vec_name) => $block,
+            $crate::vm::value::ArrayData::BitPackedBool($vec_name) => $block,
             $crate::vm::value::ArrayData::String($vec_name) => $block,
             $crate::vm::value::ArrayData::Char($vec_name) => $block,
             $crate::vm::value::ArrayData::StructRefs($vec_name) => $block,
@@ -399,6 +414,7 @@ macro_rules! array_data_numeric_or_else {
             $crate::vm::value::ArrayData::U64($vec_name) => $numeric_block,
             // Note: Bool is NOT included here because `bool as f64` is invalid in Rust
             $crate::vm::value::ArrayData::Bool(_)
+            | $crate::vm::value::ArrayData::BitPackedBool(_)
             | $crate::vm::value::ArrayData::String(_)
             | $crate::vm::value::ArrayData::Char(_)
             | $crate::vm::value::ArrayData::StructRefs(_)
@@ -451,6 +467,7 @@ macro_rules! array_data_as_f64 {
             $crate::vm::value::ArrayData::U32($vec_name) => $block,
             $crate::vm::value::ArrayData::U64($vec_name) => $block,
             $crate::vm::value::ArrayData::Bool($vec_name) => $bool_block,
+            $crate::vm::value::ArrayData::BitPackedBool($vec_name) => $bool_block,
             $crate::vm::value::ArrayData::String(_)
             | $crate::vm::value::ArrayData::Char(_)
             | $crate::vm::value::ArrayData::StructRefs(_)

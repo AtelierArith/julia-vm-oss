@@ -1,4 +1,10 @@
 [[tests]]
+name = "reduce_sum_prod_init_5761"
+file = "sum_prod_init_5761.jl"
+expected = true
+description = "sum/prod accept the init keyword (seeds the accumulator; empty collection returns init) (Issue #5761)"
+
+[[tests]]
 name = "reduce_findmax_bang"
 file = "test_findmax_bang.jl"
 expected = true
@@ -26,7 +32,7 @@ description = "count() with predicate function"
 name = "reduce_extrema_diff"
 file = "extrema_diff.jl"
 expected = true
-description = "extrema and diff - reduction functions (Issue #1874)"
+description = "extrema and diff - reduction functions, including non-Float64 diff result type preservation (Issues #1874, #4018, #4600)"
 
 [[tests]]
 name = "reduce_findmax_findmin"

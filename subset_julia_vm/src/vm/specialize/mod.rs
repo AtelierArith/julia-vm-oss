@@ -9,6 +9,10 @@
 //! - `Block` - Sequential statement blocks
 //! - `Assign` - Variable assignment
 //! - `AddAssign` - Addition assignment (+=)
+//! - `IndexAssign` - 1D Int64/Float64 array element assignment
+//! - `FieldAssign` - Mutable-struct field assignment with a statically resolved
+//!   field index (`obj.field = value`); the value is coerced to the field type
+//!   to match the interpreter (Issue #6346)
 //! - `For` - Numeric for loops
 //! - `ForEach` - Iteration loops (for x in iter)
 //! - `While` - While loops
@@ -20,9 +24,13 @@
 //! ## Unsupported Statement Types (falls back to interpreter)
 //!
 //! - `Try` - Exception handling (requires complex control flow)
-//! - `IndexAssign` - Array element assignment (high priority for future support)
-//! - `FieldAssign` - Struct field assignment
-//! - `DestructuringAssign` - Tuple/array destructuring
+//! - `DestructuringAssign` - Tuple/array destructuring. Note: the lowering pass
+//!   desugars `a, b = ...` into a temporary tuple plus indexed `Assign`s before
+//!   the specializer runs, so this IR variant is not produced by the current
+//!   pipeline. The *desugared* swap (`a, b = b, a % b`) is kept type-stable by
+//!   tracking the tuple-literal temporary's element types and sharpening the
+//!   constant `temp[i]` reads (Issue #6561 — see `tuple_element_types` and
+//!   `try_compile_tracked_tuple_index`).
 //! - `DictAssign` - Dictionary assignment
 //! - `FunctionDef` - Nested function definitions
 //! - `Test*` - Test framework macros
@@ -38,6 +46,8 @@
 //! - `Builtin` - Builtin function calls
 //! - `ArrayLiteral` - Array construction
 //! - `Index` - Array/tuple indexing
+//! - `FieldAccess` - Struct field read `obj.field` on a known struct type, with
+//!   the field index/type resolved statically (Issue #6346)
 //! - `TupleLiteral` - Tuple construction
 //! - `Range` - Range expressions (start:stop, start:step:stop)
 //!
@@ -49,10 +59,10 @@
 //! `expr_variant_name()` which use exhaustive pattern matching - adding new
 //! enum variants will cause a compiler error if these functions aren't updated.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ir::core::{Expr, Function, Literal};
-use crate::vm::{Instr, ValueType};
+use crate::vm::{AbstractTypeDefInfo, Instr, RuntimeCompileContext, StructDefInfo, ValueType};
 
 mod expr;
 mod helpers;
@@ -110,15 +120,31 @@ pub struct SpecializationResult {
 pub fn specialize_function(
     func: &Function,
     arg_types: &[ValueType],
+    struct_defs: &[StructDefInfo],
+    type_object_names: &HashSet<String>,
+    module_path: Option<&str>,
+    disable_array_index_fast_path: bool,
+    disable_field_access: bool,
 ) -> Result<SpecializationResult, SpecializationError> {
     // 1. Build locals map with fixed argument types
     let mut locals: HashMap<String, ValueType> = HashMap::new();
     for (param, ty) in func.params.iter().zip(arg_types.iter()) {
-        locals.insert(param.name.clone(), ty.clone());
+        let local_ty = if param.is_varargs {
+            // Issue #4344: runtime calls pack varargs into a Tuple slot.
+            // Specialization must mirror that calling convention instead of
+            // binding the collector to the first concrete argument type.
+            ValueType::Tuple
+        } else {
+            ty.clone()
+        };
+        locals.insert(param.name.clone(), local_ty);
     }
 
     // 2. Create specializer
-    let mut specializer = FunctionSpecializer::new(locals);
+    let mut specializer =
+        FunctionSpecializer::new(locals, struct_defs, type_object_names, module_path);
+    specializer.disable_array_index_fast_path = disable_array_index_fast_path;
+    specializer.disable_field_access = disable_field_access;
 
     // 3. Compile keyword parameter defaults and bind them as locals
     // Skip required kwargs (they don't have a valid default - marked with Literal::Undef)
@@ -151,7 +177,7 @@ pub fn specialize_function(
 }
 
 /// Lightweight compiler for function specialization
-struct FunctionSpecializer {
+struct FunctionSpecializer<'a> {
     code: Vec<Instr>,
     locals: HashMap<String, ValueType>,
     current_return_type: ValueType,
@@ -159,6 +185,68 @@ struct FunctionSpecializer {
     break_positions: Vec<usize>,
     /// Positions of continue jumps to be patched
     continue_positions: Vec<usize>,
+    /// Struct type definitions indexed by `type_id`, used to statically resolve
+    /// field indices and field types for `FieldAccess` reads and `FieldAssign`
+    /// writes on `ValueType::Struct(type_id)` operands (Issue #6346). Borrowed
+    /// from the VM's `struct_defs` for the duration of one specialization.
+    struct_defs: &'a [StructDefInfo],
+    /// Dotted module path for the function being specialized. The generic
+    /// compiler resolves unqualified module-private type objects through this
+    /// path; lazy runtime specialization must do the same or it can turn a
+    /// valid method body `T` reference into `UndefVarError: T` (Issue #8410).
+    current_module_path: Option<String>,
+    /// Per-element specialized types of tuple-literal temporaries (Issue #6561).
+    ///
+    /// The lowering pass desugars a self-referential destructuring swap such as
+    /// `a, b = b, a % b` into `__tuple_tmp = (b, a % b); a = __tuple_tmp[1];
+    /// b = __tuple_tmp[2]`. When the RHS is a tuple literal we record each
+    /// element's specialized type here so a later constant index `temp[k]`
+    /// (`compile_index`) can return the precise element type and emit a typed
+    /// `Store*` instead of widening the target to `Any`.
+    tuple_element_types: HashMap<String, Vec<ValueType>>,
+    /// Type-object names visible to the runtime specializer. The main compiler
+    /// resolves a bare module-private type in a method body through
+    /// `current_module_path`; the specializer recompiles from IR later and must
+    /// preserve that same DataType binding instead of emitting `LoadAny("T")`
+    /// (Issue #8410).
+    type_object_names: &'a HashSet<String>,
+    module_path: Option<&'a str>,
+    /// Issue #6657: when the program defines a user `getindex` override on a
+    /// native array receiver, the specializer must NOT emit its native-indexing
+    /// fast path (`IndexLoad`) for a scalar `xs[i]` — that would bypass the
+    /// override. With this set, `compile_index` bails out (`Unsupported`) so the
+    /// whole specialization is abandoned and the generic body (whose
+    /// `CallTypedDispatchOrBuiltin(GetIndex, ..)` reaches the override at
+    /// runtime) is used instead. Default `false` keeps the hot path intact.
+    disable_array_index_fast_path: bool,
+    /// Issue #8127: when the program defines a user `getproperty` override, the
+    /// specializer must NOT emit a direct `GetField` for an `obj.field` read —
+    /// that would bypass the override. With this set, `compile_field_access`
+    /// bails out (`Unsupported`) so the specialization is abandoned and the
+    /// generic body (whose interpreter `getproperty` dispatch reaches the
+    /// override) is used instead. Default `false` keeps the hot path intact.
+    disable_field_access: bool,
+}
+
+pub(crate) fn collect_type_object_names(
+    struct_defs: &[StructDefInfo],
+    compile_context: Option<&RuntimeCompileContext>,
+    abstract_types: &[AbstractTypeDefInfo],
+) -> HashSet<String> {
+    let mut names: HashSet<String> = struct_defs.iter().map(|def| def.name.clone()).collect();
+    names.extend(abstract_types.iter().map(|def| def.name.clone()));
+    if let Some(ctx) = compile_context {
+        names.extend(ctx.parametric_structs.keys().cloned());
+        names.extend(ctx.primitive_types.iter().map(|def| def.name.clone()));
+        names.extend(ctx.type_aliases.keys().cloned());
+    }
+    names
+}
+
+pub(crate) fn module_path_from_function_name(name: &str) -> Option<&str> {
+    name.rsplit_once('.')
+        .map(|(module, _)| module)
+        .filter(|module| !module.is_empty())
 }
 
 #[cfg(test)]
@@ -336,7 +424,7 @@ mod tests {
             span,
         };
 
-        let mut specializer = FunctionSpecializer::new(HashMap::new());
+        let mut specializer = FunctionSpecializer::new_for_tests(HashMap::new(), &[]);
         let result = specializer.compile_stmt(&try_stmt);
 
         // Verify the error message contains the readable name
@@ -386,8 +474,11 @@ mod tests {
     fn test_compile_index_preserves_arrayof_element_type() {
         let span = test_span();
         let mut locals = HashMap::new();
-        locals.insert("arr".to_string(), ValueType::ArrayOf(ArrayElementType::F64));
-        let mut specializer = FunctionSpecializer::new(locals);
+        locals.insert(
+            "arr".to_string(),
+            ValueType::ArrayOf(ArrayElementType::F64, None),
+        );
+        let mut specializer = FunctionSpecializer::new_for_tests(locals, &[]);
 
         let array_expr = Expr::Var("arr".to_string(), span);
         let indices = vec![Expr::Literal(Literal::Int(1), span)];
@@ -396,5 +487,356 @@ mod tests {
             .expect("compile index");
 
         assert_eq!(result, ValueType::F64);
+    }
+
+    // ---- Issue #6346: FieldAssign / FieldAccess / DestructuringAssign ----
+
+    fn point_struct_defs(is_mutable: bool) -> Vec<StructDefInfo> {
+        vec![StructDefInfo {
+            name: "Point6346".to_string(),
+            is_mutable,
+            fields: vec![
+                ("x".to_string(), ValueType::F64),
+                ("y".to_string(), ValueType::F64),
+            ],
+            field_julia_types: Vec::new(),
+            parent_type: None,
+        }]
+    }
+
+    /// `obj.field` read on a known struct resolves the field index/type
+    /// statically and emits `GetField`. (Issue #6346)
+    #[test]
+    fn test_field_access_read_resolves_to_getfield() {
+        let span = test_span();
+        let defs = point_struct_defs(true);
+        let mut locals = HashMap::new();
+        locals.insert("p".to_string(), ValueType::Struct(0));
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &defs);
+
+        let expr = Expr::FieldAccess {
+            object: Box::new(Expr::Var("p".to_string(), span)),
+            field: "y".to_string(),
+            span,
+        };
+        let ty = spec
+            .compile_expr(&expr)
+            .expect("field read should specialize");
+        assert_eq!(ty, ValueType::F64, "y is declared ::Float64");
+        assert!(
+            spec.code.iter().any(|i| matches!(i, Instr::GetField(1))),
+            "expected GetField(1) for field y, got {:?}",
+            spec.code
+        );
+    }
+
+    /// `obj.field = value` on a *mutable* struct emits a statically-resolved
+    /// `SetField(idx)`. (Issue #6346)
+    #[test]
+    fn test_field_assign_mutable_struct_emits_setfield() {
+        let span = test_span();
+        let defs = point_struct_defs(true);
+        let mut locals = HashMap::new();
+        locals.insert("p".to_string(), ValueType::Struct(0));
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &defs);
+
+        let stmt = Stmt::FieldAssign {
+            object: "p".to_string(),
+            field: "y".to_string(),
+            value: Expr::Literal(Literal::Float(3.0), span),
+            span,
+        };
+        spec.compile_stmt(&stmt)
+            .expect("mutable field assign should specialize");
+        assert!(
+            spec.code.iter().any(|i| matches!(i, Instr::SetField(1))),
+            "expected SetField(1) for field y, got {:?}",
+            spec.code
+        );
+        assert!(
+            spec.code
+                .iter()
+                .any(|i| matches!(i, Instr::StoreStruct(name) if name == "p")),
+            "expected StoreStruct(p) to write the mutated struct back, got {:?}",
+            spec.code
+        );
+    }
+
+    /// Assigning an `Int` literal to a `::Float64` field coerces via `ToF64`,
+    /// exactly matching the interpreter's `compile_expr_as`. (Issue #6346)
+    #[test]
+    fn test_field_assign_coerces_int_to_float_field() {
+        let span = test_span();
+        let defs = point_struct_defs(true);
+        let mut locals = HashMap::new();
+        locals.insert("p".to_string(), ValueType::Struct(0));
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &defs);
+
+        let stmt = Stmt::FieldAssign {
+            object: "p".to_string(),
+            field: "x".to_string(),
+            value: Expr::Literal(Literal::Int(2), span),
+            span,
+        };
+        spec.compile_stmt(&stmt)
+            .expect("coercible field assign should specialize");
+        assert!(
+            spec.code.iter().any(|i| matches!(i, Instr::ToF64)),
+            "expected ToF64 coercion for Int->Float64 field, got {:?}",
+            spec.code
+        );
+        assert!(
+            spec.code.iter().any(|i| matches!(i, Instr::SetField(0))),
+            "expected SetField(0) for field x, got {:?}",
+            spec.code
+        );
+    }
+
+    /// Field assignment on an *immutable* struct must fall back to the
+    /// interpreter (the typed `SetField` fast path is mutable-only). (Issue #6346)
+    #[test]
+    fn test_field_assign_immutable_struct_falls_back() {
+        let span = test_span();
+        let defs = point_struct_defs(false);
+        let mut locals = HashMap::new();
+        locals.insert("p".to_string(), ValueType::Struct(0));
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &defs);
+
+        let stmt = Stmt::FieldAssign {
+            object: "p".to_string(),
+            field: "x".to_string(),
+            value: Expr::Literal(Literal::Float(1.0), span),
+            span,
+        };
+        let result = spec.compile_stmt(&stmt);
+        assert!(
+            matches!(result, Err(SpecializationError::Unsupported(_))),
+            "immutable field assign should not specialize, got {:?}",
+            result
+        );
+    }
+
+    /// An n-ary operator application `*(a, b, c)` (how the parser spells the
+    /// chained product `a * b * c`) folds left through the typed binary-op path
+    /// instead of aborting specialization. (Issue #6346)
+    #[test]
+    fn test_nary_mul_operator_call_folds_to_typed_ops() {
+        let span = test_span();
+        let mut locals = HashMap::new();
+        locals.insert("a".to_string(), ValueType::F64);
+        locals.insert("b".to_string(), ValueType::F64);
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &[]);
+
+        // `*(a, b, 2.0)` — three operands, F64 throughout.
+        let expr = Expr::Call {
+            function: "*".to_string(),
+            args: vec![
+                Expr::Var("a".to_string(), span),
+                Expr::Var("b".to_string(), span),
+                Expr::Literal(Literal::Float(2.0), span),
+            ],
+            kwargs: vec![],
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
+            span,
+        };
+        let ty = spec
+            .compile_expr(&expr)
+            .expect("n-ary * call should specialize");
+        assert_eq!(ty, ValueType::F64);
+        let mul_count = spec
+            .code
+            .iter()
+            .filter(|i| matches!(i, Instr::MulF64))
+            .count();
+        assert_eq!(
+            mul_count, 2,
+            "three-operand product folds to two MulF64, got {:?}",
+            spec.code
+        );
+    }
+
+    /// An n-ary operator call on non-numeric operands stays on the interpreter
+    /// fallback (the typed fold only covers primitive numerics). (Issue #6346)
+    #[test]
+    fn test_nary_operator_call_non_numeric_falls_back() {
+        let span = test_span();
+        let mut locals = HashMap::new();
+        locals.insert("s".to_string(), ValueType::Str);
+        locals.insert("t".to_string(), ValueType::Str);
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &[]);
+
+        // String concatenation `*(s, t)` must not become a typed numeric MulF64.
+        let expr = Expr::Call {
+            function: "*".to_string(),
+            args: vec![
+                Expr::Var("s".to_string(), span),
+                Expr::Var("t".to_string(), span),
+            ],
+            kwargs: vec![],
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
+            span,
+        };
+        let result = spec.compile_expr(&expr);
+        assert!(
+            matches!(result, Err(SpecializationError::Unsupported(_))),
+            "string `*` should fall back, got {:?}",
+            result
+        );
+    }
+
+    // ---- Issue #6561: tuple-literal temporary element-type tracking ----
+
+    /// Build a specializer with `a` and `b` bound to `I64`, then compile the
+    /// desugared swap statements `t = (b, a)` and return the specializer so a
+    /// caller can drive `compile_index` against the tracked temporary.
+    fn swap_temp_specializer<'a>() -> FunctionSpecializer<'a> {
+        let mut locals = HashMap::new();
+        locals.insert("a".to_string(), ValueType::I64);
+        locals.insert("b".to_string(), ValueType::I64);
+        FunctionSpecializer::new_for_tests(locals, &[])
+    }
+
+    fn tuple_assign(var: &str, elems: Vec<Expr>) -> Stmt {
+        Stmt::Assign {
+            var: var.to_string(),
+            value: Expr::TupleLiteral {
+                elements: elems,
+                span: test_span(),
+            },
+            span: test_span(),
+        }
+    }
+
+    /// A constant index into a tracked tuple temporary returns the recorded
+    /// element type (so the caller emits a typed `Store*`) instead of widening
+    /// to `Any`. The recorded type matches the `IndexLoad` result tag exactly,
+    /// so no dynamic coercion is emitted. (Issue #6561)
+    #[test]
+    fn test_tuple_temp_index_read_sharpens_to_typed() {
+        let span = test_span();
+        let mut spec = swap_temp_specializer();
+        spec.compile_stmt(&tuple_assign(
+            "t",
+            vec![
+                Expr::Var("b".to_string(), span),
+                Expr::Var("a".to_string(), span),
+            ],
+        ))
+        .expect("tuple temp assignment should specialize");
+
+        let before = spec.code.len();
+        let ty = spec.compile_index(
+            &Expr::Var("t".to_string(), span),
+            &[Expr::Literal(Literal::Int(1), span)],
+        );
+        assert_eq!(
+            ty.expect("index should specialize"),
+            ValueType::I64,
+            "tracked tuple read should return the recorded element type"
+        );
+        assert!(
+            spec.code[before..]
+                .iter()
+                .any(|i| matches!(i, Instr::IndexLoad(1))),
+            "tracked tuple read should still load the element via IndexLoad: {:?}",
+            &spec.code[before..]
+        );
+        // The element tag already matches the recorded type, so the sharpen
+        // does NOT pay for a redundant dynamic coercion.
+        assert!(
+            !spec.code[before..]
+                .iter()
+                .any(|i| matches!(i, Instr::DynamicToI64 | Instr::DynamicToF64)),
+            "typed tuple read must not emit a redundant coercion: {:?}",
+            &spec.code[before..]
+        );
+    }
+
+    /// Indexing a `Tuple`-typed local that was NOT tracked (no recorded element
+    /// types) stays on the generic `Any` path. (Issue #6561)
+    #[test]
+    fn test_untracked_tuple_index_stays_any() {
+        let span = test_span();
+        let mut locals = HashMap::new();
+        locals.insert("t".to_string(), ValueType::Tuple);
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &[]);
+
+        let ty = spec
+            .compile_index(
+                &Expr::Var("t".to_string(), span),
+                &[Expr::Literal(Literal::Int(1), span)],
+            )
+            .expect("index should specialize");
+        assert_eq!(ty, ValueType::Any, "untracked tuple index must stay Any");
+    }
+
+    /// Reassigning the temporary to a non-tuple value invalidates the tracked
+    /// element types so a later index no longer sharpens. (Issue #6561)
+    #[test]
+    fn test_tuple_temp_invalidated_on_non_tuple_reassign() {
+        let span = test_span();
+        let mut spec = swap_temp_specializer();
+        spec.compile_stmt(&tuple_assign(
+            "t",
+            vec![
+                Expr::Var("b".to_string(), span),
+                Expr::Var("a".to_string(), span),
+            ],
+        ))
+        .expect("tuple temp assignment should specialize");
+        // Overwrite `t` with a plain integer; tracking must be dropped.
+        spec.compile_stmt(&Stmt::Assign {
+            var: "t".to_string(),
+            value: Expr::Literal(Literal::Int(7), span),
+            span,
+        })
+        .expect("reassignment should specialize");
+
+        let ty = spec
+            .compile_index(
+                &Expr::Var("t".to_string(), span),
+                &[Expr::Literal(Literal::Int(1), span)],
+            )
+            .expect("index should specialize");
+        assert_eq!(ty, ValueType::Any, "invalidated tuple index must stay Any");
+    }
+
+    /// A tracked tuple element whose type is outside the sound-coercion numeric
+    /// subset (e.g. `Str`) is left on the generic `Any` path. (Issue #6561)
+    #[test]
+    fn test_tuple_temp_non_numeric_element_stays_any() {
+        let span = test_span();
+        let mut locals = HashMap::new();
+        locals.insert("s".to_string(), ValueType::Str);
+        locals.insert("n".to_string(), ValueType::I64);
+        let mut spec = FunctionSpecializer::new_for_tests(locals, &[]);
+        spec.compile_stmt(&tuple_assign(
+            "t",
+            vec![
+                Expr::Var("s".to_string(), span),
+                Expr::Var("n".to_string(), span),
+            ],
+        ))
+        .expect("tuple temp assignment should specialize");
+
+        // Element 1 is Str -> generic Any path (no sharpen); element 2 is I64
+        // -> sharpened to a typed read.
+        let str_ty = spec
+            .compile_index(
+                &Expr::Var("t".to_string(), span),
+                &[Expr::Literal(Literal::Int(1), span)],
+            )
+            .expect("index should specialize");
+        assert_eq!(str_ty, ValueType::Any, "Str element must stay Any");
+
+        let num_ty = spec
+            .compile_index(
+                &Expr::Var("t".to_string(), span),
+                &[Expr::Literal(Literal::Int(2), span)],
+            )
+            .expect("index should specialize");
+        assert_eq!(num_ty, ValueType::I64, "I64 element must be sharpened");
     }
 }

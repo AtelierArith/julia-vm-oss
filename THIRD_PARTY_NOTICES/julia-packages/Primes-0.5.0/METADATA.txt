@@ -1,0 +1,8 @@
+package: Primes
+version: 0.5.0
+local_uuid: 27ebfcd6-29c5-5fa9-bf4e-7612837888d8
+registry_uuid: 27ebfcd6-29c5-5fa9-bf4b-fb8fc14df3ae
+repository: https://github.com/JuliaMath/Primes.jl
+license: MIT
+license_source: LICENSE.md at ref v0.5.0
+note: local Project.toml UUID differs from Julia General registry.

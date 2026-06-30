@@ -1,0 +1,5 @@
+crate: astro-float
+version: 0.9.5
+license: MIT
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/stencillogic/astro-float

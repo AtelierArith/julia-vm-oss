@@ -4,12 +4,16 @@
 //! - Unary operators (negation, not, positive)
 //! - Short-circuit logical operators (&&, ||)
 
+use crate::builtins::BuiltinId;
 use crate::intrinsics::Intrinsic;
 use crate::ir::core::{Expr, UnaryOp};
+use crate::lowering::expr::make_broadcasted_call;
+use crate::span::Span;
 use crate::types::JuliaType;
 use crate::vm::{Instr, ValueType};
 
-use super::super::{err, CResult, CoreCompiler};
+use super::super::type_helpers::short_circuit_result_type;
+use super::super::{err, is_base_function, is_random_function, CResult, CoreCompiler};
 
 /// Check if an expression is a call to a function that never returns normally
 /// (e.g., `throw(...)`, `error(...)`, `rethrow(...)`).
@@ -30,7 +34,15 @@ impl CoreCompiler<'_> {
         &mut self,
         op: &UnaryOp,
         operand: &Expr,
+        span: Span,
     ) -> CResult<ValueType> {
+        if matches!(op, UnaryOp::Not) && self.compile_unary_not_operand_is_callable(operand) {
+            self.emit(Instr::PushFunction("!".to_string()));
+            self.compile_expr(operand)?;
+            self.emit(Instr::CallBuiltin(BuiltinId::Compose, 2));
+            return Ok(ValueType::Function);
+        }
+
         // Handle unary operations on missing literals
         // In Julia, -missing returns missing (propagation of unknown value)
         if matches!(op, UnaryOp::Neg | UnaryOp::Pos) {
@@ -60,6 +72,16 @@ impl CoreCompiler<'_> {
             }
         }
 
+        if matches!(op, UnaryOp::Neg)
+            && matches!(
+                self.infer_expr_type(operand),
+                ValueType::Array | ValueType::ArrayOf(_, _)
+            )
+        {
+            let broadcasted_neg = make_broadcasted_call("-", vec![operand.clone()], span);
+            return self.compile_expr(&broadcasted_neg);
+        }
+
         let ty = self.compile_expr(operand)?;
         match (op, &ty) {
             // Negation -> neg_int, neg_float (returns same type as operand)
@@ -80,6 +102,54 @@ impl CoreCompiler<'_> {
                 // Use NegAny which handles F16 and preserves the type (Issue #1972)
                 self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
                 Ok(ValueType::F16)
+            }
+            // Issue #3705: narrow integer and 128-bit types must dispatch through
+            // NegAny which now preserves each type. Without these arms the match
+            // fell into the wildcard error case below.
+            (UnaryOp::Neg, ValueType::I8) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::I8)
+            }
+            (UnaryOp::Neg, ValueType::I16) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::I16)
+            }
+            (UnaryOp::Neg, ValueType::I32) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::I32)
+            }
+            (UnaryOp::Neg, ValueType::I128) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::I128)
+            }
+            (UnaryOp::Neg, ValueType::U8) => {
+                // Julia: -UInt8(5) == UInt8(251) (two's-complement wrap, preserves type)
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::U8)
+            }
+            (UnaryOp::Neg, ValueType::U16) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::U16)
+            }
+            (UnaryOp::Neg, ValueType::U32) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::U32)
+            }
+            (UnaryOp::Neg, ValueType::U64) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::U64)
+            }
+            (UnaryOp::Neg, ValueType::U128) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::U128)
+            }
+            (UnaryOp::Neg, ValueType::BigInt) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::BigInt)
+            }
+            (UnaryOp::Neg, ValueType::BigFloat) => {
+                self.emit(Instr::CallIntrinsic(Intrinsic::NegAny));
+                Ok(ValueType::BigFloat)
             }
             // For Any type, use DynamicNeg which handles both primitives and structs.
             // DynamicNeg tries Julia dispatch for struct types (e.g., Rational, Complex),
@@ -130,14 +200,36 @@ impl CoreCompiler<'_> {
         }
     }
 
+    fn compile_unary_not_operand_is_callable(&mut self, operand: &Expr) -> bool {
+        if self.infer_expr_type(operand) == ValueType::Function {
+            return true;
+        }
+
+        match operand {
+            Expr::FunctionRef { .. } => true,
+            Expr::Var(name, _) if !self.locals.contains_key(name) => {
+                self.method_tables.contains_key(name)
+                    || is_base_function(name)
+                    || self.function_aliases.contains_key(name)
+                    || (self.usings.contains("Random") && is_random_function(name))
+            }
+            _ => false,
+        }
+    }
+
     pub(in super::super) fn compile_and_expr(
         &mut self,
         left: &Expr,
         right: &Expr,
     ) -> CResult<ValueType> {
-        // a && b: evaluate left; if false, return false; else evaluate right
-        // JumpIfZero expects Bool (Julia semantics)
-        self.compile_expr_as(left, ValueType::Bool)?;
+        // a && b: evaluate left; if false, return false; else evaluate right.
+        // The left operand is a *condition*: compile it with its natural type
+        // (no `I64ToBool` coercion) so `JumpIfZero` enforces Julia's Bool-only
+        // boolean-context rule and raises `TypeError: non-boolean (T) used in
+        // boolean context` for a non-Bool operand such as `1 && true`. Branch
+        // position is already strict via `compile_condition_false_jumps`; this
+        // closes the value-position gap (Issue #6162).
+        self.compile_expr(left)?;
         let j_false = self.here();
         self.emit(Instr::JumpIfZero(usize::MAX));
 
@@ -149,15 +241,28 @@ impl CoreCompiler<'_> {
             right,
             Expr::ReturnExpr { .. } | Expr::BreakExpr { .. } | Expr::ContinueExpr { .. }
         ) || is_never_returning_call(right);
-        if is_control_flow {
-            self.compile_expr(right)?;
-            // Control flow executed - we won't reach here at runtime
-            // But for compilation we need to maintain stack consistency
-            // Push a dummy value for the "then" branch
-            self.emit(Instr::PushBool(false));
+        // The right operand is in *value* position: Julia's `a && b` returns `b`
+        // as-is when `a` is true (and `false` otherwise), so compile it with its
+        // natural type instead of coercing to Bool. When that type isn't Bool the
+        // whole expression widens to Any, since the false path contributes a Bool
+        // (Issue #6278; follow-up to #6162).
+        let locals_before_right = self.locals.clone();
+        let julia_type_locals_before_right = self.julia_type_locals.clone();
+        let then_restore = self.apply_then_narrowings(left);
+        let right_result = if is_control_flow {
+            self.compile_expr(right).map(|_| {
+                // Control flow executed - we won't reach here at runtime, but push a
+                // dummy value to keep the stack consistent with the false path.
+                self.emit(Instr::PushBool(false));
+                ValueType::Bool
+            })
         } else {
-            self.compile_expr_as(right, ValueType::Bool)?;
-        }
+            self.compile_expr(right).map(short_circuit_result_type)
+        };
+        self.restore_short_circuit_narrowings(then_restore);
+        self.locals = locals_before_right;
+        self.julia_type_locals = julia_type_locals_before_right;
+        let result_ty = right_result?;
         let j_end = self.here();
         self.emit(Instr::Jump(usize::MAX));
 
@@ -168,7 +273,7 @@ impl CoreCompiler<'_> {
 
         let end = self.here();
         self.patch_jump(j_end, end);
-        Ok(ValueType::Bool)
+        Ok(result_ty)
     }
 
     pub(in super::super) fn compile_or_expr(
@@ -176,9 +281,13 @@ impl CoreCompiler<'_> {
         left: &Expr,
         right: &Expr,
     ) -> CResult<ValueType> {
-        // a || b: evaluate left; if true, return true; else evaluate right
-        // JumpIfZero expects Bool (Julia semantics)
-        self.compile_expr_as(left, ValueType::Bool)?;
+        // a || b: evaluate left; if true, return true; else evaluate right.
+        // The left operand is a *condition*: compile it with its natural type
+        // (no `I64ToBool` coercion) so `JumpIfZero` enforces Julia's Bool-only
+        // boolean-context rule and raises `TypeError: non-boolean (T) used in
+        // boolean context` for a non-Bool operand such as `1 || false`
+        // (Issue #6162).
+        self.compile_expr(left)?;
         let j_eval_right = self.here();
         self.emit(Instr::JumpIfZero(usize::MAX));
 
@@ -196,16 +305,30 @@ impl CoreCompiler<'_> {
             right,
             Expr::ReturnExpr { .. } | Expr::BreakExpr { .. } | Expr::ContinueExpr { .. }
         ) || is_never_returning_call(right);
-        if is_control_flow {
-            self.compile_expr(right)?;
-            self.emit(Instr::PushBool(false)); // Dummy value for stack consistency
+        // The right operand is in *value* position: Julia's `a || b` returns `b`
+        // as-is when `a` is false (and `true` otherwise), so compile it with its
+        // natural type instead of coercing to Bool. When that type isn't Bool the
+        // whole expression widens to Any, since the true path contributes a Bool
+        // (Issue #6278; follow-up to #6162).
+        let locals_before_right = self.locals.clone();
+        let julia_type_locals_before_right = self.julia_type_locals.clone();
+        let else_restore = self.apply_else_narrowings(left);
+        let right_result = if is_control_flow {
+            self.compile_expr(right).map(|_| {
+                self.emit(Instr::PushBool(false)); // Dummy value for stack consistency
+                ValueType::Bool
+            })
         } else {
-            self.compile_expr_as(right, ValueType::Bool)?;
-        }
+            self.compile_expr(right).map(short_circuit_result_type)
+        };
+        self.restore_short_circuit_narrowings(else_restore);
+        self.locals = locals_before_right;
+        self.julia_type_locals = julia_type_locals_before_right;
+        let result_ty = right_result?;
 
         let end = self.here();
         self.patch_jump(j_end, end);
-        Ok(ValueType::Bool)
+        Ok(result_ty)
     }
 }
 

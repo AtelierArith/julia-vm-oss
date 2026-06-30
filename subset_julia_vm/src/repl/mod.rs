@@ -3,6 +3,7 @@
 //! This module provides a REPLSession that maintains state between evaluations,
 //! allowing variables defined in one evaluation to be used in subsequent ones.
 
+pub mod completions;
 mod converters;
 mod globals;
 mod session;

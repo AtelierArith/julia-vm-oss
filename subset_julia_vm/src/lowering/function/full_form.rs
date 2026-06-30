@@ -3,20 +3,127 @@
 //! Handles `function f(...) ... end` style definitions.
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
-use crate::ir::core::{Block, Function, KwParam, Stmt, TypedParam};
+use crate::ir::core::{Block, Expr, Function, KwParam, Stmt, TypedParam};
 use crate::lowering::stmt;
-use crate::lowering::LowerResult;
+use crate::lowering::{LambdaContext, LowerResult};
 use crate::parser::cst::{CstWalker, Node, NodeKind};
 use crate::types::{JuliaType, TypeParam};
 
 use super::defaults::{extract_defaults_from_function_def, generate_default_arg_stubs};
 use super::signature::{
-    parse_kwarg_splat_parameter, parse_kwparam_from_kw_node, parse_parameter, parse_signature_call,
-    parse_signature_with_where, parse_type_name,
+    inject_parameter_destructuring_prologue, module_extension_function_name,
+    parse_callable_self_param, parse_kwarg_splat_parameter, parse_kwparam_from_kw_node,
+    parse_parameter, parse_signature_call, parse_signature_with_where, parse_type_name,
 };
-use super::where_clause::parse_where_expression;
+use super::where_clause::{
+    convert_params_with_type_vars, parse_where_clause_type_params, parse_where_expression,
+};
 
 pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult<Function> {
+    lower_function_impl(walker, node, None, None)
+}
+
+pub fn lower_function_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Function> {
+    lower_function_impl(walker, node, None, Some(lambda_ctx))
+}
+
+pub fn lower_anonymous_function_value<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Expr> {
+    let span = walker.span(&node);
+    let (name, func) = lower_anonymous_function_named(walker, node, lambda_ctx)?;
+
+    Ok(Expr::LetBlock {
+        bindings: vec![],
+        body: Block {
+            stmts: vec![
+                Stmt::FunctionDef {
+                    func: Box::new(func),
+                    span,
+                },
+                Stmt::Expr {
+                    expr: Expr::Var(name, span),
+                    span,
+                },
+            ],
+            span,
+        },
+        span,
+    })
+}
+
+pub fn lower_anonymous_function_named<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<(String, Function)> {
+    let span = walker.span(&node);
+    let name = lambda_ctx
+        .map(LambdaContext::next_lambda_name)
+        .unwrap_or_else(|| format!("__anonymous_function_{}", span.start));
+    let func = lower_function_impl(walker, node, Some(name.clone()), lambda_ctx)?;
+    Ok((name, func))
+}
+
+/// Collect the names of the `where`-clause type parameters declared on a
+/// full-form function definition, without fully parsing the signature.
+///
+/// The pure-Rust parser lays out `function f(x::T) where T ... end` as sibling
+/// children `[Identifier, ParameterList, WhereClause, Block]`, so the parameter
+/// annotations are parsed before the `WhereClause` is seen. This helper does a
+/// cheap forward scan so those names can be excluded from type-alias expansion
+/// while the parameters are parsed, ensuring a `where T` parameter shadows a
+/// same-named top-level binding (Issue #7847). Errors during the scan are
+/// swallowed (returning the names found so far); the authoritative parse happens
+/// later in the main loop.
+fn collect_where_param_names(walker: &CstWalker<'_>, node: Node<'_>) -> Vec<String> {
+    let mut names = Vec::new();
+    for child in walker.named_children(&node) {
+        match walker.kind(&child) {
+            NodeKind::WhereClause => {
+                if let Ok(tps) = parse_where_clause_type_params(walker, child) {
+                    names.extend(tps.into_iter().map(|tp| tp.name));
+                }
+            }
+            NodeKind::WhereExpression => {
+                if let Ok((_, _, _, _, tps)) = parse_where_expression(walker, child) {
+                    names.extend(tps.into_iter().map(|tp| tp.name));
+                }
+            }
+            NodeKind::Signature => {
+                if let Ok((_, _, _, _, tps)) = parse_signature_with_where(walker, child) {
+                    names.extend(tps.into_iter().map(|tp| tp.name));
+                }
+            }
+            NodeKind::TypedExpression => {
+                // `function f(x::T)::R where T` nests the where expression in the
+                // left child of the return-type-annotated typed expression.
+                for inner in walker.named_children(&child) {
+                    if walker.kind(&inner) == NodeKind::WhereExpression {
+                        if let Ok((_, _, _, _, tps)) = parse_where_expression(walker, inner) {
+                            names.extend(tps.into_iter().map(|tp| tp.name));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn lower_function_impl<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    fallback_name: Option<String>,
+    lambda_ctx: Option<&LambdaContext>,
+) -> LowerResult<Function> {
     let span = walker.span(&node);
     let mut name: Option<String> = None;
     let mut params: Vec<TypedParam> = Vec::new();
@@ -25,9 +132,25 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
     let mut return_type: Option<JuliaType> = None;
     let mut is_base_extension = false;
     let mut body = None;
+    // Bound callable struct `function (self::Type)(args) ... end`: the struct
+    // instance binds to `self` as a synthetic leading parameter, injected after
+    // the parameter list is parsed (Issue #5126).
+    let mut callable_self_param: Option<TypedParam> = None;
 
     // Track whether we've seen the parameter list - any Identifier after it is the return type
     let mut seen_params = false;
+
+    // Pre-pass: collect the `where`-clause type-parameter names so they shadow
+    // any same-named top-level binding (`T = Int64`, registered as a type alias)
+    // while the parameter annotations are parsed below. The pure-Rust parser
+    // emits the parameter list as a sibling `ParameterList` node BEFORE the
+    // `WhereClause` node, so without this pre-pass `f(x::T) where T` would freeze
+    // `x`'s annotation to the alias target (`Int64`) instead of the type
+    // variable `T`. A method's `where` parameter lexically shadows the global,
+    // exactly as upstream Julia scopes it (Issue #7847; mirrors the struct
+    // parameter exclusion of Issue #7840 and the `parse_where_expression` fix).
+    let prepass_where_names = collect_where_param_names(walker, node);
+    let _exclusion = crate::lowering::type_alias::ScopedExclusion::new(&prepass_where_names);
 
     for child in walker.named_children(&node) {
         match walker.kind(&child) {
@@ -44,47 +167,36 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                     }
                 }
             }
-            NodeKind::Operator => {
+            NodeKind::Operator if name.is_none() => {
                 // Handle operator as function name: function +(a, b) ... end
-                if name.is_none() {
-                    name = Some(walker.text(&child).to_string());
+                name = Some(walker.text(&child).to_string());
+            }
+            NodeKind::FieldExpression if name.is_none() => {
+                // Handle `Base.:+`/`Base.show` (Base extension) and `Inner.f`
+                // (extend another module's function, Issue #8052). For non-Base
+                // modules the method is registered under the module-qualified name
+                // so it joins the target module's existing generic function.
+                let children = walker.named_children(&child);
+                if children.len() >= 2 {
+                    let module = walker.text(&children[0]);
+                    let field_text = walker.text(&children[1]);
+                    let (resolved_name, base_ext) =
+                        module_extension_function_name(module, field_text);
+                    name = Some(resolved_name);
+                    is_base_extension = base_ext;
                 }
             }
-            NodeKind::FieldExpression => {
-                // Handle Base.:+ syntax: function Base.:+(a, b) ... end
-                // Also handle Base.show syntax: function Base.show(io, x) ... end
-                // Extract the operator/function name from the field expression
-                if name.is_none() {
-                    let children = walker.named_children(&child);
-                    if children.len() >= 2 {
-                        let module = walker.text(&children[0]);
-                        let field_text = walker.text(&children[1]);
-                        if module == "Base" {
-                            // Extract operator name from quoted expression
-                            let mut op_name = if let Some(stripped) = field_text.strip_prefix(':')
-                            {
-                                stripped.to_string()
-                            } else {
-                                field_text.to_string()
-                            };
-                            // Strip parentheses if present (e.g., "(==)" -> "==")
-                            if op_name.starts_with('(') && op_name.ends_with(')') {
-                                op_name = op_name[1..op_name.len() - 1].to_string();
-                            }
-                            name = Some(op_name);
-                            is_base_extension = true;
-                        }
-                    }
-                }
-            }
-            NodeKind::ParenthesizedExpression => {
-                // Callable struct definition: function (::Type)(args) body end
+            NodeKind::ParenthesizedExpression if name.is_none() => {
+                // Callable struct definition (full form):
+                //   function (::Type)(args) body end        (anonymous self)
+                //   function (self::Type)(args) body end     (bound self)
                 // The parenthesized expression contains a UnaryTypedExpression
-                if name.is_none() {
-                    let inner_children = walker.named_children(&child);
-                    if inner_children.len() == 1 {
-                        let inner = inner_children[0];
-                        if walker.kind(&inner) == NodeKind::UnaryTypedExpression {
+                // (anonymous) or a TypedExpression (`self::Type`).
+                let inner_children = walker.named_children(&child);
+                if inner_children.len() == 1 {
+                    let inner = inner_children[0];
+                    match walker.kind(&inner) {
+                        NodeKind::UnaryTypedExpression => {
                             // Extract type name from ::Type
                             let type_children = walker.named_children(&inner);
                             if !type_children.is_empty() {
@@ -92,11 +204,20 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                                 name = Some(format!("__callable_{}", type_name));
                             } else {
                                 let type_text = walker.text(&inner);
-                                let type_name =
-                                    type_text.strip_prefix("::").unwrap_or(type_text);
+                                let type_name = type_text.strip_prefix("::").unwrap_or(type_text);
                                 name = Some(format!("__callable_{}", type_name));
                             }
                         }
+                        NodeKind::TypedExpression => {
+                            // Bound form `(self::Type)(args)`: bind the struct
+                            // instance to `self` so the body can read its fields.
+                            // The runtime prepends the instance to the call
+                            // arguments (Issue #5126 / Issue #5127).
+                            let (param, type_name) = parse_callable_self_param(walker, inner)?;
+                            callable_self_param = Some(param);
+                            name = Some(format!("__callable_{}", type_name));
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -193,69 +314,10 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 type_params = sig_type_params;
             }
             NodeKind::WhereClause => {
-                // Handle where clause from Pure Rust parser
-                // WhereClause can contain:
-                // - Identifier (simple: where T)
-                // - TypeParameters (multiple: where {T, S} or where {T<:Real})
-                // - SubtypeExpression (bounded: where T<:Real)
-                for where_child in walker.named_children(&child) {
-                    match walker.kind(&where_child) {
-                        NodeKind::Identifier => {
-                            let param_name = walker.text(&where_child).to_string();
-                            type_params.push(TypeParam::new(param_name));
-                        }
-                        NodeKind::TypeParameters => {
-                            // Handle where {T, S} or where {T<:Real}
-                            for tp_child in walker.named_children(&where_child) {
-                                match walker.kind(&tp_child) {
-                                    NodeKind::TypeParameter => {
-                                        // TypeParameter contains children describing the param
-                                        let tp_children = walker.named_children(&tp_child);
-                                        if tp_children.len() >= 2 {
-                                            // Bounded: T<:Real
-                                            let param_name =
-                                                walker.text(&tp_children[0]).to_string();
-                                            let bound = walker.text(&tp_children[1]).to_string();
-                                            type_params
-                                                .push(TypeParam::with_bound(param_name, bound));
-                                        } else if !tp_children.is_empty() {
-                                            // Unbounded: T
-                                            let param_name =
-                                                walker.text(&tp_children[0]).to_string();
-                                            type_params.push(TypeParam::new(param_name));
-                                        }
-                                    }
-                                    NodeKind::Identifier => {
-                                        let param_name = walker.text(&tp_child).to_string();
-                                        type_params.push(TypeParam::new(param_name));
-                                    }
-                                    NodeKind::SubtypeExpression | NodeKind::BinaryExpression => {
-                                        let children = walker.named_children(&tp_child);
-                                        if children.len() >= 2 {
-                                            let param_name = walker.text(&children[0]).to_string();
-                                            let bound = walker.text(&children[1]).to_string();
-                                            type_params
-                                                .push(TypeParam::with_bound(param_name, bound));
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        NodeKind::SubtypeExpression | NodeKind::BinaryExpression => {
-                            let children = walker.named_children(&where_child);
-                            if children.len() >= 2 {
-                                let param_name = walker.text(&children[0]).to_string();
-                                let bound = walker.text(&children[1]).to_string();
-                                type_params.push(TypeParam::with_bound(param_name, bound));
-                            } else if !children.is_empty() {
-                                let param_name = walker.text(&children[0]).to_string();
-                                type_params.push(TypeParam::new(param_name));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                // Handle where clause from Pure Rust parser. Shared with the
+                // assignment-form operator path (Issue #6537); see
+                // `parse_where_clause_type_params` for the recognized shapes.
+                type_params.extend(parse_where_clause_type_params(walker, child)?);
             }
             NodeKind::TypedExpression => {
                 // Handle return type annotation: function f(x)::ReturnType
@@ -320,7 +382,14 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
                 }
             }
             NodeKind::Block => {
-                body = Some(stmt::lower_block(walker, child)?);
+                body = Some(match lambda_ctx {
+                    Some(ctx) => ctx.with_active_type_params(&type_params, || {
+                        ctx.with_prefer_nested_lambdas(true, || {
+                            stmt::lower_block_with_ctx(walker, child, ctx)
+                        })
+                    })?,
+                    None => stmt::lower_block(walker, child)?,
+                });
             }
             NodeKind::ParametrizedTypeExpression if return_type.is_none() => {
                 // This might be a return type annotation like `::Complex{Float64}`
@@ -339,7 +408,7 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
         }
     }
 
-    let name = name.ok_or_else(|| {
+    let name = name.or(fallback_name).ok_or_else(|| {
         UnsupportedFeature::new(
             UnsupportedFeatureKind::Other("missing function name".to_string()),
             span,
@@ -360,6 +429,16 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
         body
     };
 
+    // Bound callable struct (full form): inject `self` as the leading parameter
+    // so the body can read the struct's fields. The runtime prepends the struct
+    // instance to the call arguments (Issue #5126 / Issue #5127).
+    if let Some(self_param) = callable_self_param {
+        params.insert(0, self_param);
+    }
+
+    let params = convert_params_with_type_vars(params, &type_params);
+    let (params, body) = inject_parameter_destructuring_prologue(params, body);
+
     Ok(Function {
         name,
         params,
@@ -368,6 +447,7 @@ pub fn lower_function<'a>(walker: &CstWalker<'a>, node: Node<'a>) -> LowerResult
         return_type,
         body,
         is_base_extension,
+        is_runtime_eval: false,
         span,
     })
 }
@@ -384,6 +464,28 @@ pub fn lower_function_all<'a>(
     node: Node<'a>,
 ) -> LowerResult<Vec<Function>> {
     let func = lower_function(walker, node)?;
+    lower_function_all_from_function(walker, node, func)
+}
+
+pub fn lower_function_all_with_ctx<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Vec<Function>> {
+    let func = lower_function_with_ctx(walker, node, lambda_ctx)?;
+    lower_function_all_from_function(walker, node, func)
+}
+
+fn lower_function_all_from_function<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    func: Function,
+) -> LowerResult<Vec<Function>> {
+    // Re-evaluate side-effecting keyword-argument defaults per call by injecting
+    // a guarded prologue into the body (Issue #5121). Done before stub
+    // generation so positional-default stubs forward to the prologue-bearing
+    // method and inherit the updated kwparam flags.
+    let func = super::kw_defaults::inject_kwarg_default_prologues(func);
     let defaults = extract_defaults_from_function_def(walker, node)?;
     let stubs = generate_default_arg_stubs(&func, &defaults);
     let mut result = vec![func];

@@ -1,0 +1,5 @@
+[[tests]]
+name = "web_dice_simulation_integer_floor_5990"
+file = "web_dice_simulation_integer_floor_5990.jl"
+expected = true
+description = "Web Dice Simulation keeps die as Int64 by using integer_floor before slot addition (Issue #5990)"

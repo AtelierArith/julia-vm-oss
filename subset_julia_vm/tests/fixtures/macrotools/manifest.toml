@@ -1,0 +1,175 @@
+# Fixture tests for MacroTools.jl package support (Issues #7437, #7449-#7453)
+
+[[tests]]
+name = "macrotools_package_load_capture_basic"
+file = "package_load_capture_basic.jl"
+expected = true
+description = "MacroTools loads through the bundled package path and package-internal @capture expansion resolves its defining module (Issue #7533)"
+
+[[tests]]
+name = "macrotools_nested_macrocall_structref_7856"
+file = "nested_macrocall_structref_7856.jl"
+expected = true
+description = "Nested macrocall expansion during macro-result conversion dereferences StructRef heap handles so OR-pattern @capture helpers (splitdef/isshortdef/splitarg) load and run (Issue #7856)"
+
+[[tests]]
+name = "macrotools_selective_import_module_capture_7451"
+file = "selective_import_module_capture_7451.jl"
+expected = true
+description = "Module-local using MacroTools: @capture makes the bundled matcher macro available while @match runs at the caller top level (Issue #7451)"
+
+[[tests]]
+name = "macrotools_package_animals_dir_7599"
+file = "package_animals_dir_7599.jl"
+expected = true
+description = "MacroTools package-root @__DIR__ resolves animals.txt through bundled package file I/O (Issue #7599)"
+
+[[tests]]
+name = "macrotools_animals_constant_7646"
+file = "animals_constant_7646.jl"
+expected = true
+description = "MacroTools.animals resolves to the package data Vector{Symbol} constant through module-qualified lookup (Issue #7646)"
+
+[[tests]]
+name = "macrotools_package_load_nested_macro_deps_7551"
+file = "package_load_nested_macro_deps_7551.jl"
+expected = true
+description = "MacroTools package load does not compile unrelated nested macro helpers before module registration (Issue #7551)"
+
+[[tests]]
+name = "macrotools_destruct_key_quotenode_7637"
+file = "destruct_key_quotenode_7637.jl"
+expected = true
+description = "MacroTools destruct_key handles QuoteNode key patterns without closure callable capture failure (Issue #7637)"
+
+[[tests]]
+name = "macrotools_destruct_array_pattern_7636"
+file = "destruct_array_pattern_7636.jl"
+expected = true
+description = "MacroTools @destruct captures array-style destructuring patterns during macro expansion (Issue #7636)"
+
+[[tests]]
+name = "macrotools_shortdef_splatted_q_7541"
+file = "shortdef_splatted_q_7541.jl"
+expected = true
+description = "MacroTools shortdef typed branches preserve @q splatted interpolation Expr shape without early macro-local evaluation (Issue #7541)"
+
+[[tests]]
+name = "macrotools_quoted_typed_where_function_7540"
+file = "quoted_typed_where_function_7540.jl"
+expected = true
+description = "Quoted typed/where function signatures construct Expr(:function, ...) for MacroTools helpers (Issue #7540)"
+
+[[tests]]
+name = "macrotools_package_load_runtime_any_7539"
+file = "package_load_runtime_any_7539.jl"
+expected = true
+description = "MacroTools @capture expansion quotes heterogeneous runtime Any payloads during package load and macro return conversion (Issue #7539)"
+
+[[tests]]
+name = "macrotools_quoted_typed_expression_7537"
+file = "quoted_typed_expression_7537.jl"
+expected = true
+description = "Quoted typed expressions construct Expr(:(::), ...) for MacroTools @capture patterns (Issue #7537)"
+
+[[tests]]
+name = "macrotools_infix_eq_after_macro_block_7643"
+file = "infix_eq_after_macro_block_7643.jl"
+expected = true
+description = "Any-typed infix == after macro-generated nested block assignment reaches user struct equality (Issue #7643)"
+
+[[tests]]
+name = "macrotools_capture_splatted_comprehension_7536"
+file = "capture_splatted_comprehension_7536.jl"
+expected = true
+description = "MacroTools @capture splats generated binding assignments from quote comprehensions (Issue #7536)"
+
+[[tests]]
+name = "macrotools_allbindings_quotenode_value_7535"
+file = "allbindings_quotenode_value_7535.jl"
+expected = true
+description = "MacroTools allbindings can traverse QuoteNode.value behind its isa guard during @capture expansion (Issue #7535)"
+
+[[tests]]
+name = "macrotools_nomatch_typebind_7534"
+file = "nomatch_typebind_7534.jl"
+expected = true
+description = "MacroTools TypeBind @nomatch fallback lowers and returns MatchError during match/types.jl execution (Issue #7534)"
+
+[[tests]]
+name = "macrotools_typebind_set_splat_7670"
+file = "typebind_set_splat_7670.jl"
+expected = true
+description = "MacroTools TypeBind splats Set head patterns into isexpr so matching Expr heads bind successfully (Issue #7670)"
+
+[[tests]]
+name = "macrotools_match_clauses_7546"
+file = "match_clauses_7546.jl"
+expected = true
+description = "MacroTools @match clause parsing does not emit Expr field access on Symbol inputs (Issue #7546)"
+
+[[tests]]
+name = "macrotools_match_block_macro_arg_7547"
+file = "match_block_macro_arg_7547.jl"
+expected = true
+description = "MacroTools @match receives begin/end clauses as one block and compiles helper splat dependencies (Issues #7547, #7548)"
+
+[[tests]]
+name = "macrotools_typed_matcher_pattern_7555"
+file = "typed_matcher_pattern_7555.jl"
+expected = true
+description = "MacroTools typed matcher patterns keep capture bindings dynamic instead of corrupting slot type (Issue #7555)"
+
+[[tests]]
+name = "macrotools_splitarg_unbound_refs_7556"
+file = "splitarg_unbound_refs_7556.jl"
+expected = true
+description = "MacroTools @match let bindings stay branch-local so later clauses do not shadow-save uninitialized bindings (Issue #7556)"
+
+[[tests]]
+name = "macrotools_forward_quote_7572"
+file = "forward_quote_7572.jl"
+expected = true
+description = "MacroTools @forward-style multi-line quoted generator method definitions parse and lower through quote construction (Issue #7572)"
+
+[[tests]]
+name = "macrotools_striplines_selective_import_7645"
+file = "striplines_selective_import_7645.jl"
+expected = true
+description = "using MacroTools: striplines makes the helper available to unqualified calls (Issue #7645)"
+
+[[tests]]
+name = "macrotools_combinedef_bare_dict_dispatch_7632"
+file = "combinedef_bare_dict_dispatch_7632.jl"
+expected = true
+description = "MacroTools combinedef keeps its upstream Dict annotation because Pure-Julia Dict values dispatch to bare ::Dict (Issue #7632)"
+
+[[tests]]
+name = "macrotools_upstream_match"
+file = "upstream_match.jl"
+expected = true
+description = "Upstream MacroTools.jl test/match.jl testset runs under sjulia"
+
+[[tests]]
+name = "macrotools_upstream_split"
+file = "upstream_split.jl"
+expected = true
+description = "Upstream MacroTools.jl test/split.jl testset runs under sjulia"
+
+[[tests]]
+name = "macrotools_upstream_destruct"
+file = "upstream_destruct.jl"
+expected = true
+description = "Upstream MacroTools.jl test/destruct.jl testset runs under sjulia"
+
+[[tests]]
+name = "macrotools_upstream_utils"
+file = "upstream_utils.jl"
+expected = true
+description = "Upstream MacroTools.jl test/utils.jl testset runs under sjulia"
+
+[[tests]]
+name = "macrotools_upstream_flatten_try"
+file = "upstream_flatten_try.jl"
+expected = true
+description = "Upstream MacroTools.jl test/flatten_try.jl testset runs under sjulia"

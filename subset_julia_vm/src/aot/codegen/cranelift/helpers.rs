@@ -1,5 +1,6 @@
 use crate::aot::ir::{Instruction, IrFunction};
-use crate::aot::types::JuliaType;
+use crate::aot::rooting::static_type_requires_rooting_model;
+use crate::aot::types::StaticType;
 
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{AbiParam, Signature};
@@ -7,27 +8,32 @@ use cranelift_codegen::isa::CallConv;
 
 use super::{CompileCtx, CraneliftError};
 
-/// Convert Julia type to Cranelift type.
-pub(super) fn julia_type_to_cranelift(ty: &JuliaType) -> Result<cl_types::Type, CraneliftError> {
+/// Convert a `StaticType` carrier to a Cranelift type.
+pub(super) fn static_type_to_cranelift(ty: &StaticType) -> Result<cl_types::Type, CraneliftError> {
+    if static_type_requires_rooting_model(ty) {
+        return Err(CraneliftError::Unsupported(format!(
+            "Cranelift backend does not yet satisfy AoT runtime Value rooting/safepoint contract for {:?}",
+            ty
+        )));
+    }
+
     match ty {
-        JuliaType::Int8 => Ok(cl_types::I8),
-        JuliaType::Int16 => Ok(cl_types::I16),
-        JuliaType::Int32 => Ok(cl_types::I32),
-        JuliaType::Int64 => Ok(cl_types::I64),
-        JuliaType::UInt8 => Ok(cl_types::I8),
-        JuliaType::UInt16 => Ok(cl_types::I16),
-        JuliaType::UInt32 => Ok(cl_types::I32),
-        JuliaType::UInt64 => Ok(cl_types::I64),
-        JuliaType::Float32 => Ok(cl_types::F32),
-        JuliaType::Float64 => Ok(cl_types::F64),
-        JuliaType::Bool => Ok(cl_types::I8),
-        JuliaType::Char => Ok(cl_types::I32),
-        JuliaType::Nothing => Ok(cl_types::I8),
-        JuliaType::String
-        | JuliaType::Array { .. }
-        | JuliaType::Tuple(_)
-        | JuliaType::Struct { .. } => Ok(cl_types::I64),
-        JuliaType::Any | JuliaType::Unknown => Ok(cl_types::I64),
+        StaticType::I8 => Ok(cl_types::I8),
+        StaticType::I16 => Ok(cl_types::I16),
+        StaticType::I32 => Ok(cl_types::I32),
+        StaticType::I64 => Ok(cl_types::I64),
+        StaticType::I128 => Ok(cl_types::I128),
+        StaticType::U8 => Ok(cl_types::I8),
+        StaticType::U16 => Ok(cl_types::I16),
+        StaticType::U32 => Ok(cl_types::I32),
+        StaticType::U64 => Ok(cl_types::I64),
+        StaticType::U128 => Ok(cl_types::I128),
+        StaticType::F16 => Ok(cl_types::F32),
+        StaticType::F32 => Ok(cl_types::F32),
+        StaticType::F64 => Ok(cl_types::F64),
+        StaticType::Bool => Ok(cl_types::I8),
+        StaticType::Char => Ok(cl_types::I32),
+        StaticType::Nothing => Ok(cl_types::I8),
         _ => Err(CraneliftError::TypeConversion(format!(
             "Unsupported type: {:?}",
             ty
@@ -40,13 +46,22 @@ pub(super) fn create_signature(func: &IrFunction) -> Result<Signature, Cranelift
     let mut sig = Signature::new(CallConv::SystemV);
 
     for (_, ty) in &func.params {
-        let cl_type = julia_type_to_cranelift(ty)?;
+        let cl_type = static_type_to_cranelift(ty)?;
         sig.params.push(AbiParam::new(cl_type));
     }
 
-    if func.return_type != JuliaType::Nothing {
-        let cl_type = julia_type_to_cranelift(&func.return_type)?;
-        sig.returns.push(AbiParam::new(cl_type));
+    match &func.return_type {
+        StaticType::Nothing => {}
+        StaticType::Tuple(elements) => {
+            for ty in elements {
+                let cl_type = static_type_to_cranelift(ty)?;
+                sig.returns.push(AbiParam::new(cl_type));
+            }
+        }
+        ty => {
+            let cl_type = static_type_to_cranelift(ty)?;
+            sig.returns.push(AbiParam::new(cl_type));
+        }
     }
 
     Ok(sig)

@@ -9,6 +9,18 @@ const _LN2_HI = 6.93147180369123816490e-01
 const _LN2_LO = 1.90821492927058500170e-10
 const _LOG2E  = 1.44269504088896338700e+00
 
+function _exp2_int_float64(k::Int64)
+    if k > 1023
+        return 1.0 / 0.0
+    elseif k < -1074
+        return 0.0
+    elseif k >= -1022
+        return reinterpret(Float64, UInt64(k + 1023) << 52)
+    else
+        return reinterpret(Float64, UInt64(1) << (k + 1074))
+    end
+end
+
 # =============================================================================
 # exp(x::Float64)
 # =============================================================================
@@ -56,22 +68,37 @@ function exp(x::Float64)
     p = 1.0 + r * p
 
     if k > 1023
-        p = p * (2.0 ^ 1023)
+        p = p * _exp2_int_float64(1023)
         k = k - 1023
         if k > 1023
             return 1.0 / 0.0
         end
-        return p * (2.0 ^ k)
-    elseif k < -1074
+        return p * _exp2_int_float64(k)
+    elseif k < -1075
         return 0.0
     elseif k < -1021
-        p = p * (2.0 ^ (-1021))
+        p = p * _exp2_int_float64(-1021)
         k = k + 1021
-        return p * (2.0 ^ k)
+        return p * _exp2_int_float64(k)
     else
-        return p * (2.0 ^ k)
+        return p * _exp2_int_float64(k)
     end
+end
+
+function exp(x::Float32)
+    return Float32(exp(Float64(x)))
+end
+
+function exp(x::Float16)
+    return Float16(exp(Float64(x)))
 end
 
 # Integer conversion
 exp(x::Int64) = exp(Float64(x))
+exp(x::Bool) = exp(Float64(x))
+
+# Rational conversion (Issue #5356): without an explicit method, `exp(::Rational)`
+# is lenient-dispatched to `exp(::Float64)` and the Rational lands in a Float64
+# slot (LoadSlotF64 InternalError). `float(::Rational)` is Float64, so this
+# reduces to the Float64 method with no recursion.
+exp(x::Rational) = exp(float(x))

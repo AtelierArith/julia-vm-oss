@@ -5,8 +5,20 @@ using Test
 
 @testset "Dict{K,V} struct - constructor" begin
     d = _new_dict_kv(4)
+    @test typeof(d) == Dict{Any, Any}
+    @test typeof(d.slots) == Memory{UInt8}
+    @test typeof(d.keys) == Memory{Any}
+    @test typeof(d.vals) == Memory{Any}
     @test length(d) == 0
     @test isempty(d)
+
+    typed = _new_dict_kv(String, Int64, 4)
+    @test typeof(typed) == Dict{String, Int64}
+    @test typeof(typed.slots) == Memory{UInt8}
+    @test typeof(typed.keys) == Memory{String}
+    @test typeof(typed.vals) == Memory{Int64}
+    @test keytype(typeof(typed)) == String
+    @test valtype(typeof(typed)) == Int64
 end
 
 @testset "Dict{K,V} struct - basic insert and lookup" begin

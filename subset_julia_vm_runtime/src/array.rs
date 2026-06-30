@@ -137,36 +137,38 @@ pub fn fill_f64(value: f64, n: usize) -> TypedArray {
 
 /// Get element at index (1-based Julia indexing)
 pub fn getindex_i64(arr: &[i64], index: i64) -> RuntimeResult<i64> {
+    if index < 1 || (index as usize) > arr.len() {
+        return Err(RuntimeError::bounds_error(index, arr.len()));
+    }
     let idx = (index - 1) as usize;
-    arr.get(idx)
-        .copied()
-        .ok_or_else(|| RuntimeError::bounds_error(idx, arr.len()))
+    Ok(arr[idx])
 }
 
 /// Get element at index (1-based Julia indexing)
 pub fn getindex_f64(arr: &[f64], index: i64) -> RuntimeResult<f64> {
+    if index < 1 || (index as usize) > arr.len() {
+        return Err(RuntimeError::bounds_error(index, arr.len()));
+    }
     let idx = (index - 1) as usize;
-    arr.get(idx)
-        .copied()
-        .ok_or_else(|| RuntimeError::bounds_error(idx, arr.len()))
+    Ok(arr[idx])
 }
 
 /// Set element at index (1-based Julia indexing)
 pub fn setindex_i64(arr: &mut [i64], value: i64, index: i64) -> RuntimeResult<()> {
-    let idx = (index - 1) as usize;
-    if idx >= arr.len() {
-        return Err(RuntimeError::bounds_error(idx, arr.len()));
+    if index < 1 || (index as usize) > arr.len() {
+        return Err(RuntimeError::bounds_error(index, arr.len()));
     }
+    let idx = (index - 1) as usize;
     arr[idx] = value;
     Ok(())
 }
 
 /// Set element at index (1-based Julia indexing)
 pub fn setindex_f64(arr: &mut [f64], value: f64, index: i64) -> RuntimeResult<()> {
-    let idx = (index - 1) as usize;
-    if idx >= arr.len() {
-        return Err(RuntimeError::bounds_error(idx, arr.len()));
+    if index < 1 || (index as usize) > arr.len() {
+        return Err(RuntimeError::bounds_error(index, arr.len()));
     }
+    let idx = (index - 1) as usize;
     arr[idx] = value;
     Ok(())
 }
@@ -270,7 +272,14 @@ mod tests {
         assert_eq!(getindex_i64(&arr, 1).unwrap(), 10);
         assert_eq!(getindex_i64(&arr, 2).unwrap(), 20);
         assert_eq!(getindex_i64(&arr, 3).unwrap(), 30);
-        assert!(getindex_i64(&arr, 4).is_err());
+        assert_eq!(
+            getindex_i64(&arr, 4).unwrap_err().to_string(),
+            "BoundsError: attempt to access index 4 of array with length 3"
+        );
+        assert_eq!(
+            getindex_i64(&arr, 0).unwrap_err().to_string(),
+            "BoundsError: attempt to access index 0 of array with length 3"
+        );
     }
 
     #[test]

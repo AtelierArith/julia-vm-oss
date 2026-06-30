@@ -510,9 +510,27 @@ julia> include_string(Main, "y = 2\\nz = y + 3")
     there is only a single global namespace (Main).
 """
 function include_string(m::Module, code::AbstractString, filename::AbstractString="string")
-    result = nothing
     pos = 1
     code_length = length(code)
+    if code_length < 1
+        return nothing
+    end
+
+    # Parse and evaluate the first expression eagerly so the local `result`
+    # is unconditionally bound before the while loop. Without this hoist the
+    # SubsetJuliaVM scope-inference treats `result = eval(...)` as conditional
+    # and reports an UndefVarError when the input only contains whitespace.
+    parsed = Meta.parse(code, pos)
+    expr = parsed[1]
+    next_pos = parsed[2]
+    if expr === nothing
+        return nothing
+    end
+    result = eval(expr)
+    if next_pos <= pos
+        return result
+    end
+    pos = next_pos
 
     while pos <= code_length
         # Parse one expression starting at pos
@@ -581,4 +599,8 @@ function evalfile(path::AbstractString, args::AbstractVector)
     # Note: ARGS is not modifiable in SubsetJuliaVM
     code = read(path, String)
     return include_string(Main, code, path)
+end
+
+function include(path::AbstractString)
+    return evalfile(path)
 end

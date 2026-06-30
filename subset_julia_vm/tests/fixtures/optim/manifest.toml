@@ -1,0 +1,57 @@
+# Optim.jl MVP fixtures (Issue #7432 — milestone "Optim.jl サポート").
+# Each fixture runs identically under upstream Optim.jl and sjulia and uses
+# qualified `Optim.<query>` accessors (upstream does not export the query API).
+
+[[tests]]
+name = "optim_loading"
+file = "optim_loading.jl"
+expected = true
+description = "Optim + NLSolversBase/ADTypes/LineSearches load and resolve (Issue #7478)"
+
+[[tests]]
+name = "optim_univariate_basics"
+file = "optim_univariate_basics.jl"
+expected = true
+description = "Bounded univariate minimization with GoldenSection/Brent, bounds promotion, x_lower>x_upper error (Issue #7479)"
+
+[[tests]]
+name = "optim_result_api"
+file = "optim_result_api.jl"
+expected = true
+description = "Result/query API, Options, and maximize wrapper (Issue #7480)"
+
+[[tests]]
+name = "optim_nelder_mead_mvp"
+file = "optim_nelder_mead_mvp.jl"
+expected = true
+description = "Derivative-free multivariate NelderMead MVP (Issue #7481)"
+
+[[tests]]
+name = "optim_gradient_descent_mvp"
+file = "optim_gradient_descent_mvp.jl"
+expected = true
+description = "First-order user-gradient GradientDescent MVP (Issue #7482)"
+
+[[tests]]
+name = "optim_kernel_mvp"
+file = "optim_kernel_mvp.jl"
+expected = true
+description = "Representative end-to-end Optim MVP kernel (Issue #7483)"
+
+[[tests]]
+name = "optim_bfgs_quadratic"
+file = "optim_bfgs_quadratic.jl"
+expected = true
+description = "BFGS quasi-Newton, exact-parity quadratic/sum-abs2 cases (Issue #8059)"
+
+[[tests]]
+name = "optim_bfgs_rosenbrock"
+file = "optim_bfgs_rosenbrock.jl"
+expected = true
+description = "BFGS Rosenbrock user-gradient + finite-difference + maximize (Issue #8059)"
+
+[[tests]]
+name = "optim_objective_named_f"
+file = "optim_objective_named_f.jl"
+expected = true
+description = "Objective bound to a variable literally named `f` works under BFGS (explicit gradient + finite-difference closure factory) and GradientDescent — capture name collision fixed, W-42 removed (Issue #8080)"

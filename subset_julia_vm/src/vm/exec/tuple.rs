@@ -15,32 +15,21 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use super::DispatchAction;
 use crate::rng::RngLike;
 
 use super::super::error::VmError;
+use super::super::frame::VarTypeTag;
 use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
 use super::super::value::{TupleValue, Value};
-use super::super::frame::VarTypeTag;
 use super::super::Vm;
-
-/// Result of executing a tuple instruction.
-pub(super) enum TupleResult {
-    /// Instruction not handled by this module
-    NotHandled,
-    /// Instruction handled successfully
-    Handled,
-    /// Error was raised and caught by handler, continue to next iteration
-    Continue,
-    /// Return with value (exit run loop)
-    Return(Value),
-}
 
 impl<R: RngLike> Vm<R> {
     /// Execute tuple instructions.
     /// Returns the execution result.
     #[inline]
-    pub(super) fn execute_tuple(&mut self, instr: &Instr) -> Result<TupleResult, VmError> {
+    pub(super) fn execute_tuple(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::NewTuple(n) => {
                 let mut elements = Vec::with_capacity(*n);
@@ -49,7 +38,19 @@ impl<R: RngLike> Vm<R> {
                 }
                 elements.reverse();
                 self.stack.push(Value::Tuple(TupleValue::new(elements)));
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
+            }
+
+            // Issue #4722: Core.svec(...) builds a Core.SimpleVector value.
+            Instr::MakeSimpleVector(n) => {
+                let mut elements = Vec::with_capacity(*n);
+                for _ in 0..*n {
+                    elements.push(self.stack.pop_value()?);
+                }
+                elements.reverse();
+                self.stack
+                    .push(Value::SimpleVector(TupleValue::new(elements)));
+                Ok(DispatchAction::Continue)
             }
 
             Instr::LoadTuple(name) => {
@@ -58,14 +59,20 @@ impl<R: RngLike> Vm<R> {
                     .last()
                     .and_then(|frame| match self.load_slot_value_by_name(frame, name) {
                         Some(Value::Tuple(t)) => Some(t),
-                        _ => frame.locals_tuple.get(name).cloned(),
+                        _ => frame.locals_any.get(name).and_then(|value| match value {
+                            Value::Tuple(tuple) => Some(tuple.clone()),
+                            _ => None,
+                        }),
                     })
                     .or_else(|| {
                         if self.frames.len() > 1 {
                             self.frames.first().and_then(|frame| {
                                 match self.load_slot_value_by_name(frame, name) {
                                     Some(Value::Tuple(t)) => Some(t),
-                                    _ => frame.locals_tuple.get(name).cloned(),
+                                    _ => frame.locals_any.get(name).and_then(|value| match value {
+                                        Value::Tuple(tuple) => Some(tuple.clone()),
+                                        _ => None,
+                                    }),
                                 }
                             })
                         } else {
@@ -74,7 +81,7 @@ impl<R: RngLike> Vm<R> {
                     })
                     .unwrap_or_else(|| TupleValue::new(Vec::new()));
                 self.stack.push(Value::Tuple(tuple));
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::StoreTuple(name) => {
@@ -85,14 +92,14 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "Expected Tuple, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 if let Some(frame) = self.frames.last_mut() {
-                    frame.locals_tuple.insert(name.clone(), tuple);
+                    frame.locals_any.insert(name.clone(), Value::Tuple(tuple));
                     frame.var_types.insert(name.clone(), VarTypeTag::Tuple);
                 }
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::TupleGet => {
@@ -100,19 +107,32 @@ impl<R: RngLike> Vm<R> {
                 let val = self.stack.pop_value()?;
 
                 let value = match &val {
-                    Value::Tuple(t) => match self.try_or_handle(t.get(index).cloned())? {
+                    // Issue #7964: flat StaticArray acts as its own .data tuple.
+                    Value::StaticArray(sv) => match self.try_or_handle(sv.get_1d(index))? {
                         Some(v) => v,
-                        None => return Ok(TupleResult::Continue),
+                        None => return Ok(DispatchAction::Continue),
                     },
+                    // Issue #7964 Phase 3: inline variant — same interface, no allocation.
+                    Value::StaticArrayInline(sv) => match self.try_or_handle(sv.get_1d(index))? {
+                        Some(v) => v,
+                        None => return Ok(DispatchAction::Continue),
+                    },
+                    // Tuple and Core.SimpleVector share linear indexing (Issue #4722).
+                    Value::Tuple(t) | Value::SimpleVector(t) => {
+                        match self.try_or_handle(t.get(index).cloned())? {
+                            Some(v) => v,
+                            None => return Ok(DispatchAction::Continue),
+                        }
+                    }
                     // Handle Pair struct as a 2-element tuple (for Dict iteration)
-                    Value::Struct(s) if s.struct_name == "Pair" && s.values.len() == 2 => {
+                    Value::Struct(s) if &*s.struct_name == "Pair" && s.values.len() == 2 => {
                         // Julia uses 1-based indexing, so index 1 = first element, index 2 = second element
                         if !(1..=2).contains(&index) {
                             self.raise(VmError::IndexOutOfBounds {
                                 indices: vec![index],
                                 shape: vec![2],
                             })?;
-                            return Ok(TupleResult::Continue);
+                            return Ok(DispatchAction::Continue);
                         }
                         s.values[(index - 1) as usize].clone()
                     }
@@ -124,7 +144,7 @@ impl<R: RngLike> Vm<R> {
                         let result = {
                             let s = self.struct_heap.get(heap_idx);
                             match s {
-                                Some(s) if s.struct_name == "Pair" && s.values.len() == 2 => {
+                                Some(s) if &*s.struct_name == "Pair" && s.values.len() == 2 => {
                                     if (1..=2).contains(&index) {
                                         Ok(s.values[(index - 1) as usize].clone())
                                     } else {
@@ -146,7 +166,7 @@ impl<R: RngLike> Vm<R> {
                         };
                         match self.try_or_handle(result)? {
                             Some(v) => v,
-                            None => return Ok(TupleResult::Continue),
+                            None => return Ok(DispatchAction::Continue),
                         }
                     }
                     other => {
@@ -154,26 +174,27 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "Expected Tuple, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
 
                 self.stack.push(value);
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::TupleUnpack(n) => {
                 let val = self.stack.pop_value()?;
                 let elements = match &val {
-                    Value::Tuple(t) => t.elements.clone(),
+                    // Tuple and Core.SimpleVector unpack identically (Issue #4722).
+                    Value::Tuple(t) | Value::SimpleVector(t) => t.elements.clone(),
                     // Handle Pair struct as a 2-element tuple (for Dict iteration destructuring)
-                    Value::Struct(s) if s.struct_name == "Pair" && s.values.len() == 2 => {
+                    Value::Struct(s) if &*s.struct_name == "Pair" && s.values.len() == 2 => {
                         s.values.clone()
                     }
                     // Handle StructRef - dereference it first
                     Value::StructRef(idx) => {
                         if let Some(s) = self.struct_heap.get(*idx) {
-                            if s.struct_name == "Pair" && s.values.len() == 2 {
+                            if &*s.struct_name == "Pair" && s.values.len() == 2 {
                                 s.values.clone()
                             } else {
                                 // INTERNAL: TupleUnpack non-Pair struct is a compiler bug; only Pair structs can be treated as 2-tuples
@@ -195,7 +216,7 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "Expected Tuple, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 if elements.len() != *n {
@@ -203,23 +224,23 @@ impl<R: RngLike> Vm<R> {
                         expected: *n,
                         got: elements.len(),
                     })?;
-                    return Ok(TupleResult::Continue);
+                    return Ok(DispatchAction::Continue);
                 }
                 for elem in elements {
                     self.stack.push(elem);
                 }
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::TupleFirst => {
                 let tuple = match self.stack.pop_value()? {
-                    Value::Tuple(t) => t,
+                    Value::Tuple(t) | Value::SimpleVector(t) => t,
                     other => {
                         // INTERNAL: TupleFirst is emitted only when the compiler typed the value as Tuple
                         return Err(VmError::InternalError(format!(
                             "TupleFirst: expected Tuple, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 if tuple.elements.is_empty() {
@@ -228,21 +249,21 @@ impl<R: RngLike> Vm<R> {
                         indices: vec![0],
                         shape: vec![0],
                     })?;
-                    return Ok(TupleResult::Continue);
+                    return Ok(DispatchAction::Continue);
                 }
                 self.stack.push(tuple.elements[0].clone());
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::TupleSecond => {
                 let tuple = match self.stack.pop_value()? {
-                    Value::Tuple(t) => t,
+                    Value::Tuple(t) | Value::SimpleVector(t) => t,
                     other => {
                         // INTERNAL: TupleSecond is emitted only when the compiler typed the value as Tuple
                         return Err(VmError::InternalError(format!(
                             "TupleSecond: expected Tuple, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 if tuple.elements.len() < 2 {
@@ -251,10 +272,10 @@ impl<R: RngLike> Vm<R> {
                         indices: vec![1],
                         shape: vec![tuple.elements.len()],
                     })?;
-                    return Ok(TupleResult::Continue);
+                    return Ok(DispatchAction::Continue);
                 }
                 self.stack.push(tuple.elements[1].clone());
-                Ok(TupleResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::ReturnTuple => {
@@ -265,24 +286,20 @@ impl<R: RngLike> Vm<R> {
                         return Err(VmError::InternalError(format!(
                             "Expected Tuple, got {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
-                if let Some(return_ip) = self.return_ips.pop() {
-                    // Pop any exception handlers from try blocks in this function
-                    self.pop_handlers_for_return();
-                    self.frames.pop();
-                    self.ip = return_ip;
-                    self.stack.push(Value::Tuple(tuple));
-                    Ok(TupleResult::Handled)
-                } else {
-                    // Final return - also pop handlers
-                    self.pop_handlers_for_return();
-                    Ok(TupleResult::Return(Value::Tuple(tuple)))
+                // Route through the shared continuation machinery so a tuple
+                // returned from a `map`/`filter`/generator closure is collected
+                // by the HOF/generator driver instead of leaking past it
+                // (Issue #5231).
+                match self.route_value_return(Value::Tuple(tuple))? {
+                    super::return_ops::ValueReturnRouting::Handled => Ok(DispatchAction::Continue),
+                    super::return_ops::ValueReturnRouting::Exit(v) => Ok(DispatchAction::Exit(v)),
                 }
             }
 
-            _ => Ok(TupleResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

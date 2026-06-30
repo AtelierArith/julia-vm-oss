@@ -11,3 +11,9 @@ name = "hashing_collections"
 file = "hashing_collections.jl"
 expected = true
 description = "Hash on tuples, equality contract, and distinct values (Issue #3123)"
+
+[[tests]]
+name = "user_hash_dispatch_6728"
+file = "user_hash_dispatch_6728.jl"
+expected = true
+description = "hash is no longer force-intercepted to the Rust BuiltinId (Issue #6728): it dispatches through normal Julia method dispatch like isequal/isless, so a user-defined 1-arg hash(::T) overload is respected — including when T is used as a Dict/Set key (the isequal⇒hash contract via hash+isequal collision resolution). Also confirms builtin isequal/hash semantics (NaN, isequal(1.0,1), missing, isless) are unchanged. Values vs julia 1.12."

@@ -7,6 +7,12 @@ expected = true
 description = "convert(T, x) - Int to Float64 and Float64 to Int"
 
 [[tests]]
+name = "conversion_convert_narrow_int_inexact"
+file = "convert_narrow_int_inexact.jl"
+expected = true
+description = "convert(T, x) range-checks narrow int / float->int and throws InexactError (Issue #5192)"
+
+[[tests]]
 name = "conversion_promote_basic"
 file = "promote_basic.jl"
 expected = true
@@ -77,3 +83,63 @@ name = "conversion_convert_all_integer_types"
 file = "convert_all_integer_types.jl"
 expected = true
 description = "convert() for all integer target types: Int8-Int128, UInt8-UInt128 (Issue #2267)"
+
+[[tests]]
+name = "conversion_convert_tfunc_return_type"
+file = "convert_tfunc_return_type.jl"
+expected = true
+description = "convert(T, x) infers return type as T, not source type (Issue #3475)"
+
+[[tests]]
+name = "conversion_convert_user_method_dispatch"
+file = "convert_user_method_dispatch.jl"
+expected = true
+description = "convert(T, x) prefers Pure Julia method dispatch before Rust fallback (Issue #3764)"
+
+[[tests]]
+name = "conversion_big_pure_julia_dispatch"
+file = "big_pure_julia_dispatch.jl"
+expected = true
+description = "big(...) routes through base/gmp.jl method dispatch (Issue #3730)"
+
+[[tests]]
+name = "conversion_numeric_conversion_pure_julia_dispatch"
+file = "numeric_conversion_pure_julia_dispatch.jl"
+expected = true
+description = "complex/float/signed/unsigned route through Pure Julia method dispatch (Issue #3727)"
+
+[[tests]]
+name = "conversion_signed_unsigned_widths_6494"
+file = "signed_unsigned_widths_6494.jl"
+expected = true
+description = "signed/unsigned preserve same-width integer reinterpretation across primitive widths (Issue #6494)"
+
+[[tests]]
+name = "conversion_convert_parametric_container"
+file = "convert_parametric_container.jl"
+expected = true
+description = "convert(Vector{T}, x) recursively converts each element into a new T-array; identity when types match (Issue #5111)"
+
+[[tests]]
+name = "conversion_convert_uint_widen_arith_type_6755"
+file = "convert_uint_widen_arith_type_6755.jl"
+expected = true
+description = "convert(UInt64, ::UInt32)/signed->unsigned preserve the unsigned tag so arithmetic dispatches to the unsigned type (Issue #6755)"
+
+[[tests]]
+name = "conversion_convert_bool_inexact_7970"
+file = "convert_bool_inexact_7970.jl"
+expected = true
+description = "Issue #7970: convert(Bool, x) and Bool[...] literals only accept 0/1 (signed/unsigned/float sources), raising InexactError otherwise instead of a lenient x!=0 truthiness test (convert(Bool,2) was true, Bool[2] was Bool[1])"
+
+[[tests]]
+name = "conversion_bool_constructor_7971"
+file = "bool_constructor_7971.jl"
+expected = true
+description = "Issue #7971: Bool(x) numeric constructor is callable (was 'Unknown function: Bool'), routing through the range-checked convert(Bool,x): 0/1 from signed/unsigned/float/Bool sources, InexactError otherwise; usable first-class via map; Bool-as-type unaffected"
+
+[[tests]]
+name = "conversion_type_annotation_noop_convert_8147"
+file = "type_annotation_noop_convert_8147.jl"
+expected = true
+description = "Issue #8147: ::Int return / tmp::Int = b locals elide the no-op convert(T, x::T) on the hot path (keeping I64 slot specialization) while genuine widening converts (::Float64) still run"

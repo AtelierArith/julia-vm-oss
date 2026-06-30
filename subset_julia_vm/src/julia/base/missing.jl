@@ -7,6 +7,9 @@
 # Unlike `nothing` (absence of value), `missing` represents unknown or unavailable data.
 
 # ismissing: check if value is missing
+# INTENTIONAL_NOOP (Issue #4703): upstream `ismissing(x) = x === missing`
+# (julia/base/essentials.jl:1491) is exactly this identity comparison, so
+# the trivial `return x === missing` body is correct, not a stub.
 function ismissing(x)
     return x === missing
 end
@@ -113,12 +116,16 @@ function isequal(a::Nothing, b::Nothing)
     return true
 end
 
-# Cross-type numeric specializations for isequal (Issue #2718)
+# Cross-type numeric specializations for isequal (Issue #2718).
+# Use the value-based `==` (Issue #8187: `Float64(a)` would round the integer for
+# |a| > 2^53, making isequal(2^53+1, 2.0^53) wrongly true) and add isequal's
+# signed-zero distinction: an integer is always +0, so isequal(0, -0.0) is false
+# even though 0 == -0.0 is true.
 function isequal(a::Int64, b::Float64)
-    return isequal(Float64(a), b)
+    return (a == b) && !(b == 0.0 && signbit(b))
 end
 function isequal(a::Float64, b::Int64)
-    return isequal(a, Float64(b))
+    return (a == b) && !(a == 0.0 && signbit(a))
 end
 
 # Array specialization: element-wise isequal with shape check (Issue #2718)

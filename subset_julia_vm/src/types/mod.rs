@@ -11,6 +11,8 @@
 
 mod dispatch_error;
 mod julia_type;
+mod native_word;
+mod struct_hierarchy;
 mod type_expr;
 mod type_param;
 
@@ -18,7 +20,13 @@ mod type_param;
 mod tests;
 
 pub use dispatch_error::DispatchError;
+pub(crate) use julia_type::canonicalize_union;
+pub(crate) use julia_type::unbounded_vararg_element;
 pub use julia_type::{JuliaType, Variance};
+pub(crate) use native_word::{
+    native_int_julia_type, native_int_type_name, native_uint_julia_type, native_uint_type_name,
+};
+pub use struct_hierarchy::{nominal_family_name, StructHierarchy, StructHierarchyEntry};
 pub use type_expr::TypeExpr;
 pub use type_param::TypeParam;
 

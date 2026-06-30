@@ -7,12 +7,18 @@
 # String replacement functions
 # =============================================================================
 
-# _replace_impl: internal implementation of string replacement
-# Replace occurrences of old with new in string s
+# _replace_impl: internal implementation of string replacement.
+# Replace occurrences of old with new in string s.
 # maxcount=0 means replace all (default), maxcount=N replaces at most N (Issue #2043)
+#
+# Uses byte counts (`ncodeunits`) for the loop bounds and pattern length so the
+# byte-by-byte comparison underneath agrees, and `nextind` + `s[i:next_i-1]`
+# to advance one full character (1-4 UTF-8 bytes) at a time on no-match. The
+# previous `length(...)` + `Char(codeunit(s, i))` mix corrupted multi-byte
+# UTF-8 chars by treating each byte as a separate Char. (Issue #3607)
 function _replace_impl(s, old, new, maxcount)
-    slen = length(s)
-    oldlen = length(old)
+    slen = ncodeunits(s)
+    oldlen = ncodeunits(old)
     # Empty old string: return original
     if oldlen == 0
         return s
@@ -41,9 +47,39 @@ function _replace_impl(s, old, new, maxcount)
                 continue
             end
         end
-        # No match or limit reached - append current character
-        result = result * string(Char(codeunit(s, i)))
-        i = i + 1
+        # No match or limit reached - append the current full character.
+        # Decode the UTF-8 byte sequence at i into a codepoint manually so the
+        # whole multi-byte character is added in one go (rather than the
+        # original byte-by-byte append which produced mojibake). Avoids
+        # `s[i]` / `s[i:j]` because the VM's type inference returns Any for
+        # those and breaks `result * ...` concatenation.
+        b1 = codeunit(s, i)
+        if b1 < 0x80
+            # 1-byte ASCII
+            result = result * string(Char(b1))
+            i = i + 1
+        elseif b1 < 0xE0
+            # 2-byte UTF-8 sequence (covers Latin-1 .. U+07FF)
+            b2 = codeunit(s, i + 1)
+            cp = (b1 - 0xC0) * 64 + (b2 - 0x80)
+            result = result * string(Char(cp))
+            i = i + 2
+        elseif b1 < 0xF0
+            # 3-byte UTF-8 sequence (covers BMP non-supplementary, incl. CJK)
+            b2 = codeunit(s, i + 1)
+            b3 = codeunit(s, i + 2)
+            cp = (b1 - 0xE0) * 4096 + (b2 - 0x80) * 64 + (b3 - 0x80)
+            result = result * string(Char(cp))
+            i = i + 3
+        else
+            # 4-byte UTF-8 sequence (supplementary planes, e.g. emoji)
+            b2 = codeunit(s, i + 1)
+            b3 = codeunit(s, i + 2)
+            b4 = codeunit(s, i + 3)
+            cp = (b1 - 0xF0) * 262144 + (b2 - 0x80) * 4096 + (b3 - 0x80) * 64 + (b4 - 0x80)
+            result = result * string(Char(cp))
+            i = i + 4
+        end
     end
     return result
 end
@@ -61,7 +97,35 @@ function replace(s, pair; count=0)
     if isa(old, Regex)
         return _regex_replace(s, old, new, count)
     end
+    # Normalize Char arguments to single-character strings so the underlying
+    # `_replace_impl` (which calls `length(old)` / `codeunit`) can handle them.
+    # Julia's `replace` natively accepts `Char => Char`, `Char => String`, etc.
+    # (Issue #3596)
+    if isa(old, Char)
+        old = string(old)
+    end
+    if isa(new, Char)
+        new = string(new)
+    end
     return _replace_impl(s, old, new, count)
+end
+
+# replace(collection, old => new, ...): return a copy of an array with every
+# element matching a pair's first value (by `isequal`) replaced by its second.
+# Matching is by EQUALITY, not predicate — `replace([1,2,3,4], iseven=>0)` is
+# `[1,2,3,4]` upstream (no element equals the function `iseven`). The string form
+# above stays the most specific method for `AbstractString` arguments (Issue #5670).
+function replace(collection::AbstractArray, pairs...)
+    result = copy(collection)
+    for i in eachindex(result)
+        for p in pairs
+            if isequal(result[i], p.first)
+                result[i] = p.second
+                break
+            end
+        end
+    end
+    return result
 end
 
 # =============================================================================
@@ -87,6 +151,27 @@ end
 # join with single argument (no delimiter) - concatenate all elements
 function join(arr)
     return join(arr, "")
+end
+
+# join(arr, delim, last): use a distinct separator `last` before the FINAL
+# element, e.g. join([1,2,3], ", ", " and ") == "1, 2 and 3" and
+# join([1,2], ", ", " and ") == "1 and 2". Matches upstream
+# `join(io, iterator, delim, last)` (base/strings/io.jl).
+function join(arr, delim, last)
+    n = length(arr)
+    if n == 0
+        return ""
+    end
+    if n == 1
+        return string(arr[1])
+    end
+    result = string(arr[1])
+    i = 2
+    while i < n
+        result = result * delim * string(arr[i])
+        i = i + 1
+    end
+    return result * last * string(arr[n])
 end
 
 # =============================================================================
@@ -144,6 +229,32 @@ end
 # strip: remove leading and trailing whitespace from string
 function strip(s)
     return lstrip(rstrip(s))
+end
+
+# 2-arg `strip(s, c::Char)` — strips occurrences of `c` from both ends.
+# Equivalent to Julia's `strip(s, chars) = strip(in(chars), s)` for the
+# single-Char case. (Issue #3668)
+function strip(s::String, c::Char)
+    function _strip_eq_pred(x)
+        return x == c
+    end
+    return strip(_strip_eq_pred, s)
+end
+
+# 2-arg `lstrip(s, c::Char)` — strips occurrences of `c` from the left.
+function lstrip(s::String, c::Char)
+    function _lstrip_eq_pred(x)
+        return x == c
+    end
+    return lstrip(_lstrip_eq_pred, s)
+end
+
+# 2-arg `rstrip(s, c::Char)` — strips occurrences of `c` from the right.
+function rstrip(s::String, c::Char)
+    function _rstrip_eq_pred(x)
+        return x == c
+    end
+    return rstrip(_rstrip_eq_pred, s)
 end
 
 # strip with predicate function (Issue #2126)
@@ -297,81 +408,125 @@ end
 # =============================================================================
 # Based on Julia's base/strings/util.jl
 
-# chopprefix: remove prefix from string if present
+# chopprefix: remove prefix from string if present.
+# Use byte counts (`ncodeunits`) so multi-byte UTF-8 prefixes slice on a
+# valid char boundary. Previously `length(prefix)+1` (char-count + 1) was
+# used as a byte index and threw `StringIndexError` for any non-ASCII
+# prefix. (Issue #3606)
 function chopprefix(s, prefix)
     if startswith(s, prefix)
-        plen = length(prefix)
-        return s[plen+1:length(s)]
+        return s[ncodeunits(prefix) + 1 : ncodeunits(s)]
     end
     return s
 end
 
-# chopsuffix: remove suffix from string if present
+# chopsuffix: remove suffix from string if present. Same byte-count fix
+# as chopprefix (sister potential bug — Julia 1.12 also uses ncodeunits).
 function chopsuffix(s, suffix)
     if endswith(s, suffix)
-        slen = length(suffix)
-        return s[1:length(s)-slen]
+        return s[1 : ncodeunits(s) - ncodeunits(suffix)]
     end
     return s
 end
 
-# lowercasefirst: convert first character to lowercase
+# lowercasefirst: convert first character to lowercase. Handles ASCII A-Z and
+# Latin-1 À-Ö, Ø-Þ (UTF-8 byte sequences starting with 0xC3) by inspecting
+# raw bytes and computing the new codepoint. (Issue #3608)
 function lowercasefirst(s)
     if length(s) == 0
         return s
     end
-    first_char = codeunit(s, 1)
-    if first_char >= 65 && first_char <= 90
-        new_first = Char(first_char + 32)
-        if length(s) == 1
-            return string(new_first)
+    n = ncodeunits(s)
+    b1 = codeunit(s, 1)
+
+    # ASCII A-Z (1-byte UTF-8)
+    if b1 >= 65 && b1 <= 90
+        new_first = string(Char(b1 + 32))
+        if n == 1
+            return new_first
         end
-        rest = s[2:length(s)]
-        return string(new_first) * rest
+        rest = s[2:n]
+        return new_first * rest
     end
+
+    # Latin-1 uppercase (2-byte UTF-8 starting with 0xC3): À-Ö, Ø-Þ
+    if b1 == 0xC3 && n >= 2
+        b2 = codeunit(s, 2)
+        cp = (b1 - 0xC0) * 64 + (b2 - 0x80)
+        if (cp >= 0xC0 && cp <= 0xD6) || (cp >= 0xD8 && cp <= 0xDE)
+            new_first = string(Char(cp + 32))
+            if n == 2
+                return new_first
+            end
+            rest = s[3:n]
+            return new_first * rest
+        end
+    end
+
     return s
 end
 
-# uppercasefirst: convert first character to uppercase
+# uppercasefirst: convert first character to uppercase. Handles ASCII a-z and
+# Latin-1 à-ö, ø-þ (UTF-8 byte sequences starting with 0xC3). (Issue #3609)
 function uppercasefirst(s)
     if length(s) == 0
         return s
     end
-    first_char = codeunit(s, 1)
-    if first_char >= 97 && first_char <= 122
-        new_first = Char(first_char - 32)
-        if length(s) == 1
-            return string(new_first)
+    n = ncodeunits(s)
+    b1 = codeunit(s, 1)
+
+    # ASCII a-z (1-byte UTF-8)
+    if b1 >= 97 && b1 <= 122
+        new_first = string(Char(b1 - 32))
+        if n == 1
+            return new_first
         end
-        rest = s[2:length(s)]
-        return string(new_first) * rest
+        rest = s[2:n]
+        return new_first * rest
     end
+
+    # Latin-1 lowercase (2-byte UTF-8 starting with 0xC3): à-ö, ø-þ
+    if b1 == 0xC3 && n >= 2
+        b2 = codeunit(s, 2)
+        cp = (b1 - 0xC0) * 64 + (b2 - 0x80)
+        if (cp >= 0xE0 && cp <= 0xF6) || (cp >= 0xF8 && cp <= 0xFE)
+            new_first = string(Char(cp - 32))
+            if n == 2
+                return new_first
+            end
+            rest = s[3:n]
+            return new_first * rest
+        end
+    end
+
     return s
 end
 
-# escape_string: escape special characters in string
+# escape_string: escape special characters in string.
+# Iterate by character (not byte) so multi-byte UTF-8 chars are emitted intact.
+# Previously the loop did `c = codeunit(s, i); ... Char(c)` which emitted each
+# UTF-8 byte as a separate Char (mojibake on non-ASCII). The escape branches
+# below all check ASCII codepoints (≤ 127, single byte), so they're unchanged
+# by switching to character iteration. (Issue #3599)
 function escape_string(s)
     result = ""
-    n = length(s)
-    i = 1
-    while i <= n
-        c = codeunit(s, i)
-        if c == 92
+    for ch in s
+        cp = Int(ch)
+        if cp == 92
             result = result * "\\\\"
-        elseif c == 34
+        elseif cp == 34
             result = result * "\\\""
-        elseif c == 10
+        elseif cp == 10
             result = result * "\\n"
-        elseif c == 13
+        elseif cp == 13
             result = result * "\\r"
-        elseif c == 9
+        elseif cp == 9
             result = result * "\\t"
-        elseif c == 0
+        elseif cp == 0
             result = result * "\\0"
         else
-            result = result * string(Char(c))
+            result = result * string(ch)
         end
-        i = i + 1
     end
     return result
 end
@@ -396,42 +551,45 @@ end
 # their corresponding characters.
 # Supports: \n \t \r \\ \" \0 \a \b \f \v \e \xHH \uHHHH \UHHHHHHHH
 function unescape_string(s::String)
+    # Iterate over characters (not codeunits) so multibyte text is copied
+    # verbatim; escape sequences are all ASCII and parsed character by
+    # character. (Pure-Julia migration of the former Rust builtin, Issue #6724.)
     result = ""
-    n = length(s)
+    chars = collect(s)
+    n = length(chars)
     i = 1
     while i <= n
-        c = codeunit(s, i)
-        if c == 92 && i < n  # backslash
+        c = chars[i]
+        if c == '\\' && i < n  # backslash
             i = i + 1
-            c2 = codeunit(s, i)
-            if c2 == 110       # \n -> newline (10)
+            e = chars[i]
+            if e == 'n'        # \n -> newline (10)
                 result = result * string(Char(10))
-            elseif c2 == 116   # \t -> tab (9)
+            elseif e == 't'    # \t -> tab (9)
                 result = result * string(Char(9))
-            elseif c2 == 114   # \r -> carriage return (13)
+            elseif e == 'r'    # \r -> carriage return (13)
                 result = result * string(Char(13))
-            elseif c2 == 92    # \\ -> backslash (92)
+            elseif e == '\\'   # \\ -> backslash (92)
                 result = result * string(Char(92))
-            elseif c2 == 34    # \" -> double quote (34)
+            elseif e == '"'    # \" -> double quote (34)
                 result = result * string(Char(34))
-            elseif c2 == 48    # \0 -> null (0)
+            elseif e == '0'    # \0 -> null (0)
                 result = result * string(Char(0))
-            elseif c2 == 97    # \a -> bell (7)
+            elseif e == 'a'    # \a -> bell (7)
                 result = result * string(Char(7))
-            elseif c2 == 98    # \b -> backspace (8)
+            elseif e == 'b'    # \b -> backspace (8)
                 result = result * string(Char(8))
-            elseif c2 == 102   # \f -> form feed (12)
+            elseif e == 'f'    # \f -> form feed (12)
                 result = result * string(Char(12))
-            elseif c2 == 118   # \v -> vertical tab (11)
+            elseif e == 'v'    # \v -> vertical tab (11)
                 result = result * string(Char(11))
-            elseif c2 == 101   # \e -> escape (27)
+            elseif e == 'e'    # \e -> escape (27)
                 result = result * string(Char(27))
-            elseif c2 == 120   # \x -> 2-digit hex escape
-                # Read up to 2 hex digits
+            elseif e == 'x'    # \x -> up to 2-digit hex escape
                 val = 0
                 k = 0
                 while k < 2 && i + 1 <= n
-                    h = _hexval(codeunit(s, i + 1))
+                    h = _hexval(Int(chars[i + 1]))
                     if h < 0
                         break
                     end
@@ -440,12 +598,11 @@ function unescape_string(s::String)
                     k = k + 1
                 end
                 result = result * string(Char(val))
-            elseif c2 == 117   # \u -> 4-digit unicode escape
-                # Read up to 4 hex digits
+            elseif e == 'u'    # \u -> up to 4-digit unicode escape
                 val = 0
                 k = 0
                 while k < 4 && i + 1 <= n
-                    h = _hexval(codeunit(s, i + 1))
+                    h = _hexval(Int(chars[i + 1]))
                     if h < 0
                         break
                     end
@@ -454,12 +611,11 @@ function unescape_string(s::String)
                     k = k + 1
                 end
                 result = result * string(Char(val))
-            elseif c2 == 85    # \U -> 8-digit unicode escape
-                # Read up to 8 hex digits
+            elseif e == 'U'    # \U -> up to 8-digit unicode escape
                 val = 0
                 k = 0
                 while k < 8 && i + 1 <= n
-                    h = _hexval(codeunit(s, i + 1))
+                    h = _hexval(Int(chars[i + 1]))
                     if h < 0
                         break
                     end
@@ -469,11 +625,13 @@ function unescape_string(s::String)
                 end
                 result = result * string(Char(val))
             else
-                # Unknown escape: keep as-is
-                result = result * string(Char(92)) * string(Char(c2))
+                # Unknown escape: keep as-is. (Upstream raises ArgumentError;
+                # the subset's lenient behavior and octal escapes are tracked
+                # separately — Issue #6724 covers the regex-free migration only.)
+                result = result * string(Char(92)) * string(e)
             end
         else
-            result = result * string(Char(c))
+            result = result * string(c)
         end
         i = i + 1
     end
@@ -488,23 +646,33 @@ end
 # split: split string by delimiter
 # Returns a Vector{String} containing the substrings
 # limit=0 means no limit (default), limit=N means at most N substrings (Issue #2040)
-function split(str::String, delim::String; limit=0)
+# keepempty=true (Julia default) keeps "" entries between consecutive delimiters
+# and at the start/end; keepempty=false drops them (Issue #3651).
+function split(str::String, delim::String; limit=0, keepempty=true)
     result = String[]
     n = length(str)
     dlen = length(delim)
 
-    # Empty delimiter: split into characters
+    # Empty delimiter: split into characters (Issue #3597)
+    # Walk by character using nextind so multi-byte UTF-8 characters stay
+    # intact. Previously this loop ran 1:length(str) and built chars via
+    # `Char(codeunit(str, i))`, which split each non-ASCII character into
+    # its raw UTF-8 bytes (e.g. "éa" became ["Ã", "©"]).
     if dlen == 0
+        nbytes = ncodeunits(str)
         i = 1
-        while i <= n
+        while i <= nbytes
             if limit > 0 && length(result) >= limit - 1
-                push!(result, str[i:n])
-                return result
+                push!(result, str[i:nbytes])
+                # Issue #3574: retag as Vector{SubString{String}} so the show
+                # form matches Julia 1.12 (`SubString{String}["a", "b"]`).
+                if keepempty != 0; return _substring_retag(result); else; return _filter_nonempty(result); end
             end
-            push!(result, string(Char(codeunit(str, i))))
-            i = i + 1
+            ni = nextind(str, i)
+            push!(result, str[i:ni-1])
+            i = ni
         end
-        return result
+        if keepempty != 0; return _substring_retag(result); else; return _filter_nonempty(result); end
     end
 
     start = 1
@@ -547,12 +715,66 @@ function split(str::String, delim::String; limit=0)
         push!(result, "")
     end
 
-    return result
+    # Issue #3574: see comment above.
+    if keepempty != 0; return _substring_retag(result); else; return _filter_nonempty(result); end
+end
+
+# Internal helper: return a new vector with all "" entries removed. Used by
+# split/rsplit when `keepempty=false` (Issue #3651). Always returns a fresh
+# Vector{SubString{String}}-tagged array so split/rsplit results show as
+# Julia's `SubString{String}[...]` regardless of whether `keepempty` filters.
+# Issue #3574.
+function _filter_nonempty(result::Vector{String})
+    filtered = String[]
+    for s in result
+        if !isempty(s)
+            push!(filtered, s)
+        end
+    end
+    return _substring_retag(filtered)
+end
+
+function _filter_nonempty(result)
+    filtered = String[]
+    for s in result
+        if !isempty(s)
+            push!(filtered, s)
+        end
+    end
+    return _substring_retag(filtered)
 end
 
 # split with Char delimiter
-function split(str::String, delim::Char; limit=0)
-    return split(str, string(delim), limit=limit)
+function split(str::String, delim::Char; limit=0, keepempty=true)
+    return split(str, string(delim); limit=limit, keepempty=keepempty)
+end
+
+# split with no delimiter: split on any whitespace, collapse runs, drop empties
+# Issue #3571 — Julia: split(s::AbstractString; limit=0, keepempty=false) =
+#                       split(s, isspace; limit, keepempty)
+# We provide a dedicated method that hardcodes whitespace tokenisation rather
+# than dispatching through a Function predicate, which keeps lowering simple.
+function split(str::String)
+    result = String[]
+    n = ncodeunits(str)
+    i = 1
+    while i <= n
+        # Skip a run of whitespace.
+        while i <= n && isspace(codeunit(str, i))
+            i = i + 1
+        end
+        if i > n
+            break
+        end
+        # Accumulate non-whitespace bytes until the next whitespace or EOS.
+        start = i
+        while i <= n && !isspace(codeunit(str, i))
+            i = i + 1
+        end
+        push!(result, str[start:i-1])
+    end
+    # Issue #3574: retag for Vector{SubString{String}} display.
+    return _substring_retag(result)
 end
 
 # =============================================================================
@@ -562,32 +784,46 @@ end
 # rsplit is like split but when limit is applied, only the rightmost
 # limit-1 splits are performed, keeping the left part unsplit.
 
-# rsplit with String delimiter (basic, no limit)
-function rsplit(str::String, delim::String)
-    return split(str, delim)
+# rsplit with String delimiter — accepts `limit` keyword (Issue #3610).
+# Default limit=0 means "no limit" (same output as split for an unbounded split).
+# Calls into the positional `rsplit(str, delim, limit)` method below, which
+# keeps the leftmost part unsplit when limit > 0 and falls back to `split`
+# otherwise.
+function rsplit(str::String, delim::String; limit=0, keepempty=true)
+    parts = rsplit(str, delim, limit)
+    if keepempty
+        return parts
+    end
+    return _filter_nonempty(parts)
 end
 
-# rsplit with Char delimiter (basic, no limit)
-function rsplit(str::String, delim::Char)
-    return rsplit(str, string(delim))
+# rsplit with Char delimiter — accepts `limit` and `keepempty` keywords
+# (Issues #3610, #3651).
+function rsplit(str::String, delim::Char; limit=0, keepempty=true)
+    parts = rsplit(str, string(delim), limit)
+    if keepempty
+        return parts
+    end
+    return _filter_nonempty(parts)
 end
 
 # rsplit with limit: split from the right, keeping leftmost parts together
 function rsplit(str::String, delim::String, limit::Int64)
     if limit <= 0
+        # Delegates to split, which already retags (Issue #3574).
         return split(str, delim)
     end
     if limit == 1
         result = String[]
         push!(result, str)
-        return result
+        return _substring_retag(result)
     end
 
     n = length(str)
     dlen = length(delim)
 
     if dlen == 0
-        # Empty delimiter: split into characters (same as split)
+        # Empty delimiter: split into characters (same as split, already retagged).
         return split(str, delim)
     end
 
@@ -616,14 +852,14 @@ function rsplit(str::String, delim::String, limit::Int64)
     if npos == 0
         result = String[]
         push!(result, str)
-        return result
+        return _substring_retag(result)
     end
 
     # limit-1 splits means limit parts
     # rsplit keeps rightmost limit-1 splits, so we skip the first (npos - (limit-1)) positions
     nsplits = limit - 1
     if nsplits >= npos
-        # All splits fit within limit - same as regular split
+        # All splits fit within limit - same as regular split (already retagged).
         return split(str, delim)
     end
 
@@ -656,7 +892,8 @@ function rsplit(str::String, delim::String, limit::Int64)
         k = k + 1
     end
 
-    return result
+    # Issue #3574: retag for Vector{SubString{String}} display.
+    return _substring_retag(result)
 end
 
 # rsplit with Char delimiter and limit

@@ -1,0 +1,1096 @@
+# Rust Builtin Removal Checklist
+
+*Last updated: 2026-06-11 (HOF routing inventory sync after Issues #3728/#3731)*
+
+When migrating a function from Rust builtin to Pure Julia, follow this checklist to ensure all traces of the Rust implementation are removed. Missing a location will result in the Rust builtin silently shadowing the Pure Julia version.
+
+## Current Builtin Inventory
+
+The `BuiltinId` enum currently contains **320 variants**. Verify this from
+`subset_julia_vm/src/builtins.rs` with:
+
+```bash
+awk '/pub enum BuiltinId/{inside=1; next} inside && /^}/{inside=0} inside && /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*,/{count++} END{print count}' subset_julia_vm/src/builtins.rs
+```
+
+The coarse inventory below groups the variants by migration surface; category
+counts are approximate unless a row names a narrow legacy carrier.
+
+| Category | Count | Examples | Migration Feasibility |
+|----------|-------|---------|----------------------|
+| Math/Numeric | ~30 | `Floor`, `Ceil`, `Round`, `Trunc` (+ Digits/SigDigits variants), bit ops, `Fma`, `Muladd` | Medium — rounding with kwargs needs Rust; bit ops feasible |
+| Array/Collection | ~24 | `Push`, `Pop`, `Reshape`, `Length`, `Size`, `Sort` | Low — mutation semantics require Rust |
+| Reduction/HOF | ~9 | `Minimum`, `Maximum`, `FindFirst`, `FindAll`, `Any`, `All`, `Count`, `Compose` | Mostly migrated — public predicate/reduction HOF names dispatch to Pure Julia; retained VM instructions are cache-compatibility fallbacks, while `ntuple`, `compose`, and `sprint` remain runtime/compiler boundaries |
+| Dict (Value::Dict) | 15 | `DictNew`, `DictGet`, `DictSet`, `DictDelete`, `DictKeys` | Medium — shared `DictRef` is Rust-backed with reference semantics; Dict{K,V} struct is Pure Julia alternative |
+| Set | 10 | `SetNew`, `SetPush`, `SetDelete`, `_SetLength` | **Migrated (Issue #6721)** — `Set{T}` is now a Pure Julia `struct Set{T} <: AbstractSet{T}; dict::Dict{T,Nothing}; end`. Public construction and all operations route through method dispatch; the `Value::Set`/HashSet intrinsics and 10 `BuiltinId::Set*` variants remain only as cache-compatibility / legacy-bytecode fallbacks |
+| Type/Reflection | ~17 | `TypeOf`, `Isa`, `Convert`, `Promote`, `Supertype` | Low — deep VM integration |
+| Equality/Comparison | ~10 | `Isequal`, `Isless`, `Hash`, `In` | Medium — `isequal` has Pure Julia but is intercepted |
+| String | ~20 | `StringNew`, `Ncodeunits`, `Occursin`, `StringToFloat` | Partial — some migrated, Regex forms need Rust |
+| IO/File | ~37 | `Print`, `ReadFile`, `Mkdir`, `Open`, `Close` | None — OS interface requires Rust |
+| Regex | 6 | `RegexNew`, `RegexMatch`, `RegexReplace` | None — wraps Rust `regex` crate |
+| Meta/Eval | ~22 | `Eval`, `MetaParse`, `MacroExpand`, `Gensym` | None — VM internals |
+| Test | 4 | `TestRecord`, `TestSetBegin`, `TestSetEnd` | None — VM test infrastructure |
+| Random/Time | 5 | `Rand`, `Randn`, `TimeNs`, `Sleep` | None — OS/RNG interface |
+| LinearAlgebra | 11 | `Lu`, `Det`, `Inv`, `Svd`, `Qr`, `Eigen` | None — wraps Rust linear algebra |
+| Range/Tuple | ~9 | `RangeNew`, `LinRange`, `Ntuple`, `TupleNew` | Low — compiler integration |
+| BigInt/BigFloat | ~8 | `BigInt`, `BigFloat`, precision/rounding control | None — wraps GMP library |
+| Other | ~18 | `Complex`, `Compose`, `Deepcopy`, `Getfield`, `Iterate`, `Zero`, `One` | Varies |
+
+## Public Base Routing Rule (Issue #3831)
+
+New public `Base.foo` calls should prefer Julia method dispatch before Rust
+builtin routing. Rust handlers are still valid, but only in one of these
+classified roles:
+
+| Class | Rule | Examples |
+|-------|------|----------|
+| Method-dispatch-first public function | Direct calls resolve through method tables; Rust is only a fallback for primitive VM value representations or cache compatibility. | `length`, `size`, `ndims`, `iterate`, `collect`, `getindex`, `setindex!`, `zero`, `sqrt`, `big`, Set algebra, HOF reducers |
+| Primitive fallback / internal intrinsic | Pure Julia method owns the public API; method bodies may call underscored VM primitives for unsupported representations. | `_dict_haskey`, `_set_push!`, `_array_length`, `_isabstracttype`, `_fieldnames` |
+| True runtime/OS/ABI boundary | Rust remains the implementation because the operation crosses VM, OS, native ABI, parser, allocator, regex, GMP/MPFR, or linear algebra boundaries. | `open`, `read`, `Regex`, `parse(Float64, s)`, `BigInt`, `BigFloat`, `ccall`/native AoT boundary |
+| Cache compatibility handler | New IR should not target this public route, but the VM keeps the handler for older precompiled Base cache bytecode. | Removed public routes for migrated HOF and iterator builtins |
+
+The current method-dispatch-first migration also distinguishes Rust-backed
+legacy container values from Pure Julia container structs. In particular, bare
+`::Dict` methods can still serve `Value::Dict`, while parametric
+`Dict{K,V}` / iterator wrapper structs dispatch to Pure Julia methods first.
+This prevents Rust fallback handlers from shadowing Pure Julia Base methods or
+user-defined overrides for structured values.
+
+Issue #3861 adds the same rule for module-qualified calls such as
+`Base.length(x)`, `Base.keys(x)`, and `Base.getindex(x, i)`: migrated public
+names call the normal method-dispatch path first and only reach
+`base_function_to_builtin_op()` / `compile_builtin_call()` as primitive or
+cache-compatibility fallback routes.
+
+Issue #3911 extends that rule to `Base.ncodeunits`, `Base.codeunit`, and
+`Base.codeunits`. User-defined methods for these public names are resolved
+through method dispatch first. The Rust string handlers remain as the primitive
+`String` byte-access fallback for `ncodeunits(s::String)`,
+`codeunit(s::String, i)`, and the supported `codeunits(s::String)` byte vector.
+
+Issue #3911 also routes `Base.keytype` and `Base.valtype` through method
+dispatch first, matching `julia/base/abstractdict.jl`. The retained
+`BuiltinOp::Keytype` and `BuiltinOp::Valtype` handlers are fallback boundaries
+for primitive dictionary values and cache compatibility.
+
+Issue #3911 also routes `Base.in` through method dispatch first, matching
+`julia/base/operators.jl`. The retained `BuiltinOp::In` handler is a fallback
+boundary for primitive tuple/string/dict/set membership and cache
+compatibility.
+
+Issue #3911 also routes `Base.sizeof` through method dispatch first, matching
+`julia/base/essentials.jl`. The retained `BuiltinOp::Sizeof` handler is a
+fallback boundary for primitive VM value/type layout queries and cache
+compatibility.
+
+Issue #3911 also routes `Base.hasfield` through method dispatch first, matching
+`julia/base/runtime_internals.jl`. The retained `BuiltinOp::Hasfield` handler
+is a fallback boundary for primitive/type-object registry metadata and cache
+compatibility.
+
+Issue #3911 also routes `Base.isbits`, `Base.isbitstype`, and `Base.ismutable`
+through method dispatch first, matching `julia/base/runtime_internals.jl`. The
+retained Rust handlers are fallback boundaries for primitive layout metadata
+and cache compatibility.
+
+Issue #3911 also routes `Base.objectid` through method dispatch first, matching
+`julia/base/runtime_internals.jl`. The retained Rust handler is a fallback
+boundary for primitive/object identity metadata and cache compatibility.
+
+Issue #3911 also routes `Base.hasmethod` through method dispatch first,
+matching `julia/base/reflection.jl`. The retained `BuiltinOp::HasMethod`
+handler is the supported two-argument method-table fallback and cache
+compatibility boundary; keyword/world overloads remain outside this slice.
+
+Issue #3874 centralizes the public collection-mutation fallback policy for
+`push!`, `pop!`, and `delete!` in
+`compile/expr/call/mod.rs::dispatch_first_collection_mutation_fallback()`. Those
+names still enter method dispatch for structured `Set` / `Dict{K,V}` / user
+types, while Array, legacy Rust `Value::Dict`, `Memory`, and `Any`-typed
+primitive fallback cases are routed to the retained Rust mutation handlers.
+
+### Successfully Migrated Builtins (removed from `BuiltinId`)
+
+These functions were previously Rust builtins and have been fully migrated to Pure Julia:
+
+| Function | Pure Julia Location | Migration Phase |
+|----------|-------------------|-----------------|
+| `sin`, `cos`, `tan`, `asin`, `acos`, `atan` | `base/math.jl`, `base/special/trig.jl` | Phase 6 (trig/exp/log) |
+| `exp`, `log` | `base/special/exp.jl`, `base/special/log.jl` | Phase 6 (trig/exp/log) |
+| `gcd`, `lcm`, `factorial` | `base/intfuncs.jl` | Early migration |
+| `sum` | `base/array.jl` | Array reduction migration |
+| `mean`, `std`, `var`, `median` (statistics) | `stdlib/Statistics/src/Statistics.jl` | Statistics migration |
+| `trues`, `falses`, `fill` | `base/array.jl` | Issue #2640 |
+| `first` (String), `last` (String) | `base/strings/basic.jl` | String migration |
+| `first`, `last` (public dispatch) | `base/tuple.jl`, `base/range.jl`, `base/strings/basic.jl`, `base/iterators.jl` | Issue #3734 (TupleFirst/TupleLast no longer route from public name) |
+| `length`, `size`, `ndims` (public dispatch) | `base/range.jl`, `base/subarray.jl`, `base/dict.jl`, `base/set.jl`, `base/iterators.jl`, `base/broadcast.jl`, `base/generator.jl`, `base/channels.jl` | Issue #3736 (Length/Size/Ndims no longer route from public name; remain only as fallback for primitive Array/Tuple/String/Range/Dict/Set/Generator) |
+| `iterate`, `collect` (public dispatch) | `base/iterators.jl`, `base/range.jl`, `base/generator.jl`, `base/dict.jl`, `base/channels.jl`, `base/subarray.jl` | Issue #3735 (Iterate/Collect no longer route from public name; remain only as fallback for primitive Array/Tuple/String/Range. `collect(::Range)` and `collect(::Any)` go directly to BuiltinOp::Collect to avoid runtime dispatch picking a Pure Julia struct method whose body would `GetField` on a non-struct Range value.) |
+| `getindex`, `setindex!` (Struct dispatch) | `base/pair.jl`, `base/range.jl`, `base/broadcast.jl`, `base/subarray.jl`, `base/iterators.jl` | Issue #3729 (the unconditional `compile_builtin_call` early route now falls through to method dispatch when the receiver type is `JuliaType::Struct(_)` and the method table has a matching arity; primitive Array/Tuple/String/Range/Memory/Dict still use the fast IndexLoad/IndexStore/DictGet/DictSet path) |
+| `uppercase`, `lowercase`, `titlecase` | `base/strings/unicode.jl` | String migration |
+| `strip`, `lstrip`, `rstrip`, `chomp`, `chop` | `base/strings/util.jl` | String migration |
+| `findfirst`, `findlast` (String) | `base/strings/search.jl` | String search migration |
+| `findnext`, `findprev` (String) | `base/strings/search.jl` | String search migration |
+| `split`, `rsplit` | `base/strings/util.jl` | String migration |
+| `repeat` (String) | `base/strings/basic.jl` | String migration |
+| `reverse` (String) | `base/strings/basic.jl` | String migration |
+| `parse(Int64, s)`, `tryparse(Int64, s)` | `base/parse.jl` | Parse migration |
+| `ascii`, `nextind`, `prevind`, `thisind`, `reverseind` | `base/strings/basic.jl` | String index migration |
+| `bytes2hex`, `hex2bytes` | `base/strings/util.jl` | String utility migration |
+| `typejoin`, `fieldcount` | `base/reflection.jl` | Reflection migration |
+| `ismutabletype`, `nameof` | `base/reflection.jl` | Reflection migration |
+| `fieldnames`, `fieldtypes` | `base/reflection.jl` (via intrinsics) | Reflection migration |
+| `isabstracttype`, `isconcretetype` | `base/reflection.jl` (via intrinsics) | Reflection migration |
+| `isequal` | `base/operators.jl` | Equality migration (but **still intercepted** by call.rs) |
+| `isunordered` | `base/operators.jl` | Equality migration |
+| `float()` (dispatch) | `base/float.jl` | Type conversion migration |
+| `joinpath`, `splitpath`, `basename`, `dirname` | `base/path.jl` | Path migration |
+| `hash`, `show` | `base/hashing.jl`, various | Phase 3-7 |
+| `sort`, `sort!` | `base/sort.jl` | Issue #3725 (stale `BuiltinId::Sort` removed) |
+| `union`, `intersect`, `setdiff`, `symdiff`, `issubset`, `isdisjoint`, `issetequal` (+ `!` variants) | `base/set.jl` | Issue #3724 (`BuiltinId::Set{Union,Intersect,...}` + `compile_builtin_set` removed) |
+| `push!`, `pop!`, `delete!` (lowering shortcut) | `base/set.jl`, `base/dict.jl` | Issue #3739 (`map_builtin_name` shortcut removed; Array/legacy Dict still served by `BuiltinOp::Push`/`Pop`/`DictDelete` via explicit `compile_call` routing) |
+| Base-qualified dispatch-first public names | various Base files | Issue #3861/#3911 (`Base.length`, `Base.size`, `Base.ndims`, `Base.iterate`, `Base.collect`, `Base.getindex`, `Base.setindex!`, `Base.zero`, `Base.sqrt`, `Base.big`, `Base.keys`, `Base.values`, `Base.pairs`, `Base.push!`, `Base.pop!`, `Base.pushfirst!`, `Base.popfirst!`, `Base.insert!`, `Base.deleteat!`, `Base.delete!`, `Base.empty!`, `Base.merge!`, `Base.signed`, `Base.unsigned`, `Base.ncodeunits`, `Base.codeunit`, `Base.codeunits`, `Base.keytype`, `Base.valtype`, `Base.eltype`, `Base.in`, `Base.sizeof`, `Base.hasfield`, `Base.isbits`, `Base.isbitstype`, `Base.ismutable`, `Base.objectid`, `Base.hasmethod` now enter the same method-dispatch-first path as unqualified calls before Rust fallback) |
+| `fma`, `muladd` | `base/math.jl` | Issue #3732 (public dispatch; `_fma` intrinsic preserves IEEE fused semantics on Float64) |
+| `maxintfloat` | `base/floatfuncs.jl` | Issue #3732 |
+| `zero` | `base/number.jl`, `base/promotion.jl`, `base/complex.jl`, `base/gmp.jl` | Issue #3737 (lowering removed; `BuiltinOp::Zero` retained as primitive fallback) |
+| `sqrt` (Complex) | `base/complex.jl` | Issue #3737 (lowering removed; `BuiltinOp::Sqrt` retained as Float64 fallback) |
+| `big` (dispatch) | `base/gmp.jl` | Issue #3730 (early `compile_call` route removed; `compile_builtin_types::big` retained as fallback for types without Pure Julia coverage) |
+| `complex` | `base/complex.jl` | Issue #3727 (`BuiltinId::Complex` was a dead inventory entry; removed from `from_name`) |
+| `float` (full coverage) | `base/number.jl`, `base/rational.jl`, `base/complex.jl` | Issue #3727 (`BuiltinId::FloatConv` removed from `from_name`; no public route remains) |
+| `signed` / `unsigned` | `base/number.jl` | Issue #3727 (early `compile_call` route removed; Pure Julia methods cover Int*/UInt*/Bool; Rust fallback via `is_base_function` for unsupported inputs) |
+| `map!`, `filter!`, `mapreduce`, `mapfoldl`, `mapfoldr` (HOF priority flipped) | `base/array.jl`, `base/iterators.jl` | Issue #3731 (`compile_builtin_hof` returns `Ok(None)`; VM instructions `MapFuncInPlace` / `FilterFuncInPlace` / `MapReduceFunc*` / `MapFoldrFunc*` retained as cache-compatibility fallbacks) |
+| `findfirst(f, arr)`, `findlast(f, arr)`, `findall(f, arr)`, `any(f, arr)`, `all(f, arr)`, `count(f, arr)`, `sum(f, arr)` (predicate HOF reducers) | `base/array.jl`, `base/reduce.jl` | Issue #3728 (`compile_builtin_hof` returns `Ok(None)`; VM instructions `FindFirstFunc` / `FindLastFunc` / `FindAllFunc` / `AnyFunc` / `AllFunc` / `CountFunc` / `SumFunc` retained as cache-compatibility fallbacks) |
+| `include_string`, `evalfile` | `base/meta.jl` | Issue #3738 (composes `Meta.parse` + `eval` + `read`; `BuiltinId::IncludeString` / `BuiltinId::EvalFile` no longer reachable from new IR but VM handlers retained for cache compatibility) |
+| `isvalid(::String, ::Integer)` | `base/strings/basic.jl` | Issue #3726 (UTF-8 boundary check via `_is_continuation_byte` + `codeunit`) |
+| `findall(::String, ::String)`, `findall(::Char, ::String)` | `base/strings/search.jl` | Issue #3726 (non-overlapping `findnext` walk; HOF form `findall(f, arr)` is now Pure Julia per Issue #3728) |
+| `count(::String, ::String)`, `count(::Char, ::String)` | `base/strings/search.jl` | Issue #3726 (non-overlapping `findnext` walk; HOF form `count(f, arr)` is now Pure Julia per Issue #3728) |
+
+### Intentional Rust-Retained String Helpers (Issue #3726)
+
+These remain in Rust because they wrap platform/Unicode-runtime primitives that
+have no Pure Julia equivalent in SubsetJuliaVM today:
+
+| Function | Rust handler | Reason |
+|----------|--------------|--------|
+| `parse(Float64, s)` / `tryparse(Float64, s)` | `BuiltinId::TryparseFloat64` | IEEE 754 decimal-to-binary conversion (delegates to Rust `f64::from_str`). Pure Julia would need a complete Grisu/Dragon4 parser. |
+| `isnumeric(c)` | `BuiltinId::Isnumeric` | Full Unicode "Numeric" category coverage requires utf8proc tables; the Pure Julia `isdigit`/`isletter` are conservative ASCII-leaning ports. |
+| All `Regex*` builtins (`RegexNew`, `RegexMatch`, `RegexReplace`, `RegexSplit`, `RegexEachMatch`, `RegexOccursin`) | various `BuiltinId::Regex*` | Wraps the Rust `regex` crate; reproducing Julia's PCRE semantics in Pure Julia is infeasible. |
+| `_substring_retag` | `BuiltinId::SubStringRetag` | Internal helper for `Vector{SubString{String}}` display until a real `SubString` Value variant exists (Issue #3574). |
+
+## Pre-Removal: Verify Pure Julia Implementation
+
+- [ ] Pure Julia implementation exists in `subset_julia_vm/src/julia/base/*.jl`
+- [ ] Julia file is loaded in `compile/mod.rs` `get_base()`
+- [ ] Fixture tests exist and pass for the function
+- [ ] Behavior matches official Julia (run with `julia` binary to verify)
+
+## Removal Checklist
+
+### Layer 1: BuiltinId Registration (`builtins.rs`)
+
+- [ ] Remove `BuiltinId::Foo` variant from enum
+- [ ] Remove `"foo" => Some(Self::Foo)` from `from_name()`
+- [ ] Remove `Self::Foo => "foo"` from `name()`
+- [ ] Remove from `is_aot_supported()` if present
+
+### Layer 2: VM Handlers
+
+- [ ] `vm/builtins_exec.rs` — remove handler match arm
+- [ ] `vm/builtins_math.rs` — remove handler match arm (math functions)
+- [ ] `vm/builtins_types.rs` — remove handler match arm (type operations)
+- [ ] `vm/builtins_strings.rs` — remove handler match arm (string functions)
+- [ ] `vm/builtins_io.rs` — remove handler match arm (I/O functions)
+- [ ] `vm/builtins_linalg.rs` — remove handler match arm (linear algebra)
+- [ ] `vm/builtins_equality.rs` — remove handler match arm (equality/comparison)
+- [ ] **`vm/specialize/`** — remove specialization handler (AoT path, easily missed!)
+
+### Layer 3: Compile-Time Routing
+
+> **WARNING**: `call.rs` has **explicit routing** that sends specific argument patterns directly to
+> `compile_builtin_call()`, bypassing method dispatch entirely. If you remove a builtin but leave
+> its explicit route in `call.rs`, calls will fail with "Unknown function" errors at runtime.
+> This was the root cause of Issue #2562 (findfirst/findlast removal regression).
+
+**Critical first step** — search for explicit routing:
+```bash
+rg -n '"foo"' subset_julia_vm/src/compile/expr/call
+```
+
+- [ ] `compile/expr/call/` — remove or update explicit routing to fall through to method dispatch
+  - Look for `return self.compile_builtin_call(function, args)` with your function name
+  - If found: either remove the routing block entirely, or change it to fall through
+  - If the routing has conditional logic (e.g., HOF form vs value form), only remove the path that goes to the removed builtin
+- [ ] `compile/expr/builtin_math.rs` — remove compile handler
+- [ ] `compile/expr/builtin_string.rs` — remove compile handler (or return `Ok(None)`)
+- [ ] `compile/expr/builtin.rs` — remove from error assertion list
+- [ ] `compile/expr/builtin_hof.rs` — remove HOF handler if applicable
+
+### Layer 4: Classification Functions (`compile/base_functions.rs`)
+
+- [ ] `is_base_function()` — remove function name
+- [ ] `base_function_to_builtin_op()` — remove BuiltinOp mapping (if using BuiltinOp path)
+- [ ] `is_base_submodule_function()` — remove if submodule-qualified
+
+### Layer 5: Type Inference (KEEP — DO NOT REMOVE)
+
+> **WARNING**: These entries are **independent** of whether a function is implemented in Rust or
+> Pure Julia. They inform the compiler about return types and purity. Removing them causes
+> incorrect type inference (`Any` instead of `F64`, or `F64` instead of `Struct`), leading to
+> unnecessary runtime dispatch or wrong codegen. See Issue #2634 for rationale.
+
+Three categories of entries to preserve:
+
+| File | List | Purpose | Example |
+|------|------|---------|---------|
+| `compile/inference.rs` | `struct_preserving_funcs` | `sinh(Complex) → Complex` (not F64) | Preserves struct return type |
+| `compile/expr/infer/` | Math function → F64 list | `sinh(1.0) → F64` (not Any) | Avoids unnecessary runtime dispatch |
+| `compile/effects/inference.rs` | Pure effects list | `sinh` is pure (no side effects) | Enables CSE and dead code elimination |
+
+Checklist — verify entries are still correct, but do NOT remove them:
+
+- [ ] `compile/inference.rs` — `struct_preserving_funcs` still includes the function
+- [ ] `compile/expr/infer/` — math function return type list still includes the function
+- [ ] `compile/effects/inference.rs` — pure effects list still includes the function (if applicable)
+
+### Layer 6: AoT Pipeline (if AoT-supported)
+
+- [ ] `aot/ir/ops.rs` — remove `AotBuiltinOp` enum variant + all methods
+- [ ] `aot/codegen/aot_codegen/` — remove Rust codegen handler
+- [ ] `aot/analyze/ir_converter/` — remove from recognized function list
+- [ ] `aot/optimizer/cse.rs` — remove from pure builtins list
+
+## Post-Removal
+
+- [ ] `cargo build` succeeds
+- [ ] Category tests pass: `timeout 1800 cargo nextest run --release --test fixture_tests <category>::`
+- [ ] Full test suite passes: `timeout 1800 cargo nextest run --release`
+- [ ] Update `test_all_builtin_ops_reachable` in `compile/base_functions.rs` if BuiltinOp was removed
+
+## Audit Command
+
+To find all references to a specific builtin before removal:
+
+```bash
+# Replace "foo" with the function name
+rg -n '"foo"|Foo\b' subset_julia_vm/src -g '*.rs' | rg -v 'test|//.*foo'
+```
+
+## Common Pitfalls When Writing Pure Julia Replacements
+
+### Pitfall 1: Use `::Type` not `::DataType` for type parameters (Issue #2630)
+
+When writing Pure Julia functions that accept type values, **always use `::Type`**:
+
+```julia
+# WRONG — dispatch fails with NoMethodFound for TypeOf(Int64)
+function isabstracttype(T::DataType)
+    _isabstracttype(T)
+end
+
+# CORRECT — matches type values represented as TypeOf(T)
+function isabstracttype(T::Type)
+    _isabstracttype(T)
+end
+```
+
+SubsetJuliaVM represents type values as `TypeOf(Int64)`, not `DataType`, so `::DataType`
+annotations cause dispatch failures. This matches the established pattern in `reflection.jl`
+(`fieldnames(T::Type)`, `fieldcount(T::Type)`, etc.).
+
+### Pitfall 2: Multi-line `||` continuation (Issue #2630)
+
+The SubsetJuliaVM parser does not handle `||` continuation across lines:
+
+```julia
+# FAILS — parser doesn't handle || continuation across lines
+T === Bool || T === Int8 ||
+T === UInt8 || T === Float64
+
+# WORKS — keep on single line or wrap in parentheses
+(T === Bool || T === Int8 || T === UInt8 || T === Float64)
+```
+
+### Pitfall 3: Keyword arguments in Base-loaded functions (Issue #2624)
+
+Functions with keyword arguments in Base-loaded files may not dispatch correctly
+when called without kwargs. Use positional arguments where possible, or provide
+explicit default-argument wrapper methods.
+
+## Type Coverage Checklist for Pure Julia Migrations (Issue #2724)
+
+When migrating a numeric function from Rust builtin to Pure Julia, ensure **all 17+ numeric types** have specializations where needed. Bool is the most commonly forgotten type because it is a subtype of Integer but has distinct semantics.
+
+### Complete Numeric Type List
+
+| Category | Types | Count |
+|----------|-------|-------|
+| Signed integers | `Int8`, `Int16`, `Int32`, `Int64`, `Int128` | 5 |
+| Unsigned integers | `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128` | 5 |
+| Floating point | `Float16`, `Float32`, `Float64` | 3 |
+| Boolean | `Bool` | 1 |
+| Big numbers | `BigInt`, `BigFloat` | 2 |
+| **Total** | | **16+** |
+
+### Bool Specialization Checklist
+
+Bool requires special attention because:
+- `true` is `1` and `false` is `0` for numeric operations
+- `zero(::Bool)` returns `false`, `one(::Bool)` returns `true`
+- `float(::Bool)` should return `Float64` (not stay as Bool)
+- Bool participates in Integer type hierarchy: `Bool <: Integer`
+
+When adding a Pure Julia numeric function, check:
+
+- [ ] Does the function need a `Bool` specialization? (e.g., `zero`, `one`, `float`)
+- [ ] Does the generic fallback handle Bool correctly? (e.g., `abs(true)` should work)
+- [ ] Are Bool-to-numeric conversion paths correct?
+
+### Audit Script: Find Missing Bool Specializations
+
+```bash
+# Find Pure Julia functions with Int64 but no Bool specialization
+for func in $(grep -h "function.*::Int64)" subset_julia_vm/src/julia/base/number.jl | \
+  sed 's/function \([a-z_]*\).*/\1/' | sort -u); do
+    has_bool=$(grep -c "function ${func}.*::Bool)" subset_julia_vm/src/julia/base/number.jl)
+    if [ "$has_bool" = "0" ]; then
+        echo "MISSING Bool: $func"
+    fi
+done
+```
+
+### Functions with Bool Coverage Status
+
+| Function | Bool specialization | Notes |
+|----------|-------------------|-------|
+| `zero(x)` | Yes (`false`) | In `number.jl` |
+| `one(x)` | Yes (`true`) | In `number.jl` |
+| `float(x)` | Yes (`Float64(x)`) | Added in Issue #2722 |
+| `iszero(x)` | No (generic works) | `x == 0` works for Bool |
+| `isone(x)` | No (generic works) | `x == 1` works for Bool |
+| `abs(x)` | No (generic works) | `signbit(false)` = false |
+| `abs2(x)` | No (generic works) | `x * x` works for Bool |
+| `signbit(x)` | No (generic works) | `x < 0` works for Bool |
+
+## Hardcoded Type Hierarchy Audit (Issue #2628)
+
+The file `vm/builtins_types.rs` contains multiple copies of hardcoded type hierarchy tables that map concrete types to their abstract supertypes. These should eventually be replaced with dynamic `supertype()` calls once the Pure Julia type hierarchy is complete.
+
+### Audit Command
+
+```bash
+# Find hardcoded type hierarchy tables in builtins_types.rs
+grep -n '"Signed"\|"Unsigned"\|"Integer"\|"AbstractFloat"' \
+  subset_julia_vm/src/vm/builtins_types.rs | grep -v "//"
+```
+
+### Current Hardcoded Locations (3 copies)
+
+| Lines | Context | Usage |
+|-------|---------|-------|
+| ~874-881 | `supertype()` builtin | Returns parent type for type hierarchy queries |
+| ~957-964 | `check_subtype()` helper | Type subtype checking for dispatch |
+| ~1181-1188 | `typejoin()` / type operations | Finding common supertypes |
+
+### Migration Priority
+
+These hardcoded tables are **low priority** for removal because:
+1. The type hierarchy for primitive numeric types is fixed and will not change
+2. `supertype()` for user-defined abstract types already uses dynamic lookup
+3. The hardcoded tables only cover the built-in numeric type hierarchy
+
+When the Pure Julia type system is complete enough to represent the full `Number` hierarchy dynamically, these tables can be replaced. Until then, they serve as a reliable fallback.
+
+### Prevention: Keep Tables in Sync
+
+When adding a new numeric type to the VM, update **all three** copies of the hierarchy table. Use the audit command above to find all locations.
+
+## Hybrid Dispatch Pattern (Issue #2614)
+
+Some builtins have **mixed argument types**: some arguments can be Pure Julia types (String, Number) while others are Rust-only Value types (Regex, RegexMatch, IO). These cannot be fully migrated to Pure Julia and require a **hybrid dispatch** pattern.
+
+### When to Use Hybrid Dispatch
+
+Use hybrid dispatch when a function has:
+- At least one argument type that **can** be represented in Pure Julia (e.g., `String`, `Int64`)
+- At least one argument type that is **Rust-only** (e.g., `Regex`, `IO`, `RegexMatch`)
+
+### Rust-Only Value Types (Cannot Be Migrated)
+
+| Type | Why Rust-only |
+|------|--------------|
+| `Regex` | Wraps compiled Rust `regex::Regex` object |
+| `RegexMatch` | Contains Rust-internal match data |
+| `IO` / `IOBuffer` | Wraps Rust I/O handles |
+| `Task` | Concurrency primitive |
+
+### The Compile-Time Routing Pattern
+
+For hybrid functions, `infer_expr_type` in `compile/expr/infer/` determines which argument types are present at compile time:
+
+```
+Caller: occursin("hello", "hello world")
+  → Both args are String → dispatch to Pure Julia occursin(::String, ::String)
+
+Caller: occursin(r"pattern", "hello world")
+  → First arg is Regex → route to Rust builtin CallBuiltin(BuiltinId::Occursin)
+```
+
+The key is in `compile/expr/call/`: explicit routing checks argument types and only routes to the Rust builtin when Rust-only types are involved. For all-Pure-Julia argument combinations, it falls through to method dispatch.
+
+### Builtins with Hybrid Dispatch Needs
+
+| Function | Pure Julia args | Rust-only args | Status |
+|----------|----------------|----------------|--------|
+| `occursin` | `(String, String)` | `(Regex, String)` | Partially migrated |
+| `findfirst` | `(String, String)`, `(Char, String)` | `(Regex, String)` | Partially migrated |
+| `findnext` | `(String, String, Int)` | `(Regex, String, Int)` | Partially migrated |
+| `findprev` | `(String, String, Int)` | `(Regex, String, Int)` | Partially migrated |
+| `replace` | `(String, Pair{String,String})` | `(String, Pair{Regex,String})` | Partially migrated |
+| `match` | — | `(Regex, String)` | Rust-only |
+| `eachmatch` | — | `(Regex, String)` | Rust-only |
+
+### Code Review Checklist for Hybrid Functions
+
+- [ ] Verify `call.rs` explicit routing only triggers for Rust-only argument types
+- [ ] Verify Pure Julia argument combinations fall through to method dispatch
+- [ ] Test both paths: `occursin("a", "abc")` (Pure Julia) AND `occursin(r"a", "abc")` (Rust builtin)
+- [ ] When removing the Rust builtin for String-only paths, keep the Regex path routing intact
+
+## Architecture: Why Rust Builtins Shadow Pure Julia
+
+```
+Julia source: foo(x)
+    ↓
+Compiler checks (in order):
+  1. compile/expr/call/ explicit routing → CallBuiltin(BuiltinId::Foo)  ← WINS
+  2. base_functions.rs → BuiltinOp path → CallBuiltin                    ← WINS
+  3. Method dispatch → finds Pure Julia foo(x)                            ← SHADOWED
+    ↓
+VM executes CallBuiltin → Rust handler runs
+(Pure Julia version is loaded but never called)
+```
+
+When ALL Rust paths are removed, step 3 becomes the primary path and Pure Julia runs.
+
+## Multi-Type Builtin Migration (Issue #2711)
+
+Some Rust builtins handle **multiple collection types** in a single handler. These require special care during Pure Julia migration because removing the builtin breaks ALL types, not just the one you migrated.
+
+### Pre-Migration Checklist for Multi-Type Builtins
+
+1. **List ALL types** the builtin currently handles (check the `match` arms in the Rust handler)
+2. **For each type**, determine if Pure Julia is feasible:
+   - Dict → requires Rust intrinsics for HashMap access (`_dict_get`, `_dict_set!`, etc.)
+   - NamedTuple → may need Rust infrastructure for field access
+   - Array → usually feasible in Pure Julia via `iterate()`
+   - Tuple → usually feasible in Pure Julia via `iterate()`
+   - Set → requires Rust intrinsics for HashSet access
+3. **If ANY type requires Rust**, add intrinsics for that type FIRST
+4. **Add Pure Julia implementations for ALL types** before removing from routing
+5. **Test every type** — not just the one that motivated the migration
+
+### Known Multi-Type Builtins
+
+| Builtin | Types Handled | Pure Julia Feasible? | Status |
+|---------|---------------|---------------------|--------|
+| `keys` | Dict, NamedTuple, Array, Tuple | Dict/NamedTuple need intrinsics; Array/Tuple feasible | Rust builtin |
+| `values` | Dict, NamedTuple, Array, Tuple | Dict/NamedTuple need intrinsics; Array/Tuple trivial | Rust builtin |
+| `pairs` | Dict, NamedTuple, Array, Tuple | Dict/NamedTuple need intrinsics; Array/Tuple feasible | Rust builtin |
+| `delete!` | Dict, Set | Both need Rust intrinsics (`_dict_delete!` / `_set_delete!`) | Rust builtin |
+| `in` | Array, Tuple, Set, Dict, Range, String | Most need iterate(); Set needs intrinsic | Rust builtin |
+| `length` | Dict, Array, Tuple, Range, String, Set, NamedTuple | Dict/Set need intrinsics | Rust builtin |
+| `pop!` | Dict | Dict needs intrinsics | Rust builtin |
+| `get!` | Dict | Dict needs intrinsics; mutation bug (Issue #2709) | Rust builtin |
+
+### Anti-Pattern: Partial Migration
+
+```
+# WRONG: Migrate keys(::Array) to Pure Julia but leave Rust handler
+# → Rust handler still wins for ALL types (including Array) due to routing priority
+# → Pure Julia keys(::Array) is silently shadowed
+
+# CORRECT: Either migrate ALL types at once, or use intrinsics pattern:
+# 1. Add _dict_keys, _namedtuple_keys intrinsics
+# 2. Write Pure Julia keys(d::Dict) = _dict_keys(d)
+# 3. Write Pure Julia keys(a::Array) = 1:length(a)  (no intrinsic needed)
+# 4. Remove Rust keys handler ONLY after ALL types have Pure Julia
+```
+
+## Dict Value Semantics Boundary (Issues #2709, #5225, #5675)
+
+### Current State
+
+`Value::Dict` is now `Dict(DictRef)`, where `DictRef = Rc<RefCell<DictValue>>`
+(Issue #5675). Cloning a `Value::Dict` only clones the shared reference, so
+mutating operations (`delete!`, `setindex!`, `merge!`, `empty!`, `pop!`, `get!`)
+are observed by aliases and caller bindings, matching Julia's mutable Dict
+reference semantics.
+
+```julia
+d = Dict("a" => 1)
+f!(d) = delete!(d, "a")
+f!(d)
+length(d)  # -> 0 (mutated in-place)
+```
+
+The older Issue #2709 clone-on-pass limitation is historical. `get!` also has
+dedicated write-back coverage for dict-first and thunk forms (Issue #5225), so
+insertions persist in the bound dictionary:
+
+```julia
+d = Dict("a" => 1)
+get!(d, "b", 2)
+haskey(d, "b")  # -> true
+```
+
+### Migration Rule
+
+Dict public APIs may be migrated to Pure Julia when their `Value::Dict` path is
+implemented through internal intrinsics that mutate or read the shared `DictRef`.
+Do not reintroduce clone-by-value behavior:
+
+- Mutating wrappers (`delete!`, `setindex!`, `merge!`, `empty!`, `pop!`, `get!`) must call an intrinsic that borrows the shared dict mutably and returns the same `Value::Dict` when a dict value stays on the stack.
+- Non-mutating copy-like operations (`copy`, non-`!` `merge`, new `Dict(...)` literals) must allocate an independent `DictValue` and wrap it in a fresh `DictRef`.
+- User-defined `Dict{K,V}` methods must still win before retained `Value::Dict` Rust fallbacks where dispatch-first routing applies.
+
+Regression coverage:
+
+- `subset_julia_vm/tests/fixtures/dict/dict_pass_by_reference_5675.jl`
+- `subset_julia_vm/tests/fixtures/dict/dict_getbang_writeback_5225.jl`
+- `subset_julia_vm/tests/fixtures/collections/dict_mutating.jl`
+
+## Dict → Pure Julia Migration Audit (Issue #6571)
+
+This section is the classification deliverable for the tracking refactor
+[#6571](https://github.com/AtelierArith/ailujsoi/issues/6571): migrate the
+public `Dict` surface fully toward the Pure Julia `Dict{K,V}` implementation in
+`subset_julia_vm/src/julia/base/dict.jl`, leaving Rust-backed `Value::Dict` only
+as a VM boundary / cache-compatibility fallback. As of #6619/#6621, public
+`Dict(...)` / `Dict{K,V}(...)` construction and struct-backed `Dict{K,V}`
+operations compile through Julia method dispatch; `NewDict*` and the public
+`BuiltinId::Dict*` handlers are retained for old bytecode and legacy
+`Value::Dict` values.
+
+### Hybrid representation (today)
+
+| Layer | Representation | File |
+|-------|----------------|------|
+| Legacy runtime value | `Value::Dict(DictRef)`, `DictRef = Rc<RefCell<DictValue>>` | `vm/value/value_enum.rs`, `vm/value/container.rs` |
+| Pure Julia struct | `mutable struct Dict{K,V} <: AbstractDict{K,V}` (open-addressing) | `base/dict.jl:169` |
+| Compiler legacy boundary | `Instr::NewDict` / `NewDictWithPairs` / `NewDictTyped`, `CallBuiltin(DictGet/DictSet)` for `Value::Dict` fallback only | `compile/expr/mod.rs`, `compile/expr/builtin_array.rs` |
+| Method split | bare `::Dict` methods serve `Value::Dict`; parametric `Dict{K,V}` methods serve Pure Julia `StructRef` | `base/dict.jl` |
+
+The bare-vs-parametric method split is the central hazard: a retained Rust
+fallback for `Value::Dict` must never shadow a Pure Julia `Dict{K,V}` (or
+user-defined) method, and vice versa.
+
+### Handler classification
+
+Each Dict handler is classified into one of the four roles from the
+[Public Base Routing Rule](#public-base-routing-rule-issue-3831) table.
+
+**Public API fallback — `BuiltinId::Dict*` (15).** User-callable `Base`
+behavior whose new public `Dict{K,V}` route resolves through method dispatch;
+the Rust handler is retained only as the primitive `Value::Dict` fallback and
+old bytecode/cache boundary. Defined in `builtins.rs`, handled in
+`vm/builtins_dicts.rs`.
+
+| Builtin | Public name | Notes |
+|---------|-------------|-------|
+| `DictNew` | `Dict` | empty-dict construction (also reachable via `Instr::NewDict`) |
+| `DictGet` | `getindex` / `get` | 2-arg raises `KeyError`; 3-arg returns default |
+| `DictGetkey` | `getkey` | borrowed-key probe (Issue #5187) |
+| `DictSet` | `setindex!` | StructRef dispatch reorders args; returns the dict |
+| `DictDelete` | `delete!` | shared with `Set` |
+| `DictHasKey` | `haskey` | borrowed-key probe |
+| `DictLen` | `length` | |
+| `DictKeys` | `keys` | also polymorphic over NamedTuple/Array/Tuple |
+| `DictValues` | `values` | also polymorphic over NamedTuple/Array/Tuple |
+| `DictPairs` | `pairs` | returns the dict itself |
+| `DictMerge` | `merge` | non-mutating; allocates a fresh `DictRef` |
+| `DictGetBang` | `get!` | write-back coverage (Issue #5225) |
+| `DictMergeBang` | `merge!` | collects rhs before borrow for `merge!(d, d)` safety (Issue #5675) |
+| `DictEmpty` | `empty!` | in-place clear |
+| `DictPop` | `pop!` | 2-arg raises `KeyError`; 3-arg returns default |
+
+**Primitive fallback / internal intrinsic — `_Dict*` (9).** The lowest-level
+mutable/read boundary into the shared `DictRef`; Pure Julia method bodies call
+these for the `Value::Dict` representation. These stay in Rust.
+
+`_DictGet`, `_DictSet`, `_DictDelete`, `_DictHaskey`, `_DictLength`,
+`_DictEmpty`, `_DictKeys`, `_DictValues`, `_DictPairs`.
+
+**VM boundary — genuinely Rust.** The `DictValue` open-addressing table, the
+`DictKey` enum + canonical hashing (type-object keys Issue #5108, FxHash Issue
+#5188), the borrowed-key probe (Issue #5187), and the `Rc<RefCell>` interior
+mutability/reference semantics (Issue #5675) cannot move to Pure Julia. Pure
+Julia `Dict{K,V}` instead implements its own table over `Vector{Any}` fields.
+
+**Cache compatibility — `Instr::NewDict*` & friends.** `NewDict`,
+`NewDictWithPairs`, `NewDictTyped`, `DictSet`, `DictLen`, `LoadDict`,
+`StoreDict`, `ReturnDict` remain decodable/executable for old bytecode and
+precompiled cache compatibility. New public construction routes through
+`Dict`/`Dict{K,V}` methods; an `Expr::DictLiteral` is compiled as a `Dict`
+method call rather than emitting `NewDict` + `DictSet`.
+
+### Migration roadmap (decomposed under the #6571 milestone)
+
+The remaining code migration is split into independently-shippable child issues
+under the *Dict pure-Julia migration (#6571)* milestone, each gated by the
+safety-net parity fixtures added with this audit:
+
+1. **#6586** — Reconcile `Value::Dict` vs `StructRef Dict{K,V}` dispatch so
+   neither shadows the other for public or user-defined methods (the
+   bare-vs-parametric split). **Resolved:** after the #6584/#6585 fixes the entire
+   public Dict surface dispatches correctly through `Any`-typed bindings, and
+   user methods extending Base Dict functions win over the Rust fallback. Locked
+   in by `dict_dispatch_matrix_6586.jl` (21-op `Any`-dispatch matrix) and
+   `dict_user_method_wins_6586.jl` (side-effect-observed no-shadowing), plus the
+   existing `dict_setindex_struct_dispatch.jl` / `dict_delete_struct_dispatch.jl`.
+   Edge case spun off as #6610 (overriding a `Bool`/`Dict`-returning op like
+   `haskey`/`empty!` with a different return type still coerces through an
+   `Any` binding — same return-type-widening class as #6585).
+2. **#6587** — Route public `getindex`/`setindex!` through method dispatch first
+   for `Dict`, keeping `CallBuiltin(DictGet/DictSet)` as the primitive fallback
+   (mirrors the `length`/`iterate` migrations in Issues #3735/#3736).
+   **Resolved:** the method-first routing for user/`Struct` receivers is already
+   in place (Issue #3729), and a primitive `Value::Dict` correctly keeps the fast
+   path — forcing `Value::Dict` indexing through method dispatch would regress the
+   hot path with no behavioral benefit, which the Public Base Routing Rule
+   explicitly permits ("Rust is only a fallback for primitive VM value
+   representations"). Locked in by `dict_getindex_setindex_dispatch_6587.jl`
+   (user `getindex`/`setindex!` win; `Value::Dict` fast path intact).
+3. **#6588** — Route public `keys`/`values`/`pairs`/`merge`/`copy` through Pure
+   Julia, retaining the `_Dict*` intrinsics as the `Value::Dict` boundary.
+   **Resolved:** these names already have bare `::Dict` Pure Julia wrappers in
+   `base/dict.jl` (`keys(d::Dict) = _dict_keys(d)`, etc.) and dispatch method-first
+   for user/`Struct` receivers; the `_dict_*` intrinsics remain the `Value::Dict`
+   boundary. Locked in by `dict_view_ops_dispatch_6588.jl` (user
+   `keys`/`values`/`copy` win; `Value::Dict` views intact).
+4. **#6589/#6619/#6621** — Demote public construction and operation routes away
+   from `NewDict*` / public `BuiltinId::Dict*` emission. **Resolved:** public
+   `Dict(...)` / `Dict{K,V}(...)` construction returns the Pure Julia
+   Memory-backed `Dict{K,V}` struct; `getindex` / `setindex!` / `haskey` /
+   `keys` / `values` / `pairs` / mutation helpers for that struct compile to
+   method dispatch. `NewDict*`, `LoadDict` / `StoreDict` / `ReturnDict`, and the
+   public `BuiltinId::Dict*` handlers remain only for old bytecode/cache
+   compatibility and legacy `Value::Dict` boundary values. Locked in by
+   `dict_construction_fastpath_6589.jl`, `dict_constructors_6618.jl`,
+   `dict_op_display_parity_6620.jl`, and the #6621 bytecode guard.
+
+With #6586–#6589 and #6617–#6621 resolved, the epic #6571 reaches its
+foundation goal: the public `Dict` surface is dispatch-correct and method-first
+for user/`Struct` receivers, with `Value::Dict` retained only as the primitive
+VM-boundary / cache-compatibility fallback per the Public Base Routing Rule. A
+full representation swap (eliminating `Value::Dict` entirely) is explicitly
+*not* part of #6621; no-JIT iOS hot-path performance is measured separately in
+#6622.
+
+**#6622 performance result.** The retained legacy boundary remains important:
+VM-only Criterion on the dict-heavy workload shows the Pure Julia struct route
+at `73.876 ms` for Int keys and `48.476 ms` for String keys, versus
+`10.992 ms` / `12.022 ms` on the #6619-predecessor `Value::Dict` route
+(about **6.7x** / **4.0x** slower). Future performance work should optimize
+typed `Dict{K,V}` method bodies and `Memory` field access rather than restoring
+`Value::Dict` as the public default.
+
+## Set → Pure Julia `Dict{T,Nothing}` Wrapper (Issue #6721)
+
+`Set{T}` is now a Pure Julia struct over `Dict{T,Nothing}`, mirroring upstream
+`julia/base/set.jl` (`struct Set{T} <: AbstractSet{T}; dict::Dict{T,Nothing}; end`).
+This both purifies the representation *and* fixes an observable behavioral
+divergence: a user-defined `ft(x::Set{T}) where {T} = T` now extracts the
+element type (`ft(Set([1,2,3])) == Int64`), because the value is a `StructRef`
+`Set{T}` that participates in `Set{T}` method-table dispatch — the old native
+`Value::Set` carrier did not (it threw `MethodError: no method matching ft(::Set)`).
+
+### What moved to Pure Julia
+
+`base/set.jl` now defines the `Set{T}` struct, constructors (`Set()`, `Set(itr)`,
+`Set([...])`, `Set{T}()`, `Set{T}(itr)`, `Set{T}(s::Set{T})`, and the
+`Set(x for ...)` comprehension via `Set(itr)`), and all core operations
+delegating to the backing dict: `push!`, `delete!`, `in`, `empty!`, `length`,
+`isempty`, `iterate`, `pop!` (1/2/3-arg), `copy`, `sizehint!`, plus the existing
+Pure Julia set algebra (`union`/`intersect`/`setdiff`/`symdiff`/`issubset`/
+`isdisjoint`/`issetequal` + `!` variants). **No `_set_*` HashSet intrinsic is
+referenced from any `.jl` file anymore.** `dict.jl` loads before `set.jl` in
+`get_base()` (Set depends on Dict).
+
+Because the compiler cannot instantiate a parametric type with a `where`-bound
+type variable (`Set{T}()` / `Dict{T,Nothing}()` with a free `T` is rejected),
+the backing dict is built from a runtime type value via the Dict struct's
+`_new_dict_kv(K, V, n)` helper, and explicit `Set{T}(...)` construction is routed
+through `try_compile_explicit_public_set_constructor` →
+`_set_from_eltype(::Type{T})` / `_set_with_eltype(::Type{T}, itr)` (the same
+runtime-type-value pattern `Dict{K,V}()` uses via `_dict_from_explicit_types`).
+
+### Compiler routing (mirrors the Dict #6619 migration)
+
+- Public `Set(...)` / `Set{T}(...)` / `Set(x for ...)` construction routes to
+  method dispatch (`is_public_set_constructor_method_call` +
+  `try_compile_explicit_public_set_constructor`); the `Set` pre-match handler
+  and the `Set{T}` branch in `try_compile_parametric_constructor_call` no longer
+  emit the native carrier.
+- `Set([...])` inference returns `Struct("Set{T}")` (the Dict construction
+  inference adapter is mirrored for Set in `infer/expr_tfuncs.rs` and wired into
+  both `infer/mod.rs` ValueType and `infer/julia_type.rs` JuliaType paths).
+- `push!` / `delete!` / `empty!` / `pop!` / `in` / `∈` / `∉` handlers route a
+  set-like receiver to method dispatch over the full candidate set, keeping the
+  native `BuiltinId::Set*` / `DictDelete` / `DictEmpty` / `Pop` / `In` handlers
+  as the legacy `Value::Set` / cache fallback.
+- `iterate(::Set)` is a runtime `IterateDynamic` candidate (the `("Set", 0)`
+  exclusion was removed from `core_is_runtime_iterate_candidate_type` and its
+  legacy parity twin); `collect(::Set)` reaches the dynamic iterate path.
+- `coercion.rs` accepts `Struct(Set{...}) <-> ValueType::Set` and
+  `Set <-> Any` as no-ops so a Set struct flows through bare `::Set` Base method
+  params/returns (mirrors the Array-wrapper coercion arm).
+
+### Intentional residual (cache compatibility — genuinely Rust)
+
+The native `Value::Set(SetValue)` carrier, `vm/builtins_sets/` handlers, the 10
+`BuiltinId::Set*` variants (`SetNew`/`SetPush`/`SetDelete`/`SetIn`/`SetEmpty` +
+`_SetPush`/`_SetDelete`/`_SetIn`/`_SetEmpty`/`_SetLength`), and the `NewSet`/
+`NewSetTyped`/`SetAdd`/`LoadSet`/`StoreSet` VM instructions remain decodable and
+executable for old precompiled-cache bytecode. **No new public IR targets them.**
+A full representation swap (deleting `Value::Set`/`SetValue`/`builtins_sets/`) is
+explicitly out of scope here, exactly as the Dict #6621 audit left `Value::Dict`
+as the primitive VM-boundary fallback.
+
+### Known limitation (pre-existing, not Set-specific)
+
+`[(1,2),(3,4)]` infers/constructs as `Vector{Any}`, so `Set([(1,2),(3,4)])` is
+`Set{Any}` (membership/iteration still correct). This is the general
+array-of-tuples element-type gap, not a Set regression.
+
+## Array Native Carrier Demotion (Issue #6653)
+
+The legacy `Value::Array(ArrayRef)` enum variant is already retired (#4568).
+The remaining carrier is the explicit compatibility variant
+`Value::NativeArray(ArrayRef)`. After #6649-#6652, public Array construction,
+materialization, indexing/mutation/iteration, HOF, broadcast, `similar`, and
+`reshape` routes return the Pure Julia `Array{T,N}` wrapper backed by
+`ref::MemoryRef{T}` + `size::NTuple{N,Int}`. `NativeArray` remains only for
+old precompiled cache bytecode, VM instruction fallback, formatting/REPL
+conversion, host/FFI boundaries, and internal compatibility helpers.
+
+Regression coverage:
+
+- `array_native_carrier_demoted_6653.jl` asserts public results expose
+  `typeof(a.ref) == MemoryRef{T}` across literal, constructor, collect,
+  comprehension, HOF, broadcast, `similar`, `zeros`, `ones`, and `reshape`
+  routes.
+- `array_construction_routing_6649_tests` now includes a #6653 bytecode guard
+  that public materialization function bodies do not emit `NewArray*`,
+  `PushArrayValue`, or `AllocUndef*` carrier-builder instructions.
+- `scripts/check_value_array_allowlist.sh` continues to enforce zero legacy
+  `Value::Array` matches. New `NativeArray` converter use must be a documented
+  compatibility boundary, not a public default route.
+
+**#6653 performance result.** `vm_array_benchmark` measures compile-once,
+`Vm::run()`-only workloads. With a short Criterion configuration
+(`--warm-up-time 1 --measurement-time 1 --sample-size 10`), current
+MemoryRef-wrapper route compared with #6649-pre-routing baseline `2404f188e`
+(same bench temporarily applied) is:
+
+| Workload | Baseline native route | Current wrapper route | Result |
+|----------|-----------------------|-----------------------|--------|
+| `index_mutation_push_pop_128` | `7.455 ms` | `25.170 ms` | ~3.4x slower |
+| `hof_broadcast_filter_reduce_128` | `525.90 ms` | `65.372 ms` | ~8.0x faster |
+
+The index/mutation regression is accepted for the final representation swap and
+should be addressed by typed `Memory` storage and intrinsic hot-loop
+optimizations. Do not restore `NativeArray` as the public default route to
+recover this benchmark.
+
+Dispatch-gap bugs surfaced by the audit, both fixed: **#6584** (`empty!` on an
+`Any`-typed `Value::Dict` threw `MethodError`; fixed by the bare
+`empty!(d::Dict) = _dict_empty!(d)` wrapper) and **#6585** (`get!` returned a
+Float-coerced default; fixed by defaulting the bare-`Dict` inference lattice
+key/value to `Any` instead of `Float64` in `compile/bridge.rs`).
+
+### Regression coverage for this audit
+
+Parity fixtures pin current behavior across **both** literal and non-literal
+construction paths so future migration PRs can refactor safely:
+
+- `subset_julia_vm/tests/fixtures/dict/dict_pure_julia_parity_6571.jl`
+
+## operators.jl Function Index Limit (Issue #2721)
+
+`operators.jl` is one of the largest base library files. When migrating methods to Pure Julia, adding too many methods to a single file can cause the total function count to exceed internal limits, breaking cache alignment.
+
+### The Problem
+
+Each Pure Julia method in a base file contributes to the `all_functions` array during compilation. If `operators.jl` grows too large:
+
+1. The function index limit may be exceeded, causing compilation failures
+2. Cache alignment invariants (Issue #2726) may break if function ordering changes
+
+### Migration Pattern: Distribute Methods Across Base Files
+
+Instead of adding all methods to `operators.jl`, distribute them to the appropriate base file:
+
+| Method Category | Target File | Example |
+|-----------------|-------------|---------|
+| Arithmetic operators | `operators.jl` | `+(x, y)`, `-(x, y)` |
+| Float-specific methods | `float.jl` | `float(x::Int64)` |
+| Comparison/equality | `operators.jl` or `number.jl` | `isequal(x, y)` |
+| Type conversion | `number.jl` | `convert(T, x)` |
+| String operations | `strings/basic.jl` | `string(x)` |
+| Collection operations | `array.jl` | `push!(arr, x)` |
+
+### Canary Test
+
+`tests/fixtures/arithmetic/test_promotion_canary.jl` — Verifies that promotion still works after base library changes. If operators.jl function limits are exceeded, promotion-based arithmetic will be the first to fail.
+
+### Audit
+
+```bash
+# Count methods in operators.jl to monitor growth
+grep -c "^function\|^[a-zA-Z].*) =" subset_julia_vm/src/julia/base/operators.jl
+```
+
+## Three-Layer Builtin Removal Audit (Issue #2708)
+
+When removing a Rust builtin, **all three routing layers** must be checked. Missing any one causes
+either silent shadowing (the Rust handler still runs) or runtime failure (the route exists but the
+handler is gone).
+
+### Comprehensive Audit Script
+
+Run this script before and after removing a builtin to verify completeness:
+
+```bash
+#!/bin/bash
+# Usage: ./audit_builtin.sh <function_name>
+FUNC=${1:?Usage: audit_builtin.sh <function_name>}
+FUNC_CAP=$(printf '%s' "$FUNC" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+
+echo "=== Layer 1: Lowering (lowering/expr/helpers.rs) ==="
+rg -n "\"$FUNC\"" subset_julia_vm/src/lowering/expr/helpers.rs
+
+echo ""
+echo "=== Layer 2a: Classification (compile/base_functions.rs) ==="
+rg -n "\"$FUNC\"" subset_julia_vm/src/compile/base_functions.rs
+
+echo ""
+echo "=== Layer 2b: Explicit compile-time routing (compile/expr/call/) ==="
+rg -n "\"$FUNC\"" subset_julia_vm/src/compile/expr/call
+
+echo ""
+echo "=== Layer 2c: Builtin compiler (compile/expr/builtin*.rs) ==="
+rg -n "\"$FUNC\"" subset_julia_vm/src/compile/expr -g 'builtin*.rs'
+
+echo ""
+echo "=== Layer 3a: VM handlers (vm/builtins_*.rs) ==="
+rg -n "\"$FUNC\"|$FUNC_CAP" subset_julia_vm/src/vm -g 'builtins_*.rs' | rg -v 'test|//'
+
+echo ""
+echo "=== Layer 3b: Specialization handler (vm/specialize/) ==="
+rg -n "\"$FUNC\"|$FUNC_CAP" subset_julia_vm/src/vm/specialize
+
+echo ""
+echo "=== BuiltinId enum (builtins.rs) ==="
+rg -in "$FUNC" subset_julia_vm/src/builtins.rs | head -5
+
+echo ""
+echo "=== Pure Julia implementation check ==="
+rg -n "function $FUNC" subset_julia_vm/src/julia/base -g '*.jl'
+
+echo ""
+echo "=== Type inference entries (KEEP — DO NOT REMOVE) ==="
+rg -n "\"$FUNC\"" \
+  subset_julia_vm/src/compile/inference.rs \
+  subset_julia_vm/src/compile/expr/infer \
+  subset_julia_vm/src/compile/effects/inference.rs
+```
+
+### Quick Three-Layer Verification
+
+| Layer | File(s) | What to search | What to do |
+|-------|---------|---------------|------------|
+| **Lowering** | `lowering/expr/helpers.rs` | `map_builtin_name()` match arms | Remove the `"foo" => BuiltinOp::Foo` entry |
+| **Compiler** | `compile/base_functions.rs` | `is_base_function()` and `base_function_to_builtin_op()` | Remove name from both functions |
+| **Compiler** | `compile/expr/call/` | Direct `"foo"` string matches in `compile_call` | Remove or convert to fall-through |
+| **Compiler** | `compile/expr/builtin.rs` | Error assertion list | Remove function name |
+| **Compiler** | `compile/expr/builtin_math.rs` | Compile handler match arm | Remove handler |
+| **Compiler** | `compile/expr/builtin_string.rs` | Compile handler match arm | Remove handler (return `Ok(None)`) |
+| **VM** | `vm/builtins_*.rs` | Handler match arm | Remove Rust implementation |
+| **VM** | `vm/specialize/` | Specialization handler | Remove specialization |
+| **Test** | `compile/base_functions.rs` | `test_all_builtin_ops_reachable` lists | Remove variant from test lists |
+
+## Routing Path 4: Direct call.rs Name Handling (Issue #2714)
+
+> **WARNING**: `compile/expr/call/` contains a **fourth routing path** — direct name handling
+> in `compile_call()` — that is separate from `is_base_function()` / `base_function_to_builtin_op()`.
+> Some branches emit builtins before method dispatch; other branches are explicit fallthrough
+> guards. Pure Julia code may exist but never execute when this path emits `compile_builtin_call()`
+> or `CallBuiltin(...)` first.
+
+### call.rs Route/Fallthrough Inventory
+
+The following names are direct call-routing audit points in `compile/expr/call/`
+`compile_call()`. Some still have active match arms, while others are documented
+historical routes that now intentionally skip early interception. The action
+column distinguishes true builtin interception from deliberate
+fallthrough-to-dispatch guards.
+
+| Function | call.rs action | Has Pure Julia? | Conflict? |
+|----------|---------------|-----------------|-----------|
+| `tuple` | `Instr::NewTuple` directly | No | — |
+| `!` | `Instr::NotBool` directly | No | — |
+| `getindex` / `setindex!` | `compile_builtin_call` for primitive fallback; struct/user methods fall through | Yes (`pair.jl`, `range.jl`, `broadcast.jl`, `subarray.jl`, `iterators.jl`) | **Guarded** (#3729) |
+| `reshape` | Dispatch candidates first; builtin fallback for primitive arrays | Yes (`array.jl`, `subarray.jl`) | **Guarded** |
+| `similar` | `compile_builtin_call` (Array only) | Yes (`broadcast.jl`) | **Guarded** (#2700) |
+| `big` | Method-dispatch first; fallback through `is_base_function()` | Yes (`gmp.jl`) | No (#3730) |
+| `findall` | Fall-through for 2-arg forms | Yes (`array.jl`, `reduce.jl`, `strings/search.jl`) | No (#3726/#3728) |
+| `findfirst` / `findlast` | Fall-through for 2-arg forms | Yes (`array.jl`, `strings/search.jl`) | No (#3728) |
+| `findnext` / `findprev` | Fall-through | Yes (`strings/search.jl`) | — |
+| `first` / `last` | Fall-through to method dispatch | Yes (`tuple.jl`, `range.jl`, `strings/basic.jl`, `iterators.jl`) | No (#3734) |
+| `ntuple` | `compile_builtin_call` for direct 2-arg calls | Yes (`tuple.jl`) | Intentional fast path (#4973) |
+| `count` | Fall-through for 2-arg forms | Yes (`reduce.jl`, `strings/basic.jl`, `strings/search.jl`) | No (#3726/#3728) |
+| `sum` / `any` / `all` | Fall-through for 2-arg forms | Yes (`array.jl`, `reduce.jl`) | No (#3728) |
+| `empty!` | `CallBuiltin(DictEmpty)` (Dict only) | No | — |
+| `merge!` | `CallBuiltin(DictMergeBang)` (Dict only) | No | — |
+| `get!` | `CallBuiltin(DictGetBang)` | No | — |
+| `occursin` | `compile_builtin_call` (Regex) | Yes (`strings/search.jl`) | Partial |
+| `match` | `CallBuiltin(RegexMatch)` | No | — |
+| `eachmatch` | `CallBuiltin(RegexEachMatch)` | No | — |
+| `inv` | `CallBuiltin(Inv)` (matrix) | Yes (`rational.jl`) | **Guarded** |
+| `hash` | `CallBuiltin(Hash)` | No | — |
+| `convert` | `compile_builtin_call` | No | — |
+| `promote` | `compile_builtin_call` | No | — |
+| `signed` / `unsigned` | Method-dispatch first; fallback through `is_base_function()` | Yes (`number.jl`) | No (#3727) |
+| `widemul` | `compile_builtin_call` | No | — |
+| `reinterpret` | `compile_builtin_call` | No | — |
+| `deepcopy` | `compile_builtin_call` | No | — |
+| `_fieldnames` / `_fieldtypes` / `_getfield` | `CallBuiltin` | No (intrinsics) | — |
+| `_isabstracttype` / `_isconcretetype` / `_ismutabletype` | `CallBuiltin` | No (intrinsics) | — |
+| `_dict_get` / `_dict_haskey` / etc. | `CallBuiltin` | No (intrinsics) | — |
+| `getfield` / `setfield!` | Special handling | No | — |
+| `_regex_replace` | `CallBuiltin` | No (intrinsic) | — |
+| `isequal` | `CallBuiltin(Isequal)` | Yes (`operators.jl`) | **Intercepted** |
+| `sprint` | `compile_builtin_call` (kwargs) | No | — |
+| `floor`/`ceil`/`round`/`trunc` | kwargs handling | No | — |
+| `string` | kwargs handling (base=) | No | — |
+| `parse`/`tryparse` | `CallBuiltin` | No | — |
+| `inv` (LinearAlgebra) | `CallBuiltin(Inv)` | Yes (`rational.jl`) | **Guarded** |
+| `svd`/`qr`/`eigen`/etc. | `CallBuiltin` (LinAlg) | No | — |
+| `transpose` | Fall-through to method dispatch | Yes (`number.jl`, `array.jl`) | — |
+
+### Functions with Both Builtin AND Pure Julia (Dual Implementation Conflicts) (Issue #2702)
+
+These functions have BOTH a Rust builtin handler AND a Pure Julia implementation.
+The builtin takes priority due to compile-time routing. When migrating, the routing
+must be removed or guarded to allow the Pure Julia version to run.
+
+| Function | Builtin Route | Pure Julia File | Guard Status |
+|----------|--------------|-----------------|--------------|
+| `similar` | call.rs → `compile_builtin_call` | `broadcast.jl` (`similar(::Broadcasted, ::Type)`) | **Guarded**: Array-type check (#2700) |
+| `isequal` | call.rs → `CallBuiltin(Isequal)` | `operators.jl` | **Not guarded** — builtin always wins |
+| `inv` | call.rs → `CallBuiltin(Inv)` | `rational.jl` (`inv(::Rational)`) | **Guarded**: matrix-type check |
+| `occursin` | call.rs → `compile_builtin_call` | `strings/search.jl` | **Partial**: Regex form → builtin, String form → Julia |
+
+**Action required for full migration**: When migrating any of these functions, remove the
+compile-time route in `call.rs` and verify the Pure Julia dispatch handles all argument patterns.
+Historical HOF conflicts for `findall`, `findfirst`, `findlast`, `count`, `sum`,
+`any`, and `all` were resolved by Issues #3728/#3731: `call.rs` now falls through
+for the public HOF forms and `compile_builtin_hof()` returns `Ok(None)`. The
+retained VM instructions are cache-compatibility fallbacks; see `HOF_GUIDE.md`.
+
+## Dead Pure Julia Code Hidden by Compiler Interception (Issue #2714)
+
+Pure Julia implementations that exist in `subset_julia_vm/src/julia/base/*.jl` but are
+**never called** because a compiler interception routes calls to Rust builtins first.
+
+### How to Detect Dead Pure Julia Code
+
+```bash
+# Step 1: List all Pure Julia function definitions
+grep -rn "^function " subset_julia_vm/src/julia/base/*.jl subset_julia_vm/src/julia/base/**/*.jl 2>/dev/null | \
+  sed 's/.*function \([a-zA-Z_!]*\).*/\1/' | sort -u > /tmp/pure_julia_funcs.txt
+
+# Step 2: Cross-reference with call.rs interceptions
+while read func; do
+  if grep -rq "\"$func\"" subset_julia_vm/src/compile/expr/call/; then
+    echo "INTERCEPTED: $func"
+  fi
+done < /tmp/pure_julia_funcs.txt
+
+# Step 3: Cross-reference with base_functions.rs
+while read func; do
+  if grep -q "\"$func\"" subset_julia_vm/src/compile/base_functions.rs; then
+    echo "BASE_FUNCTION: $func"
+  fi
+done < /tmp/pure_julia_funcs.txt
+```
+
+### Known Dead Code as of Current State
+
+Functions where Pure Julia code exists but **specific call patterns** are intercepted:
+
+| Function | Pure Julia Location | Intercepted Pattern | Live Pattern |
+|----------|-------------------|---------------------|--------------|
+| `isequal` | `operators.jl` | `isequal(x, y)` → Rust builtin | *(none — all calls intercepted)* |
+| `similar` | `broadcast.jl` | `similar(array, n)` → Rust builtin | `similar(::Broadcasted, ::Type)` via guard |
+
+## Compatibility Audit: Rust Builtins Extending Julia Semantics (Issue #2717)
+
+Rust builtin handlers sometimes accept arguments or produce results that official Julia
+would reject. This creates non-standard behavior that breaks when migrating to Pure Julia
+(which correctly rejects the inputs).
+
+### Audit: `builtins_equality.rs`
+
+| Handler | Non-standard behavior | Julia behavior |
+|---------|----------------------|----------------|
+| `Isequal` | Catch-all `_ => false` for unrecognized type pairs | Julia: `MethodError` for types without `isequal` defined |
+| `Isless` | Catch-all `_ => false` for unrecognized type pairs | Julia: `MethodError` for types without `isless` defined |
+| `Isless` | `(Nothing, _) => true`, `(_, Nothing) => false` | Julia: `isless(nothing, x)` is not defined for all `x` |
+| `Hash` | Catch-all `format!("{:?}", val).hash()` for unknown types | Julia: `MethodError` for types without `hash` method |
+
+### Audit: `builtins_types.rs`
+
+| Handler | Non-standard behavior | Julia behavior |
+|---------|----------------------|----------------|
+| `Convert` | Accepts string type names like `"Int64"` as first arg | Julia: requires actual `Type` value, not string |
+| `Signed` / `Unsigned` | Accepts `F64` → truncates to `I64` | Julia: `InexactError` for non-integer floats |
+| `Float` | Accepts `Rational`, `Complex` struct instances directly | Julia: uses dispatch, may not accept all struct layouts |
+
+### Migration Safety Rule
+
+When writing Pure Julia replacements, **always test with official Julia first** to confirm
+which argument types are accepted. Do NOT port the Rust catch-all behavior to Pure Julia.
+
+```bash
+# Verify Pure Julia behavior matches official Julia, NOT Rust builtin
+julia -e 'isequal(1, "hello")'           # official Julia result
+cargo run --features repl -- -e 'isequal(1, "hello")'  # SubsetJuliaVM result
+# These MUST match. If SubsetJuliaVM accepts inputs Julia rejects, that's a bug.
+```
+
+### Preventing Non-Standard Extensions
+
+When adding new Rust builtin handlers:
+
+1. **Never use catch-all `_ => <default>` that returns success** — use `_ => return Err(...)` instead
+2. **Match only types that Julia explicitly defines methods for** — check `methods(func)` in Julia REPL
+3. **Test edge cases against official Julia** — especially `nothing`, `missing`, mixed types
+
+## Related Issues
+
+- #2610 — Original prevention issue for removal checklist
+- #2616 — `call.rs` explicit routing must be updated during migration (Layer 3 enhancement)
+- #2636 — Added `specialize.rs` to checklist
+- #2634 — Preserve type inference entries (Layer 5 rationale)
+- #2630 — `::Type` vs `::DataType` pitfall + multi-line `||` pitfall
+- #2643 — Dead BuiltinOp variant removal example
+- #2711 — Multi-type builtin migration requires all-type coverage
+- #2709 — Dict value semantics blocks Pure Julia migration of mutating operations
+- #2721 — operators.jl function index limit and migration pattern
+- #2708 — Three-layer builtin removal audit with comprehensive script
+- #2702 — Builtin routing must not intercept Pure Julia method dispatch
+- #2714 — Audit dead Pure Julia code hidden by compiler interception
+- #2717 — Rust builtin handlers must not extend Julia semantics
+- #2724 — Type coverage checklist for Bool in numeric migrations
+- #2628 — Hardcoded type hierarchy tables audit
+- #2614 — Hybrid dispatch pattern for mixed Rust/Pure Julia arg types

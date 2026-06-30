@@ -14,6 +14,14 @@ end
     @test String(['h', 'e', 'l', 'l', 'o']) == "hello"
 end
 
+@testset "String(char_array) reads logical reshaped elements (Issue #3908)" begin
+    chars = collect("abcd")
+    reshaped = reshape(chars, 4)
+    chars[2] = 'Z'
+
+    @test String(reshaped) == "aZcd"
+end
+
 @testset "String(s) identity for strings" begin
     @test String("hello") == "hello"
 end

@@ -2,8 +2,41 @@
 //!
 //! This module implements constant folding that evaluates operations
 //! on literal values at compile time.
+#![allow(clippy::cast_sign_loss)] // known-safe constant casts (i64->u32)
 
 use crate::aot::ir::{AotBinOp, AotBuiltinOp, AotExpr, AotProgram, AotStmt, AotUnaryOp};
+
+/// Julia `<<` on `Int64`: left shift with over-shift clamped to 0 and a
+/// negative amount delegating to an arithmetic right shift. Mirrors the runtime
+/// `SjuliaShift` helpers so constant-folded shifts match unfolded ones
+/// (Issue #7057).
+fn julia_shl_i64(x: i64, k: i64) -> i64 {
+    if k < 0 {
+        return julia_ashr_i64(x, k.unsigned_abs().min(64) as i64);
+    }
+    if k >= 64 {
+        0
+    } else {
+        (x as u64).wrapping_shl(k as u32) as i64
+    }
+}
+
+/// Julia `>>` on `Int64`: arithmetic right shift with over-shift sign fill and a
+/// negative amount delegating to a left shift (Issue #7057).
+fn julia_ashr_i64(x: i64, k: i64) -> i64 {
+    if k < 0 {
+        return julia_shl_i64(x, k.unsigned_abs().min(64) as i64);
+    }
+    if k >= 64 {
+        if x < 0 {
+            -1
+        } else {
+            0
+        }
+    } else {
+        x >> (k as u32)
+    }
+}
 
 /// Constant folder for AoT IR
 ///
@@ -42,7 +75,7 @@ impl AotConstantFolder {
     }
 
     /// Optimize a list of statements
-    fn optimize_stmts(&mut self, stmts: &mut Vec<AotStmt>) -> usize {
+    fn optimize_stmts(&mut self, stmts: &mut [AotStmt]) -> usize {
         let mut total_folds = 0;
 
         for stmt in stmts.iter_mut() {
@@ -184,7 +217,7 @@ impl AotConstantFolder {
     }
 
     /// Fold an expression, returning the folded expression and number of folds
-    fn fold_expr(&self, expr: &AotExpr) -> (AotExpr, usize) {
+    pub(super) fn fold_expr(&self, expr: &AotExpr) -> (AotExpr, usize) {
         match expr {
             // Binary operations on literals
             AotExpr::BinOpStatic {
@@ -306,6 +339,20 @@ impl AotConstantFolder {
                 (expr.clone(), 0)
             }
 
+            AotExpr::SetFromIter { iter, elem_ty } => {
+                let (folded_iter, folds) = self.fold_expr(iter);
+                if folds > 0 {
+                    return (
+                        AotExpr::SetFromIter {
+                            iter: Box::new(folded_iter),
+                            elem_ty: elem_ty.clone(),
+                        },
+                        folds,
+                    );
+                }
+                (expr.clone(), 0)
+            }
+
             // Fold inside tuple literals
             AotExpr::TupleLit { elements } => {
                 let mut new_elements = Vec::with_capacity(elements.len());
@@ -331,6 +378,7 @@ impl AotConstantFolder {
                 function,
                 args,
                 return_ty,
+                inline_policy,
             } => {
                 let mut new_args = Vec::with_capacity(args.len());
                 let mut total_folds = 0;
@@ -345,6 +393,7 @@ impl AotConstantFolder {
                             function: function.clone(),
                             args: new_args,
                             return_ty: return_ty.clone(),
+                            inline_policy: *inline_policy,
                         },
                         total_folds,
                     );
@@ -407,8 +456,20 @@ impl AotConstantFolder {
             (AotExpr::LitI64(a), AotExpr::LitF64(b)) => self.fold_f64_binop(op, *a as f64, *b),
             (AotExpr::LitF64(a), AotExpr::LitI64(b)) => self.fold_f64_binop(op, *a, *b as f64),
 
-            // String concatenation (for Add only)
+            // String concatenation
             (AotExpr::LitStr(a), AotExpr::LitStr(b)) if op == AotBinOp::Add => {
+                Some(AotExpr::LitStr(format!("{}{}", a, b)))
+            }
+            (AotExpr::LitStr(a), AotExpr::LitStr(b)) if op == AotBinOp::Mul => {
+                Some(AotExpr::LitStr(format!("{}{}", a, b)))
+            }
+            (AotExpr::LitStr(a), AotExpr::LitChar(b)) if op == AotBinOp::Mul => {
+                Some(AotExpr::LitStr(format!("{}{}", a, b)))
+            }
+            (AotExpr::LitChar(a), AotExpr::LitStr(b)) if op == AotBinOp::Mul => {
+                Some(AotExpr::LitStr(format!("{}{}", a, b)))
+            }
+            (AotExpr::LitChar(a), AotExpr::LitChar(b)) if op == AotBinOp::Mul => {
                 Some(AotExpr::LitStr(format!("{}{}", a, b)))
             }
 
@@ -444,7 +505,7 @@ impl AotConstantFolder {
                 }
             }
             AotBinOp::Pow => {
-                if b >= 0 && b <= 63 {
+                if (0..=63).contains(&b) {
                     Some(AotExpr::LitI64(a.wrapping_pow(b as u32)))
                 } else {
                     Some(AotExpr::LitF64((a as f64).powf(b as f64)))
@@ -461,9 +522,13 @@ impl AotConstantFolder {
             AotBinOp::BitAnd => Some(AotExpr::LitI64(a & b)),
             AotBinOp::BitOr => Some(AotExpr::LitI64(a | b)),
             AotBinOp::BitXor => Some(AotExpr::LitI64(a ^ b)),
-            AotBinOp::Shl => Some(AotExpr::LitI64(a << (b as u32 & 63))),
-            AotBinOp::Shr => Some(AotExpr::LitI64(a >> (b as u32 & 63))),
-            AotBinOp::And | AotBinOp::Or => None, // Not applicable to integers
+            // Julia shift semantics: over-shift → 0 (or sign fill for `>>`),
+            // negative amount shifts the other direction. NOT Rust's masked
+            // `b & 63` (Issue #7057). Must match the runtime SjuliaShift helpers
+            // so constant-folded and unfolded shifts agree.
+            AotBinOp::Shl => Some(AotExpr::LitI64(julia_shl_i64(a, b))),
+            AotBinOp::Shr => Some(AotExpr::LitI64(julia_ashr_i64(a, b))),
+            AotBinOp::And | AotBinOp::Or | AotBinOp::Subtype => None, // Not applicable to integers
         }
     }
 
@@ -619,8 +684,9 @@ impl AotConstantFolder {
             AotBuiltinOp::Round => {
                 if args.len() == 1 {
                     match &args[0] {
-                        AotExpr::LitF64(v) => Some(AotExpr::LitF64(v.round())),
-                        AotExpr::LitF32(v) => Some(AotExpr::LitF32(v.round())),
+                        // Julia's default RoundNearest is round-half-to-even.
+                        AotExpr::LitF64(v) => Some(AotExpr::LitF64(v.round_ties_even())),
+                        AotExpr::LitF32(v) => Some(AotExpr::LitF32(v.round_ties_even())),
                         _ => None,
                     }
                 } else {

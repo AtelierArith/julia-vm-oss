@@ -13,9 +13,9 @@ using Test
     d3 = Dict()
     @test typeof(d3) == Dict{Any, Any}
 
-    # Untyped Dict with values (still Dict{Any, Any} in SubsetJuliaVM)
+    # Untyped Dict with values infers key/value types from pair arguments.
     d4 = Dict("x" => 10)
-    @test typeof(d4) == Dict{Any, Any}
+    @test typeof(d4) == Dict{String, Int64}
 end
 
 true

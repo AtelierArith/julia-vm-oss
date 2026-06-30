@@ -1,6 +1,18 @@
 # Test manifest for complex category
 
 [[tests]]
+name = "complex_int_pow_5768"
+file = "complex_int_pow_5768.jl"
+expected = true
+description = "Complex{<:Integer}^Integer ((2+3im)^2, im^2) via repeated multiplication; promoted to Complex{Int64}; previously hung (Issue #5768)"
+
+[[tests]]
+name = "complex_float_integer_pow_6252_6255"
+file = "float_integer_pow_6252_6255.jl"
+expected = true
+description = "Complex{Float64/Float32}^Integer uses integer-power semantics instead of analytic real-exponent fallback; ComplexF32 arithmetic/inv/powers preserve type (Issues #6252, #6253, #6255)"
+
+[[tests]]
 name = "complex_parametric_float64"
 file = "parametric_float64.jl"
 expected = true
@@ -173,3 +185,117 @@ name = "complex_im_in_function_body"
 file = "im_in_function_body.jl"
 expected = true
 description = "im (global const) correctly typed inside function bodies via global_types propagation (Issue #3088)"
+
+[[tests]]
+name = "complex_zero_sqrt_pure_julia_dispatch"
+file = "zero_sqrt_pure_julia_dispatch.jl"
+expected = true
+description = "zero/sqrt route through Pure Julia method dispatch (Issue #3737)"
+
+[[tests]]
+name = "complex_binary_both_helpers_3908"
+file = "complex_binary_both_helpers_3908.jl"
+expected = true
+description = "binary_both scalar/complex/matmul fallbacks via legacy_array_ref_from_value helper (Issue #3908)"
+
+[[tests]]
+name = "complex_angle_complex_4800"
+file = "angle_complex_4800.jl"
+expected = true
+description = "angle(z::Complex{T}) where {T<:Real} accepts any real-typed Complex (extended from Complex{Float64} only); mirrors upstream Base.angle(::Complex) (Issue #4800)"
+
+[[tests]]
+name = "complex_show_dispatch_5155"
+file = "complex_show_dispatch_5155.jl"
+expected = true
+description = "string/print/repr/show dispatch to pure-Julia Base.show(io, ::Complex), incl. Complex{Bool}/im special cases, matching upstream (Issue #5155)"
+
+[[tests]]
+name = "complex_global_persistence_5163"
+file = "global_persistence_5163.jl"
+expected = true
+description = "Complex{Int64}/Complex{Float64}/Complex{Float32} globals persist with exact type and parts through the generic struct-persistence path (no Complex-specific (f64,f64) REPL slot) (Issue #5163)"
+
+[[tests]]
+name = "complex_zeros_undef_generic_dispatch_5156"
+file = "zeros_undef_generic_dispatch_5156.jl"
+expected = true
+description = "zeros(Complex{Float64}, dims...) / Array{Complex{Float64}}(undef, dims...) route through generic pure-Julia dispatch after dedicated ZerosComplexF64/AllocUndefComplexF64 builtin removal; interleaved storage + read/write/eltype preserved (Issue #5156)"
+
+[[tests]]
+name = "complex_parametric_completeness_5131"
+file = "parametric_completeness_5131.jl"
+expected = true
+description = "Complex(x, y) / Complex(x) preserve and infer arbitrary T<:Real (Int32/Int16/Rational) without the promote-recursion hang; mixed-type still promotes (Issue #5131)"
+
+[[tests]]
+name = "complex_complexf32_array_setindex_5358"
+file = "complexf32_array_setindex_5358.jl"
+expected = true
+description = "ComplexF32 array setindex! works after as_complex_parts/complex_part_value_to_f64 handle F32 fields (Issue #5358)"
+
+[[tests]]
+name = "complex_eltype_parametric_type_5365"
+file = "eltype_parametric_type_5365.jl"
+expected = true
+description = "eltype(Complex{T}) / eltype(Rational{T}) return the type itself, not the inner parameter, after struct->parent ancestry fallback stops reporting Complex{Float64} <: Tuple (concrete-bound guard + base-name lookup + Any-terminated walk) (Issue #5365)"
+
+[[tests]]
+name = "complex_complexf_alias_display_5704"
+file = "complexf_alias_display_5704.jl"
+expected = true
+description = "Complex{Float64/32/16} type values display via their ComplexF64/F32/F16 aliases in show/print/string/repr (incl. recursive Vector{ComplexF64}/Tuple and native-array prefix), applied at display sites only; Complex{Int64} unchanged (Issue #5704)"
+
+[[tests]]
+name = "complex_complexf_alias_array_literal_5775"
+file = "complexf_alias_array_literal_5775.jl"
+expected = true
+description = "ComplexF64[...] / ComplexF32[...] alias-typed array literals infer Vector{ComplexFNN} (not Vector{Any}): eltype-name alias mapping + StructRef resolution in verbatim push; indexing/sum/real/broadcast work (Issue #5775)"
+
+[[tests]]
+name = "complex_array_eq_carrier_5789"
+file = "complex_array_eq_carrier_5789.jl"
+expected = true
+description = "ComplexF64 array == between different internal carriers: a literal array (Value::Struct Complex elements) vs a broadcast/copy/zeros result (StructRef elements) of equal value must compare true. compare_boundary_values_equal now resolves both Struct and StructRef via the heap and compares fields recursively (normalized struct name), instead of the Debug-string fallback that differed across carriers. Unequal values / length mismatch stay false; Float/Int array == unregressed (Issue #5789)."
+
+[[tests]]
+name = "complex_real_equality_5966"
+file = "complex_real_equality_5966.jl"
+expected = true
+description = "Mixed Complex/Real == and != terminate and match upstream. Without the upstream ==(z::Complex, x::Real) / ==(x::Real, z::Complex) methods (isreal(z) && real(z) == x), Real == Complex matched only the promote-based ==(x::Number, y::Number) fallback; when promote(Real, Complex) failed to widen the Real operand to Complex, that fallback re-dispatched ==(::Number,::Number) on the unchanged (Real, Complex) pair forever — an unbounded VM call stack that non-deterministically OOM'd the full suite (complex/promotion chunks). Adds the four mixed ==/!= methods (Issue #5966)."
+
+[[tests]]
+name = "complex_isnan_isinf_bound_6518"
+file = "complex_isnan_isinf_bound_6518.jl"
+expected = true
+description = "isnan/isinf/transpose on Complex{T} where T<:Real keep their T<:Real bound across the prelude-program / method-table caches. TypeParam.bound (legacy mirror of upper_bound) is #[serde(skip)], so a plain derive left it None after the prelude Program was bincode-round-tripped, silently dropping the where T<:Real constraint and making the caches non-transparent (serde round-trip diverged bound: None vs Some(\"Real\")). The fix reconstructs bound from upper_bound on deserialization; behavior matches upstream for Float and Int Complex element types (Issue #6518)."
+
+[[tests]]
+name = "complex_typed_array_literal_int_convert_6771"
+file = "complex_typed_array_literal_int_convert_6771.jl"
+expected = true
+description = "Typed Complex array literal with Int (or Float) elements converts each element to the declared element type, mirroring upstream `T[a,b,...]` => convert(T,a). ComplexF64[1,2][1] === 1.0+0.0im (was raw Int). Two storage paths: bare alias ComplexF64[...] stored elements verbatim into boxed Memory (compile path now emits convert(eltype,x) per element); parametric Complex{Float64}[...] routes through the interleaved-Complex Array push which rejected raw scalars (push/set now accept a real scalar as (x,0)). === / eltype / typeof assertions detect the type tag vs value mismatch that the == promotion hid (Issue #6771)."
+
+[[tests]]
+name = "complex_imag_arith_array_literal_6851"
+file = "complex_imag_arith_array_literal_6851.jl"
+expected = true
+description = "An annotation-free array literal of imaginary-arithmetic elements (`[1.0 + 2.0im, 3.0 + 4.0im]`) now infers `Vector{ComplexF64}` (and the Float32 variant `Vector{ComplexF32}`) instead of falling back to `Vector{Any}`. The ValueType inference of `1.0 + 2.0im` (i.e. `1.0 + 2.0 * im`) dispatched the `*`/`+` Base operators whose declared return type is `Any`, dropping the Complex element type; the fix mirrors the JuliaType path's `Real op Complex{T} -> Complex{promote(...)}` promotion recovery in the ValueType path. The constructor form (`[Complex(...)]`) and the typed-literal form (`ComplexF64[...]`) already worked (Issue #6851)."
+
+[[tests]]
+name = "complex_real_mixed_array_literal_6867"
+file = "complex_real_mixed_array_literal_6867.jl"
+expected = true
+description = "An annotation-free array literal mixing `Complex` and `Real` elements (`[1.0 + 0.0im, 2.0]`) now infers the promoted `Vector{ComplexF64}` / `Vector{ComplexF32}` instead of `Vector{Any}`, filling the Complex×Real gap left by the same-kind-only fix in Issue #6851. The compile-time element-type narrowing had no Complex×Real rule, so it widened to `Any`; the fix reduces the element types with Julia's `promote_type` / Complex `promote_rule` (`promote_type(Complex{Float64}, Float64) == ComplexF64`) and widens each real element into the inline Complex storage via the `Complex{T}(x, 0)` constructor. Regression-guards the motivating case `norm([1.0+0.0im, 2.0]) == 2.23606797749979`, which previously raised a runtime type error from the generic fallback (Issue #6867)."
+
+[[tests]]
+name = "complex_ordering_error_7605"
+file = "complex_ordering_error_7605.jl"
+expected = true
+description = "Complex/Real ordering comparisons (`<`, `<=`, `>`, `>=`, either operand order) now raise a clear \"Complex numbers are not orderable\" error instead of silently comparing real parts and returning a Bool (e.g. `complex(1.0,2.0) < 3` was `true`). The generic `<(x::Real, y::Real)` in promotion.jl loosely matched a Complex operand under specialization; explicit parametric `Complex{T} where {T<:Real}` ordering methods (mirroring the `==(Complex, Real)` exclusion from Issue #5966) close the hole. Complex × Complex already raised a MethodError and is left unchanged (Issue #7605)."
+
+[[tests]]
+name = "complex_array_fallback_parity_7876"
+file = "complex_array_fallback_parity_7876.jl"
+expected = true
+description = "Guarantees the interleaved-Complex Rust array fast paths (broadcast `.+ .- .*`, scalar product, `abs.`/`conj.`/`real.`/`imag.`, `sum` reduction, matrix×vector and matrix×matrix matmul) return exactly what the pure-Julia scalar Complex multiple-dispatch path (the gold-standard fallback) returns. The interleaved `[re0, im0, ...]` representation is a no-JIT performance tradeoff (RUST_BOUNDARY_JUSTIFICATION.md condition 4, Issue #7876); this fixture is the fallback-equivalence guard that breaks if a future representation change makes the fast path diverge. Verified to pass identically under upstream julia."

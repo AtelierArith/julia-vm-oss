@@ -23,6 +23,7 @@ mod base_functions;
 mod base_merge;
 pub mod bridge;
 pub mod cache;
+pub mod cfg;
 mod collect;
 pub mod const_prop;
 mod constants;
@@ -33,13 +34,21 @@ pub mod effects;
 pub(crate) mod embedded_cache;
 mod expr;
 mod free_vars;
+pub mod infer_metrics;
 mod inference;
+pub mod inference_trace;
 pub mod ipo;
+mod ir_inline;
+mod ir_opt;
 pub mod lattice;
 mod method_table;
-mod peephole;
+mod narrowing;
+pub(crate) mod peephole;
+mod pipeline_ctx;
 pub mod precompile;
+pub(crate) mod profile;
 pub mod promotion;
+mod sorted_serde;
 mod stmt;
 pub mod tfuncs;
 mod type_helpers;
@@ -51,35 +60,47 @@ mod utils;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
+use crate::compile::abstract_interp::engine::{CachedReturn, InferenceCacheKey};
 use base_functions::{
     base_function_to_builtin_op, extract_module_path_from_expr, is_base_function,
-    is_base_submodule_function, is_random_function, is_reducible_nary_operator,
-    type_expr_to_string,
+    is_base_submodule_function, is_method_dispatch_first_base_function, is_random_function,
+    is_reducible_nary_operator,
 };
 use base_merge::merge_with_precompiled_base;
 pub use cache::{compile_with_cache, compile_with_cache_with_globals};
+pub(crate) use constants::float_special_constant_value;
+// Issue #8192: the runtime arg-type specializer (`vm::specialize`) resolves its
+// typed binary-op instructions through the same shared table as the main
+// compiler, so the two codegen paths can no longer drift apart.
 pub use constants::needs_specialization;
 use constants::{
     get_base_exported_constant_value, get_math_constant_value, is_euler_name, is_math_constant,
-    is_pi_name, is_stdlib_module,
+    is_pi_name, is_stdlib_module, needs_reflection_registration,
 };
 use context::SharedCompileContext;
-pub use context::StructInfo;
+pub use context::{infer_parametric_type_args, EnumInfo, StructInfo};
 use core_compiler::{
-    is_float_type, is_numeric_type, is_singleton_type, CoreCompiler, FinallyContext, LoopContext,
+    is_float_type, is_integer_type, is_numeric_type, is_singleton_type,
+    static_assignment_types_compatible, CoreCompiler, FinallyContext, LoopContext,
+    ResolvedUsingImport,
 };
-pub(crate) use free_vars::analyze_free_variables;
+pub(crate) use expr::binary::typed_scalar_binary_instr;
+pub(crate) use free_vars::{
+    analyze_free_variables, collect_block_local_bindings, collect_referenced_names,
+};
+pub(crate) use inference::{build_shared_inference_engine, build_shared_inference_engine_owned};
 use inference::{
-    build_shared_inference_engine, collect_global_types_for_inference,
-    collect_local_types_with_mixed_tracking,
+    collect_global_types_for_inference, collect_local_binding_names_for_capture,
+    collect_local_types_with_mixed_tracking, widen_non_const_globals_for_binding_inference,
 };
-use method_table::{MethodSig, MethodTable};
+pub(crate) use method_table::{MethodSig, MethodTable};
+pub(crate) use pipeline_ctx::compile_core_program_internal;
 use type_helpers::{
     check_type_satisfies_bound, is_builtin_type_name, julia_type_to_value_type,
-    julia_type_to_value_type_with_table, widen_numeric_types,
+    julia_type_to_value_type_with_table,
 };
-use types::parse_parametric_call;
 pub use types::{err, CResult, CompileError, InstantiationKey, ParametricStructDef};
+use types::{parse_parametric_call, parse_type_args_recursive};
 
 use collect::{
     collect_block_functions, collect_from_module, collect_module_functions, collect_module_info,
@@ -90,18 +111,1158 @@ use collect::{
 pub(super) use utils::{binary_op_to_function_name, function_name_to_binary_op};
 use utils::{eval_literal_default, infer_default_type, is_required_kwarg, relocate_jumps};
 
-use crate::ir::core::{Function, Program, Stmt, UsingImport};
-use crate::types::{JuliaType, TypeExpr, TypeParam};
+use crate::ir::core::{
+    Block, BuiltinOp, Expr, Function, KwParam, Program, Stmt, UsingImport,
+    BASE_USER_MAIN_BOUNDARY_META,
+};
+use crate::types::{JuliaType, StructHierarchy, TypeExpr, TypeParam};
 use crate::vm::slot::{build_slot_info, slotize_code};
-use crate::vm::value::ArrayElementType;
+use crate::vm::value::{ArrayElementType, Value};
 use crate::vm::{
-    AbstractTypeDefInfo, CompiledProgram, FunctionInfo, Instr, KwParamInfo, RuntimeCompileContext,
-    ShowMethodEntry, SpecializableFunction, StructDefInfo, ValueType,
+    AbstractTypeDefInfo, CompiledProgram, FunctionInfo, Instr, KwParamInfo, PrimitiveTypeDefInfo,
+    RuntimeCompileContext, ShowMethodEntry, SpecializableFunction, StructDefInfo, ValueType,
 };
 use std::collections::{HashMap, HashSet};
 
 // MergedProgram and merge_with_precompiled_base are now in base_merge.rs module
 // Helper functions are now in base_functions.rs module
+
+/// Representative reflection metadata derived from the leading `Stmt::Meta`
+/// markers retained at the top of a function body. Mirrors the public
+/// `Method` / `Core.CodeInfo` fields that user code inspects via `methods`,
+/// `code_lowered`, and `code_typed`.
+#[derive(Debug, Default, Clone, Copy)]
+struct FunctionReflectionMeta {
+    /// 0 = default, 1 = `@inline` / `@propagate_inbounds`, 2 = `@noinline`
+    /// (mirrors `CodeInfo.inlining`, Issues #4977/#4980).
+    inlining: u8,
+    /// 0 = default, 1 = `Base.@constprop :aggressive`, 2 = `Base.@constprop
+    /// :none` (mirrors `Method.constprop` / `CodeInfo.constprop`,
+    /// Issues #4978/#4981).
+    constprop: u8,
+    /// `@nospecialize` bitmask over explicit positional parameters
+    /// (mirrors `Method.nospecialize`, Issue #4984).
+    nospecialize: i32,
+    /// `Base.@propagate_inbounds` (mirrors `CodeInfo.propagate_inbounds`,
+    /// Issue #4979).
+    propagate_inbounds: bool,
+    /// `Base.@nospecializeinfer` (mirrors `CodeInfo.nospecializeinfer`,
+    /// Issue #4979).
+    nospecializeinfer: bool,
+    /// `Base.@assume_effects` purity bitmask (mirrors `CodeInfo.purity`,
+    /// Issue #4983).
+    purity: u16,
+    /// Internal marker retained for `@generated` compatibility fallback bodies
+    /// so VM dispatch can apply the staged Expr tuple cache (Issue #5936).
+    is_generated: bool,
+}
+
+/// Map a single `Base.@assume_effects` setting name (with or without a leading
+/// `:`) to its `encode_effects_override` bitmask, matching upstream Julia 1.12.
+///
+/// Composite settings expand to the OR of their constituent bits exactly as the
+/// upstream macro does (`:foldable == 1163`, `:removable == 14`,
+/// `:total == 1263`).
+fn assume_effects_purity_bits(setting: &str) -> u16 {
+    match setting.trim_start_matches(':') {
+        "consistent" => 1,
+        "effect_free" => 2,
+        "nothrow" => 4,
+        "terminates_globally" => 8,
+        "terminates_locally" => 16,
+        "notaskstate" => 32,
+        "inaccessiblememonly" => 64,
+        "noub" => 128,
+        // consistent | effect_free | terminates_globally | noub | nortcall
+        "foldable" => 1163,
+        // effect_free | nothrow | terminates_globally
+        "removable" => 14,
+        // foldable | nothrow | notaskstate | inaccessiblememonly
+        "total" => 1263,
+        _ => 0,
+    }
+}
+
+/// Recursively collect the length value parameters of an `NTuple{LEN, ELEM}`
+/// type name, descending into nested `NTuple` element types so that patterns
+/// like `NTuple{N, NTuple{M, T}}` mark both `N` and `M` as value parameters
+/// (Issue #4842). A length argument is recorded only when it is a where-clause
+/// type parameter of the enclosing function.
+fn collect_ntuple_value_params(
+    type_name: &str,
+    func_type_param_names: &HashSet<&str>,
+    val_type_params: &mut HashSet<String>,
+) {
+    if !(type_name.starts_with("NTuple{") && type_name.ends_with("}")) {
+        return;
+    }
+    let inner = &type_name[7..type_name.len() - 1];
+    // Split on the first top-level comma so a nested `NTuple{M,T}` stays intact.
+    let mut depth = 0usize;
+    let mut split_at = None;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                split_at = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(split_at) = split_at else {
+        return;
+    };
+    let len_arg = inner[..split_at].trim();
+    let elem_arg = inner[split_at + 1..].trim();
+    if func_type_param_names.contains(len_arg) {
+        val_type_params.insert(len_arg.to_string());
+    }
+    collect_ntuple_value_params(elem_arg, func_type_param_names, val_type_params);
+}
+
+/// Collect rank value parameters from `Array{T,N}`-style signatures. The second
+/// array type argument is a value parameter, so function bodies must read it
+/// like `Val{N}`/`NTuple{N,T}` rather than as a DataType (Issue #6210).
+fn collect_array_rank_value_params(
+    type_name: &str,
+    func_type_param_names: &HashSet<&str>,
+    val_type_params: &mut HashSet<String>,
+) {
+    let base = type_name
+        .find('{')
+        .map_or(type_name, |brace_idx| &type_name[..brace_idx]);
+    let base = base.rsplit('.').next().unwrap_or(base);
+    if !matches!(base, "Array" | "AbstractArray") {
+        return;
+    }
+
+    let params = crate::vm::util::parse_parametric_params(type_name);
+    let Some(rank_arg) = params.get(1).map(|arg| arg.trim()) else {
+        return;
+    };
+    if func_type_param_names.contains(rank_arg) {
+        val_type_params.insert(rank_arg.to_string());
+    }
+}
+
+/// Scan the leading `Stmt::Meta` markers retained at the top of a function
+/// body and derive upstream-compatible representative reflection metadata.
+fn function_reflection_meta(func: &Function) -> FunctionReflectionMeta {
+    let mut meta = FunctionReflectionMeta::default();
+    for stmt in &func.body.stmts {
+        let Stmt::Meta { annotation, .. } = stmt else {
+            // Meta markers are inserted at the very top of the body; stop at
+            // the first non-meta statement to avoid scanning the whole body.
+            break;
+        };
+        match annotation.name.as_str() {
+            "generated" => meta.is_generated = true,
+            "inline" => meta.inlining = 1,
+            "propagate_inbounds" => {
+                meta.inlining = 1;
+                meta.propagate_inbounds = true;
+            }
+            "noinline" => meta.inlining = 2,
+            "nospecializeinfer" => meta.nospecializeinfer = true,
+            "constprop" => {
+                let setting = annotation.args.first().map(String::as_str);
+                match setting {
+                    Some(s) if s.contains("aggressive") => meta.constprop = 1,
+                    Some(s) if s.contains("none") => meta.constprop = 2,
+                    _ => {}
+                }
+            }
+            "assume_effects" => {
+                for arg in &annotation.args {
+                    meta.purity |= assume_effects_purity_bits(arg);
+                }
+            }
+            // Statement-position `@nospecialize a b` sets the bit for each named
+            // explicit positional parameter; `@specialize` (no args) clears the
+            // accumulated mask (Issue #4984).
+            "nospecialize" => {
+                for name in &annotation.args {
+                    if let Some(pos) = func.params.iter().position(|p| p.name == *name) {
+                        if pos < i32::BITS as usize {
+                            meta.nospecialize |= 1i32 << pos;
+                        }
+                    }
+                }
+            }
+            "specialize" => {
+                if annotation.args.is_empty() {
+                    meta.nospecialize = 0;
+                } else {
+                    for name in &annotation.args {
+                        if let Some(pos) = func.params.iter().position(|p| p.name == *name) {
+                            if pos < i32::BITS as usize {
+                                meta.nospecialize &= !(1i32 << pos);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    meta
+}
+
+fn is_base_user_main_boundary(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Meta { annotation, .. } if annotation.name == BASE_USER_MAIN_BOUNDARY_META
+    )
+}
+
+fn build_struct_hierarchy_from_context(shared_ctx: &SharedCompileContext) -> StructHierarchy {
+    let mut hierarchy = StructHierarchy::new();
+
+    for def in &shared_ctx.struct_defs {
+        hierarchy.insert(&def.name, def.parent_type.clone(), Vec::new());
+    }
+
+    for (name, ps) in &shared_ctx.parametric_structs {
+        let type_params = ps
+            .def
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        hierarchy.insert_if_absent(name, ps.def.parent_type.clone(), type_params);
+    }
+
+    for at in &shared_ctx.abstract_types {
+        hierarchy.insert_if_absent(&at.name, at.parent.clone(), at.type_params.clone());
+    }
+
+    hierarchy
+}
+
+fn collect_assigned_binding_names(stmts: &[Stmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Assign { var, .. } | Stmt::AddAssign { var, .. } => {
+                out.insert(var.clone());
+            }
+            Stmt::DestructuringAssign { targets, .. } => {
+                out.extend(targets.iter().cloned());
+            }
+            Stmt::Block(block)
+            | Stmt::Timed { body: block, .. }
+            | Stmt::TestSet { body: block, .. } => {
+                collect_assigned_binding_names(&block.stmts, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_testset_local_binding_names_for_capture(stmts: &[Stmt], names: &mut HashSet<String>) {
+    collect_testset_local_binding_names_from_stmts(stmts, names);
+}
+
+fn collect_testset_local_binding_names_from_stmts(stmts: &[Stmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr { expr, .. } => collect_testset_local_binding_names_from_expr(expr, out),
+            Stmt::TestSet { body, .. } => {
+                collect_testset_scope_assigned_binding_names(&body.stmts, out);
+            }
+            // A variable bound to an empty-binding `let` block — e.g.
+            // `#result# = let … end`, how `@time` / `@elapsed` capture their
+            // body's value — is a transparent capture scope (the `let` introduces
+            // no bindings of its own). Collect the body's binding names so a
+            // closure defined inside it is recognized as capturing them; without
+            // this a `@time`-block-local capture fails to compile with "Undefined
+            // variable" (Issue #6288).
+            Stmt::Assign {
+                value: Expr::LetBlock { bindings, body, .. },
+                ..
+            } if bindings.is_empty() => {
+                collect_testset_scope_assigned_binding_names(&body.stmts, out);
+            }
+            Stmt::Block(block) | Stmt::Timed { body: block, .. } => {
+                collect_testset_local_binding_names_from_stmts(&block.stmts, out);
+            }
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                collect_testset_local_binding_names_from_stmts(&then_branch.stmts, out);
+                if let Some(block) = else_branch {
+                    collect_testset_local_binding_names_from_stmts(&block.stmts, out);
+                }
+            }
+            Stmt::Try {
+                try_block,
+                catch_block,
+                else_block,
+                finally_block,
+                ..
+            } => {
+                collect_testset_local_binding_names_from_stmts(&try_block.stmts, out);
+                for block in [catch_block, else_block, finally_block]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_testset_local_binding_names_from_stmts(&block.stmts, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_testset_local_binding_names_from_expr(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::LetBlock { body, .. } => {
+            if block_opens_testset_scope(body) {
+                // Issue #6261: lambda capture pre-analysis needs the names
+                // available inside a macro-expanded @testset, but #6256 must
+                // not leak their concrete types into the outer pre-scan map.
+                collect_testset_scope_assigned_binding_names(&body.stmts, out);
+            } else {
+                collect_testset_local_binding_names_from_stmts(&body.stmts, out);
+            }
+        }
+        Expr::Call { args, kwargs, .. } | Expr::ModuleCall { args, kwargs, .. } => {
+            for arg in args {
+                collect_testset_local_binding_names_from_expr(arg, out);
+            }
+            for (_, value) in kwargs {
+                collect_testset_local_binding_names_from_expr(value, out);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            collect_testset_local_binding_names_from_expr(left, out);
+            collect_testset_local_binding_names_from_expr(right, out);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            collect_testset_local_binding_names_from_expr(operand, out);
+        }
+        Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_testset_local_binding_names_from_expr(condition, out);
+            collect_testset_local_binding_names_from_expr(then_expr, out);
+            collect_testset_local_binding_names_from_expr(else_expr, out);
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                collect_testset_local_binding_names_from_expr(elem, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_testset_scope_assigned_binding_names(stmts: &[Stmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Assign { var, value, .. } | Stmt::AddAssign { var, value, .. } => {
+                out.insert(var.clone());
+                // Descend into the value too: `@time` / `@elapsed` bury their
+                // body's bindings inside `#result# = let … end` (an empty-binding
+                // `let` block as an assignment value), so a closure inside that
+                // body is only recognized as capturing them if we look there as
+                // well (Issue #6288).
+                collect_testset_scope_assigned_binding_names_from_expr(value, out);
+            }
+            Stmt::DestructuringAssign { targets, .. } => {
+                out.extend(targets.iter().cloned());
+            }
+            Stmt::Expr { expr, .. } => {
+                collect_testset_scope_assigned_binding_names_from_expr(expr, out);
+            }
+            Stmt::Block(block)
+            | Stmt::Timed { body: block, .. }
+            | Stmt::TestSet { body: block, .. }
+            | Stmt::For { body: block, .. }
+            | Stmt::ForEach { body: block, .. }
+            | Stmt::ForEachTuple { body: block, .. }
+            | Stmt::While { body: block, .. } => {
+                collect_testset_scope_assigned_binding_names(&block.stmts, out);
+            }
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                collect_testset_scope_assigned_binding_names(&then_branch.stmts, out);
+                if let Some(block) = else_branch {
+                    collect_testset_scope_assigned_binding_names(&block.stmts, out);
+                }
+            }
+            Stmt::Try {
+                try_block,
+                catch_block,
+                else_block,
+                finally_block,
+                ..
+            } => {
+                collect_testset_scope_assigned_binding_names(&try_block.stmts, out);
+                for block in [catch_block, else_block, finally_block]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_testset_scope_assigned_binding_names(&block.stmts, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_testset_scope_assigned_binding_names_from_expr(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::LetBlock { body, .. } => {
+            collect_testset_scope_assigned_binding_names(&body.stmts, out);
+        }
+        Expr::Call { args, kwargs, .. } | Expr::ModuleCall { args, kwargs, .. } => {
+            for arg in args {
+                collect_testset_scope_assigned_binding_names_from_expr(arg, out);
+            }
+            for (_, value) in kwargs {
+                collect_testset_scope_assigned_binding_names_from_expr(value, out);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            collect_testset_scope_assigned_binding_names_from_expr(left, out);
+            collect_testset_scope_assigned_binding_names_from_expr(right, out);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            collect_testset_scope_assigned_binding_names_from_expr(operand, out);
+        }
+        Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_testset_scope_assigned_binding_names_from_expr(condition, out);
+            collect_testset_scope_assigned_binding_names_from_expr(then_expr, out);
+            collect_testset_scope_assigned_binding_names_from_expr(else_expr, out);
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                collect_testset_scope_assigned_binding_names_from_expr(elem, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn block_opens_testset_scope(block: &Block) -> bool {
+    block.stmts.iter().any(|stmt| match stmt {
+        Stmt::Expr { expr, .. } => expr_opens_testset_scope(expr),
+        _ => false,
+    })
+}
+
+fn expr_opens_testset_scope(expr: &Expr) -> bool {
+    match expr {
+        Expr::Builtin {
+            name: BuiltinOp::TestSetBegin,
+            ..
+        } => true,
+        Expr::Call { function, .. } => function == "_testset_begin!",
+        Expr::LetBlock { body, .. } => block_opens_testset_scope(body),
+        _ => false,
+    }
+}
+
+fn type_parameter_return_snapshot(func: &Function) -> Option<JuliaType> {
+    let returned_name = directly_returned_var(func)?;
+
+    if !func
+        .type_params
+        .iter()
+        .any(|type_param| type_param.name == *returned_name)
+    {
+        return None;
+    }
+
+    let appears_as_type_param = func.params.iter().any(|param| {
+        param
+            .type_annotation
+            .as_ref()
+            .is_some_and(|ty| julia_type_contains_direct_typevar(ty, returned_name))
+    });
+
+    appears_as_type_param
+        .then(|| JuliaType::TypeOf(Box::new(JuliaType::TypeVar(returned_name.clone(), None))))
+}
+
+fn collect_callable_typeof_aliases(
+    stmts: &[Stmt],
+    all_functions: &[(&Function, Option<String>)],
+) -> HashMap<String, String> {
+    let callable_names: HashSet<String> = all_functions
+        .iter()
+        .map(|(func, _)| func.name.clone())
+        .collect();
+    let mut callable_bindings: HashMap<String, String> = callable_names
+        .iter()
+        .map(|name| (name.clone(), name.clone()))
+        .collect();
+    let mut typeof_aliases = HashMap::new();
+
+    for stmt in stmts {
+        let Stmt::Assign { var, value, .. } = stmt else {
+            continue;
+        };
+
+        if let Some(callable_name) = typeof_callable_target(value, &callable_bindings) {
+            typeof_aliases.insert(var.clone(), callable_name);
+            continue;
+        }
+
+        if let Some(callable_name) = callable_binding_target(value, &callable_bindings) {
+            callable_bindings.insert(var.clone(), callable_name);
+        }
+    }
+
+    typeof_aliases
+}
+
+fn callable_binding_target(
+    expr: &Expr,
+    callable_bindings: &HashMap<String, String>,
+) -> Option<String> {
+    match expr {
+        Expr::FunctionRef { name, .. } => callable_bindings.get(name).cloned(),
+        Expr::Var(name, _) => callable_bindings.get(name).cloned(),
+        _ => None,
+    }
+}
+
+fn typeof_callable_target(
+    expr: &Expr,
+    callable_bindings: &HashMap<String, String>,
+) -> Option<String> {
+    match expr {
+        Expr::Builtin {
+            name: BuiltinOp::TypeOf,
+            args,
+            ..
+        } => args
+            .first()
+            .and_then(|arg| callable_binding_target(arg, callable_bindings)),
+        Expr::Call { function, args, .. } if function == "typeof" => args
+            .first()
+            .and_then(|arg| callable_binding_target(arg, callable_bindings)),
+        _ => None,
+    }
+}
+
+fn add_callable_typeof_method_table_aliases(
+    func_name: &str,
+    callable_typeof_aliases: &HashMap<String, String>,
+    table_names: &mut Vec<String>,
+) {
+    let Some(type_alias) = func_name.strip_prefix("__callable_") else {
+        return;
+    };
+    let Some(callable_name) = callable_typeof_aliases.get(type_alias) else {
+        return;
+    };
+
+    // Issue #4309: Julia lets methods added to `typeof(f)` participate in calls
+    // to the function object `f`. sjulia lowers `(::Alias)(...)` as
+    // `__callable_Alias`, so static `Alias = typeof(f)` bindings need an iOS-safe
+    // compile-time bridge into `f`'s method table.
+    if !table_names.contains(callable_name) {
+        table_names.push(callable_name.clone());
+    }
+
+    let typeof_table_name = format!("__callable_typeof({})", callable_name);
+    if !table_names.contains(&typeof_table_name) {
+        table_names.push(typeof_table_name);
+    }
+}
+
+fn has_abstract_numeric_param(params: &[(String, JuliaType)]) -> bool {
+    params.iter().any(|(_, ty)| ty.is_abstract_numeric())
+}
+
+fn is_concrete_numeric_return_type(ty: &ValueType) -> bool {
+    is_numeric_type(ty) || matches!(ty, ValueType::BigInt | ValueType::BigFloat)
+}
+
+fn direct_parameter_return_snapshot(func: &Function) -> Option<JuliaType> {
+    let returned_name = directly_returned_var(func)?;
+    let returned_param_type = func
+        .params
+        .iter()
+        .find(|param| param.name == *returned_name)?
+        .type_annotation
+        .clone()?;
+
+    julia_type_needs_return_snapshot(&returned_param_type).then_some(returned_param_type)
+}
+
+/// An optional keyword argument with no type annotation, e.g. `f(; n = 0)`.
+///
+/// Such a kwarg accepts *any* value at runtime regardless of its default's type,
+/// so the no-JIT VM's single compiled body must type it as `Any` — using the
+/// default literal's type would reject a differently-typed caller value
+/// (`g(; n = 0); g(n = 1.5)` → `ReturnI64: expected integer`, Issue #5425). This
+/// generalizes the `nothing`-default case (Issue #5416), which was the original
+/// motivating bug, to ANY typed default.
+fn is_unannotated_optional_kwparam(kw: &KwParam) -> bool {
+    !kw.is_varargs && kw.type_annotation.is_none() && !is_required_kwarg(&kw.default)
+}
+
+/// True when the method body is exactly `return kw` / `kw` for an unannotated
+/// optional keyword argument `kw` (`g(; n = 0) = n`).
+///
+/// The returned value can be any runtime type, so the *compiled body* must emit
+/// `ReturnAny` (not a typed return) and *callers passing that kwarg* must keep
+/// the result `Any` (Issue #5425; generalizes the `nothing`-default case of
+/// Issue #5416). This deliberately does NOT widen `FunctionInfo.return_type`
+/// itself: reflection (`Base.infer_return_type`) uses that field as a precise
+/// snapshot for the omitted-kwarg signature (e.g. `Int64` for `g`), and the
+/// `kwargs::default_expression_order_4297` fixture depends on it.
+pub(in crate::compile) fn directly_returns_unannotated_optional_kwparam(func: &Function) -> bool {
+    let Some(returned_name) = directly_returned_var(func) else {
+        return false;
+    };
+
+    func.kwparams
+        .iter()
+        .any(|kw| kw.name == *returned_name && is_unannotated_optional_kwparam(kw))
+}
+
+/// True when the method's return value is *derived from* an unannotated optional
+/// keyword argument through a computation rather than returned directly
+/// (`g2(; n = 0) = n + 1`, `g2(; n = 0); m = n + 1; return m; end`).
+///
+/// This generalizes `directly_returns_unannotated_optional_kwparam` (Issue #5425,
+/// which only covered `return kw`) to the follow-up case where the kwarg flows
+/// into a binary op / call / local binding before being returned (Issue #5466).
+/// The kwarg slot is already widened to `Any` (`is_unannotated_optional_kwparam`),
+/// so the kwarg value loads dynamically; the remaining hazard is that the
+/// function's *inferred* return type stays concrete (e.g. `n + 1` -> `Int64`
+/// because the inference engine binds `n` to its default's type), so the compiled
+/// body emits a typed `ReturnI64` that rejects a differently-typed result. As with
+/// #5425 this widens the *body* / *dispatch* (`MethodSig.return_type`) /
+/// *call-site* (v2) return-type channels to `Any` but deliberately leaves
+/// `FunctionInfo.return_type` precise so reflection stays accurate.
+///
+/// Detection is conservative: it tracks data flow from the kwparam(s) through
+/// local assignments (a one-or-more-step taint) and only fires when an actual
+/// return-value expression references a tainted name. A function that merely
+/// *mentions* a kwarg without returning a value derived from it
+/// (`function f(; n = 0); println(n); return 5; end`) is NOT widened.
+pub(in crate::compile) fn returns_value_derived_from_unannotated_optional_kwparam(
+    func: &Function,
+) -> bool {
+    // The directly-returned case is handled by its own predicate (it also feeds
+    // the `Nothing`-default snapshot widening); skip it here to keep the two
+    // detection paths disjoint and their call sites independently auditable.
+    if directly_returns_unannotated_optional_kwparam(func) {
+        return false;
+    }
+
+    let mut tainted: HashSet<String> = func
+        .kwparams
+        .iter()
+        .filter(|kw| is_unannotated_optional_kwparam(kw))
+        .map(|kw| kw.name.clone())
+        .collect();
+    if tainted.is_empty() {
+        return false;
+    }
+
+    // Propagate taint through local assignments to a fixpoint: a local bound to
+    // an expression that references a tainted name becomes tainted itself, so
+    // `m = n + 1; return m` is recognized.
+    loop {
+        let mut changed = false;
+        propagate_taint_in_block(&func.body, &mut tainted, &mut changed);
+        if !changed {
+            break;
+        }
+    }
+
+    let mut derived = false;
+    collect_return_value_derivation(&func.body, &tainted, &mut derived);
+    derived
+}
+
+/// True when the method's return value is an unannotated optional kwarg — either
+/// returned directly (`g(; n = 0) = n`, Issue #5425) or derived from it through a
+/// computation (`g2(; n = 0) = n + 1`, Issue #5466). The compiled body, dispatch
+/// (`MethodSig.return_type`) and call-site (v2) return-type channels must all be
+/// `Any` in either case; `FunctionInfo.return_type` stays precise for reflection.
+pub(in crate::compile) fn returns_unannotated_optional_kwparam_value(func: &Function) -> bool {
+    directly_returns_unannotated_optional_kwparam(func)
+        || returns_value_derived_from_unannotated_optional_kwparam(func)
+}
+
+fn returns_untyped_param_power_value(func: &Function) -> bool {
+    let untyped_params: HashSet<String> = func
+        .params
+        .iter()
+        .filter(|param| param.type_annotation.is_none() && !param.is_varargs)
+        .map(|param| param.name.clone())
+        .collect();
+    if untyped_params.is_empty() {
+        return false;
+    }
+
+    let mut found = false;
+    collect_return_value_power_from_names(&func.body, &untyped_params, &mut found);
+    found
+}
+
+fn collect_return_value_power_from_names(block: &Block, names: &HashSet<String>, found: &mut bool) {
+    let len = block.stmts.len();
+    for (idx, stmt) in block.stmts.iter().enumerate() {
+        match stmt {
+            Stmt::Return {
+                value: Some(expr), ..
+            } => {
+                *found = *found || expr_has_power_operand_referencing_any(expr, names);
+            }
+            Stmt::Expr { expr, .. } if idx + 1 == len => {
+                *found = *found || expr_has_power_operand_referencing_any(expr, names);
+            }
+            Stmt::Block(inner) => collect_return_value_power_from_names(inner, names, found),
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                collect_return_value_power_from_names(then_branch, names, found);
+                if let Some(else_branch) = else_branch {
+                    collect_return_value_power_from_names(else_branch, names, found);
+                }
+            }
+            Stmt::For { body, .. }
+            | Stmt::ForEach { body, .. }
+            | Stmt::ForEachTuple { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::Timed { body, .. }
+            | Stmt::TestSet { body, .. } => {
+                collect_return_value_power_from_names(body, names, found)
+            }
+            Stmt::Try {
+                try_block,
+                catch_block,
+                else_block,
+                finally_block,
+                ..
+            } => {
+                collect_return_value_power_from_names(try_block, names, found);
+                for block in [catch_block, else_block, finally_block]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_return_value_power_from_names(block, names, found);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn expr_has_power_operand_referencing_any(expr: &Expr, names: &HashSet<String>) -> bool {
+    match expr {
+        Expr::BinaryOp {
+            op, left, right, ..
+        } => {
+            (*op == crate::ir::core::BinaryOp::Pow)
+                && (expr_references_any(left, names) || expr_references_any(right, names))
+                || expr_has_power_operand_referencing_any(left, names)
+                || expr_has_power_operand_referencing_any(right, names)
+        }
+        Expr::UnaryOp { operand, .. } => expr_has_power_operand_referencing_any(operand, names),
+        Expr::Call {
+            function,
+            args,
+            kwargs,
+            ..
+        } => {
+            (function == "^" && args.iter().any(|arg| expr_references_any(arg, names)))
+                || args
+                    .iter()
+                    .any(|arg| expr_has_power_operand_referencing_any(arg, names))
+                || kwargs
+                    .iter()
+                    .any(|(_, value)| expr_has_power_operand_referencing_any(value, names))
+        }
+        Expr::ModuleCall {
+            function,
+            args,
+            kwargs,
+            ..
+        } => {
+            (function == "^" && args.iter().any(|arg| expr_references_any(arg, names)))
+                || args
+                    .iter()
+                    .any(|arg| expr_has_power_operand_referencing_any(arg, names))
+                || kwargs
+                    .iter()
+                    .any(|(_, value)| expr_has_power_operand_referencing_any(value, names))
+        }
+        Expr::Builtin { args, .. } => args
+            .iter()
+            .any(|arg| expr_has_power_operand_referencing_any(arg, names)),
+        Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => elements
+            .iter()
+            .any(|expr| expr_has_power_operand_referencing_any(expr, names)),
+        Expr::Index { array, indices, .. } => {
+            expr_has_power_operand_referencing_any(array, names)
+                || indices
+                    .iter()
+                    .any(|idx| expr_has_power_operand_referencing_any(idx, names))
+        }
+        Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_has_power_operand_referencing_any(condition, names)
+                || expr_has_power_operand_referencing_any(then_expr, names)
+                || expr_has_power_operand_referencing_any(else_expr, names)
+        }
+        Expr::LetBlock { bindings, body, .. } => {
+            bindings
+                .iter()
+                .any(|(_, value)| expr_has_power_operand_referencing_any(value, names))
+                || block_has_power_operand_referencing_any(body, names)
+        }
+        _ => false,
+    }
+}
+
+fn block_has_power_operand_referencing_any(block: &Block, names: &HashSet<String>) -> bool {
+    block.stmts.iter().any(|stmt| match stmt {
+        Stmt::Assign { value, .. } | Stmt::AddAssign { value, .. } => {
+            expr_has_power_operand_referencing_any(value, names)
+        }
+        Stmt::Return {
+            value: Some(expr), ..
+        }
+        | Stmt::Expr { expr, .. } => expr_has_power_operand_referencing_any(expr, names),
+        _ => false,
+    })
+}
+
+/// One pass of taint propagation over a block's assignment statements.
+fn propagate_taint_in_block(block: &Block, tainted: &mut HashSet<String>, changed: &mut bool) {
+    for stmt in &block.stmts {
+        propagate_taint_in_stmt(stmt, tainted, changed);
+    }
+}
+
+fn propagate_taint_in_stmt(stmt: &Stmt, tainted: &mut HashSet<String>, changed: &mut bool) {
+    match stmt {
+        Stmt::Assign { var, value, .. } | Stmt::AddAssign { var, value, .. } => {
+            let derives = !tainted.contains(var) && expr_references_any(value, tainted);
+            *changed = (derives && tainted.insert(var.clone())) || *changed;
+        }
+        Stmt::Block(block) => propagate_taint_in_block(block, tainted, changed),
+        Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            propagate_taint_in_block(then_branch, tainted, changed);
+            if let Some(else_branch) = else_branch {
+                propagate_taint_in_block(else_branch, tainted, changed);
+            }
+        }
+        Stmt::For { body, .. }
+        | Stmt::ForEach { body, .. }
+        | Stmt::ForEachTuple { body, .. }
+        | Stmt::While { body, .. }
+        | Stmt::Timed { body, .. }
+        | Stmt::TestSet { body, .. } => propagate_taint_in_block(body, tainted, changed),
+        Stmt::Try {
+            try_block,
+            catch_block,
+            else_block,
+            finally_block,
+            ..
+        } => {
+            propagate_taint_in_block(try_block, tainted, changed);
+            for block in [catch_block, else_block, finally_block]
+                .into_iter()
+                .flatten()
+            {
+                propagate_taint_in_block(block, tainted, changed);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Walk a block looking for return-value expressions (explicit `return e` and the
+/// block's trailing implicit-return expression) that reference a tainted name.
+fn collect_return_value_derivation(block: &Block, tainted: &HashSet<String>, derived: &mut bool) {
+    let len = block.stmts.len();
+    for (idx, stmt) in block.stmts.iter().enumerate() {
+        match stmt {
+            Stmt::Return {
+                value: Some(expr), ..
+            } => {
+                *derived = *derived || expr_references_any(expr, tainted);
+            }
+            // The last statement of a block is its implicit return value in Julia.
+            Stmt::Expr { expr, .. } if idx + 1 == len => {
+                *derived = *derived || expr_references_any(expr, tainted);
+            }
+            Stmt::Block(inner) => collect_return_value_derivation(inner, tainted, derived),
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                collect_return_value_derivation(then_branch, tainted, derived);
+                if let Some(else_branch) = else_branch {
+                    collect_return_value_derivation(else_branch, tainted, derived);
+                }
+            }
+            Stmt::For { body, .. }
+            | Stmt::ForEach { body, .. }
+            | Stmt::ForEachTuple { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::Timed { body, .. }
+            | Stmt::TestSet { body, .. } => collect_return_value_derivation(body, tainted, derived),
+            Stmt::Try {
+                try_block,
+                catch_block,
+                else_block,
+                finally_block,
+                ..
+            } => {
+                collect_return_value_derivation(try_block, tainted, derived);
+                for block in [catch_block, else_block, finally_block]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_return_value_derivation(block, tainted, derived);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// True when `expr` references any variable name in `names`. Walks the full Core
+/// IR `Expr` tree (so binary ops, calls, indexing, comprehensions, ternaries,
+/// field access, etc. are all covered). Nested function literals are not
+/// descended into — their bodies have their own scope.
+fn expr_references_any(expr: &Expr, names: &HashSet<String>) -> bool {
+    match expr {
+        Expr::Var(name, _) => names.contains(name),
+        Expr::Literal(_, _)
+        | Expr::TypedEmptyArray { .. }
+        | Expr::SliceAll { .. }
+        | Expr::FunctionRef { .. } => false,
+        Expr::BinaryOp { left, right, .. } => {
+            expr_references_any(left, names) || expr_references_any(right, names)
+        }
+        Expr::UnaryOp { operand, .. } => expr_references_any(operand, names),
+        Expr::Call { args, kwargs, .. } | Expr::ModuleCall { args, kwargs, .. } => {
+            args.iter().any(|a| expr_references_any(a, names))
+                || kwargs.iter().any(|(_, v)| expr_references_any(v, names))
+        }
+        Expr::Builtin { args, .. } => args.iter().any(|a| expr_references_any(a, names)),
+        Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => {
+            elements.iter().any(|e| expr_references_any(e, names))
+        }
+        Expr::Index { array, indices, .. } => {
+            expr_references_any(array, names)
+                || indices.iter().any(|i| expr_references_any(i, names))
+        }
+        Expr::Range {
+            start, step, stop, ..
+        } => {
+            expr_references_any(start, names)
+                || expr_references_any(stop, names)
+                || step.as_ref().is_some_and(|s| expr_references_any(s, names))
+        }
+        Expr::Comprehension {
+            body, iter, filter, ..
+        }
+        | Expr::Generator {
+            body, iter, filter, ..
+        } => {
+            expr_references_any(body, names)
+                || expr_references_any(iter, names)
+                || filter
+                    .as_ref()
+                    .is_some_and(|f| expr_references_any(f, names))
+        }
+        Expr::MultiComprehension {
+            body,
+            iterations,
+            filter,
+            ..
+        } => {
+            expr_references_any(body, names)
+                || iterations
+                    .iter()
+                    .any(|(_, it)| expr_references_any(it, names))
+                || filter
+                    .as_ref()
+                    .is_some_and(|f| expr_references_any(f, names))
+        }
+        Expr::FieldAccess { object, .. } => expr_references_any(object, names),
+        Expr::NamedTupleLiteral { fields, .. } => {
+            fields.iter().any(|(_, v)| expr_references_any(v, names))
+        }
+        Expr::Pair { key, value, .. } => {
+            expr_references_any(key, names) || expr_references_any(value, names)
+        }
+        Expr::DictLiteral { pairs, .. } => pairs
+            .iter()
+            .any(|(k, v)| expr_references_any(k, names) || expr_references_any(v, names)),
+        Expr::LetBlock { bindings, body, .. } => {
+            bindings.iter().any(|(_, v)| expr_references_any(v, names))
+                || block_references_any(body, names)
+        }
+        Expr::StringConcat { parts, .. } => parts.iter().any(|p| expr_references_any(p, names)),
+        Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_references_any(condition, names)
+                || expr_references_any(then_expr, names)
+                || expr_references_any(else_expr, names)
+        }
+        // Any remaining variants (e.g. `new(...)`, lambdas) conservatively report
+        // no reference so the widening never fires spuriously for them; the cases
+        // above cover every shape exercised by the `return-derived-from-kwparam`
+        // fixtures and ordinary arithmetic/call computations.
+        _ => false,
+    }
+}
+
+/// True when any expression inside `block` references a name in `names`.
+fn block_references_any(block: &Block, names: &HashSet<String>) -> bool {
+    block.stmts.iter().any(|stmt| match stmt {
+        Stmt::Assign { value, .. } | Stmt::AddAssign { value, .. } => {
+            expr_references_any(value, names)
+        }
+        Stmt::Return {
+            value: Some(expr), ..
+        }
+        | Stmt::Expr { expr, .. } => expr_references_any(expr, names),
+        _ => false,
+    })
+}
+
+/// Returns the name of the `where`-bound type parameter a method body directly
+/// returns, for the shape `g(...) where {..., R, ...} = R`. Used by reflection
+/// inference to bind `R` from the concrete call signature (Issue #4845).
+///
+/// Only fires when the returned variable is a declared `where` type parameter
+/// *and* is not also an ordinary value parameter name (so it cannot collide
+/// with the existing `direct_parameter_return_snapshot` path).
+fn direct_return_type_param(func: &Function) -> Option<String> {
+    let returned_name = directly_returned_var(func)?;
+    if !func
+        .type_params
+        .iter()
+        .any(|type_param| type_param.name == *returned_name)
+    {
+        return None;
+    }
+    if func.params.iter().any(|param| param.name == *returned_name) {
+        return None;
+    }
+    Some(returned_name.clone())
+}
+
+fn directly_returned_var(func: &Function) -> Option<&String> {
+    let returned_name = match func.body.stmts.as_slice() {
+        [Stmt::Return {
+            value: Some(Expr::Var(name, _)),
+            ..
+        }]
+        | [Stmt::Expr {
+            expr: Expr::Var(name, _),
+            ..
+        }] => name,
+        _ => return None,
+    };
+
+    Some(returned_name)
+}
+
+fn julia_type_needs_return_snapshot(ty: &JuliaType) -> bool {
+    match ty {
+        JuliaType::VectorOf(_)
+        | JuliaType::MatrixOf(_)
+        | JuliaType::TupleOf(_)
+        | JuliaType::Union(_)
+        | JuliaType::UnionAll { .. }
+        | JuliaType::TypeOf(_) => true,
+        JuliaType::Struct(name) => name.contains('{'),
+        _ => false,
+    }
+}
+
+fn julia_type_contains_direct_typevar(ty: &JuliaType, name: &str) -> bool {
+    match ty {
+        JuliaType::TypeVar(type_name, _) => type_name == name,
+        JuliaType::TypeOf(inner) | JuliaType::VectorOf(inner) | JuliaType::MatrixOf(inner) => {
+            julia_type_contains_direct_typevar(inner, name)
+        }
+        JuliaType::TupleOf(types) | JuliaType::Union(types) => types
+            .iter()
+            .any(|ty| julia_type_contains_direct_typevar(ty, name)),
+        JuliaType::UnionAll { body, .. } => julia_type_contains_direct_typevar(body, name),
+        _ => false,
+    }
+}
+
+/// Collect the names of `where`-clause type variables (restricted to
+/// `where_names`) that are syntactically referenced by a constructor
+/// parameter's declared type. A type variable referenced this way can be
+/// recovered at runtime by argument inference, so `new{...}` may materialize it
+/// directly from the constructor frame (Issue #5059).
+fn collect_referenced_type_var_names(
+    ty: &JuliaType,
+    where_names: &HashSet<&str>,
+    out: &mut HashSet<String>,
+) {
+    match ty {
+        // An unknown bare name (`x::T`) is parsed as either a TypeVar or a
+        // Struct; treat it as a referenced type var when it names a where param.
+        JuliaType::TypeVar(name, _) | JuliaType::Struct(name)
+            if where_names.contains(name.as_str()) =>
+        {
+            out.insert(name.clone());
+        }
+        JuliaType::TypeOf(inner) | JuliaType::VectorOf(inner) | JuliaType::MatrixOf(inner) => {
+            collect_referenced_type_var_names(inner, where_names, out);
+        }
+        JuliaType::TupleOf(types) | JuliaType::Union(types) => {
+            for inner in types {
+                collect_referenced_type_var_names(inner, where_names, out);
+            }
+        }
+        JuliaType::UnionAll { body, .. } => {
+            collect_referenced_type_var_names(body, where_names, out);
+        }
+        _ => {}
+    }
+}
 
 /// Optional cache inputs for compilation.
 /// Groups the precompiled Base bytecode, method tables, and closure captures
@@ -111,6 +1272,150 @@ pub(crate) struct CompilerCacheInput<'a> {
     pub precompiled_base: Option<&'a CompiledProgram>,
     pub method_tables: Option<&'a HashMap<String, MethodTable>>,
     pub closure_captures: Option<&'a HashMap<String, std::collections::HashSet<String>>>,
+    pub inference_results: Option<&'a [(InferenceCacheKey, CachedReturn)]>,
+}
+
+/// Recursively collect `@enum` definitions from a block into `enum_types`
+/// (Issue #5139). A later definition overwrites an earlier one of the same
+/// name, matching upstream's "last definition wins" for redefinitions.
+fn collect_enum_types(block: &Block, enum_types: &mut HashMap<String, EnumInfo>) {
+    collect_enum_types_with_module_path(block, enum_types, None);
+}
+
+fn collect_enum_types_with_module_path(
+    block: &Block,
+    enum_types: &mut HashMap<String, EnumInfo>,
+    module_path: Option<&str>,
+) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::EnumDef { enum_def, .. } => {
+                let info = EnumInfo {
+                    base_type: enum_def.base_type.clone(),
+                    members: enum_def
+                        .members
+                        .iter()
+                        .map(|m| (m.name.clone(), m.value))
+                        .collect(),
+                };
+                enum_types.insert(enum_def.name.clone(), info.clone());
+                if let Some(module_path) = module_path {
+                    enum_types.insert(format!("{}.{}", module_path, enum_def.name), info);
+                }
+            }
+            // Enum defs may be nested in plain blocks (e.g. `begin ... end`).
+            Stmt::Block(inner) => {
+                collect_enum_types_with_module_path(inner, enum_types, module_path)
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Collect `@enum` definitions defined inside a module (and its submodules).
+fn collect_enum_types_in_module(
+    module: &crate::ir::core::Module,
+    enum_types: &mut HashMap<String, EnumInfo>,
+) {
+    collect_enum_types_in_module_inner(module, enum_types, "");
+}
+
+fn collect_enum_types_in_module_inner(
+    module: &crate::ir::core::Module,
+    enum_types: &mut HashMap<String, EnumInfo>,
+    prefix: &str,
+) {
+    let module_path = if prefix.is_empty() {
+        module.name.clone()
+    } else {
+        format!("{}.{}", prefix, module.name)
+    };
+    collect_enum_types_with_module_path(&module.body, enum_types, Some(&module_path));
+    for sub in &module.submodules {
+        collect_enum_types_in_module_inner(sub, enum_types, &module_path);
+    }
+}
+
+/// Collect user-declared primitive types defined inside modules (and submodules)
+/// so they are visible to the compiler/runtime alongside top-level ones (Issue #5058).
+fn collect_module_primitive_types(
+    modules: &[crate::ir::core::Module],
+    out: &mut Vec<PrimitiveTypeDefInfo>,
+) {
+    collect_module_primitive_types_inner(modules, out, "");
+}
+
+fn collect_module_primitive_types_inner(
+    modules: &[crate::ir::core::Module],
+    out: &mut Vec<PrimitiveTypeDefInfo>,
+    prefix: &str,
+) {
+    for module in modules {
+        let module_path = if prefix.is_empty() {
+            module.name.clone()
+        } else {
+            format!("{}.{}", prefix, module.name)
+        };
+        for pt in &module.primitive_types {
+            out.push(PrimitiveTypeDefInfo {
+                name: pt.name.clone(),
+                parent: pt.parent.clone(),
+                bits: pt.bits,
+            });
+            out.push(PrimitiveTypeDefInfo {
+                name: format!("{}.{}", module_path, pt.name),
+                parent: pt.parent.clone(),
+                bits: pt.bits,
+            });
+        }
+        collect_module_primitive_types_inner(&module.submodules, out, &module_path);
+    }
+}
+
+/// Recursively collect abstract type definitions declared inside modules /
+/// bundled packages (Issues #7263 / #7265).
+///
+/// Top-level `abstract type` declarations land in `program.abstract_types`, but
+/// the ones declared *inside a `module` body* (e.g. `Distribution`,
+/// `VariateForm`, `ValueSupport` in the bundled Distributions package) live only
+/// on `Module.abstract_types`. Without this collection they never reach the
+/// compiler's abstract-type registry, so a method parameter annotated with a
+/// module-local abstract type (`f(d::Distribution)`) is left as a concrete
+/// `Struct("Distribution")` annotation that no value can satisfy — the typed
+/// method silently loses dispatch to the untyped generic it extends. Collecting
+/// them here mirrors `collect_module_structs` / `collect_module_primitive_types`
+/// and feeds both the struct hierarchy and `resolve_abstract_type`.
+///
+/// Module abstract types keep their *bare* name (`Distribution`) for
+/// within-module annotations and parent links, and also gain a qualified
+/// `ModuleName.Distribution` entry so runtime module-binding reflection can
+/// prove ownership without treating every bare name as visible in every module.
+fn collect_module_abstract_types(
+    modules: &[crate::ir::core::Module],
+    out: &mut Vec<crate::ir::core::AbstractTypeDef>,
+) {
+    collect_module_abstract_types_inner(modules, out, "");
+}
+
+fn collect_module_abstract_types_inner(
+    modules: &[crate::ir::core::Module],
+    out: &mut Vec<crate::ir::core::AbstractTypeDef>,
+    prefix: &str,
+) {
+    for module in modules {
+        let module_path = if prefix.is_empty() {
+            module.name.clone()
+        } else {
+            format!("{}.{}", prefix, module.name)
+        };
+        for at in &module.abstract_types {
+            out.push(at.clone());
+            let mut qualified = at.clone();
+            qualified.name = format!("{}.{}", module_path, at.name);
+            out.push(qualified);
+        }
+        collect_module_abstract_types_inner(&module.submodules, out, &module_path);
+    }
 }
 
 /// Compile a Core IR Program into bytecode with multiple dispatch support.
@@ -123,1786 +1428,13 @@ pub fn compile_core_program_with_globals(
     global_types: &HashMap<String, ValueType>,
     global_struct_names: &HashMap<String, String>,
 ) -> CResult<CompiledProgram> {
-    let (compiled, _method_tables, _closure_captures) = compile_core_program_internal(
+    let output = compile_core_program_internal(
         program,
         global_types,
         global_struct_names,
         CompilerCacheInput::default(),
     )?;
-    Ok(compiled)
-}
-
-/// Internal compilation with optional precompiled Base cache and method tables
-/// Returns (CompiledProgram, method_tables, closure_captures) for caching
-pub(crate) fn compile_core_program_internal(
-    program: &Program,
-    global_types: &HashMap<String, ValueType>,
-    global_struct_names: &HashMap<String, String>,
-    cache_input: CompilerCacheInput<'_>,
-) -> CResult<(
-    CompiledProgram,
-    HashMap<String, MethodTable>,
-    HashMap<String, std::collections::HashSet<String>>,
-)> {
-    let CompilerCacheInput {
-        precompiled_base,
-        method_tables: cached_method_tables,
-        closure_captures: cached_closure_captures,
-    } = cache_input;
-
-    // Use base_function_count from program if already merged by lib.rs,
-    // otherwise merge with base (for JSON IR input that doesn't use lib.rs pipeline)
-    let (program_ref, base_function_count): (std::borrow::Cow<Program>, usize) =
-        if program.base_function_count > 0 {
-            // Already merged by lib.rs - use as-is
-            (
-                std::borrow::Cow::Borrowed(program),
-                program.base_function_count,
-            )
-        } else {
-            // Not merged yet (e.g., JSON IR) - merge now
-            let merged = merge_with_precompiled_base(program);
-            (
-                std::borrow::Cow::Owned(merged.program),
-                merged.base_function_count,
-            )
-        };
-    let program = program_ref.as_ref();
-
-    // Load stdlib modules for any using statements
-    // that reference stdlib modules not already in program.modules
-    let existing_module_names: HashSet<String> =
-        program.modules.iter().map(|m| m.name.clone()).collect();
-    let loaded_modules: Vec<crate::ir::core::Module> = {
-        // Collect all using imports from top-level and from within modules
-        let mut all_usings: Vec<&UsingImport> = program.usings.iter().collect();
-
-        for module in &program.modules {
-            collect_module_usings_recursive(module, &mut all_usings);
-        }
-
-        // Use pure Rust stdlib loader for WASM builds
-        let usings_to_load: Vec<UsingImport> = all_usings
-            .iter()
-            .filter(|u| !u.is_relative)
-            .filter(|u| !existing_module_names.contains(&u.module))
-            .filter(|u| !matches!(u.module.as_str(), "Base" | "Core" | "Main" | "Pkg"))
-            .map(|u| (*u).clone())
-            .collect();
-        crate::stdlib_loader::load_stdlib_modules(&usings_to_load)
-    };
-
-    // Combine program modules with loaded stdlib modules
-    let all_modules: Vec<&crate::ir::core::Module> = program
-        .modules
-        .iter()
-        .chain(loaded_modules.iter())
-        .collect();
-
-    // Build struct table from struct definitions
-    // Separate parametric structs from concrete structs
-    let mut struct_table: HashMap<String, StructInfo> = HashMap::new();
-    let mut parametric_structs: HashMap<String, ParametricStructDef> = HashMap::new();
-
-    // When using cache, initialize struct_defs from cached base to maintain consistent type_ids.
-    // This is critical because cached bytecode contains NewStruct instructions with type_ids
-    // that must match the struct_defs indices.
-    //
-    // Also build instantiation_table for parametric instantiations like Complex{Float64}
-    // to prevent re-instantiation with different type_ids.
-    let mut cached_instantiation_table: HashMap<InstantiationKey, usize> = HashMap::new();
-    let (mut struct_defs, mut next_type_id): (Vec<StructDefInfo>, usize) =
-        if let Some(base_cache) = precompiled_base {
-            let cached_len = base_cache.struct_defs.len();
-            // Also rebuild struct_table for cached structs so we can look them up
-            for (idx, def) in base_cache.struct_defs.iter().enumerate() {
-                struct_table.insert(
-                    def.name.clone(),
-                    StructInfo {
-                        type_id: idx,
-                        is_mutable: def.is_mutable,
-                        fields: def.fields.clone(),
-                        // Base structs with inner constructors are already compiled;
-                        // the method_tables cache handles their dispatch.
-                        has_inner_constructor: false,
-                    },
-                );
-
-                // For parametric instantiations like "Complex{Float64}", build instantiation_table entry
-                if let Some(brace_idx) = def.name.find('{') {
-                    let base_name = def.name[..brace_idx].to_string();
-                    let type_args_str = &def.name[brace_idx + 1..def.name.len() - 1];
-                    // Parse type arguments - use JuliaType::from_name_or_struct to get
-                    // the correct JuliaType variant (e.g., Float64 -> JuliaType::Float64)
-                    let type_args: Vec<TypeExpr> = type_args_str
-                        .split(", ")
-                        .map(|s| TypeExpr::Concrete(JuliaType::from_name_or_struct(s)))
-                        .collect();
-                    let key = InstantiationKey {
-                        base_name,
-                        type_args,
-                    };
-                    cached_instantiation_table.insert(key, idx);
-                }
-            }
-            (base_cache.struct_defs.clone(), cached_len)
-        } else {
-            (Vec::new(), 0)
-        };
-
-    // Collect all structs: top-level (None) + module structs (Some(module_path))
-    let mut all_structs: Vec<(&crate::ir::core::StructDef, Option<String>)> =
-        program.structs.iter().map(|s| (s, None)).collect();
-
-    for module in &all_modules {
-        let mut module_structs = Vec::new();
-        collect_module_structs(module, "", &mut module_structs);
-        for (struct_def, module_path) in module_structs {
-            all_structs.push((struct_def, Some(module_path)));
-        }
-    }
-
-    // Build a map of module_path -> set of struct names defined in that module.
-    // This is used to qualify struct type names in function parameters for module functions.
-    let mut module_struct_names: HashMap<String, HashSet<String>> = HashMap::new();
-    for (struct_def, module_path) in &all_structs {
-        if let Some(path) = module_path {
-            module_struct_names
-                .entry(path.clone())
-                .or_default()
-                .insert(struct_def.name.clone());
-        }
-    }
-
-    // Process all structs (top-level and module structs)
-    for (struct_def, module_path) in &all_structs {
-        // Determine the struct name (qualified for module structs)
-        let struct_name = match module_path {
-            Some(path) => format!("{}.{}", path, struct_def.name),
-            None => struct_def.name.clone(),
-        };
-
-        // When using cache, skip Base structs that are already registered.
-        // This prevents re-assigning type_ids and breaking cached bytecode.
-        if precompiled_base.is_some() && struct_table.contains_key(&struct_name) {
-            // For parametric structs, still register them in parametric_structs
-            // but don't modify struct_table or struct_defs
-            if struct_def.is_parametric() {
-                parametric_structs.insert(
-                    struct_name.clone(),
-                    ParametricStructDef {
-                        def: (*struct_def).clone(),
-                    },
-                );
-            }
-            continue;
-        }
-
-        if struct_def.is_parametric() {
-            // Store parametric struct definition for later instantiation
-            // All parametric structs (including Complex) are handled the same way
-            parametric_structs.insert(
-                struct_name.clone(),
-                ParametricStructDef {
-                    def: (*struct_def).clone(),
-                },
-            );
-            // Also register with short name for module structs
-            // This allows `Point(...)` syntax after `using .MyGeometry`
-            if module_path.is_some() {
-                parametric_structs.insert(
-                    struct_def.name.clone(),
-                    ParametricStructDef {
-                        def: (*struct_def).clone(),
-                    },
-                );
-            }
-        } else {
-            // Concrete struct - register immediately with sequential type_id
-            let type_id = next_type_id;
-            next_type_id += 1;
-
-            let fields: Vec<(String, ValueType)> = struct_def
-                .fields
-                .iter()
-                .map(|f| {
-                    let vt = f
-                        .as_julia_type()
-                        .as_ref()
-                        .map(julia_type_to_value_type)
-                        .unwrap_or(ValueType::Any); // Untyped fields are Any (Julia semantics)
-                    (f.name.clone(), vt)
-                })
-                .collect();
-
-            let has_inner_ctor = !struct_def.inner_constructors.is_empty();
-            struct_table.insert(
-                struct_name.clone(),
-                StructInfo {
-                    type_id,
-                    is_mutable: struct_def.is_mutable,
-                    fields: fields.clone(),
-                    has_inner_constructor: has_inner_ctor,
-                },
-            );
-
-            // Also register with short name for module structs
-            if module_path.is_some() {
-                struct_table.insert(
-                    struct_def.name.clone(),
-                    StructInfo {
-                        type_id,
-                        is_mutable: struct_def.is_mutable,
-                        fields: fields.clone(),
-                        has_inner_constructor: has_inner_ctor,
-                    },
-                );
-            }
-
-            // Push to struct_defs for all structs
-            // Complex is already at index 0, so update it; others get new indices
-            if struct_def.name == "Complex" {
-                // Update the placeholder at index 0 with actual definition
-                // Use "Complex{Float64}" as the name for proper runtime dispatch matching
-                // Methods like +(::Real, ::Complex{Float64}) need to match correctly
-                struct_defs[0] = StructDefInfo {
-                    name: "Complex{Float64}".to_string(),
-                    is_mutable: struct_def.is_mutable,
-                    fields,
-                    parent_type: struct_def.parent_type.clone(),
-                };
-            } else {
-                struct_defs.push(StructDefInfo {
-                    name: struct_name,
-                    is_mutable: struct_def.is_mutable,
-                    fields,
-                    parent_type: struct_def.parent_type.clone(),
-                });
-            }
-        }
-    }
-
-    // Build abstract type definitions (Issue #2523: preserve type_params at runtime)
-    let abstract_types: Vec<AbstractTypeDefInfo> = program
-        .abstract_types
-        .iter()
-        .map(|at| AbstractTypeDefInfo {
-            name: at.name.clone(),
-            parent: at.parent.clone(),
-            type_params: at.type_params.iter().map(|tp| tp.name.clone()).collect(),
-        })
-        .collect();
-
-    // Build set of abstract type names for compiler
-    let abstract_type_names: HashSet<String> = program
-        .abstract_types
-        .iter()
-        .map(|at| at.name.clone())
-        .collect();
-
-    // Create shared compilation context
-    // When using cache, pass the cached instantiation table to prevent re-instantiation
-    let mut shared_ctx = if !cached_instantiation_table.is_empty() {
-        SharedCompileContext::with_instantiation_table(
-            struct_table,
-            struct_defs,
-            parametric_structs,
-            abstract_types.clone(),
-            next_type_id,
-            cached_instantiation_table,
-        )
-    } else {
-        SharedCompileContext::new(
-            struct_table,
-            struct_defs,
-            parametric_structs,
-            abstract_types.clone(),
-            next_type_id,
-        )
-    };
-
-    // Populate type aliases from program
-    for alias in &program.type_aliases {
-        shared_ctx
-            .type_aliases
-            .insert(alias.name.clone(), alias.target_type.clone());
-    }
-
-    // Pre-populate closure captures from cache (Issue #2100)
-    // When using the compilation cache, outer Base functions are skipped (cached bytecode).
-    // But their inner/nested functions still need to be compiled, and they reference
-    // captured variables from the outer scope. Without this, those inner functions
-    // would get empty closure_captures and fail with "Undefined variable" errors.
-    if let Some(cached_captures) = cached_closure_captures {
-        shared_ctx.closure_captures = cached_captures.clone();
-    }
-
-    // Store global_types temporarily - will resolve after struct_table is built
-    let pending_global_types = global_types.clone();
-    let pending_global_struct_names = global_struct_names.clone();
-
-    // Build method tables from functions (including module functions)
-    // Start with cached Base method tables if available (Option A optimization)
-    let mut method_tables: HashMap<String, MethodTable> = if let Some(cached) = cached_method_tables
-    {
-        cached.clone()
-    } else {
-        HashMap::new()
-    };
-
-    // When using cache, initialize function_infos from cache to maintain consistent indices.
-    // This is critical because cached bytecode contains Call instructions with indices that
-    // must match function_infos. User functions are appended at the end.
-    //
-    // func_index_map: maps all_functions index -> function_infos index
-    // - For Base functions (when using cache): identity mapping (0->0, 1->1, etc.)
-    // - For user functions: maps to end of cache (e.g., 678->682 if cache has 682 entries)
-    let (mut function_infos, mut global_index, cached_base_len): (Vec<FunctionInfo>, usize, usize) =
-        if let Some(base_cache) = precompiled_base {
-            let len = base_cache.functions.len();
-            (base_cache.functions.clone(), len, len)
-        } else {
-            (Vec::new(), 0, 0)
-        };
-    let mut func_index_map: Vec<usize> = Vec::new();
-    // When using cache, initialize show_methods from cached Base (Issue #2489).
-    // Base show methods (e.g., show(io, Complex)) are skipped during the function loop
-    // when using cache, so they must be pre-populated from the cached compilation.
-    let mut show_methods: Vec<ShowMethodEntry> = if let Some(base_cache) = precompiled_base {
-        base_cache.show_methods.clone()
-    } else {
-        Vec::new()
-    };
-
-    // Lazy AoT: Track functions that need specialization
-    let mut specializable_functions: Vec<SpecializableFunction> = Vec::new();
-
-    // Build module function mapping: module_path -> set of function names
-    // For nested modules, path is "A.B.C"
-    let mut module_functions: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut module_exports: HashMap<String, HashSet<String>> = HashMap::new();
-    // Track module-level constants (variables assigned in module body)
-    let mut module_constants: HashMap<String, HashSet<String>> = HashMap::new();
-
-    // Collect info from all top-level modules (including precompiled stdlib)
-    for module in &all_modules {
-        collect_module_info(
-            module,
-            "",
-            &mut module_functions,
-            &mut module_exports,
-            &mut module_constants,
-        );
-    }
-
-    // Build set of function names that are imported via `using`
-    // This respects both export restrictions and selective imports
-    let mut imported_functions: HashSet<String> = HashSet::new();
-    for using_import in &program.usings {
-        let module_name = &using_import.module;
-
-        // Get the functions available in this module
-        if let Some(module_funcs) = module_functions.get(module_name) {
-            // Get the exported functions (empty = all exported)
-            let exports = module_exports.get(module_name);
-            let all_exported = exports.is_none_or(|e| e.is_empty());
-
-            match &using_import.symbols {
-                // Selective import: `using Module: func1, func2`
-                Some(symbols) => {
-                    for sym in symbols {
-                        // Check if the symbol exists in the module
-                        if module_funcs.contains(sym) {
-                            // Check if it's exported (or all are exported)
-                            if all_exported || exports.is_some_and(|e| e.contains(sym)) {
-                                imported_functions.insert(sym.clone());
-                            }
-                        }
-                    }
-                }
-                // Import all exported: `using Module`
-                None => {
-                    for func_name in module_funcs {
-                        // Only import if exported (or all are exported)
-                        if all_exported || exports.is_some_and(|e| e.contains(func_name)) {
-                            imported_functions.insert(func_name.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Add top-level functions to imported_functions (they're always available)
-    for func in &program.functions {
-        imported_functions.insert(func.name.clone());
-    }
-
-    // For backward compatibility, also keep track of used module names
-    let usings_set: HashSet<String> = program.usings.iter().map(|u| u.module.clone()).collect();
-
-    // Collect all functions: top-level + module functions (including submodules)
-    let mut all_functions: Vec<(&Function, Option<String>)> =
-        program.functions.iter().map(|f| (f, None)).collect();
-
-    for module in &all_modules {
-        collect_module_functions(module, "", &mut all_functions);
-    }
-
-    // Collect inline functions from top-level statements (with parent function tracking)
-    // inline_functions: Vec<(Function, Option<parent_func_name>)>
-    let mut inline_functions: Vec<(Function, Option<String>)> = Vec::new();
-    for stmt in &program.main.stmts {
-        collect_stmt_functions(stmt, &mut inline_functions, None);
-    }
-    // Also collect from each top-level function's body
-    for func in &program.functions {
-        collect_block_functions(&func.body, &mut inline_functions, Some(&func.name));
-    }
-    // Also collect from module functions
-    for module in &all_modules {
-        collect_from_module(module, &mut inline_functions);
-    }
-
-    // Build maps for nested function tracking (Issue #1743)
-    // 1. nested_function_parents: qualified_name -> parent_name (for general reference)
-    // 2. func_to_parent: function_name -> parent_name (for lookup during compilation)
-    //    Note: When multiple parents have same-named nested functions, we track the index
-    let mut nested_function_parents: HashMap<String, String> = HashMap::new();
-
-    // Track inline function indices to their parent functions
-    // We use the index in inline_functions as a unique identifier
-    let mut inline_func_parent_by_idx: HashMap<usize, String> = HashMap::new();
-    for (idx, (func, parent_name)) in inline_functions.iter().enumerate() {
-        if let Some(parent) = parent_name {
-            // Create qualified name: "parent#nested"
-            let qualified_name = format!("{}#{}", parent, func.name);
-            nested_function_parents.insert(qualified_name, parent.clone());
-            inline_func_parent_by_idx.insert(idx, parent.clone());
-        }
-    }
-
-    // Track the index in all_functions where inline functions start
-    let inline_start_idx = all_functions.len();
-
-    // Add inline functions to all_functions and imported_functions
-    for (func, parent_name) in &inline_functions {
-        all_functions.push((func, None));
-        // Mark inline functions as imported so they can be called
-        // For nested functions, use qualified name for disambiguation
-        if let Some(parent) = parent_name {
-            let qualified_name = format!("{}#{}", parent, func.name);
-            imported_functions.insert(qualified_name);
-        } else {
-            imported_functions.insert(func.name.clone());
-        }
-    }
-
-    // Build a map from function index in all_functions to parent name (for inline functions only)
-    let mut func_idx_to_parent: HashMap<usize, String> = HashMap::new();
-    for (inline_idx, parent) in inline_func_parent_by_idx.iter() {
-        let all_funcs_idx = inline_start_idx + inline_idx;
-        func_idx_to_parent.insert(all_funcs_idx, parent.clone());
-    }
-
-    // Pre-populate closure captures for nested functions (Issue #2100)
-    //
-    // When using prelude cache, parent functions are skipped during compilation,
-    // so Stmt::FunctionDef in parent bodies never runs and closure captures are
-    // never analyzed. This causes "Undefined variable" errors for captured variables
-    // in nested functions that act as closures (e.g., curried string search functions).
-    //
-    // Fix: analyze free variables for all nested functions upfront by examining
-    // each parent function's parameters as the outer scope.
-    for (nested_func, parent_name) in &inline_functions {
-        if let Some(parent) = parent_name {
-            // Find the parent function(s) with matching name to get their parameters
-            for parent_func in &program.functions {
-                if parent_func.name == *parent {
-                    let outer_vars: HashSet<String> =
-                        parent_func.params.iter().map(|p| p.name.clone()).collect();
-                    let free_vars = analyze_free_variables(nested_func, &outer_vars);
-                    if !free_vars.is_empty() {
-                        let qname = format!("{}#{}", parent, nested_func.name);
-                        shared_ctx.closure_captures.insert(qname, free_vars);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Pre-instantiate parametric struct types used in function parameters
-    // This ensures that types like Complex{Float64} are in struct_table
-    // BEFORE we infer function return types for method tables
-    for (func, _) in &all_functions {
-        // Collect type parameter names from the function's where clause
-        let type_param_names: HashSet<&str> =
-            func.type_params.iter().map(|tp| tp.name.as_str()).collect();
-
-        for param in &func.params {
-            let param_ty = param.effective_type();
-            if let JuliaType::Struct(name) = &param_ty {
-                if let Some(brace_idx) = name.find('{') {
-                    let base_name = &name[..brace_idx];
-                    let type_args_str = &name[brace_idx + 1..name.len() - 1];
-
-                    // Check if any type argument is a type parameter from where clause
-                    // e.g., Rational{T} where T - T is a type parameter, not a concrete type
-                    let type_arg_names: Vec<&str> =
-                        type_args_str.split(',').map(|s| s.trim()).collect();
-                    let has_type_param = type_arg_names
-                        .iter()
-                        .any(|arg| type_param_names.contains(arg));
-
-                    // Skip instantiation if any type arg is a where clause type parameter
-                    // These will be instantiated at call sites with concrete types
-                    if has_type_param {
-                        continue;
-                    }
-
-                    let type_args: Vec<TypeExpr> = type_arg_names
-                        .iter()
-                        .map(|s| TypeExpr::from_name(s, &[]))
-                        .collect();
-                    // Instantiate the parametric struct type
-                    let _ = shared_ctx.resolve_instantiation_with_type_expr(base_name, &type_args);
-                }
-            }
-        }
-    }
-
-    // Collect struct literal types from main block and function bodies
-    let mut struct_literal_names: HashSet<String> = HashSet::new();
-    collect_struct_literal_types(&program.main.stmts, &mut struct_literal_names);
-    for (func, _) in &all_functions {
-        collect_struct_literal_types(&func.body.stmts, &mut struct_literal_names);
-    }
-
-    // Instantiate parametric struct types from literals
-    for struct_name in &struct_literal_names {
-        if let Some(brace_idx) = struct_name.find('{') {
-            let base_name = &struct_name[..brace_idx];
-            let type_args_str = &struct_name[brace_idx + 1..struct_name.len() - 1];
-            let type_arg_names: Vec<&str> = type_args_str.split(',').map(|s| s.trim()).collect();
-            let type_args: Vec<TypeExpr> = type_arg_names
-                .iter()
-                .map(|s| TypeExpr::from_name(s, &[]))
-                .collect();
-            // Instantiate the type (ignore errors - may already exist)
-            let _ = shared_ctx.resolve_instantiation_with_type_expr(base_name, &type_args);
-        }
-    }
-
-    // Now that struct_table is fully built, resolve global_types from REPL session
-    // Pre-collect global variable types from main block before function compilation.
-    // This allows functions to reference top-level const/global variables with proper types.
-    // Also collects const struct constructors for inlining in functions.
-    {
-        let mut global_types_map = std::mem::take(&mut shared_ctx.global_types);
-        // Merge with provided global_types (from REPL session)
-        // Resolve struct type_ids from struct_names using struct_table (now fully built)
-        for (name, ty) in &pending_global_types {
-            if let ValueType::Struct(_) = ty {
-                // Resolve struct type_id from struct_name
-                if let Some(struct_name) = pending_global_struct_names.get(name) {
-                    if let Some(struct_info) = shared_ctx.struct_table.get(struct_name) {
-                        global_types_map
-                            .insert(name.clone(), ValueType::Struct(struct_info.type_id));
-                        continue;
-                    }
-                    // Try to find parametric struct instance (e.g., "Rational{Int64}")
-                    if let Some(brace_idx) = struct_name.find('{') {
-                        let base_name = &struct_name[..brace_idx];
-                        let prefix = format!("{}{{", base_name);
-                        for (table_name, struct_info) in &shared_ctx.struct_table {
-                            if table_name.starts_with(&prefix) || table_name == struct_name {
-                                global_types_map
-                                    .insert(name.clone(), ValueType::Struct(struct_info.type_id));
-                                break;
-                            }
-                        }
-                        continue;
-                    }
-                }
-            }
-            // For non-struct types or if struct resolution failed, use the provided type
-            global_types_map.insert(name.clone(), ty.clone());
-        }
-        let mut global_const_structs = std::mem::take(&mut shared_ctx.global_const_structs);
-        collect_global_types_for_inference(
-            &program.main.stmts,
-            &mut global_types_map,
-            &shared_ctx.struct_table,
-            &mut global_const_structs,
-        );
-        shared_ctx.global_types = global_types_map;
-        shared_ctx.global_const_structs = global_const_structs;
-    }
-
-    // Also collect global types from module bodies (for module-level constants like SHIFTEDMONTHDAYS).
-    // This ensures module-level constants are registered before function compilation so they're
-    // not flagged as "undefined variable" when referenced from module functions.
-    {
-        let mut global_types_map = std::mem::take(&mut shared_ctx.global_types);
-        let mut global_const_structs = std::mem::take(&mut shared_ctx.global_const_structs);
-        for module in &all_modules {
-            collect_global_types_for_inference(
-                &module.body.stmts,
-                &mut global_types_map,
-                &shared_ctx.struct_table,
-                &mut global_const_structs,
-            );
-        }
-        shared_ctx.global_types = global_types_map;
-        shared_ctx.global_const_structs = global_const_structs;
-    }
-
-    // Collect module-level using statements to support module-local imports.
-    let mut module_usings: HashMap<String, Vec<UsingImport>> = HashMap::new();
-
-    for module in &all_modules {
-        collect_module_usings(module, "", &mut module_usings);
-    }
-
-    // Resolve module-local imports based on their using statements.
-    let mut module_imports_map: HashMap<String, HashSet<String>> = HashMap::new();
-    for (module_path, usings) in &module_usings {
-        let mut imported = HashSet::new();
-        for using_import in usings {
-            let using_module = &using_import.module;
-            // Skip relative imports (they refer to user modules, handled separately)
-            if using_import.is_relative {
-                continue;
-            }
-            if let Some(module_funcs) = module_functions.get(using_module) {
-                let exports = module_exports.get(using_module);
-                let all_exported = exports.is_none_or(|e| e.is_empty());
-
-                match &using_import.symbols {
-                    // Selective import: `using Module: func1, func2`
-                    Some(symbols) => {
-                        for sym in symbols {
-                            if module_funcs.contains(sym.as_str())
-                                && (all_exported
-                                    || exports.is_some_and(|e| e.contains(sym.as_str())))
-                            {
-                                imported.insert(sym.clone());
-                            }
-                        }
-                    }
-                    // Import all exported functions: `using Module`
-                    None => {
-                        for func_name in module_funcs {
-                            if all_exported || exports.is_some_and(|e| e.contains(func_name)) {
-                                imported.insert(func_name.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        module_imports_map.insert(module_path.clone(), imported);
-    }
-
-    // Build a map from abstract type name to its parent for converting Struct to AbstractUser
-    let abstract_type_parents: HashMap<String, Option<String>> = program
-        .abstract_types
-        .iter()
-        .map(|at| (at.name.clone(), at.parent.clone()))
-        .collect();
-
-    let _total_functions = all_functions.len();
-
-    // Build a shared inference engine ONCE before the loop.
-    // Previously, infer_function_return_type_v2_with_functions was called inside the loop,
-    // creating a new engine and cloning all ~5000 functions on every iteration (O(n^2)).
-    // This shared engine clones functions once (O(n)) and reuses the return-type cache.
-    let mut inference_engine =
-        build_shared_inference_engine(&shared_ctx.struct_table, program.functions.iter());
-
-    for (all_funcs_idx, (func, module_path)) in all_functions.iter().enumerate() {
-        // Build params early (needed for both method tables and show methods)
-        // For module functions, qualify struct type names to match the qualified struct instances.
-        // Also convert Struct types to AbstractUser when the type is actually an abstract type.
-        let params: Vec<(String, JuliaType)> = func
-            .params
-            .iter()
-            .map(|p| {
-                let ty = p.effective_type();
-                let qualified_ty =
-                    qualify_type_for_module(ty, module_path.as_ref(), &module_struct_names);
-                let resolved_ty = resolve_abstract_type(qualified_ty, &abstract_type_parents);
-                // Resolve type aliases (Issue #2527): const IntWrapper = Wrapper{Int64}
-                let alias_resolved = resolve_type_alias(resolved_ty, &shared_ctx.type_aliases);
-                (p.name.clone(), alias_resolved)
-            })
-            .collect();
-
-        // Build vm_params, vm_kwparams, and return_type (needed for FunctionInfo)
-        let vm_params: Vec<(String, ValueType)> = params
-            .iter()
-            .map(|(name, jt)| {
-                (
-                    name.clone(),
-                    julia_type_to_value_type_with_table(jt, &shared_ctx.struct_table),
-                )
-            })
-            .collect();
-
-        let vm_kwparams: Vec<KwParamInfo> = func
-            .kwparams
-            .iter()
-            .map(|kw| {
-                let required = is_required_kwarg(&kw.default);
-                // For varargs kwargs (kwargs...), type is always Pairs (Julia's Base.Pairs)
-                // For required kwargs, use type annotation if available; otherwise use Any
-                // For optional kwargs, infer from default value
-                let ty = if kw.is_varargs {
-                    ValueType::Pairs
-                } else if required {
-                    kw.type_annotation
-                        .as_ref()
-                        .map(|jt| julia_type_to_value_type_with_table(jt, &shared_ctx.struct_table))
-                        .unwrap_or(ValueType::Any)
-                } else {
-                    infer_default_type(&kw.default)
-                };
-                KwParamInfo {
-                    name: kw.name.clone(),
-                    default: eval_literal_default(&kw.default),
-                    ty,
-                    slot: 0,
-                    required,
-                    is_varargs: kw.is_varargs,
-                }
-            })
-            .collect();
-
-        // Use declared return type if available, otherwise infer from function body
-        // Using the shared inference engine (created once before the loop) for
-        // abstract interpretation. The engine caches return types across calls.
-        let (return_type, return_julia_type) = if let Some(ref declared_rt) = func.return_type {
-            let vt = julia_type_to_value_type_with_table(declared_rt, &shared_ctx.struct_table);
-            // Declared return types already carry parametric info via JuliaType
-            let jt = if matches!(declared_rt, JuliaType::TupleOf(_)) {
-                Some(declared_rt.clone())
-            } else {
-                None
-            };
-            (vt, jt)
-        } else {
-            let rt = inference_engine.infer_function(func);
-            let vt = bridge::lattice_to_value_type(&rt);
-            // Extract parametric tuple type that ValueType::Tuple would lose (Issue #2317)
-            let jt = bridge::lattice_to_parametric_julia_type(&rt);
-            (vt, jt)
-        };
-
-        // Skip Base functions if we're using cached method tables (Option A optimization)
-        // Base methods are already in the cached method tables
-        // When using cache, global_index starts at base_function_count, so we use loop counter instead
-        // Note: all_funcs_idx is 0-indexed, so we use <= to match 1-indexed behavior
-        let is_base_function = (all_funcs_idx + 1) <= base_function_count;
-        let skip_method_table_update = is_base_function && cached_method_tables.is_some();
-        // When using cache, skip function_infos.push() for Base functions (already in cache)
-        let skip_function_info_push = is_base_function && precompiled_base.is_some();
-
-        // Detect varargs parameter early (needed for both MethodSig and FunctionInfo)
-        let vararg_param_index = func.params.iter().position(|p| p.is_varargs);
-        // For Vararg{T, N}: extract fixed count N (Issue #2525)
-        let vararg_fixed_count = func
-            .params
-            .iter()
-            .find(|p| p.is_varargs)
-            .and_then(|p| p.vararg_count);
-
-        if !skip_method_table_update {
-            let is_stdlib_func = module_path
-                .as_ref()
-                .map(|path| {
-                    is_stdlib_module(path)
-                        || path == "Base"
-                        || path.starts_with("Base.")
-                        || path == "Core"
-                        || path.starts_with("Core.")
-                })
-                .unwrap_or(false);
-            if !is_base_function && !is_stdlib_func {
-                shared_ctx
-                    .function_ir_by_global_index
-                    .insert(global_index, (*func).clone());
-            }
-            let table = method_tables
-                .entry(func.name.clone())
-                .or_insert_with(|| MethodTable::new(func.name.clone()));
-
-            let method_index = table.methods.len();
-            table.add_method(MethodSig {
-                _method_index: method_index,
-                global_index,
-                params: params.clone(),
-                return_type: return_type.clone(),
-                return_julia_type: return_julia_type.clone(),
-                is_base_extension: func.is_base_extension,
-                type_params: func.type_params.clone(),
-                vararg_param_index,
-                vararg_fixed_count,
-            });
-        }
-
-        // Detect show methods: function Base.show(io::IO, x::SomeStruct)
-        // Also detect show methods defined within base library files (e.g., io.jl)
-        // Skip for cached Base functions — their show_methods are pre-populated from cache (Issue #2489)
-        if !skip_function_info_push
-            && (func.is_base_extension || is_base_function)
-            && func.name == "show"
-            && params.len() >= 2
-        {
-            // First param must be IO type
-            if let JuliaType::IO = &params[0].1 {
-                // Second param must be a Struct type
-                if let JuliaType::Struct(struct_name) = &params[1].1 {
-                    show_methods.push(ShowMethodEntry {
-                        type_name: struct_name.clone(),
-                        func_index: global_index,
-                    });
-                }
-            }
-        }
-
-        // Build func_index_map and function_infos
-        // When using cache, Base functions are already in function_infos (from cache clone)
-        let func_info_idx = if skip_function_info_push {
-            // Base function using cache: identity mapping (index in all_functions = index in function_infos)
-            // all_funcs_idx is 0-indexed, same as function_infos
-            func_index_map.push(all_funcs_idx);
-            all_funcs_idx
-        } else {
-            // User function or no cache: push to function_infos, map to new index
-            let idx = function_infos.len();
-            func_index_map.push(idx);
-
-            // Preserve original JuliaTypes for type parameter binding
-            let param_julia_types: Vec<JuliaType> =
-                params.iter().map(|(_, jt)| jt.clone()).collect();
-
-            // For nested functions, use qualified name (parent#nested) to avoid collisions
-            // when multiple parent functions have nested functions with the same name (Issue #1743)
-            let function_name = if let Some(parent) = func_idx_to_parent.get(&all_funcs_idx) {
-                format!("{}#{}", parent, func.name)
-            } else {
-                func.name.clone()
-            };
-
-            function_infos.push(FunctionInfo {
-                name: function_name,
-                params: vm_params,
-                kwparams: vm_kwparams,
-                entry: 0,
-                return_type,
-                type_params: func.type_params.clone(),
-                param_julia_types,
-                code_start: 0, // Will be set during compilation
-                code_end: 0,   // Will be set during compilation
-                slot_names: Vec::new(),
-                local_slot_count: 0,
-                param_slots: Vec::new(),
-                vararg_param_index,
-                vararg_fixed_count,
-            });
-
-            // Register function index for Stmt::FunctionDef lookups
-            // Use qualified name for nested functions to avoid collisions (Issue #1743)
-            let registration_name = if let Some(parent) = func_idx_to_parent.get(&all_funcs_idx) {
-                // This is a nested function - use qualified name
-                format!("{}#{}", parent, func.name)
-            } else {
-                // Top-level or module function - use original name
-                func.name.clone()
-            };
-            shared_ctx.function_indices.insert(registration_name, idx);
-
-            global_index += 1;
-            idx
-        };
-
-        // Lazy AoT: Register function if it needs specialization
-        // This must be done for ALL functions (including Base when using cache)
-        // because cached bytecode may contain CallSpecialized instructions
-        // Lazy AoT specialization enabled for:
-        // - Base functions: enabled
-        // - User functions: enabled
-        // - Stdlib modules: enabled (Statistics, etc.)
-        // - Core module: DISABLED (intrinsic wrappers like add_int)
-        let is_specializable = if let Some(path) = module_path {
-            // Module functions: enable for Stdlib, disable for Core
-            path != "Core" && !path.starts_with("Core.")
-        } else {
-            // Non-module functions (Base + User): all enabled
-            true
-        };
-        if is_specializable && needs_specialization(func) {
-            let spec_idx = specializable_functions.len();
-            specializable_functions.push(SpecializableFunction {
-                ir: (*func).clone(),
-                name: func.name.clone(),
-                fallback_index: func_info_idx,
-            });
-            // Map function global_index to specializable index
-            shared_ctx.spec_func_mapping.insert(func_info_idx, spec_idx);
-        }
-    }
-
-    // Debug assertion: verify cache alignment after function merging (Issue #2726).
-    // When using precompiled cache, all_functions[i] and function_infos[i] must have the same
-    // name for all Base functions. A mismatch indicates that exact signature matching in
-    // base function filtering has regressed, which would cause Call instructions in cached
-    // bytecode to invoke the wrong function.
-    #[cfg(debug_assertions)]
-    if precompiled_base.is_some() {
-        for i in 0..base_function_count
-            .min(all_functions.len())
-            .min(function_infos.len())
-        {
-            let all_func_name = &all_functions[i].0.name;
-            let info_name = &function_infos[i].name;
-            debug_assert_eq!(
-                all_func_name, info_name,
-                "Cache alignment mismatch at index {}: all_functions has '{}' but function_infos has '{}'. \
-                 Base function filtering must use exact signature matching (Issue #2726).",
-                i, all_func_name, info_name
-            );
-        }
-    }
-
-    // Collect inner constructors from struct definitions (both top-level and module structs)
-    // These are registered with the struct name, allowing Point(x, y) to call the inner constructor
-    struct InnerCtorInfo {
-        struct_name: String,
-        type_id: usize,
-        ctor: crate::ir::core::InnerConstructor,
-        func_info_idx: usize, // Index in function_infos where this ctor is registered
-    }
-    let mut inner_ctors: Vec<InnerCtorInfo> = Vec::new();
-
-    // Use all_structs to include module structs (e.g., Dates.Date, Dates.DateTime)
-    for (struct_def, _module_path) in &all_structs {
-        if struct_def.inner_constructors.is_empty() {
-            continue;
-        }
-
-        // Always add struct name to imported_functions (needed for name resolution)
-        imported_functions.insert(struct_def.name.clone());
-
-        // When using cache, skip inner constructors that are already in cache
-        // (i.e., Base struct inner constructors). User-defined inner constructors
-        // need to be registered even when using cache.
-        let skip_this_struct = if precompiled_base.is_some() {
-            // Check if this struct's constructor is already in cached method_tables
-            // If so, it's a Base struct and we can skip
-            method_tables
-                .get(&struct_def.name)
-                .map(|t| !t.methods.is_empty())
-                .unwrap_or(false)
-        } else {
-            false
-        };
-        if skip_this_struct {
-            continue;
-        }
-
-        // Get the type_id for this struct (or handle parametric struct)
-        // Use short name since both short and qualified names are registered in struct_table
-        let (type_id, is_parametric) =
-            if let Some(info) = shared_ctx.struct_table.get(&struct_def.name) {
-                (info.type_id, false)
-            } else if shared_ctx.parametric_structs.contains_key(&struct_def.name) {
-                // Parametric struct: use placeholder type_id, actual type resolved at call site
-                (0, true)
-            } else {
-                continue;
-            };
-
-        for ctor in &struct_def.inner_constructors {
-            let table = method_tables
-                .entry(struct_def.name.clone())
-                .or_insert_with(|| MethodTable::new(struct_def.name.clone()));
-
-            // Add struct name to imported_functions immediately when registering inner constructor
-            imported_functions.insert(struct_def.name.clone());
-
-            let params: Vec<(String, JuliaType)> = ctor
-                .params
-                .iter()
-                .map(|p| (p.name.clone(), p.effective_type()))
-                .collect();
-
-            let vm_params: Vec<(String, ValueType)> = params
-                .iter()
-                .map(|(name, jt)| {
-                    (
-                        name.clone(),
-                        julia_type_to_value_type_with_table(jt, &shared_ctx.struct_table),
-                    )
-                })
-                .collect();
-
-            // Inner constructors return the struct type
-            // For parametric structs, use Any since actual type is determined at call site
-            let return_type = if is_parametric {
-                ValueType::Any
-            } else {
-                ValueType::Struct(type_id)
-            };
-
-            // Preserve original JuliaTypes for type parameter binding (before params is moved)
-            let param_julia_types: Vec<JuliaType> =
-                params.iter().map(|(_, jt)| jt.clone()).collect();
-
-            // Use type params from the inner constructor's where clause
-            let ctor_type_params: Vec<TypeParam> = ctor.type_params.clone();
-
-            let method_index = table.methods.len();
-            table.add_method(MethodSig {
-                _method_index: method_index,
-                global_index,
-                params,
-                return_type: return_type.clone(),
-                return_julia_type: None, // Inner constructors return structs, not parametric tuples
-                is_base_extension: false,
-                type_params: ctor_type_params.clone(),
-                vararg_param_index: None, // Inner constructors don't have varargs
-                vararg_fixed_count: None,
-            });
-
-            // Record the index where this inner constructor will be stored
-            let func_info_idx = function_infos.len();
-
-            function_infos.push(FunctionInfo {
-                name: struct_def.name.clone(),
-                params: vm_params,
-                kwparams: vec![],
-                entry: 0,
-                return_type,
-                type_params: ctor_type_params,
-                param_julia_types,
-                code_start: 0, // Will be set during compilation
-                code_end: 0,   // Will be set during compilation
-                slot_names: Vec::new(),
-                local_slot_count: 0,
-                param_slots: Vec::new(),
-                vararg_param_index: None, // Inner constructors don't have varargs
-                vararg_fixed_count: None,
-            });
-
-            inner_ctors.push(InnerCtorInfo {
-                struct_name: struct_def.name.clone(),
-                type_id,
-                ctor: ctor.clone(),
-                func_info_idx,
-            });
-
-            global_index += 1;
-        }
-    }
-    // Also add struct names to imported_functions so they can be called
-    // Use all_structs to include module structs
-    for (struct_def, _module_path) in &all_structs {
-        if !struct_def.inner_constructors.is_empty() {
-            imported_functions.insert(struct_def.name.clone());
-        }
-    }
-
-    // Populate struct_parents on all method tables for abstract dispatch tie-breaking (Issue #3144).
-    // Build a map from concrete struct name to its declared parent abstract type.
-    // This enables `dispatch()` to correctly prefer f(::MotorVehicle) over f(::NonMotorVehicle)
-    // when the argument is Car where `struct Car <: MotorVehicle`.
-    {
-        let struct_parent_map: HashMap<String, Option<String>> = shared_ctx
-            .struct_defs
-            .iter()
-            .map(|def| {
-                // Strip type parameters from struct name (e.g., "Complex{Float64}" -> "Complex")
-                let base_name = def.name.split('{').next().unwrap_or(&def.name);
-                (base_name.to_string(), def.parent_type.clone())
-            })
-            .collect();
-
-        for table in method_tables.values_mut() {
-            table.struct_parents = struct_parent_map.clone();
-        }
-    }
-
-    // Pre-analyze closure captures for lambda functions defined at module level (Issue #2358)
-    //
-    // Lambda functions (e.g., `f = () -> x + 1`) in @testset or other module-level blocks
-    // are lifted to top-level functions named __lambda_N. They need to capture variables
-    // from the outer scope. This must be done BEFORE the function compilation loop.
-    //
-    // First, collect the module-level locals to know what variables are available.
-    {
-        let mut main_locals: HashMap<String, ValueType> = HashMap::new();
-        let mut main_mixed_type_vars: HashSet<String> = HashSet::new();
-        let protected: HashSet<String> = HashSet::new();
-        collect_local_types_with_mixed_tracking(
-            &program.main.stmts,
-            &mut main_locals,
-            &protected,
-            &shared_ctx.struct_table,
-            &shared_ctx.global_types,
-            &mut main_mixed_type_vars,
-        );
-
-        // Now analyze each __lambda_N function to see if it captures variables
-        for func in &program.functions {
-            if func.name.starts_with("__lambda_") {
-                let outer_scope_vars: HashSet<String> = main_locals.keys().cloned().collect();
-                let free_vars = analyze_free_variables(func, &outer_scope_vars);
-                if !free_vars.is_empty() {
-                    shared_ctx
-                        .closure_captures
-                        .insert(func.name.clone(), free_vars);
-                }
-            }
-        }
-    }
-
-    // Compile each function
-    // When using cache, copy the entire bytecode from cache first
-    // This ensures all Base functions (including those not in all_functions) are available
-    let (mut code, mut reused_base): (Vec<Instr>, Vec<bool>) =
-        if let Some(base_cache) = precompiled_base {
-            // Copy all bytecode from cache
-            let cached_code = base_cache.code.clone();
-            // Mark all cached functions as reused
-            let reused = vec![true; function_infos.len()];
-            (cached_code, reused)
-        } else {
-            (Vec::new(), vec![false; function_infos.len()])
-        };
-
-    for (idx, (func, module_path)) in all_functions.iter().enumerate() {
-        // Map all_functions index to function_infos index
-        let func_info_idx = func_index_map[idx];
-
-        // When using cache, check if this function already has bytecode from cache
-        // A function has valid cache bytecode if its code_start != code_end
-        if precompiled_base.is_some() && func_info_idx < cached_base_len {
-            let fi = &function_infos[func_info_idx];
-            if fi.code_start != fi.code_end {
-                // Function has valid bytecode from cache, skip compilation
-                continue;
-            }
-        }
-
-        let entry = code.len();
-        function_infos[func_info_idx].entry = entry;
-        reused_base[func_info_idx] = false; // This is a user function, not reused from cache
-
-        let mut function_imports = imported_functions.clone();
-        if let Some(module_path) = module_path {
-            if let Some(module_funcs) = module_functions.get(module_path) {
-                function_imports.extend(module_funcs.iter().cloned());
-            }
-            if let Some(module_imports) = module_imports_map.get(module_path) {
-                function_imports.extend(module_imports.iter().cloned());
-            }
-        }
-
-        // Check if this function is a closure with captured variables
-        // Clone the captures before creating the compiler (to avoid borrow conflicts)
-        //
-        // For nested functions, closure_captures uses qualified names like "parent#nested"
-        // We use func_idx_to_parent to find the exact parent for this function index,
-        // which allows disambiguating between multiple nested functions with the same name
-        // from different parents (Issue #1743).
-        let closure_captures = if let Some(parent) = func_idx_to_parent.get(&idx) {
-            // This is a nested function - look up by qualified name
-            let qualified_name = format!("{}#{}", parent, func.name);
-            shared_ctx
-                .closure_captures
-                .get(&qualified_name)
-                .cloned()
-                .unwrap_or_default()
-        } else {
-            // Top-level or module function - look up by simple name
-            shared_ctx
-                .closure_captures
-                .get(&func.name)
-                .cloned()
-                .unwrap_or_default()
-        };
-
-        let mut compiler = CoreCompiler::new_for_function(
-            &method_tables,
-            &module_functions,
-            &module_exports,
-            &function_imports,
-            &usings_set,
-            &mut shared_ctx,
-            &abstract_type_names,
-            &module_constants,
-        );
-
-        // Set captured_vars so that load_local emits LoadCaptured for those variables
-        compiler.captured_vars = closure_captures;
-
-        // Set the current function name for nested function disambiguation
-        // For nested functions, use the qualified name (parent#nested) so that
-        // deeper nesting levels can build the full qualified path (Issue #1744)
-        let current_func_name = if let Some(parent) = func_idx_to_parent.get(&idx) {
-            format!("{}#{}", parent, func.name)
-        } else {
-            func.name.clone()
-        };
-        compiler.current_function_name = Some(current_func_name);
-
-        // Set module path for resolving unqualified struct names inside module functions
-        compiler.current_module_path = module_path.clone();
-
-        // Set type parameters from where clause for type binding support
-        compiler.current_type_params = func.type_params.clone();
-        compiler.current_type_param_index = func
-            .type_params
-            .iter()
-            .enumerate()
-            .map(|(i, tp)| (tp.name.clone(), i))
-            .collect();
-
-        // Collect type parameter names from the function's where clause
-        let func_type_param_names: HashSet<&str> =
-            func.type_params.iter().map(|tp| tp.name.as_str()).collect();
-
-        // Detect Val{N} patterns and mark N as a value parameter
-        // For parameters like ::Val{N} where N, N should be treated as I64, not DataType
-        for param in &func.params {
-            if let JuliaType::Struct(type_name) = param.effective_type() {
-                if type_name.starts_with("Val{") && type_name.ends_with("}") {
-                    // Extract the type argument (e.g., "N" from "Val{N}")
-                    let type_arg = &type_name[4..type_name.len() - 1];
-                    // If this type arg is a where clause type parameter, it's a value parameter
-                    if func_type_param_names.contains(type_arg) {
-                        compiler.val_type_params.insert(type_arg.to_string());
-                    }
-                }
-            }
-        }
-
-        // Set up parameter types in locals
-        for param in &func.params {
-            let param_ty = param.effective_type();
-            // Ensure parametric struct instantiations exist (e.g., Complex{Float64})
-            if let JuliaType::Struct(name) = &param_ty {
-                if name.contains('{') && !compiler.shared_ctx.struct_table.contains_key(name) {
-                    // Parse type arguments and create instantiation
-                    if let Some(brace_idx) = name.find('{') {
-                        let base_name = &name[..brace_idx];
-                        let type_args_str = &name[brace_idx + 1..name.len() - 1];
-
-                        // Check if any type arg is a where clause type parameter
-                        let type_arg_names: Vec<&str> =
-                            type_args_str.split(',').map(|s| s.trim()).collect();
-                        let has_type_param = type_arg_names
-                            .iter()
-                            .any(|arg| func_type_param_names.contains(arg));
-
-                        // Skip instantiation if any type arg is a where clause type parameter
-                        if !has_type_param {
-                            let type_args: Vec<TypeExpr> = type_arg_names
-                                .iter()
-                                .map(|s| TypeExpr::from_name(s, &[]))
-                                .collect();
-                            let _ = compiler
-                                .shared_ctx
-                                .resolve_instantiation_with_type_expr(base_name, &type_args);
-                        }
-                    }
-                }
-            }
-            let vt = compiler.julia_type_to_value_type_with_ctx(&param_ty);
-            compiler.locals.insert(param.name.clone(), vt.clone());
-            // Track parameters with narrow integer types in julia_type_locals
-            // so that infer_julia_type returns the precise type (e.g., Int32)
-            // instead of Int64 (which ValueType::I64 maps to).
-            // This is needed for correct compile-time dispatch of calls like
-            // gcd(num, den) where num::Int32.
-            if param_ty.is_narrow_integer() {
-                compiler
-                    .julia_type_locals
-                    .insert(param.name.clone(), param_ty.clone());
-            }
-            // Track parameters with TypeVar type annotations (e.g., x::T where T<:Integer)
-            // Store the upper bound type in julia_type_locals so that variable references
-            // resolve to the bound type for proper dispatch (Issue #2556)
-            if let JuliaType::TypeVar(_, Some(bound_name)) = &param_ty {
-                if let Some(bound_type) = JuliaType::from_name(bound_name) {
-                    compiler
-                        .julia_type_locals
-                        .insert(param.name.clone(), bound_type.clone());
-                    // Also track abstract numeric bounds for runtime dispatch
-                    if bound_type.is_abstract_numeric() {
-                        compiler.abstract_numeric_params.insert(param.name.clone());
-                    }
-                }
-            }
-            // Track parameters with Any type - these should preserve Any on reassignment
-            if matches!(param_ty, JuliaType::Any) {
-                compiler.any_params.insert(param.name.clone());
-            }
-            // Track parameters with abstract numeric type annotations (Number, Real, etc.)
-            // Binary operations on these must use runtime dispatch (Issue #2498)
-            if param_ty.is_abstract_numeric() {
-                compiler.abstract_numeric_params.insert(param.name.clone());
-            }
-        }
-
-        // Set up kwparam types in locals
-        // For varargs kwargs (kwargs...), type is always NamedTuple
-        // For required kwargs (Undef default), use type annotation if available
-        // For kwargs with `nothing` default, use Any since they can receive any type at runtime
-        for kwparam in &func.kwparams {
-            let vt = if kwparam.is_varargs {
-                // Varargs kwargs collects all remaining kwargs as Pairs (Julia's Base.Pairs)
-                ValueType::Pairs
-            } else {
-                let is_required = is_required_kwarg(&kwparam.default);
-                if is_required {
-                    // Required kwarg - use type annotation if available
-                    kwparam
-                        .type_annotation
-                        .as_ref()
-                        .map(|jt| {
-                            julia_type_to_value_type_with_table(
-                                jt,
-                                &compiler.shared_ctx.struct_table,
-                            )
-                        })
-                        .unwrap_or(ValueType::Any)
-                } else {
-                    let vt = infer_default_type(&kwparam.default);
-                    if vt == ValueType::Nothing {
-                        ValueType::Any
-                    } else {
-                        vt
-                    }
-                }
-            };
-            compiler.locals.insert(kwparam.name.clone(), vt);
-        }
-
-        // Register type parameters from where clause as DataType locals
-        // This enables T(x) calls where T is a type parameter: function f(x::T) where T; T(1); end
-        for tp in &func.type_params {
-            // Skip Val{N} value parameters - they are I64, not DataType
-            if !compiler.val_type_params.contains(&tp.name) {
-                compiler.locals.insert(tp.name.clone(), ValueType::DataType);
-            }
-        }
-
-        // Pre-populate locals with inferred types to ensure consistent type usage
-        // This prevents bugs where a variable is first assigned as I64 then used as F64
-        // Protect function parameters (and kwargs) from being overwritten by local assignments
-        // This fixes the bug where parameter reassignment (e.g., a = abs(a)) causes type mismatch
-        let protected: HashSet<String> = func
-            .params
-            .iter()
-            .map(|p| p.name.clone())
-            .chain(func.kwparams.iter().map(|k| k.name.clone()))
-            .collect();
-        collect_local_types_with_mixed_tracking(
-            &func.body.stmts,
-            &mut compiler.locals,
-            &protected,
-            &compiler.shared_ctx.struct_table,
-            &compiler.shared_ctx.global_types,
-            &mut compiler.mixed_type_vars,
-        );
-
-        // Compile function body with implicit return handling
-        // In Julia, the last expression in a function is its return value
-        compiler.compile_function_body(
-            &func.body,
-            function_infos[func_info_idx].return_type.clone(),
-        )?;
-        // Patch @goto jumps after function body compilation
-        compiler.patch_goto_jumps()?;
-
-        let code_start = entry;
-        let mut func_code = compiler.code;
-        relocate_jumps(&mut func_code, 0, entry);
-        code.extend(func_code);
-        let code_end = code.len();
-
-        // Update function boundaries for future caching
-        function_infos[func_info_idx].code_start = code_start;
-        function_infos[func_info_idx].code_end = code_end;
-    }
-
-    // Compile inner constructors
-    // These run with current_struct_type_id set so new() creates the correct struct type
-    for ctor_info in inner_ctors.iter() {
-        let entry = code.len();
-        let func_info_idx = ctor_info.func_info_idx;
-        function_infos[func_info_idx].entry = entry;
-
-        let mut compiler = CoreCompiler::new_for_function(
-            &method_tables,
-            &module_functions,
-            &module_exports,
-            &imported_functions,
-            &usings_set,
-            &mut shared_ctx,
-            &abstract_type_names,
-            &module_constants,
-        );
-
-        // Set current_struct_type_id so new() creates the correct struct type
-        compiler.current_struct_type_id = Some(ctor_info.type_id);
-
-        // For parametric structs (type_id=0), set the base name for dynamic struct creation
-        if ctor_info.type_id == 0 {
-            compiler.current_parametric_struct_name = Some(ctor_info.struct_name.clone());
-        }
-
-        // Set type parameters from the constructor's where clause (e.g., where T)
-        compiler.current_type_params = ctor_info.ctor.type_params.clone();
-        compiler.current_type_param_index = ctor_info
-            .ctor
-            .type_params
-            .iter()
-            .enumerate()
-            .map(|(i, tp)| (tp.name.clone(), i))
-            .collect();
-
-        // Set up parameter types in locals
-        for param in &ctor_info.ctor.params {
-            let param_ty = param.effective_type();
-            let vt = compiler.julia_type_to_value_type_with_ctx(&param_ty);
-            compiler.locals.insert(param.name.clone(), vt);
-            // Track parameters with Any type - these should preserve Any on reassignment
-            if matches!(param_ty, JuliaType::Any) {
-                compiler.any_params.insert(param.name.clone());
-            }
-            // Track parameters with abstract numeric type annotations (Issue #2498)
-            if param_ty.is_abstract_numeric() {
-                compiler.abstract_numeric_params.insert(param.name.clone());
-            }
-        }
-
-        // Register type parameters from constructor's where clause as DataType locals
-        // This enables T(x) calls inside inner constructors: function Foo{T}(x) where T; T(1); end
-        for tp in &ctor_info.ctor.type_params {
-            compiler.locals.insert(tp.name.clone(), ValueType::DataType);
-        }
-
-        // Protect constructor parameters from being overwritten by local assignments
-        // This fixes the bug where parameter reassignment (e.g., num = div(num, g)) causes type mismatch
-        let protected: HashSet<String> = ctor_info
-            .ctor
-            .params
-            .iter()
-            .map(|p| p.name.clone())
-            .collect();
-        collect_local_types_with_mixed_tracking(
-            &ctor_info.ctor.body.stmts,
-            &mut compiler.locals,
-            &protected,
-            &compiler.shared_ctx.struct_table,
-            &compiler.shared_ctx.global_types,
-            &mut compiler.mixed_type_vars,
-        );
-
-        // Compile constructor body
-        let return_type = ValueType::Struct(ctor_info.type_id);
-        compiler.compile_function_body(&ctor_info.ctor.body, return_type)?;
-        // Patch @goto jumps after constructor body compilation
-        compiler.patch_goto_jumps()?;
-
-        let code_start = entry;
-        let mut func_code = compiler.code;
-        relocate_jumps(&mut func_code, 0, entry);
-        code.extend(func_code);
-        let code_end = code.len();
-
-        // Update constructor function boundaries
-        function_infos[func_info_idx].code_start = code_start;
-        function_infos[func_info_idx].code_end = code_end;
-
-        // Mark this inner constructor as not reused from cache (needs slot transformation)
-        reused_base[func_info_idx] = false;
-    }
-
-    // Record where modules start (this will be the entry point if there are modules)
-    let modules_entry = code.len();
-
-    // Compile modules (execute their bodies before main)
-    for module in &all_modules {
-        let module_offset = code.len();
-
-        // Create module-local imported functions set: includes all functions defined in this module
-        // and functions imported via `using` statements in this module
-        let mut module_imported_functions = imported_functions.clone();
-        for func in &module.functions {
-            module_imported_functions.insert(func.name.clone());
-        }
-
-        // Add functions imported via module-local using statements
-        if let Some(module_imports) = module_imports_map.get(&module.name) {
-            module_imported_functions.extend(module_imports.iter().cloned());
-        }
-
-        let mut module_compiler = CoreCompiler::new(
-            &method_tables,
-            &module_functions,
-            &module_exports,
-            &module_imported_functions,
-            &usings_set,
-            &mut shared_ctx,
-            &abstract_type_names,
-            &module_constants,
-        );
-
-        // Set module path for qualified constant storage
-        module_compiler.current_module_path = Some(module.name.clone());
-
-        // Compile module body
-        module_compiler.compile_block(&module.body)?;
-
-        // After compiling the module body, create a ModuleValue and store it
-        // This makes the module accessible as a variable (e.g., TestMod)
-        module_compiler.emit(Instr::PushModule(
-            module.name.clone(),
-            module.exports.clone(),
-            module.publics.clone(),
-        ));
-        module_compiler.emit(Instr::StoreAny(module.name.clone()));
-
-        // Don't emit ReturnUnit - let execution flow through to next module or main
-
-        // Patch @goto jumps after module body compilation
-        module_compiler.patch_goto_jumps()?;
-
-        let mut module_code = module_compiler.code;
-        relocate_jumps(&mut module_code, 0, module_offset);
-        code.extend(module_code);
-    }
-
-    // Compile main block
-    let main_entry = code.len();
-    // Entry point: start at modules if there are any, otherwise at main
-    let entry = if !all_modules.is_empty() {
-        modules_entry
-    } else {
-        main_entry
-    };
-    let mut main_compiler = CoreCompiler::new(
-        &method_tables,
-        &module_functions,
-        &module_exports,
-        &imported_functions,
-        &usings_set,
-        &mut shared_ctx,
-        &abstract_type_names,
-        &module_constants,
-    );
-
-    // Pre-populate locals with inferred types to ensure consistent type usage
-    // This prevents bugs where a variable is first assigned as I64 then used as F64
-    // Also track mixed-type variables for proper dynamic typing at top-level
-    let stmts = &program.main.stmts;
-    let protected: HashSet<String> = HashSet::new();
-    collect_local_types_with_mixed_tracking(
-        stmts,
-        &mut main_compiler.locals,
-        &protected,
-        &main_compiler.shared_ctx.struct_table,
-        &main_compiler.shared_ctx.global_types,
-        &mut main_compiler.mixed_type_vars,
-    );
-
-    // Compile all statements except the last one
-    if !stmts.is_empty() {
-        for stmt in &stmts[..stmts.len() - 1] {
-            main_compiler.compile_stmt(stmt)?;
-        }
-
-        // For the last statement, if it's an expression, return its value
-        // In Julia, assignment is also an expression that returns the assigned value
-        let last_stmt = &stmts[stmts.len() - 1];
-        match last_stmt {
-            Stmt::Expr { expr, .. } => {
-                let ty = main_compiler.compile_expr(expr)?;
-                main_compiler.emit_return_for_type(ty);
-            }
-            // Assignment as last statement returns the assigned value (Julia semantics)
-            Stmt::Assign { var, value, .. } => {
-                // Check for wider type as in compile_stmt
-                let target_ty = main_compiler.locals.get(var).cloned();
-                let ty = main_compiler.compile_expr(value)?;
-
-                // Handle widening for consistency with compile_stmt
-                // For mixed-type variables, use dynamic typing (don't convert I64 to F64)
-                let is_mixed_type = main_compiler.mixed_type_vars.contains(var);
-                let final_ty = match (target_ty, ty.clone()) {
-                    // For mixed-type variables, preserve the actual type
-                    (Some(ValueType::Any), ValueType::I64)
-                    | (Some(ValueType::Any), ValueType::F64)
-                        if is_mixed_type =>
-                    {
-                        ValueType::Any
-                    }
-                    (Some(ValueType::F64), ValueType::I64) if is_mixed_type => ty,
-                    (Some(ValueType::I64), ValueType::F64) if is_mixed_type => ty,
-                    // For non-mixed variables, apply widening
-                    (Some(ValueType::F64), ValueType::I64) => {
-                        main_compiler.emit(Instr::ToF64);
-                        ValueType::F64
-                    }
-                    _ => ty,
-                };
-
-                // Duplicate the value before storing (for supported types)
-                // For other types, store and then load back
-                let needs_load_back = !matches!(final_ty, ValueType::I64 | ValueType::F64);
-
-                if !needs_load_back {
-                    // For I64 and F64, we have Dup instructions
-                    let dup_instr = match final_ty {
-                        ValueType::I64 => Instr::DupI64,
-                        ValueType::F64 => Instr::DupF64,
-                        _ => return err(format!("internal: unexpected type {:?} in Dup path", final_ty)),
-                    };
-                    main_compiler.emit(dup_instr);
-                    main_compiler.store_local(var, final_ty.clone());
-                } else {
-                    // For other types, store first then load back
-                    main_compiler.store_local(var, final_ty.clone());
-                    main_compiler.load_local(var)?;
-                }
-
-                main_compiler.emit_return_for_type(final_ty);
-            }
-            other => {
-                main_compiler.compile_stmt(other)?;
-                main_compiler.emit(Instr::ReturnNothing);
-            }
-        }
-    } else {
-        main_compiler.emit(Instr::ReturnNothing);
-    }
-
-    // Patch @goto jumps after main code compilation
-    main_compiler.patch_goto_jumps()?;
-
-    let mut main_code = main_compiler.code;
-    // Use main_entry (where main code actually starts) instead of entry (modules_entry)
-    // for jump relocation. This ensures jumps point to correct addresses when modules exist.
-    relocate_jumps(&mut main_code, 0, main_entry);
-    code.extend(main_code);
-
-    // Peephole optimization: fuse common instruction patterns
-    // Cached functions are already optimized, so we protect them from re-optimization
-    // and only optimize the non-cached portions (user functions + main code)
-    let protected_ranges: Vec<(usize, usize)> = function_infos
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, func_info)| {
-            if reused_base.get(idx).copied().unwrap_or(false) {
-                Some((func_info.code_start, func_info.code_end))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let (mut code, index_mapping) =
-        peephole::optimize_with_protected_ranges(code, &protected_ranges);
-
-    // Update all function boundaries and entry point after optimization
-    // The index_mapping includes one extra entry for the end position
-    for func_info in &mut function_infos {
-        if func_info.code_start < index_mapping.len() {
-            func_info.code_start = index_mapping[func_info.code_start];
-        }
-        if func_info.code_end < index_mapping.len() {
-            func_info.code_end = index_mapping[func_info.code_end];
-        }
-        if func_info.entry < index_mapping.len() {
-            func_info.entry = index_mapping[func_info.entry];
-        }
-    }
-
-    // Update entry point
-    let entry = if entry < index_mapping.len() {
-        index_mapping[entry]
-    } else {
-        entry // Keep original if out of bounds (shouldn't happen)
-    };
-
-    for (idx, func_info) in function_infos.iter_mut().enumerate() {
-        if reused_base[idx] {
-            continue;
-        }
-        let code_start = func_info.code_start;
-        let code_end = func_info.code_end;
-        if code_start >= code_end || code_end > code.len() {
-            continue;
-        }
-        let slot_info = build_slot_info(
-            &func_info.params,
-            &func_info.kwparams,
-            &code[code_start..code_end],
-        );
-        slotize_code(&mut code[code_start..code_end], &slot_info.name_to_slot);
-        func_info.slot_names = slot_info.slot_names;
-        func_info.local_slot_count = func_info.slot_names.len();
-        func_info.param_slots = slot_info.param_slots;
-        for (kw, slot) in func_info
-            .kwparams
-            .iter_mut()
-            .zip(slot_info.kwparam_slots.into_iter())
-        {
-            kw.slot = slot;
-        }
-    }
-
-    let global_slot_info = if entry < code.len() {
-        let slot_info = build_slot_info(&[], &[], &code[entry..]);
-        slotize_code(&mut code[entry..], &slot_info.name_to_slot);
-        slot_info
-    } else {
-        build_slot_info(&[], &[], &[])
-    };
-    let global_slot_names = global_slot_info.slot_names;
-    let global_slot_count = global_slot_names.len();
-
-    // Lazy AoT: Build RuntimeCompileContext for specialization
-    let compile_context = if !specializable_functions.is_empty() {
-        Some(RuntimeCompileContext {
-            struct_table: shared_ctx.struct_table.clone(),
-            struct_defs: shared_ctx.struct_defs.clone(),
-            parametric_structs: shared_ctx.parametric_structs.clone(),
-        })
-    } else {
-        None
-    };
-
-    let compiled = CompiledProgram {
-        code,
-        functions: function_infos,
-        struct_defs: shared_ctx.struct_defs,
-        abstract_types,
-        show_methods,
-        entry,
-        specializable_functions,
-        compile_context,
-        base_function_count,
-        global_slot_names,
-        global_slot_count,
-    };
-
-    Ok((compiled, method_tables, shared_ctx.closure_captures))
+    Ok(output.compiled)
 }
 
 // LoopContext, FinallyContext, CoreCompiler struct, impl, and type predicates

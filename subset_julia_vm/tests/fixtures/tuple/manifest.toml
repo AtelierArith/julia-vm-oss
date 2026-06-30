@@ -103,6 +103,12 @@ expected = true
 description = "tuple() function creates tuples from arguments (Issue #2173)"
 
 [[tests]]
+name = "tuple_map_type_preservation_4283"
+file = "map_type_preservation_4283.jl"
+expected = true
+description = "map over tuples preserves tuple shape and per-slot element types (Issue #4283)"
+
+[[tests]]
 name = "tuple_parametric_dispatch"
 file = "parametric_dispatch.jl"
 expected = true
@@ -161,3 +167,111 @@ name = "tuple_type_dispatch"
 file = "test_tuple_type_dispatch.jl"
 expected = true
 description = "Tuple type pattern matching dispatch: Tuple{}, Tuple{Any}, Tuple{Any,Any} (Issue #2524)"
+
+[[tests]]
+name = "tuple_last_heterogeneous"
+file = "last_heterogeneous.jl"
+expected = true
+description = "last on heterogeneous tuple returns last element, not first (Issue #3467)"
+
+[[tests]]
+name = "tuple_multiline_tuple_literal_4654"
+file = "multiline_tuple_literal_4654.jl"
+expected = true
+description = "Multiline tuple literals parse after assignment and for-loop in clauses (Issue #4654)"
+
+[[tests]]
+name = "tuple_type_head_tail_cons"
+file = "tuple_type_head_tail_cons.jl"
+expected = true
+description = "Base.tuple_type_head/tail/cons for Tuple type-parameter manipulation (Issue #5119)"
+
+[[tests]]
+name = "tuple_namedtuple_macro_5120"
+file = "namedtuple_macro_5120.jl"
+expected = true
+description = "@NamedTuple{a::Int, b} and @NamedTuple begin...end expand to the canonical NamedTuple type (Issue #5120)"
+
+[[tests]]
+name = "tuple_namedtuple_type_level_5063"
+file = "namedtuple_type_level_5063.jl"
+expected = true
+description = "Type-level NamedTuple{names, T}: isa, ===, subtype, dispatch on field names, and positional/typed construction (Issue #5063)"
+
+[[tests]]
+name = "tuple_namedtuple_equality_5265"
+file = "namedtuple_equality_5265.jl"
+expected = true
+description = "== / != / isequal on named tuples: equal named tuples compare true; order/value/arity/name mismatches compare false (Issue #5265)"
+
+[[tests]]
+name = "tuple_equality_float_edges_5267"
+file = "equality_float_edges_5267.jl"
+expected = true
+description = "== on tuples/named tuples folds == (not isequal) over elements: 0.0 == -0.0 is true and NaN == NaN is false; isequal stays bitwise/NaN-aware (Issue #5267)"
+
+[[tests]]
+name = "tuple_struct_element_equality_6685"
+file = "struct_element_equality_6685.jl"
+expected = true
+description = "== / != on tuples and named tuples compares heap-stored struct elements (OneTo, UnitRange, Complex, axes results) by value, not heap index; nested tuples fold recursively (Issue #6685)"
+
+[[tests]]
+name = "tuple_user_parametric_covariance_5064"
+file = "tuple_user_parametric_covariance_5064.jl"
+expected = true
+description = "Covariant Tuple isa/subtype/dispatch over user-defined parametric (Foo{Int}) and abstract (Dog<:Animal) element types, matching upstream subtype_tuple (Issue #5064)"
+
+[[tests]]
+name = "tuple_local_any_carrier_5081"
+file = "tuple_local_any_carrier_5081.jl"
+expected = true
+description = "Tuple fallback locals use locals_any with VarTypeTag::Tuple after legacy locals_tuple removal (Issue #5081)"
+
+[[tests]]
+name = "tuple_namedtuple_local_any_carrier_5081"
+file = "namedtuple_local_any_carrier_5081.jl"
+expected = true
+description = "NamedTuple fallback locals use locals_any with VarTypeTag::NamedTuple after legacy locals_named_tuple removal (Issue #5081)"
+
+[[tests]]
+name = "tuple_namedtuple_merge_5687"
+file = "namedtuple_merge_5687.jl"
+expected = true
+description = "merge(::NamedTuple, ::NamedTuple...) preserves field order and right-side overrides (Issue #5687)"
+
+[[tests]]
+name = "tuple_find_5681"
+file = "tuple_find_5681.jl"
+expected = true
+description = "findfirst/findlast/findall over a Tuple (Issue #5681): return the Int index / nothing / Vector{Int} of matching indices, matching upstream. Pure-Julia methods in base/tuple.jl; previously NoMethodFound. (filter/cumsum on tuples remain blocked on the Any[]-coercion bug #5717 and tuple splat construction.)"
+
+[[tests]]
+name = "tuple_filter_cumsum_5681"
+file = "tuple_filter_cumsum_5681.jl"
+expected = true
+description = "filter/cumsum/cumprod over a Tuple return a Tuple (Issue #5681). filter previously returned an Array, cumsum/cumprod an Array of Float64. Collected into a type-preserving Any[] (#5717) then rebuilt by output arity (no tuple splat / Tuple(vector) in the subset). Covers empty/odd/even filters, cumulative sum/prod, type preservation, and a 10-tuple."
+
+[[tests]]
+name = "tuple_empty_namedtuple_5776"
+file = "empty_namedtuple_5776.jl"
+expected = true
+description = "Empty NamedTuple literal (;) and NamedTuple() constructor, semicolon-form (; a=1), and display (NamedTuple() for empty, trailing comma for single field) (Issue #5776)"
+
+[[tests]]
+name = "tuple_destructuring_swap_specialization_6561"
+file = "destructuring_swap_specialization_6561.jl"
+expected = true
+description = "Self-referential destructuring swaps (a, b = b, a % b) lower to a temp tuple plus indexed reads; the lazy specializer keeps the swapped bindings type-stable (Issue #6561). Covers integer GCD/Fibonacci swaps and a Float64 swap; results match upstream Julia."
+
+[[tests]]
+name = "tuple_swap_no_tuple_alloc_6569"
+file = "swap_no_tuple_alloc_6569.jl"
+expected = true
+description = "Tuple-literal destructuring swaps (a, b = b, a % b) lower to per-element temporaries with no tuple allocation (Issue #6569). Covers 2-element swap, 3-cycle and 4-element rotations, gcd swap, and a mixed-type swap; results and simultaneous-assignment semantics match upstream Julia."
+
+[[tests]]
+name = "tuple_vector_element_equality_7803"
+file = "vector_element_equality_7803.jl"
+expected = true
+description = "== / != on tuples whose elements are mutable Vectors compares the vectors structurally by value, not heap index, so ([0.2, 0.5, 0.8],) == ([0.2, 0.5, 0.8],) is true; covers single/multiple/mixed/nested Vector elements (Issue #7803)."

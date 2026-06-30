@@ -1,13 +1,12 @@
 //! User-defined and Base macro expansion in expression context.
 
-use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
-use crate::ir::core::{Expr, Literal};
-use crate::lowering::{get_node_macro_type, LowerResult, MacroParamType};
-use crate::parser::cst::{CstWalker, Node, NodeKind};
 use super::super::lower_expr_with_ctx;
-use super::super::quote::quote_constructor_to_code_with_varargs;
 #[cfg(debug_assertions)]
 use super::macro_debug_log;
+use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
+use crate::ir::core::Expr;
+use crate::lowering::{get_node_macro_type, LowerResult, MacroParamType};
+use crate::parser::cst::{CstWalker, Node, NodeKind};
 
 pub(crate) fn lower_macroexpand_expr<'a>(
     walker: &CstWalker<'a>,
@@ -91,8 +90,8 @@ pub(crate) fn lower_macroexpand_expr<'a>(
         )
     };
 
-    if let Ok(ref expanded) = result {
-        #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
+    if let Ok(expanded) = &result {
         macro_debug_log(format_args!("  Expanded to: {:?}", expanded));
     }
 
@@ -139,132 +138,34 @@ pub(crate) fn expand_user_defined_macro_expr<'a>(
         );
     }
 
-    let stmts = &macro_def.body.stmts;
-
-    if stmts.is_empty() {
-        return Ok(Expr::Literal(Literal::Nothing, span));
-    }
-
-    if stmts.len() == 1 {
-        return match &stmts[0] {
-            crate::ir::core::Stmt::Expr { expr, .. } => {
-                substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )
-            }
-            crate::ir::core::Stmt::Return {
-                value: Some(expr), ..
-            } => {
-                substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )
-            }
-            _ => Err(
-                UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(
-                    "user-defined macro expansion currently only supports macros that return expressions",
-                ),
-            ),
-        };
-    }
-
-    let mut expanded_stmts = Vec::new();
-    for stmt in stmts {
-        match stmt {
-            crate::ir::core::Stmt::Expr {
-                expr,
-                span: stmt_span,
-            } => {
-                let expanded = substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(crate::ir::core::Stmt::Expr {
-                    expr: expanded,
-                    span: *stmt_span,
-                });
-            }
-            crate::ir::core::Stmt::Assign {
-                var,
-                value,
-                span: stmt_span,
-            } => {
-                let expanded_value = substitute_params_in_macro_expr(
-                    value,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(crate::ir::core::Stmt::Assign {
-                    var: var.clone(),
-                    value: expanded_value,
-                    span: *stmt_span,
-                });
-            }
-            crate::ir::core::Stmt::Return {
-                value: Some(expr),
-                span: stmt_span,
-            } => {
-                let expanded = substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(crate::ir::core::Stmt::Expr {
-                    expr: expanded,
-                    span: *stmt_span,
-                });
-            }
-            _ => {
-                return Err(
-                    UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(
-                        "user-defined macro expansion currently only supports expression and assignment statements",
-                    ),
-                );
-            }
-        }
-    }
-
-    Ok(Expr::LetBlock {
-        bindings: vec![],
-        body: crate::ir::core::Block {
-            stmts: expanded_stmts,
-            span,
-        },
-        span,
-    })
+    crate::lowering::macro_runtime::expand_macro_to_expr(
+        walker, macro_name, &macro_def, args, span, lambda_ctx,
+    )
 }
 
-/// Expand a Base macro call in expression context.
-pub(crate) fn expand_base_macro_expr<'a>(
+/// Expand a bundled-package macro call (e.g. Plots' `@animate`/`@gif`) in
+/// expression context.
+///
+/// Bundled-package macros are expanded through the same full `macro_runtime` path
+/// as user-defined macros — not the limited template path used for Base/stdlib —
+/// so they may construct AST nodes (`Expr(:for, …)`, `.args` access) at expansion
+/// time. Issue #6355: `anim = @animate for … end` is a macro call in value
+/// position, which previously never reached the bundled-macro registry.
+pub(crate) fn expand_bundled_package_macro_expr<'a>(
     walker: &CstWalker<'a>,
+    module_name: &str,
     macro_name: &str,
     args: &[Node<'a>],
     span: crate::span::Span,
     lambda_ctx: &crate::lowering::LambdaContext,
 ) -> LowerResult<Expr> {
-    let macro_def = crate::base_loader::get_base_macro(macro_name).ok_or_else(|| {
-        UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span)
-            .with_hint(format!("Base macro @{} not found", macro_name))
-    })?;
+    let macro_def = crate::stdlib_loader::get_bundled_package_macro(module_name, macro_name)
+        .ok_or_else(|| {
+            UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(format!(
+                "bundled-package macro @{} not found in {}",
+                macro_name, module_name
+            ))
+        })?;
 
     let min_args = if macro_def.has_varargs {
         macro_def.params.len() - 1
@@ -282,248 +183,64 @@ pub(crate) fn expand_base_macro_expr<'a>(
         );
     }
 
-    let stmts = &macro_def.body.stmts;
-
-    if stmts.is_empty() {
-        return Ok(Expr::Literal(Literal::Nothing, span));
-    }
-
-    if stmts.len() == 1 {
-        return match &stmts[0] {
-            crate::ir::core::Stmt::Expr { expr, .. } => {
-                substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )
-            }
-            crate::ir::core::Stmt::Return {
-                value: Some(expr), ..
-            } => {
-                substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )
-            }
-            _ => Err(
-                UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(
-                    "Base macro expansion currently only supports macros that return expressions",
-                ),
-            ),
-        };
-    }
-
-    let mut expanded_stmts = Vec::new();
-    for stmt in stmts {
-        match stmt {
-            crate::ir::core::Stmt::Expr {
-                expr,
-                span: stmt_span,
-            } => {
-                let expanded = substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(crate::ir::core::Stmt::Expr {
-                    expr: expanded,
-                    span: *stmt_span,
-                });
-            }
-            crate::ir::core::Stmt::Assign {
-                var,
-                value,
-                span: stmt_span,
-            } => {
-                let expanded_value = substitute_params_in_macro_expr(
-                    value,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(crate::ir::core::Stmt::Assign {
-                    var: var.clone(),
-                    value: expanded_value,
-                    span: *stmt_span,
-                });
-            }
-            crate::ir::core::Stmt::Return {
-                value: Some(expr),
-                span: stmt_span,
-            } => {
-                let expanded = substitute_params_in_macro_expr(
-                    expr,
-                    &macro_def.params,
-                    args,
-                    walker,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(crate::ir::core::Stmt::Expr {
-                    expr: expanded,
-                    span: *stmt_span,
-                });
-            }
-            _ => {
-                return Err(
-                    UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(
-                        "Base macro expansion currently only supports expression and assignment statements",
-                    ),
-                );
-            }
-        }
-    }
-
-    Ok(Expr::LetBlock {
-        bindings: vec![],
-        body: crate::ir::core::Block {
-            stmts: expanded_stmts,
-            span,
-        },
-        span,
-    })
+    crate::stdlib_loader::add_bundled_package_macro_context(module_name, lambda_ctx);
+    crate::lowering::macro_runtime::expand_macro_to_expr(
+        walker, macro_name, &macro_def, args, span, lambda_ctx,
+    )
 }
 
-/// Substitute macro parameters in an expression with actual arguments.
-pub(crate) fn substitute_params_in_macro_expr<'a>(
-    expr: &Expr,
-    params: &[String],
-    args: &[Node<'a>],
+/// Expand a Base macro call in expression context.
+pub(crate) fn expand_base_macro_expr<'a>(
     walker: &CstWalker<'a>,
+    macro_name: &str,
+    args: &[Node<'a>],
+    span: crate::span::Span,
     lambda_ctx: &crate::lowering::LambdaContext,
-    has_varargs: bool,
 ) -> LowerResult<Expr> {
-    match expr {
-        Expr::Var(name, span) => {
-            if let Some(idx) = params.iter().position(|p| p == name) {
-                if has_varargs && idx == params.len() - 1 {
-                    let fixed_param_count = params.len() - 1;
-                    if args.len() > fixed_param_count {
-                        let varargs_exprs: Result<Vec<_>, _> = args[fixed_param_count..]
-                            .iter()
-                            .map(|arg| lower_expr_with_ctx(walker, *arg, lambda_ctx))
-                            .collect();
-                        Ok(Expr::TupleLiteral {
-                            elements: varargs_exprs?,
-                            span: *span,
-                        })
-                    } else {
-                        Ok(Expr::TupleLiteral {
-                            elements: vec![],
-                            span: *span,
-                        })
-                    }
-                } else {
-                    lower_expr_with_ctx(walker, args[idx], lambda_ctx)
-                }
-            } else {
-                Ok(Expr::Var(name.clone(), *span))
-            }
-        }
-        Expr::QuoteLiteral { constructor, span } => {
-            quote_constructor_to_code_with_varargs(
-                constructor,
-                params,
-                args,
-                *span,
-                walker,
-                lambda_ctx,
-                has_varargs,
-            )
-        }
-        Expr::BinaryOp {
-            op,
-            left,
-            right,
+    // Multi-argument @show (Issue #4868) in expression context, e.g.
+    // `(@show a b c) == c`. Build the same `_do_show` block as the statement
+    // path and wrap it in a LetBlock so the expression evaluates to the value
+    // of the last argument. See build_multiarg_show_block for details.
+    if macro_name == "show" && args.len() != 1 {
+        let block = crate::lowering::stmt::macros::expand::build_multiarg_show_block(
+            walker, args, span, lambda_ctx,
+        )?;
+        return Ok(Expr::LetBlock {
+            bindings: vec![],
+            body: block,
             span,
-        } => {
-            let new_left = substitute_params_in_macro_expr(left, params, args, walker, lambda_ctx, has_varargs)?;
-            let new_right = substitute_params_in_macro_expr(right, params, args, walker, lambda_ctx, has_varargs)?;
-            Ok(Expr::BinaryOp {
-                op: *op,
-                left: Box::new(new_left),
-                right: Box::new(new_right),
-                span: *span,
-            })
-        }
-        Expr::UnaryOp { op, operand, span } => {
-            let new_operand = substitute_params_in_macro_expr(operand, params, args, walker, lambda_ctx, has_varargs)?;
-            Ok(Expr::UnaryOp {
-                op: *op,
-                operand: Box::new(new_operand),
-                span: *span,
-            })
-        }
-        Expr::Call {
-            function,
-            args: call_args,
-            kwargs,
-            splat_mask,
-            kwargs_splat_mask,
-            span,
-        } => {
-            if function == "string" && call_args.len() == 1 && kwargs.is_empty() {
-                if let Expr::Var(param_name, _) = &call_args[0] {
-                    if let Some(idx) = params.iter().position(|p| p == param_name) {
-                        let arg_text = walker.text(&args[idx]);
-                        return Ok(Expr::Literal(Literal::Str(arg_text.to_string()), *span));
-                    }
-                }
-            }
-
-            let new_args: Result<Vec<_>, _> = call_args
-                .iter()
-                .map(|a| substitute_params_in_macro_expr(a, params, args, walker, lambda_ctx, has_varargs))
-                .collect();
-            let new_kwargs: Result<Vec<_>, _> = kwargs
-                .iter()
-                .map(|(k, v)| {
-                    substitute_params_in_macro_expr(v, params, args, walker, lambda_ctx, has_varargs)
-                        .map(|nv| (k.clone(), nv))
-                })
-                .collect();
-            Ok(Expr::Call {
-                function: function.clone(),
-                args: new_args?,
-                kwargs: new_kwargs?,
-                splat_mask: splat_mask.clone(),
-                kwargs_splat_mask: kwargs_splat_mask.clone(),
-                span: *span,
-            })
-        }
-        Expr::Builtin {
-            name,
-            args: builtin_args,
-            span,
-        } => {
-            if *name == crate::ir::core::BuiltinOp::Esc && builtin_args.len() == 1 {
-                return substitute_params_in_macro_expr(
-                    &builtin_args[0], params, args, walker, lambda_ctx, has_varargs,
-                );
-            }
-
-            let new_args: Result<Vec<_>, _> = builtin_args
-                .iter()
-                .map(|a| substitute_params_in_macro_expr(a, params, args, walker, lambda_ctx, has_varargs))
-                .collect();
-            Ok(Expr::Builtin {
-                name: *name,
-                args: new_args?,
-                span: *span,
-            })
-        }
-        _ => Ok(expr.clone()),
+        });
     }
+
+    // Select the overload matching the call arity. A base macro like `@sprintf`
+    // has several fixed-arity definitions (`sprintf(fmt)`, `sprintf(fmt, a1)`, ...);
+    // using the arity-agnostic `get_base_macro` here picked the first (1-arg)
+    // overload, so `@sprintf("%d", 42)` in value position dropped all value
+    // arguments and produced "" (Issue #5683). The statement-position expander
+    // already uses the arity-aware lookup.
+    let macro_def = crate::base_loader::get_base_macro_with_arity(macro_name, args.len())
+        .ok_or_else(|| {
+            UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span)
+                .with_hint(format!("Base macro @{} not found", macro_name))
+        })?;
+
+    let min_args = if macro_def.has_varargs {
+        macro_def.params.len() - 1
+    } else {
+        macro_def.params.len()
+    };
+    if args.len() < min_args {
+        return Err(
+            UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(format!(
+                "macro @{} expects at least {} arguments, got {}",
+                macro_name,
+                min_args,
+                args.len()
+            )),
+        );
+    }
+
+    crate::lowering::macro_runtime::expand_macro_to_expr(
+        walker, macro_name, &macro_def, args, span, lambda_ctx,
+    )
 }

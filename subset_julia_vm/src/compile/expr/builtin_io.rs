@@ -18,7 +18,128 @@ impl CoreCompiler<'_> {
     ) -> CResult<Option<ValueType>> {
         match name {
             "println" => {
-                // Julia's println concatenates arguments without adding spaces
+                // Julia's println concatenates arguments without adding spaces and
+                // appends a newline. Support `println(io, args...)` (Issue #3573):
+                // when the first argument is an IO stream (stdout/stderr/IOBuffer/
+                // devnull) we route the entire write — newline included — through
+                // the IOPrint builtin so that stderr/IOBuffer destinations are
+                // honored instead of dumping the io value itself onto stdout.
+                if !args.is_empty() {
+                    let first_ty = self.infer_expr_type(&args[0]);
+                    // Issue #4731: when the first arg's type is `Any` (e.g.
+                    // `_show_vector(io, v)` where the `io` parameter is
+                    // untyped), `println(io)` previously fell through to the
+                    // stdout path and `PrintAnyNoNewline` formatted the IO
+                    // value with the Rust `Debug` form `IOBuffer(...)`,
+                    // leaking that string to stdout. Route `Any`-typed
+                    // singles through IOPrint too — IOPrint dispatches on
+                    // the runtime kind: IO writes the newline to the sink,
+                    // non-IO falls back to printing both [arg, "\n"] to
+                    // stdout (matches upstream `println(x)` for any non-IO).
+                    // Issue #4853: `println(io, x)` with a single value whose
+                    // first arg is statically known to be IO is lowered as
+                    // `print(io, x)` followed by a separate newline write, so
+                    // the IOPrint two-arg user-`show` dispatch fires for a
+                    // struct `x` with a registered `show(io, ::T)` method.
+                    // Bundling the trailing "\n" into the same IOPrint call
+                    // (the `else` branch below) makes it a three-arg print,
+                    // which skips user-`show` dispatch and field-dumps the
+                    // struct. We `Dup` the IO value so the side-effecting `io`
+                    // expression is evaluated once: stack becomes [io, io],
+                    // IOPrint consumes [io, x] (dispatching show), its result
+                    // is popped, and `println(io)` writes the newline to the
+                    // remaining IO handle.
+                    if (first_ty == ValueType::IO || first_ty == ValueType::Any) && args.len() == 2
+                    {
+                        // Single-value `println(io_or_val, x)`. Split the write so
+                        // the two-arg IOPrint user-`show` dispatch can fire for a
+                        // struct `x` with a registered `show(io, ::T)` method:
+                        //   compile(first); Dup        # [first, first]
+                        //   compile(x)                 # [first, first, x]
+                        //   IOPrint(2)                 # consumes [first, x]
+                        //   Pop                        # discard IOPrint result
+                        //   IOPrintlnNewline           # newline to first's sink
+                        // The `first` value is Dup'd so the (possibly
+                        // side-effecting) IO expression is evaluated exactly once.
+                        // `IOPrintlnNewline` discriminates `first` at runtime:
+                        //   - IO  -> newline to the resolved sink (IOBuffer/
+                        //            stdout/stderr/devnull);
+                        //   - non-IO (`println(a, x)` with an `Any`-typed non-IO
+                        //     `a`) -> newline to stdout. IOPrint already printed
+                        //     `a` + `x` to stdout, so the newline is NOT a re-
+                        //     print of the value (Issue #4853 follow-up: a local
+                        //     `IOBuffer()` infers as `Any`, so this case must be
+                        //     runtime-safe rather than assuming a static IO).
+                        self.compile_expr(&args[0])?;
+                        self.emit(Instr::Dup);
+                        self.compile_expr(&args[1])?;
+                        self.emit(Instr::CallBuiltin(BuiltinId::IOPrint, 2));
+                        self.emit(Instr::Pop);
+                        self.emit(Instr::IOPrintlnNewline);
+                        self.emit(Instr::PushNothing);
+                        return Ok(Some(ValueType::Nothing));
+                    }
+                    // Issue #4827: multi-value `println(io, a, x, b)` with a
+                    // statically-`IO` first arg shares the same gap as multi-arg
+                    // `print(io, …)` — bundling every value into one
+                    // `IOPrint(N+1)` skips user-`show` dispatch for a struct value
+                    // and field-dumps it. Split the same way as `print` above so
+                    // each value goes through a two-arg `IOPrint` (which dispatches
+                    // `show(io, ::T)`), then write the trailing newline to the
+                    // remaining IO handle via `IOPrintlnNewline`:
+                    //   compile(io)            # [io]   (evaluated exactly once)
+                    //   for each value arg:
+                    //     Dup; compile(arg); IOPrint(2); Pop
+                    //   IOPrintlnNewline       # consumes io, writes "\n" to sink
+                    //   PushNothing            # println returns nothing
+                    // Restricted to a statically-`IO` first arg: the `Any` case
+                    // (a local `IOBuffer()` infers as `Any`, or a non-IO `a`) keeps
+                    // the runtime-dispatched single `IOPrint(N+1)` below.
+                    if first_ty == ValueType::IO && args.len() > 2 {
+                        self.compile_expr(&args[0])?;
+                        for arg in args[1..].iter() {
+                            self.emit(Instr::Dup);
+                            self.compile_expr(arg)?;
+                            self.emit(Instr::CallBuiltin(BuiltinId::IOPrint, 2));
+                            self.emit(Instr::Pop);
+                        }
+                        self.emit(Instr::IOPrintlnNewline);
+                        self.emit(Instr::PushNothing);
+                        return Ok(Some(ValueType::Nothing));
+                    }
+                    // Issue #7171/#7172: single-arg `println(x)` where `x`'s type
+                    // is unknown (`Any`) — e.g. a package/module function return like
+                    // `factor(360)::Primes.Factorization`. Bundling `[x, "\n"]` into one
+                    // IOPrint sends the value through the non-IO arm's plain field-dump,
+                    // skipping a registered `show(io, ::T)`. Split so IOPrint sees the
+                    // lone value (and can dispatch user `show`), while `IOPrintlnNewline`
+                    // discriminates the sink at runtime — keeping `println(io::Any)`
+                    // (newline to the io's sink) correct too (Issue #4731).
+                    if first_ty == ValueType::Any && args.len() == 1 {
+                        self.compile_expr(&args[0])?;
+                        self.emit(Instr::Dup);
+                        self.emit(Instr::CallBuiltin(BuiltinId::IOPrint, 1));
+                        self.emit(Instr::Pop);
+                        self.emit(Instr::IOPrintlnNewline);
+                        self.emit(Instr::PushNothing);
+                        return Ok(Some(ValueType::Nothing));
+                    }
+                    if first_ty == ValueType::IO || first_ty == ValueType::Any {
+                        // Compile all user args, then push a literal "\n" as the
+                        // final value. IOPrint will dispatch on the first arg's
+                        // runtime kind (Stdout/Stderr/Buffer/Devnull/non-IO) and
+                        // write each subsequent value — including the trailing
+                        // newline — to the resolved sink.
+                        for arg in args.iter() {
+                            self.compile_expr(arg)?;
+                        }
+                        self.emit(Instr::PushStr("\n".to_string()));
+                        self.emit(Instr::CallBuiltin(BuiltinId::IOPrint, args.len() + 1));
+                        return Ok(Some(ValueType::Any));
+                    }
+                }
+
+                // No IO argument - use specialized print instructions for stdout.
                 for arg in args.iter() {
                     let ty = self.compile_expr(arg)?;
                     match ty {
@@ -52,6 +173,43 @@ impl CoreCompiler<'_> {
                 if !args.is_empty() {
                     // Check if first arg is IO type (compile-time check)
                     let first_ty = self.infer_expr_type(&args[0]);
+                    // Issue #4827: multi-arg `print(io, a, x, b)` where the first
+                    // arg is statically IO must dispatch each struct value `x` to
+                    // a user-defined `show(io, ::T)`, just like the 2-arg
+                    // `print(io, x)` path already does (Issue #4761). Bundling
+                    // every value into one `IOPrint(N)` call skips the user-`show`
+                    // dispatch (which the VM only performs for the exact 2-arg
+                    // shape) and field-dumps the struct. Split the write so each
+                    // value goes through its own two-arg `IOPrint`:
+                    //   compile(io)            # [io]   (evaluated exactly once)
+                    //   for each value arg:
+                    //     Dup                  # [io, io]
+                    //     compile(arg)         # [io, io, arg]
+                    //     IOPrint(2)           # consumes [io, arg] -> pushes result
+                    //     Pop                  # discard the IOPrint result
+                    // The original `io` handle is left on the stack as the overall
+                    // result, matching the single `IOPrint(N)` semantics (returns
+                    // the IO for an IOBuffer, used for chaining `io = print(io,…)`).
+                    // `io` is compiled once and `Dup`'d per value so the
+                    // (possibly side-effecting) IO expression is evaluated exactly
+                    // once and each two-arg `IOPrint` gets its own copy.
+                    //
+                    // Restrict the split to a statically-known `IO` first arg: the
+                    // `Any`-typed first-arg case may resolve to stdout or a non-IO
+                    // value at runtime (e.g. `print(a, x)`), where a per-value
+                    // 2-arg IOPrint would change concatenation semantics; that
+                    // case keeps the single `IOPrint(N)`.
+                    if first_ty == ValueType::IO && args.len() > 2 {
+                        self.compile_expr(&args[0])?;
+                        for arg in args[1..].iter() {
+                            self.emit(Instr::Dup);
+                            self.compile_expr(arg)?;
+                            self.emit(Instr::CallBuiltin(BuiltinId::IOPrint, 2));
+                            self.emit(Instr::Pop);
+                        }
+                        // The original IO handle remains on the stack as the value.
+                        return Ok(Some(ValueType::Any));
+                    }
                     if first_ty == ValueType::IO || (first_ty == ValueType::Any && args.len() > 1) {
                         // IO is definitely IO, or first arg type is unknown with multiple args
                         // Use IOPrint builtin - it handles both IO and non-IO first args at runtime
@@ -129,7 +287,7 @@ impl CoreCompiler<'_> {
                 }
                 Ok(Some(ValueType::Nothing))
             }
-            "rethrow" => {
+            "rethrow" | "Base.rethrow" => {
                 // rethrow() - rethrow the current exception from within a catch block
                 // rethrow(e) - rethrow with a different exception value
                 if args.is_empty() {
@@ -155,12 +313,18 @@ impl CoreCompiler<'_> {
                 Ok(Some(ValueType::Nothing))
             }
             "IOBuffer" => {
-                // IOBuffer() - create new empty IOBuffer
-                if !args.is_empty() {
-                    return err("IOBuffer() takes no arguments");
+                // IOBuffer() - empty writable buffer; IOBuffer(s) - readable buffer
+                // initialized with the string `s` (Issue #5686).
+                if args.is_empty() {
+                    self.emit(Instr::CallBuiltin(BuiltinId::IOBufferNew, 0));
+                    Ok(Some(ValueType::IO))
+                } else if args.len() == 1 {
+                    self.compile_expr(&args[0])?; // the string content
+                    self.emit(Instr::CallBuiltin(BuiltinId::IOBufferFromString, 1));
+                    Ok(Some(ValueType::IO))
+                } else {
+                    err("IOBuffer accepts at most one argument")
                 }
-                self.emit(Instr::CallBuiltin(BuiltinId::IOBufferNew, 0));
-                Ok(Some(ValueType::IO))
             }
             "take!" | "takestring!" => {
                 // take!(io) or takestring!(io) - extract string from IOBuffer
@@ -222,6 +386,14 @@ impl CoreCompiler<'_> {
                     // Check if second arg is String type
                     if let Expr::Var(type_name, _) = &args[1] {
                         if type_name == "String" {
+                            // read(io, String) on an IOBuffer returns its remaining
+                            // content (Issue #5686). `take!` extracts the buffer string;
+                            // a single read consumes it, matching upstream semantics.
+                            if self.infer_expr_type(&args[0]) == ValueType::IO {
+                                self.compile_expr(&args[0])?; // the IO buffer
+                                self.emit(Instr::CallBuiltin(BuiltinId::TakeString, 1));
+                                return Ok(Some(ValueType::Str));
+                            }
                             self.compile_expr(&args[0])?; // filename
                             self.compile_expr(&args[1])?; // String type (ignored at runtime)
                             self.emit(Instr::CallBuiltin(BuiltinId::ReadFile, 2));
@@ -241,6 +413,22 @@ impl CoreCompiler<'_> {
                 self.emit(Instr::CallBuiltin(BuiltinId::ReadLines, 1));
                 Ok(Some(ValueType::ArrayOf(
                     super::super::ArrayElementType::String,
+                    Some(1),
+                )))
+            }
+            "eachline" => {
+                // eachline(filename) - return an iterable collection of lines.
+                // This currently materializes the file like readlines(filename),
+                // which covers package initialization patterns such as
+                // collect(eachline(path)) and map(f, eachline(path)) (Issue #7593).
+                if args.len() != 1 {
+                    return err("eachline requires exactly 1 argument: eachline(filename)");
+                }
+                self.compile_expr(&args[0])?;
+                self.emit(Instr::CallBuiltin(BuiltinId::Eachline, 1));
+                Ok(Some(ValueType::ArrayOf(
+                    super::super::ArrayElementType::String,
+                    Some(1),
                 )))
             }
             "readline" => {
@@ -325,6 +513,7 @@ impl CoreCompiler<'_> {
                 }
                 Ok(Some(ValueType::ArrayOf(
                     super::super::ArrayElementType::String,
+                    Some(1),
                 )))
             }
             "mkdir" => {

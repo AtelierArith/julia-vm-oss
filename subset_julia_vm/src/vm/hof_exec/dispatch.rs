@@ -2,17 +2,20 @@
 
 use crate::rng::RngLike;
 
+use super::state::{BroadcastInput, HofOpKind};
 use crate::vm::broadcast::{broadcast_get_index, compute_strides, expand_shapes_for_julia};
 use crate::vm::error::VmError;
-use crate::vm::frame::{BroadcastInput, HofOpKind};
-use crate::vm::value::{new_array_ref, ArrayData, ArrayValue, Value};
+use crate::vm::value::{ArrayValue, Value};
 use crate::vm::Vm;
 
 impl<R: RngLike> Vm<R> {
     /// Handle return value from HOF function call
     /// Called by ReturnF64/ReturnI64 when in HOF mode
     pub(in crate::vm) fn handle_hof_return(&mut self, result: f64) -> Result<(), VmError> {
-        let bc_state = self.broadcast_state.as_mut().ok_or_else(|| {
+        // Direct field access (not the `broadcast_state_mut` helper) keeps the
+        // borrow scoped to `broadcast_states` so the body can still mutate the
+        // disjoint `frames` / `stack` / `return_ips` fields (Issue #5229).
+        let bc_state = self.broadcast_states.last_mut().ok_or_else(|| {
             VmError::InternalError("handle_hof_return called without broadcast_state".to_string())
         })?;
         let op_kind = bc_state.op_kind;
@@ -25,10 +28,22 @@ impl<R: RngLike> Vm<R> {
         let input_val = bc_state.input.get(current_idx).unwrap_or(Value::F64(0.0));
 
         // Pop the current frame
-        self.frames.pop();
+        if let Some(frame) = self.frames.pop() {
+            self.stack.truncate(frame.stack_base);
+        }
         self.return_ips.pop();
 
         match op_kind {
+            HofOpKind::FilterMap => {
+                return Err(VmError::InternalError(
+                    "FilterMap should use value-mode HOF dispatch".to_string(),
+                ));
+            }
+            HofOpKind::BroadcastTupleSplat => {
+                return Err(VmError::InternalError(
+                    "BroadcastTupleSplat should use value-mode HOF dispatch".to_string(),
+                ));
+            }
             HofOpKind::Broadcast => {
                 // Collect result into results array
                 bc_state.results.push_f64(result);
@@ -56,12 +71,11 @@ impl<R: RngLike> Vm<R> {
                     let result_data = bc_state.results.take_f64();
                     let result_shape = bc_state.input_shape.clone();
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
-                    self.stack
-                        .push(Value::Array(new_array_ref(ArrayValue::from_f64(
-                            result_data,
-                            result_shape,
-                        ))));
+                    self.clear_broadcast_state();
+                    self.push_array_value_as_wrapper(ArrayValue::memory_first_from_f64(
+                        result_data,
+                        result_shape,
+                    ))?;
                     self.ip = return_ip;
                 }
             }
@@ -98,12 +112,11 @@ impl<R: RngLike> Vm<R> {
                     let result_data = bc_state.results.take_i64();
                     let len = result_data.len();
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
-                    self.stack
-                        .push(Value::Array(new_array_ref(ArrayValue::from_i64(
-                            result_data,
-                            vec![len],
-                        ))));
+                    self.clear_broadcast_state();
+                    self.push_array_value_as_wrapper(ArrayValue::memory_first_from_i64(
+                        result_data,
+                        vec![len],
+                    ))?;
                     self.ip = return_ip;
                 }
             }
@@ -113,7 +126,7 @@ impl<R: RngLike> Vm<R> {
                 if result != 0.0 {
                     let index = (bc_state.current_index + 1) as i64;
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
+                    self.clear_broadcast_state();
                     self.stack.push(Value::I64(index));
                     self.ip = return_ip;
                 } else {
@@ -137,7 +150,7 @@ impl<R: RngLike> Vm<R> {
                     } else {
                         // All elements checked, none matched - return nothing
                         let return_ip = bc_state.return_ip_after_broadcast;
-                        self.broadcast_state = None;
+                        self.clear_broadcast_state();
                         self.stack.push(Value::Nothing);
                         self.ip = return_ip;
                     }
@@ -174,7 +187,7 @@ impl<R: RngLike> Vm<R> {
                         _ => Value::Nothing,
                     };
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
+                    self.clear_broadcast_state();
                     self.stack.push(result_val);
                     self.ip = return_ip;
                 }
@@ -213,7 +226,7 @@ impl<R: RngLike> Vm<R> {
                         _ => 0.0,
                     };
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
+                    self.clear_broadcast_state();
                     self.stack.push(Value::F64(final_sum));
                     self.ip = return_ip;
                 }
@@ -223,7 +236,7 @@ impl<R: RngLike> Vm<R> {
                 // Short-circuit: if result is truthy, we're done (Issue #2031)
                 if result != 0.0 {
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
+                    self.clear_broadcast_state();
                     self.stack.push(Value::Bool(true));
                     self.ip = return_ip;
                 } else {
@@ -247,7 +260,7 @@ impl<R: RngLike> Vm<R> {
                     } else {
                         // All elements checked, none were true (Issue #2031)
                         let return_ip = bc_state.return_ip_after_broadcast;
-                        self.broadcast_state = None;
+                        self.clear_broadcast_state();
                         self.stack.push(Value::Bool(false));
                         self.ip = return_ip;
                     }
@@ -258,7 +271,7 @@ impl<R: RngLike> Vm<R> {
                 // Short-circuit: if result is falsy, we're done (Issue #2031)
                 if result == 0.0 {
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
+                    self.clear_broadcast_state();
                     self.stack.push(Value::Bool(false));
                     self.ip = return_ip;
                 } else {
@@ -282,7 +295,7 @@ impl<R: RngLike> Vm<R> {
                     } else {
                         // All elements checked, all were true (Issue #2031)
                         let return_ip = bc_state.return_ip_after_broadcast;
-                        self.broadcast_state = None;
+                        self.clear_broadcast_state();
                         self.stack.push(Value::Bool(true));
                         self.ip = return_ip;
                     }
@@ -325,7 +338,7 @@ impl<R: RngLike> Vm<R> {
                         _ => 0,
                     };
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
+                    self.clear_broadcast_state();
                     self.stack.push(Value::I64(final_count));
                     self.ip = return_ip;
                 }
@@ -401,12 +414,11 @@ impl<R: RngLike> Vm<R> {
                     // All elements processed - create result array
                     let result_data = bc_state.results.take_f64();
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
-                    self.stack
-                        .push(Value::Array(new_array_ref(ArrayValue::from_f64(
-                            result_data,
-                            result_shape,
-                        ))));
+                    self.clear_broadcast_state();
+                    self.push_array_value_as_wrapper(ArrayValue::memory_first_from_f64(
+                        result_data,
+                        result_shape,
+                    ))?;
                     self.ip = return_ip;
                 }
             }
@@ -488,8 +500,8 @@ impl<R: RngLike> Vm<R> {
                 } else {
                     // All elements processed - return dest array
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
-                    self.stack.push(Value::Array(dest_ref));
+                    self.clear_broadcast_state();
+                    self.push_array_ref_as_wrapper(dest_ref)?;
                     self.ip = return_ip;
                 }
             }
@@ -517,7 +529,7 @@ impl<R: RngLike> Vm<R> {
                         } else {
                             // Only one element - return the mapped result
                             let return_ip = bc_state.return_ip_after_broadcast;
-                            self.broadcast_state = None;
+                            self.clear_broadcast_state();
                             self.stack.push(Value::F64(result));
                             self.ip = return_ip;
                         }
@@ -553,7 +565,7 @@ impl<R: RngLike> Vm<R> {
                     } else {
                         // All done - return final accumulator
                         let return_ip = bc_state.return_ip_after_broadcast;
-                        self.broadcast_state = None;
+                        self.clear_broadcast_state();
                         self.stack.push(Value::F64(result));
                         self.ip = return_ip;
                     }
@@ -583,7 +595,7 @@ impl<R: RngLike> Vm<R> {
                         } else {
                             // Only one element - return the mapped result
                             let return_ip = bc_state.return_ip_after_broadcast;
-                            self.broadcast_state = None;
+                            self.clear_broadcast_state();
                             self.stack.push(Value::F64(result));
                             self.ip = return_ip;
                         }
@@ -620,7 +632,7 @@ impl<R: RngLike> Vm<R> {
                     } else {
                         // All done - return final accumulator
                         let return_ip = bc_state.return_ip_after_broadcast;
-                        self.broadcast_state = None;
+                        self.clear_broadcast_state();
                         self.stack.push(Value::F64(result));
                         self.ip = return_ip;
                     }
@@ -647,8 +659,8 @@ impl<R: RngLike> Vm<R> {
                 } else {
                     // All elements processed - return dest array
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
-                    self.stack.push(Value::Array(dest_ref));
+                    self.clear_broadcast_state();
+                    self.push_array_ref_as_wrapper(dest_ref)?;
                     self.ip = return_ip;
                 }
             }
@@ -675,7 +687,6 @@ impl<R: RngLike> Vm<R> {
                     })?;
                     {
                         let mut dest_borrow = dest_ref.borrow_mut();
-                        // Rebuild the data with only kept values
                         let new_data: Vec<f64> = kept_values
                             .iter()
                             .map(|v| match v {
@@ -684,12 +695,11 @@ impl<R: RngLike> Vm<R> {
                                 _ => 0.0,
                             })
                             .collect();
-                        dest_borrow.data = ArrayData::F64(new_data);
-                        dest_borrow.shape = vec![new_len];
+                        *dest_borrow = ArrayValue::memory_first_from_f64(new_data, vec![new_len]);
                     }
                     let return_ip = bc_state.return_ip_after_broadcast;
-                    self.broadcast_state = None;
-                    self.stack.push(Value::Array(dest_ref));
+                    self.clear_broadcast_state();
+                    self.push_array_ref_as_wrapper(dest_ref)?;
                     self.ip = return_ip;
                 }
             }

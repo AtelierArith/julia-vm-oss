@@ -79,10 +79,16 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            // 'in' can be used as a function call: in(x, itr)
+            Token::KwIn => {
+                let token = self.advance().unwrap();
+                Ok(CstNode::leaf(NodeKind::Identifier, token.span, token.text))
+            }
+
             // 'end' keyword can be used in indexing expressions: a[end]
             // 'isa' can be used as a function call: isa(x, T)
-            // 'outer' is a contextual keyword (only special in `for outer x in ...`)
-            Token::KwEnd | Token::KwIsa | Token::KwOuter => {
+            // ('outer' is lexed as a plain Identifier — see Token enum / Issue #8099)
+            Token::KwEnd | Token::KwIsa => {
                 let token = self.advance().unwrap();
                 Ok(CstNode::leaf(NodeKind::Identifier, token.span, token.text))
             }
@@ -93,8 +99,17 @@ impl<'a> Parser<'a> {
             // 'let' as expression: y = let a = 1; a + 1 end
             Token::KwLet => self.parse_let_expression(),
 
+            // 'try' as expression: y = try ... catch ... end (Issue #4784).
+            // Upstream Julia treats try/catch/finally as a first-class
+            // expression whose value is the last expression in whichever
+            // branch ran (try body if no exception, catch body if any).
+            Token::KwTry => self.parse_try_statement(),
+
             // 'quote' as expression: esc(quote ... end)
             Token::KwQuote => self.parse_quote_expression(),
+
+            // Anonymous function expression: f = function (x) x + 1 end
+            Token::KwFunction => self.parse_function_definition(),
 
             // Jump expressions: these can appear as the right-hand side of && or ||
             // e.g., x > 0 && return nothing
@@ -165,7 +180,7 @@ impl<'a> Parser<'a> {
                 self.advance(); // consume (
 
                 // Check if it's an operator, statement, or expression inside parens
-                let inner = if let Some(token) = &self.current {
+                let mut inner = if let Some(token) = &self.current {
                     if token.token.is_operator() || token.token.is_assignment() {
                         // Check if this is an operator symbol like :(+) or a prefix expression like :(!true)
                         // If the next token after the operator is ), it's an operator symbol
@@ -212,6 +227,57 @@ impl<'a> Parser<'a> {
                     ));
                 };
 
+                if self.check(&Token::Comma) {
+                    let tuple_start = inner.span.start;
+                    let mut elements = vec![inner];
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        while self.check(&Token::Newline) {
+                            self.advance();
+                        }
+                        if self.check(&Token::RParen) {
+                            break;
+                        }
+                        elements.push(self.parse_expression()?);
+                        while self.check(&Token::Newline) {
+                            self.advance();
+                        }
+                    }
+                    let tuple_end = elements
+                        .last()
+                        .map(|child| child.span.end)
+                        .unwrap_or(tuple_start);
+                    inner = CstNode::with_children(
+                        NodeKind::TupleExpression,
+                        self.source_map.span(tuple_start, tuple_end),
+                        elements,
+                    );
+                }
+
+                if self.check(&Token::Semicolon) {
+                    let block_start = inner.span.start;
+                    let mut block_children = vec![inner];
+                    while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
+                        self.advance();
+                        while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
+                            self.advance();
+                        }
+                        if self.check(&Token::RParen) {
+                            break;
+                        }
+                        block_children.push(self.parse_expression()?);
+                    }
+                    let block_end = block_children
+                        .last()
+                        .map(|child| child.span.end)
+                        .unwrap_or(block_start);
+                    inner = CstNode::with_children(
+                        NodeKind::CompoundStatement,
+                        self.source_map.span(block_start, block_end),
+                        block_children,
+                    );
+                }
+
                 let end_token = self.expect(Token::RParen)?;
                 let span = self.source_map.span(start, end_token.span.end);
                 Ok(CstNode::with_children(
@@ -232,6 +298,26 @@ impl<'a> Parser<'a> {
                 ))
             }
 
+            // Issue #4908: `:.` and `:...` — Symbols whose names are the
+            // dot and ellipsis operators. These tokens are not classified
+            // as operators by `Token::is_operator()` (they're treated as
+            // syntactic markers for field access and splat in the rest of
+            // the grammar), so they fall through to the standalone-colon
+            // arm below and produce `ParseFailed`. Upstream Julia accepts
+            // `:.` as `Symbol(".")` (the canonical Expr head for field
+            // access) and `:...` as `Symbol("...")` (the splat head); add
+            // explicit arms so the colon-prefix sugar mirrors the
+            // user-visible `Symbol(name)` constructor.
+            Some(Token::Dot) | Some(Token::Ellipsis) | Some(Token::Dollar) => {
+                let op_token = self.advance().unwrap();
+                let span = self.source_map.span(start, op_token.span.end);
+                Ok(CstNode::leaf(
+                    NodeKind::QuoteExpression,
+                    span,
+                    &self.source[start..op_token.span.end],
+                ))
+            }
+
             // :keyword - keyword symbol (e.g., :if, :for, :quote, :end, etc.)
             Some(token) if token.keyword_as_symbol_text().is_some() => {
                 let kw_token = self.advance().unwrap();
@@ -240,6 +326,39 @@ impl<'a> Parser<'a> {
                     NodeKind::QuoteExpression,
                     span,
                     &self.source[start..kw_token.span.end],
+                ))
+            }
+
+            // Issue #4923: `:42`, `:3.14`, `:"hello"`, `:'x'` —
+            // colon-prefix on a literal — must produce `QuoteNode(value)`
+            // per upstream Julia. Unlike `:identifier` (which produces a
+            // Symbol), `:literal` produces a literal value wrapped in
+            // QuoteNode. The colon-prefix is tightly-bound here:
+            // `:1 + 2` is `QuoteNode(1) + 2`, not `QuoteNode(1 + 2)`,
+            // so we parse exactly the single literal via `parse_primary`
+            // and wrap it as the child of a `QuoteExpression` with-
+            // children node. The quote-lowering arm (`cst_to_constructor.rs`,
+            // `NodeKind::QuoteExpression` with-children branch) then
+            // recurses on the literal child and produces `QuoteNode(value)`
+            // because the inner kind is an atom (IntegerLiteral / FloatLiteral
+            // / CharacterLiteral / StringLiteral / BooleanLiteral).
+            Some(Token::DecimalLiteral)
+            | Some(Token::BinaryLiteral)
+            | Some(Token::OctalLiteral)
+            | Some(Token::HexLiteral)
+            | Some(Token::FloatLiteral)
+            | Some(Token::FloatLeadingDot)
+            | Some(Token::FloatExponent)
+            | Some(Token::HexFloat)
+            | Some(Token::CharLiteral)
+            | Some(Token::DoubleQuote)
+            | Some(Token::TripleDoubleQuote) => {
+                let literal = self.parse_primary()?;
+                let span = self.source_map.span(start, literal.span.end);
+                Ok(CstNode::with_children(
+                    NodeKind::QuoteExpression,
+                    span,
+                    vec![literal],
                 ))
             }
 

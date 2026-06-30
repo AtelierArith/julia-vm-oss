@@ -11,3 +11,39 @@ name = "essentials_identity_misc"
 file = "essentials_identity_misc.jl"
 expected = true
 description = "Essential functions: identity, iszero, isone, typeof (Issue #3123)"
+
+[[tests]]
+name = "essentials_ifelse_strict_evaluation"
+file = "ifelse_strict_evaluation.jl"
+expected = true
+description = "ifelse evaluates both branches (Issue #3733 — Pure Julia migration)"
+
+[[tests]]
+name = "essentials_core_primitives_phase1"
+file = "core_primitives_phase1.jl"
+expected = true
+description = "Phase 1 essentials core primitive fallbacks (Issue #3765)"
+
+[[tests]]
+name = "essentials_base_noop_helpers"
+file = "essentials_base_noop_helpers.jl"
+expected = true
+description = "INTENTIONAL_NOOP base/ helpers behave correctly: identity/real/conj/isreal/isnothing/ismissing/firstindex (Issue #4703 silent-stub audit)"
+
+[[tests]]
+name = "essentials_oftype_convert"
+file = "oftype_convert.jl"
+expected = true
+description = "oftype(x, y) = convert(typeof(x), y) matches upstream incl. InexactError (Issue #5109)"
+
+[[tests]]
+name = "essentials_typed_expr_typeassert"
+file = "typed_expr_typeassert.jl"
+expected = true
+description = "Type assertion on call expressions: expr::T lowers to typeassert (Issue #5193)"
+
+[[tests]]
+name = "essentials_const_ref_empty_index_6839"
+file = "const_ref_empty_index_6839.jl"
+expected = true
+description = "const-global `name[]` is getindex(name), not the typed empty-array literal T[] (Issue #6839)"

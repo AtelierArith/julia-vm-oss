@@ -77,3 +77,9 @@ name = "varargs_form_duality"
 file = "varargs_form_duality.jl"
 expected = true
 description = "SplatParameter/SplatExpression duality: full-form vs short-form (Issue #2253)"
+
+[[tests]]
+name = "varargs_long_homogeneous"
+file = "varargs_long_homogeneous.jl"
+expected = true
+description = "Long homogeneous varargs collapse to Tuple{T, Vararg{T}} in inference (Issue #3511)"

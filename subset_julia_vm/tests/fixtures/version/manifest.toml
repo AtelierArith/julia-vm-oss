@@ -10,4 +10,4 @@ description = "VersionNumber construction and VERSION constant"
 name = "version_comparison"
 file = "version_comparison.jl"
 expected = true
-description = "VersionNumber equality, string repr, default args (Issue #3123)"
+description = "VersionNumber equality, comparison operators, string repr, default args (Issues #3123, #7529)"

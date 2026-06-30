@@ -1,0 +1,5 @@
+crate: rustyline
+version: 17.0.2
+license: MIT
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/kkawakam/rustyline

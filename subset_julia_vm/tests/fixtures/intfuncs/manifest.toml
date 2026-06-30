@@ -65,3 +65,9 @@ name = "intfuncs_binomial_basic"
 file = "binomial_basic.jl"
 expected = true
 description = "binomial - binomial coefficients (Issue #1865)"
+
+[[tests]]
+name = "intfuncs_bitcount_function_values_5333"
+file = "bitcount_function_values_5333.jl"
+expected = true
+description = "bit-count helpers (count_ones/leading_zeros/bitrotate/…) as first-class function values (Issue #5333)"

@@ -15,10 +15,11 @@ mod tests;
 
 // Re-export all public types
 pub use aot_types::{
-    AotEnum, AotExpr, AotFunction, AotGlobal, AotProgram, AotStmt, AotStruct, DynamicOpDiagnostic,
+    AotEnum, AotExpr, AotFunction, AotGlobal, AotInlinePolicy, AotProgram, AotStmt, AotStruct,
+    DynamicOpDiagnostic,
 };
 pub use basic_types::{
-    BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction, IrModule, Terminator, UnaryOpKind,
-    VarRef,
+    BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction, IrModule, StructFieldInit,
+    Terminator, UnaryOpKind, VarRef,
 };
 pub use ops::{AotBinOp, AotBuiltinOp, AotUnaryOp, CompoundAssignOp};

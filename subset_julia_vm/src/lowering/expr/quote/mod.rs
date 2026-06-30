@@ -28,5 +28,5 @@ pub use code_generation::{
     quote_constructor_to_code, quote_constructor_to_code_with_locals,
     quote_constructor_to_code_with_varargs,
 };
-pub(crate) use cst_to_constructor::lower_quote_expr;
+pub(crate) use cst_to_constructor::{cst_to_macro_arg_constructor, lower_quote_expr};
 pub(super) use handlers::{collect_introduced_vars, extract_symbol_from_constructor};

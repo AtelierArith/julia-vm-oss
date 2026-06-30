@@ -83,6 +83,159 @@ impl<R: RngLike> Vm<R> {
         Ok((value, next_pos))
     }
 
+    fn expr_value(head: &str, args: Vec<Value>) -> Value {
+        Value::Expr(ExprValue::from_head(head, args))
+    }
+
+    fn block_value(args: Vec<Value>) -> Value {
+        Self::expr_value("block", args)
+    }
+
+    fn named_children(
+        node: &subset_julia_vm_parser::CstNode,
+    ) -> Vec<&subset_julia_vm_parser::CstNode> {
+        node.children
+            .iter()
+            .filter(|child| child.is_named)
+            .collect()
+    }
+
+    fn cst_to_block_value(
+        &self,
+        node: &subset_julia_vm_parser::CstNode,
+        source: &str,
+    ) -> Result<Value, VmError> {
+        use subset_julia_vm_parser::NodeKind;
+
+        if matches!(node.kind, NodeKind::Block | NodeKind::BeginBlock) {
+            self.cst_to_value(node, source)
+        } else {
+            Ok(Self::block_value(vec![self.cst_to_value(node, source)?]))
+        }
+    }
+
+    fn let_bindings_to_value(
+        &self,
+        node: &subset_julia_vm_parser::CstNode,
+        source: &str,
+    ) -> Result<Value, VmError> {
+        let mut bindings = Self::named_children(node)
+            .into_iter()
+            .map(|child| self.cst_to_value(child, source))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if bindings.len() == 1 {
+            Ok(bindings.remove(0))
+        } else {
+            Ok(Self::block_value(bindings))
+        }
+    }
+
+    fn let_expr_to_value(
+        &self,
+        node: &subset_julia_vm_parser::CstNode,
+        source: &str,
+    ) -> Result<Value, VmError> {
+        use subset_julia_vm_parser::NodeKind;
+
+        let children = Self::named_children(node);
+        let mut child_index = 0;
+        let bindings = if children
+            .first()
+            .map(|child| child.kind == NodeKind::LetBindings)
+            .unwrap_or(false)
+        {
+            child_index = 1;
+            self.let_bindings_to_value(children[0], source)?
+        } else {
+            Self::block_value(Vec::new())
+        };
+        let body = match children.get(child_index) {
+            Some(body_node) => self.cst_to_block_value(body_node, source)?,
+            None => Self::block_value(Vec::new()),
+        };
+
+        Ok(Self::expr_value("let", vec![bindings, body]))
+    }
+
+    fn else_clause_to_value(
+        &self,
+        node: &subset_julia_vm_parser::CstNode,
+        source: &str,
+    ) -> Result<Value, VmError> {
+        match Self::named_children(node).first() {
+            Some(body) => self.cst_to_block_value(body, source),
+            None => Ok(Self::block_value(Vec::new())),
+        }
+    }
+
+    fn elseif_clause_to_value(
+        &self,
+        node: &subset_julia_vm_parser::CstNode,
+        tail: Option<Value>,
+        source: &str,
+    ) -> Result<Value, VmError> {
+        let children = Self::named_children(node);
+        if children.len() < 2 {
+            return Err(VmError::TypeError(
+                "Invalid elseif clause: missing condition or body".to_string(),
+            ));
+        }
+
+        let condition = self.cst_to_value(children[0], source)?;
+        let then_branch = self.cst_to_block_value(children[1], source)?;
+        let mut args = vec![Self::block_value(vec![condition]), then_branch];
+        if let Some(tail) = tail {
+            args.push(tail);
+        }
+
+        Ok(Self::expr_value("elseif", args))
+    }
+
+    fn if_statement_to_value(
+        &self,
+        node: &subset_julia_vm_parser::CstNode,
+        source: &str,
+    ) -> Result<Value, VmError> {
+        use subset_julia_vm_parser::NodeKind;
+
+        let children = Self::named_children(node);
+        if children.len() < 2 {
+            return Err(VmError::TypeError(
+                "Invalid if statement: missing condition or body".to_string(),
+            ));
+        }
+
+        let condition = self.cst_to_value(children[0], source)?;
+        let then_branch = self.cst_to_block_value(children[1], source)?;
+        let mut elseif_clauses = Vec::new();
+        let mut tail = None;
+
+        for child in children.iter().skip(2) {
+            match child.kind {
+                NodeKind::ElseifClause => elseif_clauses.push(*child),
+                NodeKind::ElseClause => tail = Some(self.else_clause_to_value(child, source)?),
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "Invalid if statement child: {:?}",
+                        child.kind
+                    )));
+                }
+            }
+        }
+
+        for elseif_clause in elseif_clauses.into_iter().rev() {
+            tail = Some(self.elseif_clause_to_value(elseif_clause, tail, source)?);
+        }
+
+        let mut args = vec![condition, then_branch];
+        if let Some(tail) = tail {
+            args.push(tail);
+        }
+
+        Ok(Self::expr_value("if", args))
+    }
+
     /// Convert a CST node to a Value (for Meta.parse)
     fn cst_to_value(
         &self,
@@ -96,28 +249,39 @@ impl<R: RngLike> Vm<R> {
         match node.kind {
             // Literals
             NodeKind::IntegerLiteral => {
-                // Parse integer literal
+                // Parse integer literal. Issue #4753: overflowing literals
+                // (e.g. `Meta.parse(repr(typemin(Int64)))` produces the
+                // magnitude `9223372036854775808` which doesn't fit in
+                // i64) used to fail with `Invalid integer`. Match upstream
+                // Julia by promoting to Int128 and then BigInt as the
+                // literal magnitude grows — `-9223372036854775808` then
+                // parses as `Expr(:call, :-, Int128(9223372036854775808))`,
+                // and the unary-minus eval lands at `Int64::MIN` exactly.
                 let clean = text.replace("_", "");
                 if let Ok(n) = clean.parse::<i64>() {
-                    Ok(Value::I64(n))
+                    return Ok(Value::I64(n));
+                }
+                let (radix, body) = if clean.starts_with("0x") || clean.starts_with("0X") {
+                    (16, &clean[2..])
+                } else if clean.starts_with("0o") || clean.starts_with("0O") {
+                    (8, &clean[2..])
+                } else if clean.starts_with("0b") || clean.starts_with("0B") {
+                    (2, &clean[2..])
                 } else {
-                    // Try parsing as hex/oct/bin
-                    if clean.starts_with("0x") || clean.starts_with("0X") {
-                        i64::from_str_radix(&clean[2..], 16)
-                            .map(Value::I64)
-                            .map_err(|_| VmError::TypeError(format!("Invalid integer: {}", text)))
-                    } else if clean.starts_with("0o") || clean.starts_with("0O") {
-                        i64::from_str_radix(&clean[2..], 8)
-                            .map(Value::I64)
-                            .map_err(|_| VmError::TypeError(format!("Invalid integer: {}", text)))
-                    } else if clean.starts_with("0b") || clean.starts_with("0B") {
-                        i64::from_str_radix(&clean[2..], 2)
-                            .map(Value::I64)
-                            .map_err(|_| VmError::TypeError(format!("Invalid integer: {}", text)))
-                    } else {
-                        Err(VmError::TypeError(format!("Invalid integer: {}", text)))
+                    (10, clean.as_str())
+                };
+                if let Ok(n) = i64::from_str_radix(body, radix) {
+                    return Ok(Value::I64(n));
+                }
+                if let Ok(n) = i128::from_str_radix(body, radix) {
+                    return Ok(Value::I128(n));
+                }
+                if radix == 10 {
+                    if let Ok(big) = body.parse::<crate::vm::value::RustBigInt>() {
+                        return Ok(Value::BigInt(big));
                     }
                 }
+                Err(VmError::TypeError(format!("Invalid integer: {}", text)))
             }
 
             NodeKind::FloatLiteral => {
@@ -277,18 +441,30 @@ impl<R: RngLike> Vm<R> {
                         args.push(self.cst_to_value(child, source)?);
                     }
                 }
-                Ok(Value::Expr(ExprValue::from_head("block", args)))
+                Ok(Self::block_value(args))
             }
 
             // If statement: if cond ... end -> Expr(:if, cond, then_block, else_block?)
-            NodeKind::IfStatement => {
-                let mut args = Vec::new();
-                for child in &node.children {
-                    if child.is_named {
-                        args.push(self.cst_to_value(child, source)?);
-                    }
-                }
-                Ok(Value::Expr(ExprValue::from_head("if", args)))
+            //
+            // The Rust parser has parser-internal `ElseifClause` / `ElseClause`
+            // nodes, but upstream `Meta.parse` returns a normalized `Expr(:if, ...)`
+            // with branch bodies as `Expr(:block, ...)` and nested `Expr(:elseif, ...)`
+            // tails.
+            NodeKind::IfStatement => self.if_statement_to_value(node, source),
+
+            NodeKind::ElseifClause => self.elseif_clause_to_value(node, None, source),
+
+            NodeKind::ElseClause => self.else_clause_to_value(node, source),
+
+            NodeKind::LetBindings => self.let_bindings_to_value(node, source),
+
+            // Let expression: let bindings body end -> Expr(:let, bindings, body)
+            //
+            // Normalize the parser-internal `LetExpression` / `LetBindings` nodes to
+            // upstream-shaped `Expr(:let, ...)` so `Meta.parse` values can flow back
+            // through eval and macro-return lowering (Issue #7754).
+            NodeKind::LetExpression | NodeKind::LetStatement => {
+                self.let_expr_to_value(node, source)
             }
 
             // Function definition -> Expr(:function, signature, body)
@@ -328,16 +504,74 @@ impl<R: RngLike> Vm<R> {
                 Ok(Value::Expr(ExprValue::from_head("macrocall", args)))
             }
 
-            // Quote: :(expr) -> Expr(:quote, expr)
+            // Prefixed string literal: `var"@q"`, `r"abc"`, `big"123"`, ... (Issue #7753)
+            //
+            // Upstream `Meta.parse`:
+            //   - `var"name"` is the *non-standard identifier* syntax and parses to
+            //     `Symbol("name")` (NOT a string / a `:prefixedstringliteral` Expr),
+            //     which `string`/`show` print back as `var"name"` when the name is not
+            //     a plain identifier (see `format_symbol_name`, Issue #7676).
+            //   - every other prefix `x"content"` is the string-macro sugar and parses
+            //     to `Expr(:macrocall, Symbol("@x_str"), LineNumberNode(...), "content")`.
+            NodeKind::PrefixedStringLiteral => {
+                let children: Vec<&subset_julia_vm_parser::CstNode> =
+                    node.children.iter().filter(|c| c.is_named).collect();
+                if children.len() < 2 {
+                    return Err(VmError::TypeError(
+                        "Invalid prefixed string literal".to_string(),
+                    ));
+                }
+                let prefix_text = &source[children[0].span.start..children[0].span.end];
+                let string_text = &source[children[1].span.start..children[1].span.end];
+                // Mirror the lowering path (Issue #7676): the var/string content is the
+                // text with its surrounding `"` quotes stripped.
+                let content = string_text.trim_matches('"').to_string();
+
+                if prefix_text == "var" {
+                    Ok(Value::Symbol(SymbolValue::new(&content)))
+                } else {
+                    let macro_sym = format!("@{}_str", prefix_text);
+                    Ok(Value::Expr(ExprValue::from_head(
+                        "macrocall",
+                        vec![
+                            Value::Symbol(SymbolValue::new(&macro_sym)),
+                            Value::LineNumberNode(crate::vm::value::LineNumberNodeValue::new(
+                                1, None,
+                            )),
+                            Value::Str(content),
+                        ],
+                    )))
+                }
+            }
+
+            // Keyword argument: `name = value` in a call -> Expr(:kw, name, value)
+            // (Issue #7753). Upstream parses `f(a=2)` as
+            // `Expr(:call, :f, Expr(:kw, :a, 2))`, NOT a parser-internal
+            // `:keywordargument` head.
+            NodeKind::KeywordArgument => {
+                let named: Vec<&subset_julia_vm_parser::CstNode> =
+                    node.children.iter().filter(|c| c.is_named).collect();
+                if named.len() < 2 {
+                    return Err(VmError::TypeError("Invalid keyword argument".to_string()));
+                }
+                let name = self.cst_to_value(named[0], source)?;
+                let value = self.cst_to_value(named[named.len() - 1], source)?;
+                Ok(Value::Expr(ExprValue::from_head("kw", vec![name, value])))
+            }
+
+            // Quote: :(expr) -> Expr(:quote, expr); :symbol -> QuoteNode(:symbol)
             NodeKind::QuoteExpression => {
                 if let Some(child) = node.children.iter().find(|c| c.is_named) {
                     let inner = self.cst_to_value(child, source)?;
                     Ok(Value::Expr(ExprValue::from_head("quote", vec![inner])))
                 } else {
-                    // :symbol -> just the Symbol (NOT QuoteNode)
-                    // In Julia, Meta.parse(":x") returns Symbol, not QuoteNode
+                    // `:symbol` -> QuoteNode(Symbol). Upstream `Meta.parse(":x")`
+                    // returns `QuoteNode(:x)` (and `Dict(:a => 1)` keeps the `:a`
+                    // QuoteNode so it prints `:a`, not `a` — Issue #7753).
                     let sym_text = text.trim_start_matches(':');
-                    Ok(Value::Symbol(SymbolValue::new(sym_text)))
+                    Ok(Value::QuoteNode(Box::new(Value::Symbol(SymbolValue::new(
+                        sym_text,
+                    )))))
                 }
             }
 

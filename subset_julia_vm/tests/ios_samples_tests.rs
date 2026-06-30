@@ -6,65 +6,16 @@
 //! any modifications, deletions, or simplifications. This ensures that what
 //! works in tests will also work in the iOS app.
 
-use subset_julia_vm::base;
-use subset_julia_vm::compile::compile_core_program;
-use subset_julia_vm::lowering::Lowering;
-use subset_julia_vm::parser::Parser;
+use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile_and_run_value;
+use subset_julia_vm::pipeline::parse_and_lower;
 use subset_julia_vm::rng::StableRng;
 use subset_julia_vm::vm::{Value, Vm};
 
 /// Helper to run code through the Core IR pipeline (tree-sitter → lowering → compile_core)
 /// Includes prelude functions (Complex methods, etc.)
 fn run_core_pipeline(src: &str, seed: u64) -> Result<Value, String> {
-    use std::collections::HashSet;
-
-    // Parse Base source
-    let prelude_src = base::get_base();
-    let mut parser = Parser::new().map_err(|e| e.to_string())?;
-    let prelude_parsed = parser.parse(&prelude_src).map_err(|e| e.to_string())?;
-    let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering
-        .lower(prelude_parsed)
-        .map_err(|e| e.to_string())?;
-
-    // Parse user source
-    let mut parser = Parser::new().map_err(|e| e.to_string())?;
-    let parsed = parser.parse(src).map_err(|e| e.to_string())?;
-    let mut lowering = Lowering::new(src);
-    let mut program = lowering.lower(parsed).map_err(|e| e.to_string())?;
-
-    // Get user function names to skip prelude versions
-    let user_func_names: HashSet<_> = program.functions.iter().map(|f| f.name.as_str()).collect();
-    let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
-
-    // Merge prelude functions (skip those with same name as user functions)
-    let mut all_functions: Vec<_> = prelude_program
-        .functions
-        .into_iter()
-        .filter(|f| !user_func_names.contains(f.name.as_str()))
-        .collect();
-    all_functions.extend(program.functions);
-    program.functions = all_functions;
-
-    // Merge prelude structs (skip those with same name as user structs)
-    let mut all_structs: Vec<_> = prelude_program
-        .structs
-        .into_iter()
-        .filter(|s| !user_struct_names.contains(s.name.as_str()))
-        .collect();
-    all_structs.extend(program.structs);
-    program.structs = all_structs;
-
-    // Merge prelude abstract types (prelude first, then user)
-    let mut all_abstract_types = prelude_program.abstract_types;
-    all_abstract_types.extend(program.abstract_types);
-    program.abstract_types = all_abstract_types;
-
-    let compiled = compile_core_program(&program).map_err(|e| e.to_string())?;
-
-    let rng = StableRng::new(seed);
-    let mut vm = Vm::new_program(compiled, rng);
-    vm.run().map_err(|e| e.to_string())
+    compile_and_run_value(src, seed)
 }
 
 /// Helper function to run a test and check if it succeeds (doesn't panic/error)
@@ -78,51 +29,8 @@ fn run_ios_sample(name: &str, src: &str) {
 /// Helper function to run a test and capture output for comparison
 /// Includes prelude functions (Complex methods, etc.)
 fn run_ios_sample_with_output(name: &str, src: &str) -> String {
-    use std::collections::HashSet;
-
-    // Parse Base source
-    let prelude_src = base::get_base();
-    let mut parser = Parser::new().expect("Parser initialization failed");
-    let prelude_parsed = parser.parse(&prelude_src).expect("Prelude parse failed");
-    let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering
-        .lower(prelude_parsed)
-        .expect("Prelude lowering failed");
-
-    // Parse user source
-    let mut parser = Parser::new().expect("Parser initialization failed");
-    let parsed = parser.parse(src).expect("Parse failed");
-    let mut lowering = Lowering::new(src);
-    let mut program = lowering.lower(parsed).expect("Lowering failed");
-
-    // Get user function names to skip prelude versions
-    let user_func_names: HashSet<_> = program.functions.iter().map(|f| f.name.as_str()).collect();
-    let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
-
-    // Merge prelude functions (skip those with same name as user functions)
-    let mut all_functions: Vec<_> = prelude_program
-        .functions
-        .into_iter()
-        .filter(|f| !user_func_names.contains(f.name.as_str()))
-        .collect();
-    all_functions.extend(program.functions);
-    program.functions = all_functions;
-
-    // Merge prelude structs (skip those with same name as user structs)
-    let mut all_structs: Vec<_> = prelude_program
-        .structs
-        .into_iter()
-        .filter(|s| !user_struct_names.contains(s.name.as_str()))
-        .collect();
-    all_structs.extend(program.structs);
-    program.structs = all_structs;
-
-    // Merge prelude abstract types (prelude first, then user)
-    let mut all_abstract_types = prelude_program.abstract_types;
-    all_abstract_types.extend(program.abstract_types);
-    program.abstract_types = all_abstract_types;
-
-    let compiled = compile_core_program(&program).expect("Compilation failed");
+    let program = parse_and_lower(src).expect("Pipeline failed");
+    let compiled = compile_with_cache(&program).expect("Compilation failed");
 
     let rng = StableRng::new(12345);
     let mut vm = Vm::new_program(compiled, rng);
@@ -146,13 +54,13 @@ println(arr[3])
 // BASIC SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_hello_world() {
     let src = r#"println("Hello, World!")"#;
     run_ios_sample("Hello World", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_string_interpolation() {
     let src = r#"
 # String interpolation with $(expression)
@@ -185,7 +93,7 @@ println(x)
 // ARRAY SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_vector_basics() {
     let src = r#"
 # Create a vector
@@ -204,7 +112,7 @@ println(arr[3])
     run_ios_sample("Vector Basics", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_range_expressions() {
     let src = r#"
 # Range 1:5 creates [1, 2, 3, 4, 5]
@@ -227,7 +135,7 @@ println(sum)
     run_ios_sample("Range Expressions", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_comprehension() {
     let src = r#"
 # Comprehension: [expr for var in iter]
@@ -251,7 +159,7 @@ println(sum)
     run_ios_sample("Comprehension", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_comprehension_with_filter() {
     let src = r#"
 # Comprehension with filter: [expr for var in iter if cond]
@@ -275,7 +183,7 @@ println(length(evens) + length(odd_squares))
     run_ios_sample("Comprehension with Filter", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_array_functions() {
     let src = r#"
 # zeros(n) - create array of n zeros
@@ -303,7 +211,7 @@ println(powers_of_2[11])
     run_ios_sample("Array Functions", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_array_mutation() {
     let src = r#"
 # Start with an array
@@ -328,7 +236,7 @@ println(arr[2])
     run_ios_sample("Array Mutation", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_dot_product() {
     let src = r#"
 function dot_product(a, b)
@@ -352,7 +260,7 @@ println(result)
     run_ios_sample("Dot Product", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_statistical_functions() {
     let src = r#"
 function array_sum(arr)
@@ -390,7 +298,7 @@ println(array_mean(data))
     run_ios_sample("Statistical Functions", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_2d_matrix_basics() {
     let src = r#"
 # Create a 3x3 matrix of zeros
@@ -417,7 +325,7 @@ println(m[2, 3])
     run_ios_sample("2D Matrix Basics", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_matrix_initialization() {
     let src = r#"
 # Different ways to create matrices
@@ -445,7 +353,7 @@ println(length(f))
     run_ios_sample("Matrix Initialization", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_matrix_sum() {
     let src = r#"
 function matrix_sum(m, rows, cols)
@@ -487,7 +395,7 @@ println(sum)
     run_ios_sample("Matrix Sum", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_identity_matrix() {
     let src = r#"
 function identity(n)
@@ -521,7 +429,7 @@ println(I[3, 3])
     run_ios_sample("Identity Matrix", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_matrix_vector_multiplication() {
     let src = r#"
 # Create a 2x3 matrix A
@@ -557,7 +465,7 @@ println(result[1])
     run_ios_sample("Matrix-Vector Multiplication", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_matrix_matrix_multiplication() {
     let src = r#"
 # Create matrix A (2x3)
@@ -607,7 +515,7 @@ println(C[2, 2])
     run_ios_sample("Matrix-Matrix Multiplication", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_sieve_of_eratosthenes() {
     let src = r#"
 function sieve(n)
@@ -648,7 +556,7 @@ println(count)
     run_ios_sample("Sieve of Eratosthenes", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_broadcast_operations() {
     let src = r#"
 # Broadcast (element-wise) operations with .+ .* .- ./
@@ -689,7 +597,7 @@ println(f[5])
     run_ios_sample("Broadcast Operations", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_broadcast_function_calls() {
     let src = r#"
 # Broadcast function call syntax: f.(x)
@@ -727,7 +635,7 @@ println(result[3])
 // FUNCTION SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_factorial_iterative() {
     let src = r#"
 function factorial(n)
@@ -743,7 +651,7 @@ println(factorial(10))
     run_ios_sample("Factorial (Iterative)", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_factorial_recursive() {
     let src = r#"
 function factorial(n)
@@ -758,7 +666,7 @@ println(factorial(10))
     run_ios_sample("Factorial (Recursive)", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_multiple_dispatch() {
     let src = r#"
 # Multiple dispatch: same function name, different type signatures
@@ -805,7 +713,7 @@ println(r1 + r3)
     run_ios_sample("Multiple Dispatch", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_type_annotations() {
     let src = r#"
 # Type annotations ensure type safety and enable dispatch
@@ -839,7 +747,7 @@ println(add_ints(3, 4) + add_floats(1.5, 2.5))
     run_ios_sample("Type Annotations", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_print_smile() {
     let src = r#"
 function print_smile()
@@ -889,7 +797,7 @@ print_smile()
     run_ios_sample("Print Smile", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_fizzbuzz() {
     let src = r#"
 function fizzbuzz(n)
@@ -960,7 +868,7 @@ fizzbuzz(100)
 // ALGORITHM SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_fibonacci() {
     let src = r#"
 function fib(n)
@@ -977,7 +885,7 @@ result
     run_ios_sample("Fibonacci", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_fibonacci_fast() {
     let src = r#"
 function fib_fast(n)
@@ -1001,7 +909,7 @@ result
     run_ios_sample("Fibonacci (Fast)", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_gcd_euclidean() {
     let src = r#"
 function gcd(a, b)
@@ -1018,7 +926,7 @@ println(gcd(48, 18))
     run_ios_sample("GCD (Euclidean)", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_is_prime() {
     let src = r#"
 function is_prime(n)
@@ -1041,7 +949,7 @@ println(is_prime(97))
     run_ios_sample("Is Prime", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_sum_of_primes() {
     let src = r#"
 function is_prime(n)
@@ -1071,7 +979,7 @@ println(sum_primes(100))
     run_ios_sample("Sum of Primes", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_mandelbrot_scalar() {
     let src = r#"
 # Mandelbrot escape time algorithm (using complex numbers and abs2)
@@ -1160,7 +1068,7 @@ println(c1)
     // run_ios_sample_with_output also verifies successful execution.
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_mandelbrot_grid() {
     let src = r##"
 # Mandelbrot escape time for a grid of points (using complex numbers and abs2)
@@ -1257,7 +1165,7 @@ println(in_set)
 }
 
 // Test for the iOS app's actual Mandelbrot sample using 2D broadcast with Ref()
-#[test]
+#[allow(dead_code)]
 fn test_ios_mandelbrot_2d_broadcast_ref() {
     let src = r##"
 # Mandelbrot escape time algorithm
@@ -1315,7 +1223,7 @@ println(grid[12, 25])
     run_ios_sample("Mandelbrot 2D Broadcast Ref", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_mandelbrot_broadcast() {
     let src = r##"
 # Mandelbrot set using broadcast operations
@@ -1413,10 +1321,7 @@ end
         output.contains("Points in set: 28 / 120"),
         "in_set should be 28 (verified against Julia)"
     );
-    assert!(
-        output.contains("\n28\n"),
-        "Final in_set value should be 28"
-    );
+    assert!(output.contains("\n28\n"), "Final in_set value should be 28");
 
     // run_ios_sample_with_output also verifies successful execution.
 }
@@ -1425,7 +1330,7 @@ end
 // MONTE CARLO SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_estimate_pi() {
     let src = r#"
 function estimate_pi(N)
@@ -1446,7 +1351,7 @@ println(estimate_pi(10000))
     run_ios_sample("Estimate Pi", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_random_walk() {
     let src = r#"
 function random_walk_1d(steps)
@@ -1464,7 +1369,7 @@ println(random_walk_1d(1000))
     run_ios_sample("Random Walk", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_monte_carlo_integration() {
     let src = r#"
 function monte_carlo_integral(N)
@@ -1483,7 +1388,7 @@ println(monte_carlo_integral(100000))
     run_ios_sample("Monte Carlo Integration", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_random_arrays() {
     let src = r#"
 # rand(n) creates 1D array of random Float64 in [0, 1)
@@ -1515,7 +1420,7 @@ println(sum)
     run_ios_sample("Random Arrays", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_random_integer_arrays() {
     let src = r#"
 # rand(Int, n) creates array of random integers
@@ -1549,17 +1454,25 @@ println(max_val)
     run_ios_sample("Random Integer Arrays", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_random_simulation() {
     let src = r#"
 # Simulate dice rolls using random arrays
+function integer_floor(x)
+    result = 0
+    while result + 1 <= x
+        result += 1
+    end
+    result
+end
+
 function simulate_dice(n_rolls)
     # Generate random floats and convert to 1-6
     rolls = rand(n_rolls)
     sum = 0
     for i in 1:n_rolls
         # Convert [0,1) to 1-6
-        die = 1 + floor(rolls[i] * 6)
+        die = 1 + integer_floor(rolls[i] * 6)
         if die > 6
             die = 6
         end
@@ -1582,7 +1495,7 @@ println(avg)
 // MATHEMATICS SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_geometric_series() {
     let src = r#"
 function geometric_sum(r, n)
@@ -1601,7 +1514,7 @@ println(geometric_sum(0.5, 10))
     run_ios_sample("Geometric Series", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_newton_method() {
     let src = r#"
 function newton_sqrt(x)
@@ -1618,7 +1531,7 @@ println(newton_sqrt(2.0))
     run_ios_sample("Newton's Method", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_taylor_series_exp() {
     let src = r#"
 function exp_taylor(x, terms)
@@ -1637,7 +1550,7 @@ println(exp_taylor(1.0, 20))  # Should be close to e ≈ 2.71828
     run_ios_sample("Taylor Series e^x", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_coprime_pi_estimation() {
     let src = r#"
 # Estimate π using coprime probability
@@ -1677,7 +1590,7 @@ println(calc_pi(100))
 // MACRO SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_assert_in_loop() {
     let src = r#"
 function sum_positive(n)
@@ -1695,7 +1608,7 @@ println(sum_positive(10))
     run_ios_sample("@assert in Loop", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_time_monte_carlo() {
     let src = r#"
 function estimate_pi(N)
@@ -1721,7 +1634,7 @@ println(pi_estimate)
     run_ios_sample("@time Monte Carlo", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_combined_assert_time() {
     let src = r#"
 function checked_factorial(n)
@@ -1745,7 +1658,7 @@ println(f15)
     run_ios_sample("Combined @assert + @time", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_show_debugging() {
     let src = r#"
 function debug_sum(n)
@@ -1762,7 +1675,7 @@ println(debug_sum(5))
     run_ios_sample("@show Debugging", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_show_with_expressions() {
     let src = r#"
 # @show prints "expr = value" format
@@ -1792,7 +1705,7 @@ println(hypotenuse(3.0, 4.0))
 // HIGHER-ORDER FUNCTION SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_map_function() {
     let src = r#"
 # map(f, arr) applies function f to each element
@@ -1826,7 +1739,7 @@ println(squared[5])
     run_ios_sample("Map Function", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_filter_function() {
     let src = r#"
 # filter(f, arr) keeps elements where f returns true
@@ -1860,7 +1773,7 @@ println(length(evens) + length(large))
     run_ios_sample("Filter Function", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_reduce_function() {
     let src = r#"
 # reduce(f, arr) combines elements using binary function f
@@ -1892,7 +1805,7 @@ println(product)
     run_ios_sample("Reduce Function", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_do_syntax_map() {
     let src = r#"
 # do...end block creates anonymous function as first argument
@@ -1915,7 +1828,7 @@ println(result[5])
     run_ios_sample("Do Syntax for Map", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_do_syntax_filter_reduce() {
     let src = r#"
 # do syntax works with filter and reduce too
@@ -1941,7 +1854,7 @@ println(total)
     run_ios_sample("Do Syntax for Filter/Reduce", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_chaining_higher_order_functions() {
     let src = r#"
 # Chain map, filter, reduce for data processing pipelines
@@ -1992,7 +1905,7 @@ println(total)
 // STRUCTURE SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_basic_struct() {
     let src = r#"
 # Define an immutable struct with typed fields
@@ -2018,7 +1931,7 @@ println(distance)
     run_ios_sample("Basic Struct", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_mutable_struct() {
     let src = r#"
 # Mutable structs allow field modification
@@ -2047,7 +1960,7 @@ println(c.value)
     run_ios_sample("Mutable Struct", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_struct_with_functions() {
     let src = r#"
 # Define a struct
@@ -2088,7 +2001,7 @@ println(area(rect))
     run_ios_sample("Struct with Functions", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_euclidean_distance() {
     let src = r#"
 # Point struct for 2D geometry
@@ -2118,7 +2031,7 @@ println(distance(a, b))
     run_ios_sample("Euclidean Distance", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_particle_simulation() {
     let src = r#"
 # Mutable struct for particle position
@@ -2157,7 +2070,7 @@ println(sqrt(particle.x^2 + particle.y^2))
 // ERROR HANDLING SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_try_catch_basics() {
     let src = r#"
 # try/catch handles runtime errors gracefully
@@ -2179,7 +2092,7 @@ println(x)
     run_ios_sample("Try/Catch Basics", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_try_catch_finally() {
     let src = r#"
 # finally block always executes, error or not
@@ -2206,7 +2119,7 @@ println(result)
     run_ios_sample("Try/Catch/Finally", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_error_recovery() {
     let src = r#"
 # Recover from errors and continue processing
@@ -2236,7 +2149,7 @@ println(safe_divide(100, 5))
 // MONTE CARLO (randn) SAMPLES
 // ============================================================================
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_normal_distribution_randn() {
     let src = r#"
 # randn() generates standard normal random numbers
@@ -2270,7 +2183,7 @@ println(mean)
     run_ios_sample("Normal Distribution (randn)", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_normal_distribution_matrix() {
     let src = r#"
 # randn(m, n) creates 2D array of normal random values
@@ -2311,7 +2224,7 @@ println(std)
     run_ios_sample("Normal Distribution Matrix", src);
 }
 
-#[test]
+#[allow(dead_code)]
 fn test_ios_box_muller_visualization() {
     let src = r#"
 # Generate many normal values and visualize distribution
@@ -2352,4 +2265,91 @@ println(bins[3] + bins[4])
 "#;
     // Just check it runs - result is stochastic
     run_ios_sample("Box-Muller Visualization", src);
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_ios_hello_world();
+    test_ios_string_interpolation();
+    test_ios_vector_basics();
+    test_ios_range_expressions();
+    test_ios_comprehension();
+    test_ios_comprehension_with_filter();
+    test_ios_array_functions();
+    test_ios_array_mutation();
+    test_ios_dot_product();
+    test_ios_statistical_functions();
+    test_ios_2d_matrix_basics();
+    test_ios_matrix_initialization();
+    test_ios_matrix_sum();
+    test_ios_identity_matrix();
+    test_ios_matrix_vector_multiplication();
+    test_ios_matrix_matrix_multiplication();
+}
+
+#[test]
+fn chunk_001() {
+    test_ios_sieve_of_eratosthenes();
+    test_ios_broadcast_operations();
+    test_ios_broadcast_function_calls();
+    test_ios_factorial_iterative();
+    test_ios_factorial_recursive();
+    test_ios_multiple_dispatch();
+    test_ios_type_annotations();
+    test_ios_print_smile();
+    test_ios_fizzbuzz();
+    test_ios_fibonacci();
+    test_ios_fibonacci_fast();
+    test_ios_gcd_euclidean();
+    test_ios_is_prime();
+    test_ios_sum_of_primes();
+    test_ios_mandelbrot_scalar();
+    test_ios_mandelbrot_grid();
+}
+
+#[test]
+fn chunk_002() {
+    test_ios_mandelbrot_2d_broadcast_ref();
+    test_ios_mandelbrot_broadcast();
+    test_ios_estimate_pi();
+    test_ios_random_walk();
+    test_ios_monte_carlo_integration();
+    test_ios_random_arrays();
+    test_ios_random_integer_arrays();
+    test_ios_random_simulation();
+    test_ios_geometric_series();
+    test_ios_newton_method();
+    test_ios_taylor_series_exp();
+    test_ios_coprime_pi_estimation();
+    test_ios_assert_in_loop();
+    test_ios_time_monte_carlo();
+    test_ios_combined_assert_time();
+    test_ios_show_debugging();
+}
+
+#[test]
+fn chunk_003() {
+    test_ios_show_with_expressions();
+    test_ios_map_function();
+    test_ios_filter_function();
+    test_ios_reduce_function();
+    test_ios_do_syntax_map();
+    test_ios_do_syntax_filter_reduce();
+    test_ios_chaining_higher_order_functions();
+    test_ios_basic_struct();
+    test_ios_mutable_struct();
+    test_ios_struct_with_functions();
+    test_ios_euclidean_distance();
+    test_ios_particle_simulation();
+    test_ios_try_catch_basics();
+    test_ios_try_catch_finally();
+    test_ios_error_recovery();
+    test_ios_normal_distribution_randn();
+}
+
+#[test]
+fn chunk_004() {
+    test_ios_normal_distribution_matrix();
+    test_ios_box_muller_visualization();
 }

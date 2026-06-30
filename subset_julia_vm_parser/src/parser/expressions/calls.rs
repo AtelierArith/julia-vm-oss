@@ -10,6 +10,23 @@ use crate::parser::Parser;
 impl<'a> Parser<'a> {
     /// Parse a function call expression
     pub(crate) fn parse_call_expression(&mut self, callee: CstNode) -> ParseResult<CstNode> {
+        // Inside the parentheses we leave macro-argument whitespace sensitivity
+        // behind: interior expressions parse normally (Issue #5494). The flag is
+        // restored before returning so a following space-before-paren in the same
+        // macro argument is still treated as an argument separator. The
+        // matrix-row context likewise does not extend into a call's argument
+        // list, so `[f(1 - 2)]` keeps `-` binary (Issue #7196).
+        let saved_space_sensitive = std::mem::replace(&mut self.macro_arg_space_sensitive, false);
+        let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, false);
+        let saved_in_ternary_then = std::mem::replace(&mut self.in_ternary_then, false);
+        let result = self.parse_call_expression_inner(callee);
+        self.macro_arg_space_sensitive = saved_space_sensitive;
+        self.in_matrix_row = saved_in_matrix_row;
+        self.in_ternary_then = saved_in_ternary_then;
+        result
+    }
+
+    fn parse_call_expression_inner(&mut self, callee: CstNode) -> ParseResult<CstNode> {
         let start = callee.span.start;
         let lparen_token = self.expect(Token::LParen)?;
 
@@ -53,7 +70,7 @@ impl<'a> Parser<'a> {
                         let end = type_expr.span.end;
                         let span = self.source_map.span(start, end);
                         CstNode::with_children(NodeKind::TypedParameter, span, vec![type_expr])
-                    } else if token.token.is_operator() {
+                    } else if token.token.is_operator() && token.token != Token::Dollar {
                         // Peek at next token to see if it's , or )
                         if let Some(next) = self.peek_next() {
                             if next == Token::Comma || next == Token::RParen {
@@ -87,22 +104,17 @@ impl<'a> Parser<'a> {
                     }
                 };
 
-                // Check for generator inside call: sum(x for x in iter)
-                if self.check(&Token::KwFor) {
+                // Check for generator inside call: sum(x for x in iter).
+                // The generator is a single positional argument; do NOT consume
+                // the closing paren here so the shared separator handling below
+                // can accept trailing `; kw=...` keyword arguments
+                // (`f(x for x in it; kw=v)`, Issue #5763).
+                let arg = if self.check(&Token::KwFor) {
                     let gen_start = lparen_token.span.start;
-                    let generator = self.parse_generator_rest(gen_start, arg)?;
-                    // Generator consumed the closing paren, so adjust span
-                    let span = self.source_map.span(start, generator.span.end);
-                    // Wrap generator in ArgumentList
-                    let args_span = self.source_map.span(args_start, generator.span.end);
-                    let arg_list =
-                        CstNode::with_children(NodeKind::ArgumentList, args_span, vec![generator]);
-                    return Ok(CstNode::with_children(
-                        NodeKind::CallExpression,
-                        span,
-                        vec![callee, arg_list],
-                    ));
-                }
+                    self.parse_generator_rest_opts(gen_start, arg, false)?
+                } else {
+                    arg
+                };
 
                 arg_children.push(arg);
 
@@ -121,6 +133,14 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
+        }
+
+        // Skip newlines before the closing paren so the no-trailing-
+        // comma multi-line call shape `f(\n a,\n b,\n c\n)` also
+        // parses (Issue #4776). The trailing-comma form is already
+        // handled by the in-loop newline skip above.
+        while self.check(&Token::Newline) {
+            self.advance();
         }
 
         let end_token = self.expect(Token::RParen)?;

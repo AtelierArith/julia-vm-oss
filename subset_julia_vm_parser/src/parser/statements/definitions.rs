@@ -2,6 +2,7 @@
 
 use crate::cst::CstNode;
 use crate::error::{ParseError, ParseResult};
+use crate::lexer::Lexer;
 use crate::node_kind::NodeKind;
 use crate::token::Token;
 
@@ -19,12 +20,26 @@ impl<'a> Parser<'a> {
 
         // Check for anonymous function: function (x) ... end
         // Or callable struct definition: function (::Type)(args) ... end
+        //                            or: function (self::Type)(args) ... end
         // If next token is '(' directly, check if it's a callable struct pattern
         let name = if self.check(&Token::LParen) {
-            // Disambiguate: (::Type) is a callable struct, anything else is anonymous function
-            if self.peek_next() == Some(Token::DoubleColon) {
+            // Disambiguate the parenthesized head:
+            //   `(::Type)`        anonymous callable struct  -> head is the name
+            //   `(self::Type)(x)` bound callable struct      -> head is the name
+            //   `(x)` / `(x, y)`  anonymous function         -> head is the parameter list
+            //
+            // The anonymous-self form is detected by a leading `::`. The bound
+            // form `(self::Type)(args)` is detected by a `(` immediately
+            // following the closing `)` of the parenthesized head — that second
+            // paren group is the callable's argument list (Issue #5126).
+            if self.peek_next() == Some(Token::DoubleColon)
+                || self.paren_head_is_callable_object()
+                || self.paren_head_is_operator_signature()
+            {
                 // Callable struct definition: function (::Type)(args) body end
-                // Parse (::Type) as a parenthesized unary typed expression
+                //                         or: function (self::Type)(args) body end
+                // Parse the parenthesized head as the function "name"; the
+                // following parameter list is parsed below.
                 Some(self.parse_parenthesized_or_tuple()?)
             } else {
                 None // Anonymous function
@@ -96,9 +111,129 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    fn paren_head_is_operator_signature(&self) -> bool {
+        let Some(tok) = self.current.as_ref() else {
+            return false;
+        };
+        if tok.token != Token::LParen {
+            return false;
+        }
+
+        let mut lexer = Lexer::new(&self.source[tok.span.start..]);
+        let mut depth: i32 = 0;
+        while let Some(result) = lexer.next_token() {
+            let Ok(spanned) = result else { continue };
+            match spanned.token {
+                Token::LParen | Token::LBracket | Token::LBrace => depth += 1,
+                Token::RParen | Token::RBracket | Token::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return false;
+                    }
+                }
+                token if depth == 1 && token.is_operator() => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Decide whether the parenthesized head at the current `(` is the name of
+    /// a callable-object method definition rather than an anonymous function's
+    /// parameter list.
+    ///
+    /// A bound callable struct `function (self::Type)(args) ... end` is
+    /// distinguished from an anonymous function `function (x) ... end` by what
+    /// follows the closing `)` of the parenthesized head: a callable-object
+    /// definition has a *second* parenthesized group (the argument list)
+    /// immediately after, whereas an anonymous function has its body there.
+    ///
+    /// The current token is the opening `(`. We scan the source from that byte
+    /// offset, tracking nesting of `()`, `[]`, and `{}` (so parametric type
+    /// annotations like `Foo{T,S}` and tuple heads do not confuse the scan),
+    /// and skipping string literals. When the head paren group closes, we check
+    /// the next non-whitespace byte for `(` (Issue #5126).
+    fn paren_head_is_callable_object(&self) -> bool {
+        let Some(tok) = self.current.as_ref() else {
+            return false;
+        };
+        let bytes = self.source.as_bytes();
+        let mut i = tok.span.start;
+        // Defensive: the current token must actually be the opening paren.
+        if i >= bytes.len() || bytes[i] != b'(' {
+            return false;
+        }
+        let mut depth: i32 = 0;
+        let mut in_string = false;
+        let mut string_delim = b'"';
+        while i < bytes.len() {
+            let c = bytes[i];
+            if in_string {
+                match c {
+                    b'\\' => {
+                        // Skip the escaped byte.
+                        i += 2;
+                        continue;
+                    }
+                    _ if c == string_delim => in_string = false,
+                    _ => {}
+                }
+                i += 1;
+                continue;
+            }
+            match c {
+                b'"' | b'\'' => {
+                    in_string = true;
+                    string_delim = c;
+                }
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Found the close of the head paren group. Look at the
+                        // next non-whitespace byte.
+                        let mut j = i + 1;
+                        while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                            j += 1;
+                        }
+                        return j < bytes.len() && bytes[j] == b'(';
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
     /// Parse function name (identifier, operator, or qualified name like Base.:-)
     pub(crate) fn parse_function_name(&mut self) -> ParseResult<CstNode> {
-        let mut left = if self.check(&Token::Identifier) {
+        let mut left = if self.check(&Token::Dollar) {
+            let op_token = self.advance().unwrap();
+            let name = if self.check(&Token::Identifier) {
+                self.parse_identifier()?
+            } else if self.check(&Token::LParen) {
+                // Parenthesized interpolated function name, e.g.
+                // `function $(esc(:f))(x) ... end` (Issue #8066). Parse only the
+                // `(...)` group as the `$` operand (a primary atom, no postfix),
+                // so the following `(args)` is parsed as the parameter list. The
+                // quote constructor interpolates this `$(...)` payload (handling
+                // `esc`) when building the signature.
+                self.parse_primary()?
+            } else {
+                return Err(ParseError::unexpected_token(
+                    self.current
+                        .as_ref()
+                        .map(|t| t.text.to_string())
+                        .unwrap_or_default(),
+                    "interpolated function name",
+                    self.current_span(),
+                ));
+            };
+            let span = self.source_map.span(op_token.span.start, name.span.end);
+            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+            CstNode::with_children(NodeKind::UnaryExpression, span, vec![op_node, name])
+        } else if self.check(&Token::Identifier) {
             self.parse_identifier()?
         } else if self
             .current
@@ -207,6 +342,33 @@ impl<'a> Parser<'a> {
     /// - Typed varargs: args::T...
     /// - Anonymous typed: ::Type (e.g., ::Type{T} in promote_rule)
     pub(crate) fn parse_parameter(&mut self) -> ParseResult<CstNode> {
+        // Compiler metadata annotations in parameter position:
+        // `function f(@nospecialize x) ... end` and
+        // `function f(@specialize(x)) ... end`. These annotations affect
+        // specialization metadata in upstream Julia; the current parser slice
+        // accepts them by returning the wrapped parameter unchanged.
+        if self.check(&Token::At) {
+            self.advance();
+            let macro_name = self.parse_identifier()?;
+            let macro_text = macro_name.text_str().unwrap_or("");
+            if !matches!(macro_text, "nospecialize" | "specialize") {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "parameter metadata annotation".to_string(),
+                    found: format!("@{}", macro_text),
+                    span: macro_name.span,
+                });
+            }
+
+            if self.check(&Token::LParen) {
+                self.advance();
+                let param = self.parse_parameter()?;
+                self.expect(Token::RParen)?;
+                return Ok(param);
+            }
+
+            return self.parse_parameter();
+        }
+
         // Check for anonymous typed parameter: ::Type{T}
         if self.check(&Token::DoubleColon) {
             let start = self.current.as_ref().map(|t| t.span.start).unwrap_or(0);
@@ -218,6 +380,16 @@ impl<'a> Parser<'a> {
                 NodeKind::TypedParameter,
                 span,
                 vec![type_expr],
+            ));
+        }
+
+        if self.check(&Token::Dollar) {
+            let expr = self.parse_prefix()?;
+            let span = expr.span;
+            return Ok(CstNode::with_children(
+                NodeKind::Parameter,
+                span,
+                vec![expr],
             ));
         }
 
@@ -276,6 +448,16 @@ impl<'a> Parser<'a> {
     /// Uses KwParameter NodeKind to distinguish from positional parameters.
     /// Supports kwargs splat: kwargs... to collect all remaining keyword arguments
     pub(crate) fn parse_kw_parameter(&mut self) -> ParseResult<CstNode> {
+        if self.check(&Token::Dollar) {
+            let expr = self.parse_prefix()?;
+            let span = expr.span;
+            return Ok(CstNode::with_children(
+                NodeKind::KwParameter,
+                span,
+                vec![expr],
+            ));
+        }
+
         let name = self.parse_identifier()?;
         let start = name.span.start;
         let mut children = vec![name];
@@ -312,62 +494,87 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse where clause: where T <: SomeType or where {T, S}
+    ///
+    /// Unbraced constraints are parsed with `parse_type_constraint` (not the
+    /// general expression parser): a general expression parse would swallow a
+    /// following `= body` as an Assignment, so the assignment-form operator
+    /// definition `*(a, b) where T<:Real = expr` failed with `expected Eq`
+    /// (Issue #6537). `parse_type_constraint` stops cleanly before `=` / the
+    /// body and preserves the `>:` bound direction and the double-bounded
+    /// `Lower<:T<:Upper` shape (Issue #5650).
+    ///
+    /// Chained clauses (`where T where S`, possibly mixing braced lists) are
+    /// folded into a single `WhereClause` node whose children are the
+    /// constraints / `TypeParameters` lists in source order.
     pub(crate) fn parse_where_clause(&mut self) -> ParseResult<CstNode> {
         let start_token = self.expect(Token::KwWhere)?;
         let start = start_token.span.start;
+        let mut children = Vec::new();
+        // Always assigned on the first loop iteration (both branches set it).
+        let mut end;
 
-        // Check for braced type parameter list: where {T, S}
-        if self.check(&Token::LBrace) {
-            self.advance(); // consume '{'
-            let mut type_params = Vec::new();
+        loop {
+            if self.check(&Token::LBrace) {
+                // Braced type parameter list: where {T, S}
+                let lbrace_token = self.advance().unwrap(); // consume '{'
+                let mut type_params = Vec::new();
 
-            loop {
-                // Skip newlines
-                while self.check(&Token::Newline) {
-                    self.advance();
+                loop {
+                    // Skip newlines
+                    while self.check(&Token::Newline) {
+                        self.advance();
+                    }
+                    if self.check(&Token::RBrace) {
+                        break;
+                    }
+
+                    // Parse type parameter (could be T or T <: Bound)
+                    let param = self.parse_expression()?;
+                    type_params.push(param);
+
+                    // Skip newlines after param
+                    while self.check(&Token::Newline) {
+                        self.advance();
+                    }
+
+                    if !self.check(&Token::Comma) {
+                        break;
+                    }
+                    self.advance(); // consume comma
                 }
-                if self.check(&Token::RBrace) {
-                    break;
-                }
 
-                // Parse type parameter (could be T or T <: Bound)
-                let param = self.parse_expression()?;
-                type_params.push(param);
+                let end_token = self.expect(Token::RBrace)?;
 
-                // Skip newlines after param
-                while self.check(&Token::Newline) {
-                    self.advance();
-                }
-
-                if !self.check(&Token::Comma) {
-                    break;
-                }
-                self.advance(); // consume comma
+                // Wrap the type parameters in a TypeParameters node (reusing existing kind)
+                let params_span = self
+                    .source_map
+                    .span(lbrace_token.span.start, end_token.span.end);
+                children.push(CstNode::with_children(
+                    NodeKind::TypeParameters,
+                    params_span,
+                    type_params,
+                ));
+                end = end_token.span.end;
+            } else {
+                // Single constraint: where T or where T <: SomeType
+                let constraint = self.parse_type_constraint()?;
+                end = constraint.span.end;
+                children.push(constraint);
             }
 
-            let end_token = self.expect(Token::RBrace)?;
-            let span = self.source_map.span(start, end_token.span.end);
-
-            // Wrap the type parameters in a TypeParameters node (reusing existing kind)
-            let params_span = self
-                .source_map
-                .span(start_token.span.end, end_token.span.end);
-            let params_node =
-                CstNode::with_children(NodeKind::TypeParameters, params_span, type_params);
-            return Ok(CstNode::with_children(
-                NodeKind::WhereClause,
-                span,
-                vec![params_node],
-            ));
+            // Chained where clause: where T where S
+            if self.check(&Token::KwWhere) {
+                self.advance();
+            } else {
+                break;
+            }
         }
 
-        // Single constraint: where T or where T <: SomeType
-        let constraints = self.parse_expression()?;
-        let span = self.source_map.span(start, constraints.span.end);
+        let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::WhereClause,
             span,
-            vec![constraints],
+            children,
         ))
     }
 

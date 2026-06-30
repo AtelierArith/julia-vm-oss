@@ -1,0 +1,5 @@
+crate: cranelift-codegen
+version: 0.115.1
+license: Apache-2.0 WITH LLVM-exception
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/bytecodealliance/wasmtime

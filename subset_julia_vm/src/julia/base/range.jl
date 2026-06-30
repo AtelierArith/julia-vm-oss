@@ -12,6 +12,160 @@
 #   - stepsize (renamed to step)
 #   - range_length (internal)
 
+# VM-native range collect bridges.
+#
+# Upstream Julia defines `collect(r::AbstractRange) = Array(r)`. sjulia still
+# represents parser-created range values as VM-native `Value::Range`, so use
+# the same public `_collect` trait path for numeric UnitRange/StepRange slices
+# that can run without field access on a Julia struct. Runtime `Any` non-unit
+# ranges still retain a VM-native materialization fallback until they have safe
+# Julia wrappers.
+function _collect_vm_range(r)
+    n = length(r)
+    if n == 0
+        if isa(r, StepRange{Int64,Int64})
+            return _array_undef_from_dims(Int64, (0,))
+        end
+        return []
+    end
+    if isa(r, StepRange{Int64,Int64})
+        result = _array_undef_from_dims(Int64, (n,))
+        for i in 1:n
+            result[i] = Int64(r[i])
+        end
+        return result
+    end
+    first_value = r[1]
+    if isa(first_value, Int64)
+        result = _array_undef_from_dims(Int64, (n,))
+    elseif isa(first_value, Float64)
+        result = _array_undef_from_dims(Float64, (n,))
+    elseif isa(first_value, Float32)
+        result = _array_undef_from_dims(Float32, (n,))
+    else
+        result = _array_undef_from_dims(Any, (n,))
+    end
+    result[1] = first_value
+    for i in 2:n
+        value = r[i]
+        result[i] = value
+    end
+    return result
+end
+
+function _collect_vm_range_as(::Type{T}, r) where {T}
+    n = length(r)
+    if n == 0
+        if T === Int64
+            return _array_undef_from_dims(Int64, (0,))
+        elseif T === Float64
+            return _array_undef_from_dims(Float64, (0,))
+        elseif T === Float32
+            return _array_undef_from_dims(Float32, (0,))
+        end
+        return []
+    end
+    if T === Int64
+        result = _array_undef_from_dims(Int64, (n,))
+        for i in 1:n
+            result[i] = Int64(r[i])
+        end
+        return result
+    elseif T === Float64
+        result = _array_undef_from_dims(Float64, (n,))
+        for i in 1:n
+            result[i] = Float64(r[i])
+        end
+        return result
+    elseif T === Float32
+        result = _array_undef_from_dims(Float32, (n,))
+        for i in 1:n
+            result[i] = Float32(r[i])
+        end
+        return result
+    end
+    return _collect_vm_range(r)
+end
+
+function collect(r::UnitRange{T}) where {T}
+    return _collect_vm_range_as(T, r)
+end
+
+function collect(r::UnitRange)
+    return _collect_vm_range(r)
+end
+
+function collect(r::StepRange{T,S}) where {T,S}
+    return _collect_vm_range_as(T, r)
+end
+
+function collect(r::StepRange)
+    return _collect_vm_range(r)
+end
+
+# eltype for the parametric range types (Issue #5116).  Upstream derives these
+# from `eltype(::Type{<:AbstractArray{E}}) where {E} = E`
+# (julia/base/abstractarray.jl:246), since every `AbstractRange <: AbstractArray`.
+# The VM cannot bind a covariant `::Type{<:AbstractArray{E}}` type parameter, so
+# `UnitRange{T}` / `StepRange{T,S}` are written as concrete-parametric methods
+# that the dispatcher resolves; the value forms delegate through `typeof`.
+eltype(::Type{UnitRange{T}}) where {T} = T
+eltype(r::UnitRange) = eltype(typeof(r))
+eltype(::Type{StepRange{T,S}}) where {T,S} = T
+eltype(r::StepRange) = eltype(typeof(r))
+
+# `reverse` of a range is itself a (lazy) range, not a materialized Vector —
+# `reverse(1:5) === 5:-1:1`, `reverse(1:2:9) === 9:-2:1`. Without this method the
+# generic `reverse(arr)` collects the range first (Issue #5661). The colon
+# operator reconstructs the appropriate range type (StepRange for integers,
+# StepRangeLen for floats) from the reversed endpoints and negated step.
+reverse(r::AbstractRange) = last(r):(-step(r)):first(r)
+
+# ==(r::AbstractRange, ...) — element-wise equality (Issue #5666). Ranges are
+# `AbstractArray`s in Julia, so `==` compares element-wise: `1:5 == 1:5`,
+# `1:1:5 == 1:5`, and `1:5 == [1,2,3,4,5]` are all true. The compiler routes a
+# `==`/`!=` with a range operand to these methods (the numeric fast path cannot
+# coerce a `Range`); a range compared with a non-array scalar falls back to
+# identity (`false`).
+function ==(r::AbstractRange, s::AbstractRange)
+    if length(r) != length(s)
+        return false
+    end
+    for i in 1:length(r)
+        if !(r[i] == s[i])
+            return false
+        end
+    end
+    return true
+end
+
+function ==(r::AbstractRange, a::AbstractArray)
+    if length(r) != length(a)
+        return false
+    end
+    for i in 1:length(r)
+        if !(r[i] == a[i])
+            return false
+        end
+    end
+    return true
+end
+
+==(a::AbstractArray, r::AbstractRange) = (r == a)
+
+# Range predicate count follows upstream `count(f, itr)` semantics through
+# iteration. Keep this public path in Julia; the VM `CountFunc` range branch is
+# only a compatibility fallback for old bytecode.
+function count(f::Function, r::AbstractRange)
+    n = 0
+    for x in r
+        if f(x)
+            n = n + 1
+        end
+    end
+    return n
+end
+
 # =============================================================================
 # LinRange - linearly spaced range defined by start, stop, and length
 # =============================================================================
@@ -116,6 +270,30 @@ function size(r::LinRange)
     return (r.len,)
 end
 
+function IteratorSize(::Type{LinRange{T}}) where {T}
+    return HasShape{1}()
+end
+
+function IteratorSize(r::LinRange)
+    return IteratorSize(typeof(r))
+end
+
+function IteratorEltype(::Type{LinRange{T}}) where {T}
+    return HasEltype()
+end
+
+function IteratorEltype(r::LinRange)
+    return IteratorEltype(typeof(r))
+end
+
+function eltype(::Type{LinRange{T}}) where {T}
+    return T
+end
+
+function eltype(r::LinRange)
+    return eltype(typeof(r))
+end
+
 # isempty for LinRange
 function isempty(r::LinRange)
     return r.len == 0
@@ -123,9 +301,21 @@ end
 
 # collect for LinRange
 function collect(r::LinRange)
-    result = Float64[]
-    for x in r
-        push!(result, x)
+    n = length(r)
+    T = eltype(r)
+    tname = string(T)
+    if tname == "Int64"
+        result = _array_undef_from_dims(Int64, (n,))
+    elseif tname == "Float64"
+        result = _array_undef_from_dims(Float64, (n,))
+    elseif tname == "Float32"
+        result = _array_undef_from_dims(Float32, (n,))
+    else
+        result = _array_undef_from_dims(Any, (n,))
+    end
+    for i in 1:n
+        value = r[i]
+        result[i] = value
     end
     return result
 end
@@ -239,6 +429,30 @@ function size(r::StepRangeLen)
     return (r.len,)
 end
 
+function IteratorSize(::Type{StepRangeLen{T}}) where {T}
+    return HasShape{1}()
+end
+
+function IteratorSize(r::StepRangeLen)
+    return IteratorSize(typeof(r))
+end
+
+function IteratorEltype(::Type{StepRangeLen{T}}) where {T}
+    return HasEltype()
+end
+
+function IteratorEltype(r::StepRangeLen)
+    return IteratorEltype(typeof(r))
+end
+
+function eltype(::Type{StepRangeLen{T}}) where {T}
+    return T
+end
+
+function eltype(r::StepRangeLen)
+    return eltype(typeof(r))
+end
+
 # isempty for StepRangeLen
 function isempty(r::StepRangeLen)
     return r.len == 0
@@ -246,9 +460,21 @@ end
 
 # collect for StepRangeLen
 function collect(r::StepRangeLen)
-    result = Float64[]
-    for x in r
-        push!(result, x)
+    n = length(r)
+    T = eltype(r)
+    tname = string(T)
+    if tname == "Int64"
+        result = _array_undef_from_dims(Int64, (n,))
+    elseif tname == "Float64"
+        result = _array_undef_from_dims(Float64, (n,))
+    elseif tname == "Float32"
+        result = _array_undef_from_dims(Float32, (n,))
+    else
+        result = _array_undef_from_dims(Any, (n,))
+    end
+    for i in 1:n
+        value = r[i]
+        result[i] = value
     end
     return result
 end
@@ -335,10 +561,22 @@ function range_start_stop_length(start, stop, len)
 end
 
 # range_start_step_length(start, step, len) - start and step with length
-# Julia: function range_start_step_length(a, step, len::Integer)
-# Returns a lazy StepRangeLen for compatibility with Julia.
+# (Issue #5135) Upstream returns `StepRange{typeof(stop),typeof(step)}` when the
+# recomputed stop is Signed and a `StepRangeLen` otherwise
+# (julia/base/range.jl:222-229). For integer `start`/`step` the previous
+# `StepRangeLen(start * 1.0, step * 1.0, ...)` form silently float-promoted the
+# element type, so `range(1, step=2, length=5)` produced `[1.0, 3.0, ...]`
+# instead of the integer `[1, 3, 5, 7, 9]`. Route the all-integer case through
+# the VM colon operator (`start:step:stop`), which materializes the correct
+# `StepRange{Int64,Int64}` with integer elements. Non-integer arguments keep the
+# existing float `StepRangeLen` representation, matching upstream values there.
 function range_start_step_length(start, step, len)
-    return StepRangeLen(start * 1.0, step * 1.0, Int64(len), 1)
+    n = Int64(len)
+    if isa(start, Integer) && isa(step, Integer)
+        stop = start + step * (n - 1)
+        return start:step:stop
+    end
+    return StepRangeLen(start * 1.0, step * 1.0, n, 1)
 end
 
 # range_start_length(start, len) - start and length, step=1
@@ -355,8 +593,19 @@ function range_start_step_stop(start, step, stop)
     return (start * 1.0):(step * 1.0):(stop * 1.0)
 end
 
-# first: get the first element of a collection
+# first: get the first element of a collection.
+# Special-case empty Range (Issue #3734 follow-up): the generic `arr[1]`
+# raises BoundsError on `1:0` even though Julia semantics define
+# `first(1:0) == 1` (returns `r.start`). Pure Julia cannot read `r.start`
+# directly on a `Value::Range`, so route through the `_tuple_first`
+# internal alias (BuiltinId::TupleFirst Rust handler) for that case only.
+# We test `AbstractRange` rather than `UnitRange` because the parametric
+# `isa(r, UnitRange)` only matches with the exact element-type parameter
+# whereas `AbstractRange` covers all empty Range values.
 function first(arr)
+    if isa(arr, AbstractRange) && length(arr) == 0
+        return _tuple_first(arr)
+    end
     return arr[1]
 end
 
@@ -366,13 +615,25 @@ function first(arr, n::Int64)
     if n < 0
         throw(ArgumentError("Number of elements must be non-negative"))
     end
-    len = length(arr)
-    m = min(n, len)
-    return arr[1:m]
+    # Indexable collections slice directly so the result type is preserved
+    # (`first(1:10, 3) === 1:3`, `first("hello", 3) === "hel"`).
+    if isa(arr, AbstractArray) || isa(arr, AbstractRange) || isa(arr, AbstractString)
+        len = length(arr)
+        m = min(n, len)
+        return arr[1:m]
+    end
+    # General iterators (tuples, generators, Iterators.cycle, …) are not
+    # indexable: take the first `n` by iteration, returning a Vector — matching
+    # upstream `first(itr, n)` (Issue #5750).
+    return collect(Iterators.take(arr, n))
 end
 
-# last: get the last element of a collection
+# last: get the last element of a collection.
+# Special-case empty Range (Issue #3734 follow-up): see `first(arr)`.
 function last(arr)
+    if isa(arr, AbstractRange) && length(arr) == 0
+        return _tuple_last(arr)
+    end
     return arr[length(arr)]
 end
 
@@ -402,6 +663,11 @@ function eachindex(arr)
 end
 
 # firstindex: get the first valid index (always 1 in Julia)
+# INTENTIONAL_NOOP (Issue #4703): upstream
+# `firstindex(a::AbstractArray) = first(eachindex(IndexLinear(), a))`
+# (julia/base/abstractarray.jl:452). sjulia has no OffsetArrays, so every
+# supported AbstractArray is 1-based and the constant `return 1` matches
+# the upstream result for all values this method sees.
 function firstindex(arr)
     return 1
 end
@@ -500,6 +766,42 @@ function getindex(r::OneTo, i::Integer)
     return getindex(r, Int64(i))
 end
 
+# Range slicing (Issue #5751): indexing a range with a range index returns a
+# sub-range, preserving the step (`(1:10)[1:3] === 1:3`, `(1:2:20)[1:3] === 1:2:5`,
+# reverse indices like `(1:10)[3:-1:1]` give `3:-1:1`). Indexing with a single Int
+# is handled by the per-range-type `getindex` methods above.
+function getindex(r::AbstractRange, inds::AbstractRange)
+    n = length(inds)
+    s = step(r) * step(inds)
+    if n == 0
+        f = first(r) + (first(inds) - 1) * step(r)
+        stop = s < 0 ? f + 1 : f - 1
+        if s == 1
+            return f:stop
+        else
+            return f:s:stop
+        end
+    end
+    f = r[first(inds)]
+    if s == 1
+        return f:(f + n - 1)
+    else
+        return f:s:(f + (n - 1) * s)
+    end
+end
+
+# Indexing a range with a vector of indices (or a Bool mask) materializes a
+# Vector of the selected elements, mirroring `getindex(::AbstractArray,
+# ::AbstractVector)` for ordinary arrays. Without this, `(1:10)[[1, 3, 5]]` failed
+# with "no method" while `collect(1:10)[[1, 3, 5]]` worked (Issue #5754).
+function getindex(r::AbstractRange, inds::AbstractVector{<:Integer})
+    return [r[i] for i in inds]
+end
+
+function getindex(r::AbstractRange, mask::AbstractVector{Bool})
+    return [r[i] for i in 1:length(r) if mask[i]]
+end
+
 # iterate for OneTo (following the iteration protocol)
 function iterate(r::OneTo)
     if r.stop == 0
@@ -525,6 +827,30 @@ function size(r::OneTo)
     return (r.stop,)
 end
 
+function IteratorSize(::Type{OneTo})
+    return HasShape{1}()
+end
+
+function IteratorSize(r::OneTo)
+    return IteratorSize(typeof(r))
+end
+
+function IteratorEltype(::Type{OneTo})
+    return HasEltype()
+end
+
+function IteratorEltype(r::OneTo)
+    return IteratorEltype(typeof(r))
+end
+
+function eltype(::Type{OneTo})
+    return Int64
+end
+
+function eltype(r::OneTo)
+    return Int64
+end
+
 # isempty for OneTo
 function isempty(r::OneTo)
     return r.stop == 0
@@ -532,11 +858,7 @@ end
 
 # collect for OneTo
 function collect(r::OneTo)
-    result = Int64[]
-    for x in r
-        push!(result, x)
-    end
-    return result
+    return _collect(1:1, r, IteratorEltype(r), IteratorSize(r))
 end
 
 # eachindex for OneTo
@@ -618,6 +940,22 @@ function size(r::LogRange)
     return (r.len,)
 end
 
+function IteratorSize(r::LogRange)
+    return HasShape{1}()
+end
+
+function IteratorEltype(r::LogRange)
+    return HasEltype()
+end
+
+function eltype(r::LogRange)
+    return typeof(r.start)
+end
+
+function collect(r::LogRange)
+    return _collect(1:1, r, IteratorEltype(r), IteratorSize(r))
+end
+
 # first element
 function first(r::LogRange)
     return r.start
@@ -681,15 +1019,6 @@ end
 # isempty for LogRange
 function isempty(r::LogRange)
     return r.len == 0
-end
-
-# collect for LogRange
-function collect(r::LogRange)
-    result = Float64[]
-    for x in r
-        push!(result, x)
-    end
-    return result
 end
 
 # eachindex for LogRange

@@ -65,3 +65,9 @@ name = "sort_insorted_argument_order"
 file = "insorted_argument_order.jl"
 expected = true
 description = "insorted(x, arr) argument order matches Julia's insorted(x, v) (Issue #2163)"
+
+[[tests]]
+name = "sort_pure_julia_dispatch"
+file = "sort_pure_julia_dispatch.jl"
+expected = true
+description = "sort/sort! route through Pure Julia base/sort.jl after removing stale Sort builtin (Issue #3725)"

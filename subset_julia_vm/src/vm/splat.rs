@@ -4,7 +4,104 @@
 //! (`f(args...)`) from Array, Tuple, and Range values into flat argument lists.
 //! Used by `call.rs`, `call_dynamic.rs`, and `sync_exec.rs`.
 
-use super::value::Value;
+use super::error::VmError;
+use super::util::{extract_base_type, is_dict_type_name, strip_module_prefix};
+use super::value::{
+    array_wrapper_value_to_array_value, native_array_value_ref, StructInstance, Value,
+};
+
+const DICT_FILLED_MASK: u8 = 128;
+
+fn is_set_type_name(type_name: &str) -> bool {
+    strip_module_prefix(extract_base_type(type_name)) == "Set"
+}
+
+fn struct_instance_from_value<'a>(
+    value: &'a Value,
+    struct_heap: &'a [StructInstance],
+) -> Result<Option<&'a StructInstance>, VmError> {
+    match value {
+        Value::Struct(instance) => Ok(Some(instance)),
+        Value::StructRef(idx) => struct_heap
+            .get(*idx)
+            .map(Some)
+            .ok_or_else(|| VmError::TypeError(format!("Invalid StructRef index {}", idx))),
+        _ => Ok(None),
+    }
+}
+
+fn memory_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Memory(mem) => Some(mem.borrow().len()),
+        Value::MemoryRef(memref) => Some(memref.len()),
+        _ => None,
+    }
+}
+
+fn memory_get(value: &Value, index: usize) -> Result<Option<Value>, VmError> {
+    match value {
+        Value::Memory(mem) => mem.borrow().get(index).map(Some),
+        Value::MemoryRef(memref) => memref.get(index).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn slot_is_filled(slot: &Value) -> bool {
+    match slot {
+        Value::U8(v) => (v & DICT_FILLED_MASK) != 0,
+        Value::I64(v) => match u8::try_from(*v) {
+            Ok(byte) => (byte & DICT_FILLED_MASK) != 0,
+            Err(_) => false,
+        },
+        _ => false,
+    }
+}
+
+fn set_wrapper_value_to_elements(
+    value: &Value,
+    struct_heap: &[StructInstance],
+) -> Result<Option<Vec<Value>>, VmError> {
+    let Some(set_instance) = struct_instance_from_value(value, struct_heap)? else {
+        return Ok(None);
+    };
+    if !is_set_type_name(&set_instance.struct_name) {
+        return Ok(None);
+    }
+
+    let Some(dict_value) = set_instance.values.first() else {
+        return Ok(None);
+    };
+    let Some(dict_instance) = struct_instance_from_value(dict_value, struct_heap)? else {
+        return Ok(None);
+    };
+    if !is_dict_type_name(&dict_instance.struct_name) {
+        return Ok(None);
+    }
+
+    let Some(slots) = dict_instance.values.first() else {
+        return Ok(None);
+    };
+    let Some(keys) = dict_instance.values.get(1) else {
+        return Ok(None);
+    };
+    let Some(slot_len) = memory_len(slots) else {
+        return Ok(None);
+    };
+
+    let mut elements = Vec::new();
+    for index in 1..=slot_len {
+        let Some(slot) = memory_get(slots, index)? else {
+            return Ok(None);
+        };
+        if slot_is_filled(&slot) {
+            let Some(key) = memory_get(keys, index)? else {
+                return Ok(None);
+            };
+            elements.push(key);
+        }
+    }
+    Ok(Some(elements))
+}
 
 /// Expand splatted arguments into a flat argument list.
 ///
@@ -21,39 +118,98 @@ use super::value::Value;
 pub fn expand_splat_arguments(args: Vec<Value>, splat_mask: &[bool]) -> Vec<Value> {
     let mut expanded = Vec::new();
     for (idx, arg) in args.into_iter().enumerate() {
-        if splat_mask.get(idx).copied().unwrap_or(false) {
-            // Expand this argument
-            match &arg {
-                Value::Array(arr) => {
-                    let borrowed = arr.borrow();
-                    for i in 0..borrowed.len() {
-                        if let Ok(val) = borrowed.get(&[(i + 1) as i64]) {
-                            expanded.push(val);
-                        }
-                    }
-                }
-                Value::Tuple(tuple) => {
-                    for elem in &tuple.elements {
-                        expanded.push(elem.clone());
-                    }
-                }
-                Value::Range(range) => {
-                    // Julia ranges are inclusive: 1:3 = [1, 2, 3]
-                    let mut i = range.start;
-                    while (range.step > 0.0 && i <= range.stop)
-                        || (range.step < 0.0 && i >= range.stop)
-                    {
-                        expanded.push(Value::I64(i as i64));
-                        i += range.step;
-                    }
-                }
-                _ => expanded.push(arg),
-            }
-        } else {
+        if !splat_mask.get(idx).copied().unwrap_or(false) {
             expanded.push(arg);
+            continue;
+        }
+        // Expand this argument. The native-array branch routes through the
+        // shared `native_array_value_ref` so the file no longer pattern-
+        // matches on the legacy native-array variant directly
+        // (Issue #3908).
+        if let Some(arr) = native_array_value_ref(&arg) {
+            let borrowed = arr.borrow();
+            for i in 0..borrowed.len() {
+                if let Ok(val) = borrowed.get(&[(i + 1) as i64]) {
+                    expanded.push(val);
+                }
+            }
+            continue;
+        }
+        match &arg {
+            // Tuple and Core.SimpleVector splat their elements (Issue #4722).
+            Value::Tuple(tuple) | Value::SimpleVector(tuple) => {
+                for elem in &tuple.elements {
+                    expanded.push(elem.clone());
+                }
+            }
+            Value::Range(range) => {
+                // Julia ranges are inclusive: 1:3 = [1, 2, 3]
+                let mut i = range.start;
+                while (range.step > 0.0 && i <= range.stop) || (range.step < 0.0 && i >= range.stop)
+                {
+                    expanded.push(Value::I64(i as i64));
+                    i += range.step;
+                }
+            }
+            _ => expanded.push(arg),
         }
     }
     expanded
+}
+
+/// Expand splatted arguments, including Pure Julia `Array{T,N}` wrappers that
+/// store elements in `Memory`/`MemoryRef`.
+pub fn expand_splat_arguments_with_heap(
+    args: Vec<Value>,
+    splat_mask: &[bool],
+    struct_heap: &[StructInstance],
+) -> Result<Vec<Value>, VmError> {
+    let mut expanded = Vec::new();
+    for (idx, arg) in args.into_iter().enumerate() {
+        if !splat_mask.get(idx).copied().unwrap_or(false) {
+            expanded.push(arg);
+            continue;
+        }
+
+        if let Some(arr) = native_array_value_ref(&arg) {
+            let borrowed = arr.borrow();
+            for i in 0..borrowed.len() {
+                expanded.push(borrowed.get(&[(i + 1) as i64])?);
+            }
+            continue;
+        }
+
+        if let Some(arr) = array_wrapper_value_to_array_value(&arg, struct_heap)? {
+            for i in 0..arr.element_count() {
+                expanded.push(arr.get_linear(i)?);
+            }
+            continue;
+        }
+
+        if let Some(elements) = set_wrapper_value_to_elements(&arg, struct_heap)? {
+            expanded.extend(elements);
+            continue;
+        }
+
+        match &arg {
+            // Tuple and Core.SimpleVector splat their elements (Issue #4722).
+            Value::Tuple(tuple) | Value::SimpleVector(tuple) => {
+                for elem in &tuple.elements {
+                    expanded.push(elem.clone());
+                }
+            }
+            Value::Range(range) => {
+                let mut i = range.start;
+                while (range.step > 0.0 && i <= range.stop) || (range.step < 0.0 && i >= range.stop)
+                {
+                    expanded.push(Value::I64(i as i64));
+                    i += range.step;
+                }
+            }
+            _ => expanded.push(arg),
+        }
+    }
+    Ok(expanded)
 }
 
 #[cfg(test)]

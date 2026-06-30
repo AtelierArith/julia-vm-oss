@@ -1,0 +1,15 @@
+using Test
+using LinearAlgebra
+
+import LinearAlgebra: det, lu
+
+det(A::Array) = 99
+lu(A::Array) = :lu_dispatch_first_4020
+
+@testset "det/lu dispatch first #4020" begin
+    A = [1 2; 3 4]
+    @test det(A) == 99
+    @test lu(A) === :lu_dispatch_first_4020
+end
+
+true

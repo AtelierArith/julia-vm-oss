@@ -79,26 +79,40 @@ mod tests {
     fn test_get_first_element_1_based() {
         let t = make_tuple(vec![10, 20, 30]);
         let val = t.get(1).unwrap();
-        assert!(matches!(val, Value::I64(10)), "Expected I64(10), got {:?}", val);
+        assert!(
+            matches!(val, Value::I64(10)),
+            "Expected I64(10), got {:?}",
+            val
+        );
     }
 
     #[test]
     fn test_get_last_element() {
         let t = make_tuple(vec![10, 20, 30]);
         let val = t.get(3).unwrap();
-        assert!(matches!(val, Value::I64(30)), "Expected I64(30), got {:?}", val);
+        assert!(
+            matches!(val, Value::I64(30)),
+            "Expected I64(30), got {:?}",
+            val
+        );
     }
 
     #[test]
     fn test_get_index_zero_returns_error() {
         let t = make_tuple(vec![1, 2]);
-        assert!(t.get(0).is_err(), "Index 0 should be out of bounds (1-based)");
+        assert!(
+            t.get(0).is_err(),
+            "Index 0 should be out of bounds (1-based)"
+        );
     }
 
     #[test]
     fn test_get_index_beyond_length_returns_error() {
         let t = make_tuple(vec![1, 2]);
-        assert!(t.get(3).is_err(), "Index 3 should be out of bounds for 2-element tuple");
+        assert!(
+            t.get(3).is_err(),
+            "Index 3 should be out of bounds for 2-element tuple"
+        );
     }
 
     // ── TupleValue::first / last ──────────────────────────────────────────────
@@ -107,7 +121,11 @@ mod tests {
     fn test_first_returns_first_element() {
         let t = make_tuple(vec![42, 99]);
         let val = t.first().unwrap();
-        assert!(matches!(val, Value::I64(42)), "Expected I64(42), got {:?}", val);
+        assert!(
+            matches!(val, Value::I64(42)),
+            "Expected I64(42), got {:?}",
+            val
+        );
     }
 
     #[test]
@@ -120,7 +138,11 @@ mod tests {
     fn test_last_returns_last_element() {
         let t = make_tuple(vec![1, 2, 7]);
         let val = t.last().unwrap();
-        assert!(matches!(val, Value::I64(7)), "Expected I64(7), got {:?}", val);
+        assert!(
+            matches!(val, Value::I64(7)),
+            "Expected I64(7), got {:?}",
+            val
+        );
     }
 
     #[test]

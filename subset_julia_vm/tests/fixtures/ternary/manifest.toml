@@ -1,6 +1,18 @@
 # Test manifest for ternary category
 
 [[tests]]
+name = "ternary_comparison_then_branch_8314"
+file = "comparison_then_branch_8314.jl"
+expected = true
+description = "Comparison operator in a ternary then-branch parses; the `:` is the separator, not a range. Parenthesized ranges in the then-branch still work (Issue #8314)"
+
+[[tests]]
+name = "ternary_else_branch_range_8318"
+file = "else_branch_range_8318.jl"
+expected = true
+description = "An unparenthesized range in the ternary else-branch keeps its `:` as a range operator: `cond ? a : b:c` is `cond ? a : (b:c)` (Issue #8318)"
+
+[[tests]]
 name = "ternary_basic_true"
 file = "basic_true.jl"
 expected = true
@@ -41,3 +53,15 @@ name = "ternary_in_loop"
 file = "in_loop.jl"
 expected = true
 description = "Ternary inside a for loop"
+
+[[tests]]
+name = "ternary_multiline_newline_4862"
+file = "multiline_newline_4862.jl"
+expected = true
+description = "Newline immediately after `?` (and after the inner `:`) in a multi-line ternary parses as a continuation; previously rejected with `ParseFailed(\"unexpected token '\\n' ..., expected expression\")` because the ternary dispatch path bypassed the binary-operator continuation loop (Issue #4862)"
+
+[[tests]]
+name = "ternary_prime_identifier_7513"
+file = "prime_identifier_7513.jl"
+expected = true
+description = "Prime-suffixed identifiers parse and lower in ternary branches (Issue #7513)"

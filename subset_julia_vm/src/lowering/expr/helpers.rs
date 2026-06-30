@@ -54,8 +54,16 @@ pub(crate) fn is_flattenable_operator(op: &str) -> bool {
 
 /// Check if an operator is a comparison operator that can be chained.
 /// In Julia, `a < b < c` is equivalent to `(a < b) && (b < c)`.
+///
+/// The subtype operators `<:` and `>:` chain the same way (Issue #5492):
+/// `A <: B <: C` lowers to `(A <: B) && (B <: C)`, matching upstream Julia's
+/// `expand-compare-chain` in `julia/src/julia-syntax.scm`, which treats every
+/// comparison-precedence operator (including `<:`/`>:`) uniformly.
 pub(crate) fn is_comparison_operator(op: &str) -> bool {
-    matches!(op, "<" | ">" | "<=" | ">=" | "==" | "!=" | "===" | "!==")
+    matches!(
+        op,
+        "<" | ">" | "<=" | ">=" | "==" | "!=" | "===" | "!==" | "<:" | ">:"
+    )
 }
 
 /// Check if a node kind represents an operator token.
@@ -142,21 +150,25 @@ pub(crate) fn strip_broadcast_dot(op: &str) -> &str {
 /// * `args` - The already-lowered argument expressions
 /// * `span` - Source span for error reporting
 pub(crate) fn make_broadcasted_call(fn_name: &str, args: Vec<Expr>, span: Span) -> Expr {
-    // Strip materialize wrappers from args that are broadcast results (fusion)
-    let fused_args: Vec<Expr> = args.into_iter().map(strip_materialize).collect();
-
-    // Build: Broadcasted(fn_ref, (arg1, arg2, ...))
     let fn_ref = Expr::FunctionRef {
         name: fn_name.to_string(),
         span,
     };
+    make_broadcasted_call_with_callee(fn_ref, args, span)
+}
+
+pub(crate) fn make_broadcasted_call_with_callee(callee: Expr, args: Vec<Expr>, span: Span) -> Expr {
+    // Strip materialize wrappers from args that are broadcast results (fusion)
+    let fused_args: Vec<Expr> = args.into_iter().map(strip_materialize).collect();
+
+    // Build: Broadcasted(fn_ref, (arg1, arg2, ...))
     let args_tuple = Expr::TupleLiteral {
         elements: fused_args,
         span,
     };
     let broadcasted_call = Expr::Call {
         function: "Broadcasted".to_string(),
-        args: vec![fn_ref, args_tuple],
+        args: vec![callee, args_tuple],
         kwargs: Vec::new(),
         splat_mask: vec![false, false],
         kwargs_splat_mask: vec![],
@@ -210,10 +222,10 @@ pub(crate) fn map_binary_op(op: &str) -> Option<BinaryOp> {
         "^" => Some(BinaryOp::Pow),
         "<" => Some(BinaryOp::Lt),
         ">" => Some(BinaryOp::Gt),
-        "<=" => Some(BinaryOp::Le),
-        ">=" => Some(BinaryOp::Ge),
+        "<=" | "≤" => Some(BinaryOp::Le),
+        ">=" | "≥" => Some(BinaryOp::Ge),
         "==" => Some(BinaryOp::Eq),
-        "!=" => Some(BinaryOp::Ne),
+        "!=" | "≠" => Some(BinaryOp::Ne),
         "===" => Some(BinaryOp::Egal),
         "!==" => Some(BinaryOp::NotEgal),
         "<:" => Some(BinaryOp::Subtype),
@@ -237,38 +249,64 @@ pub(crate) fn map_unary_op(op: &str) -> Option<UnaryOp> {
 pub(crate) fn map_builtin_name(name: &str) -> Option<BuiltinOp> {
     Some(match name {
         "rand" => BuiltinOp::Rand,
-        "sqrt" => BuiltinOp::Sqrt,
-        "ifelse" => BuiltinOp::IfElse,
+        // Note: sqrt is now routed through method dispatch first (Issue #3737).
+        // BuiltinOp::Sqrt is still reachable via `base_function_to_builtin_op`
+        // as a fallback for real numeric types when dispatch finds no match.
+        // Note: ifelse is now Pure Julia (base/essentials.jl, Issue #3733). Lowering
+        // to BuiltinOp::IfElse short-circuits the non-selected arm, which violates
+        // Julia's strict-evaluation semantics for ifelse(condition, x, y).
         // Array builtins
-        "zeros" => BuiltinOp::Zeros,
-        "ones" => BuiltinOp::Ones,
-        "reshape" => BuiltinOp::Reshape,
+        // zeros/ones are Pure Julia allocation dispatch (Issue #4036).
+        // reshape is dispatch-first with a retained VM fallback (Issue #4276).
         // Note: trues, falses, fill are now Pure Julia (base/array.jl)
-        "length" => BuiltinOp::Length,
-        "size" => BuiltinOp::Size,
-        "push!" => BuiltinOp::Push,
-        "pop!" => BuiltinOp::Pop,
-        "zero" => BuiltinOp::Zero,
+        // Note: length, size are now routed through method dispatch first (Issue #3736).
+        // Pure Julia methods exist in base/range.jl (LinRange/StepRangeLen/OneTo/LogRange),
+        // base/subarray.jl (SubArray, MatrixView), base/dict.jl, base/set.jl,
+        // base/iterators.jl (Enumerate/Zip/Take/Drop/CartesianIndices/...),
+        // base/broadcast.jl (Broadcasted), base/generator.jl, base/channels.jl, etc.
+        // BuiltinOp::Length / BuiltinOp::Size remain reachable via
+        // `base_function_to_builtin_op("length"|"size")` as a fallback for native
+        // VM containers (Array, Tuple, String, Dict, Set, Range, Generator) when
+        // method dispatch finds no matching Pure Julia method.
+        // Note: push!, pop! removed from lowering shortcut (Issue #3739) — public
+        // mutating collection calls now go through method dispatch so Pure Julia
+        // methods on `Set` (base/set.jl) and `Dict{K,V}` (base/dict.jl) win over
+        // the Rust builtin. Array calls still reach `BuiltinOp::Push` / `Pop` via
+        // `base_function_to_builtin_op` after dispatch fails (call.rs fallback).
+        // Note: zero is now routed through method dispatch first (Issue #3737).
+        // BuiltinOp::Zero is still reachable via `base_function_to_builtin_op`
+        // as a fallback for primitive numeric types when dispatch finds no
+        // matching Pure Julia method.
         // Note: complex, real, imag, conj, abs, abs2, transpose are Pure Julia
         // RNG constructors
         "StableRNG" => BuiltinOp::StableRNG,
         "Xoshiro" => BuiltinOp::XoshiroRNG,
+        "MersenneTwister" => BuiltinOp::MersenneTwisterRNG,
         // Normal distribution
         "randn" => BuiltinOp::Randn,
         // Tuple operations
-        "first" => BuiltinOp::TupleFirst,
-        "last" => BuiltinOp::TupleLast,
+        // Note: first/last are now Pure Julia (Issue #3734) - they dispatch through
+        // the method table to the implementations in base/tuple.jl, base/range.jl,
+        // base/strings/basic.jl, base/iterators.jl, and any user-defined struct methods.
         // Dict operations
         // Note: haskey, get, merge, keys, values, pairs are now Pure Julia (Issue #2572, #2573, #2669)
-        "delete!" => BuiltinOp::DictDelete,
+        // Note: delete! removed from lowering shortcut (Issue #3739) — Set and
+        // Dict{K,V} have Pure Julia `delete!` methods. The Rust HashMap-backed
+        // `Value::Dict` still falls back to `BuiltinOp::DictDelete` via
+        // `base_function_to_builtin_op` when method dispatch finds no match.
         // Broadcasting control
         "Ref" => BuiltinOp::Ref,
         // Type operations
         "typeof" => BuiltinOp::TypeOf,
         "isa" => BuiltinOp::Isa,
         // Iterator Protocol
-        "iterate" => BuiltinOp::Iterate,
-        "collect" => BuiltinOp::Collect,
+        // Note: iterate, collect are now routed through method dispatch first
+        // (Issue #3735). Pure Julia methods exist in base/iterators.jl,
+        // base/range.jl, base/generator.jl, base/dict.jl, base/channels.jl,
+        // base/subarray.jl. BuiltinOp::Iterate / BuiltinOp::Collect remain
+        // reachable via base_function_to_builtin_op as the fallback for
+        // primitive containers (Array, Tuple, String, Range) when method
+        // dispatch finds no matching Pure Julia method.
         // Macro hygiene
         // Note: gensym is now Pure Julia (meta.jl) - Issue #294
         "esc" => BuiltinOp::Esc,
@@ -276,8 +314,8 @@ pub(crate) fn map_builtin_name(name: &str) -> Option<BuiltinOp> {
         "eval" => BuiltinOp::Eval,
         "macroexpand" => BuiltinOp::MacroExpand,
         "macroexpand!" => BuiltinOp::MacroExpandBang,
-        "include_string" => BuiltinOp::IncludeString,
-        "evalfile" => BuiltinOp::EvalFile,
+        // Note: include_string and evalfile are now dispatched to Pure Julia (Issue #3738)
+        // The Pure Julia implementations in base/meta.jl compose Meta.parse, eval, and read.
         "Symbol" => BuiltinOp::SymbolNew,
         "Expr" => BuiltinOp::ExprNew,
         "LineNumberNode" => BuiltinOp::LineNumberNodeNew,
@@ -356,6 +394,14 @@ mod tests {
     }
 
     #[test]
+    fn test_is_comparison_operator_subtype_ops_chain() {
+        // `<:`/`>:` are comparison-precedence operators that chain like the
+        // scalar comparisons (Issue #5492): `A <: B <: C` => `(A <: B) && (B <: C)`.
+        assert!(is_comparison_operator("<:"));
+        assert!(is_comparison_operator(">:"));
+    }
+
+    #[test]
     fn test_is_comparison_operator_non_comparison() {
         assert!(!is_comparison_operator("+"));
         assert!(!is_comparison_operator("&&"));
@@ -374,7 +420,7 @@ mod tests {
     #[test]
     fn test_is_broadcast_op_plain_op_is_not() {
         assert!(!is_broadcast_op("+"));
-        assert!(!is_broadcast_op("."));  // single dot is not broadcast
+        assert!(!is_broadcast_op(".")); // single dot is not broadcast
     }
 
     // ── strip_broadcast_dot ───────────────────────────────────────────────────
@@ -402,10 +448,13 @@ mod tests {
         assert_eq!(map_binary_op("/"), Some(BinaryOp::Div));
         assert_eq!(map_binary_op("=="), Some(BinaryOp::Eq));
         assert_eq!(map_binary_op("!="), Some(BinaryOp::Ne));
+        assert_eq!(map_binary_op("≠"), Some(BinaryOp::Ne));
         assert_eq!(map_binary_op("<"), Some(BinaryOp::Lt));
         assert_eq!(map_binary_op(">"), Some(BinaryOp::Gt));
         assert_eq!(map_binary_op("<="), Some(BinaryOp::Le));
+        assert_eq!(map_binary_op("≤"), Some(BinaryOp::Le));
         assert_eq!(map_binary_op(">="), Some(BinaryOp::Ge));
+        assert_eq!(map_binary_op("≥"), Some(BinaryOp::Ge));
         assert_eq!(map_binary_op("&&"), Some(BinaryOp::And));
         assert_eq!(map_binary_op("||"), Some(BinaryOp::Or));
         assert_eq!(map_binary_op("==="), Some(BinaryOp::Egal));
@@ -440,9 +489,6 @@ mod tests {
 
     #[test]
     fn test_map_builtin_name_known_builtins() {
-        assert_eq!(map_builtin_name("sqrt"), Some(BuiltinOp::Sqrt));
-        assert_eq!(map_builtin_name("length"), Some(BuiltinOp::Length));
-        assert_eq!(map_builtin_name("push!"), Some(BuiltinOp::Push));
         assert_eq!(map_builtin_name("typeof"), Some(BuiltinOp::TypeOf));
         assert_eq!(map_builtin_name("isa"), Some(BuiltinOp::Isa));
     }
@@ -450,7 +496,31 @@ mod tests {
     #[test]
     fn test_map_builtin_name_unknown_returns_none() {
         assert_eq!(map_builtin_name("foo"), None);
-        assert_eq!(map_builtin_name("haskey"), None);  // now Pure Julia
+        assert_eq!(map_builtin_name("haskey"), None); // now Pure Julia
+                                                      // sqrt and zero now dispatch through method tables first (Issue #3737)
+                                                      // and only reach BuiltinOp::Sqrt / BuiltinOp::Zero via the
+                                                      // `base_function_to_builtin_op` fallback path.
+        assert_eq!(map_builtin_name("sqrt"), None);
+        assert_eq!(map_builtin_name("zero"), None);
+        // zeros/ones now dispatch through method tables first (Issue #4036).
+        assert_eq!(map_builtin_name("zeros"), None);
+        assert_eq!(map_builtin_name("ones"), None);
+        // length/size now dispatch through method tables first (Issue #3736)
+        // and only reach BuiltinOp::Length / BuiltinOp::Size via the
+        // `base_function_to_builtin_op` fallback path.
+        assert_eq!(map_builtin_name("length"), None);
+        assert_eq!(map_builtin_name("size"), None);
+        // iterate/collect now dispatch through method tables first (Issue #3735)
+        // and only reach BuiltinOp::Iterate / BuiltinOp::Collect via the
+        // `base_function_to_builtin_op` fallback path.
+        assert_eq!(map_builtin_name("iterate"), None);
+        assert_eq!(map_builtin_name("collect"), None);
+        // push!, pop!, delete! removed from lowering shortcut (Issue #3739).
+        // Reachable via `base_function_to_builtin_op` fallback when method
+        // dispatch cannot find a Pure Julia method.
+        assert_eq!(map_builtin_name("push!"), None);
+        assert_eq!(map_builtin_name("pop!"), None);
+        assert_eq!(map_builtin_name("delete!"), None);
         assert_eq!(map_builtin_name(""), None);
     }
 }

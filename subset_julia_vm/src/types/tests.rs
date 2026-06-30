@@ -8,6 +8,24 @@ fn test_generator_type_name() {
 }
 
 #[test]
+fn test_anonymous_bounded_typevar_name_issue_5644() {
+    // An anonymous bounded typevar (placeholder name `_`, from the covariant
+    // shorthand `Vector{<:Integer}`) prints `<:Bound`, not `_<:Bound`.
+    let anon = JuliaType::TypeVar("_".to_string(), Some("Integer".to_string()));
+    assert_eq!(anon.name().as_ref(), "<:Integer");
+
+    // Rendered inside a parametric container.
+    let vec_anon = JuliaType::VectorOf(Box::new(anon));
+    assert_eq!(vec_anon.name().as_ref(), "Vector{<:Integer}");
+
+    // A NAMED bounded typevar keeps its name; an unbounded one is just its name.
+    let named = JuliaType::TypeVar("T".to_string(), Some("Real".to_string()));
+    assert_eq!(named.name().as_ref(), "T<:Real");
+    let unbounded = JuliaType::TypeVar("T".to_string(), None);
+    assert_eq!(unbounded.name().as_ref(), "T");
+}
+
+#[test]
 fn test_subtype_concrete() {
     // Concrete types are subtypes of themselves
     assert!(JuliaType::Int64.is_subtype_of(&JuliaType::Int64));
@@ -30,6 +48,109 @@ fn test_subtype_integer_hierarchy() {
     assert!(JuliaType::Integer.is_subtype_of(&JuliaType::Real));
     assert!(JuliaType::Integer.is_subtype_of(&JuliaType::Number));
     assert!(JuliaType::Integer.is_subtype_of(&JuliaType::Any));
+}
+
+#[test]
+fn test_array_receiver_extracts_typevar_binding_issue_4018() {
+    let type_params = vec![TypeParam::new("T".to_string())];
+    let array_pattern = JuliaType::Struct("Array{T}".to_string());
+
+    let vector_bindings = JuliaType::VectorOf(Box::new(JuliaType::Int64))
+        .extract_type_bindings(&array_pattern, &type_params)
+        .expect("Vector{Int64} should match Array{T}");
+    assert_eq!(vector_bindings.get("T"), Some(&JuliaType::Int64));
+
+    let matrix_bindings = JuliaType::MatrixOf(Box::new(JuliaType::Float64))
+        .extract_type_bindings(&array_pattern, &type_params)
+        .expect("Matrix{Float64} should match Array{T}");
+    assert_eq!(matrix_bindings.get("T"), Some(&JuliaType::Float64));
+
+    let array3_bindings = JuliaType::Struct("Array{Bool, 3}".to_string())
+        .extract_type_bindings(&array_pattern, &type_params)
+        .expect("Array{Bool,3} should match Array{T}");
+    assert_eq!(array3_bindings.get("T"), Some(&JuliaType::Bool));
+}
+
+#[test]
+fn test_vector_receiver_extracts_abstract_vector_typevar_issue_8342() {
+    let type_params = vec![TypeParam::new("T".to_string())];
+    let pattern = JuliaType::from_name_or_struct("AbstractVector{T}");
+
+    let bindings = JuliaType::VectorOf(Box::new(JuliaType::Float64))
+        .extract_type_bindings(&pattern, &type_params)
+        .expect("Vector{Float64} should match AbstractVector{T}");
+
+    assert_eq!(bindings.get("T"), Some(&JuliaType::Float64));
+}
+
+#[test]
+fn test_partial_parametric_struct_signature_extracts_prefix_issue_8348() {
+    let type_params = vec![TypeParam::new("T".to_string())];
+    let pattern = JuliaType::from_name_or_struct("TwoParamMatrixIssue{T}");
+    let actual = JuliaType::from_name_or_struct("TwoParamMatrixIssue{Float64, Vector{Float64}}");
+
+    assert!(
+        actual.is_subtype_of_parametric(&pattern, &type_params),
+        "TwoParamMatrixIssue{{T}} should match fully parameterized values"
+    );
+
+    let bindings = actual
+        .extract_type_bindings(&pattern, &type_params)
+        .expect("prefix parametric match should bind T");
+    assert_eq!(bindings.get("T"), Some(&JuliaType::Float64));
+}
+
+#[test]
+fn test_covariant_partial_parametric_struct_signature_issue_8349() {
+    let pattern = JuliaType::from_name_or_struct("CovariantParamIssue{<:Real}");
+    let actual = JuliaType::from_name_or_struct("CovariantParamIssue{Float64, Vector{Float64}}");
+    let nonmatch = JuliaType::from_name_or_struct("CovariantParamIssue{String, Vector{String}}");
+
+    assert!(
+        actual.is_subtype_of_parametric(&pattern, &[]),
+        "CovariantParamIssue{{<:Real}} should match a Float64 first parameter"
+    );
+    assert!(
+        actual.extract_type_bindings(&pattern, &[]).is_some(),
+        "covariant prefix match should be accepted without bindings"
+    );
+    assert!(
+        !nonmatch.is_subtype_of_parametric(&pattern, &[]),
+        "CovariantParamIssue{{<:Real}} must reject non-Real first parameters"
+    );
+}
+
+#[test]
+fn test_array_receiver_extracts_nested_pair_bindings_issue_4635() {
+    let type_params = vec![
+        TypeParam::new("K".to_string()),
+        TypeParam::new("V".to_string()),
+    ];
+    let array_pattern = JuliaType::Struct("Array{Pair{K,V}}".to_string());
+    let array_actual = JuliaType::Struct("Array{Pair{Int64,Int8}}".to_string());
+
+    let bindings = array_actual
+        .extract_type_bindings(&array_pattern, &type_params)
+        .expect("Array{Pair{Int64,Int8}} should match Array{Pair{K,V}}");
+
+    assert_eq!(bindings.get("K"), Some(&JuliaType::Int64));
+    assert_eq!(bindings.get("V"), Some(&JuliaType::Int8));
+}
+
+#[test]
+fn test_matrix_covariant_bound_parametric_dispatch_issue_4020() {
+    let matrix_integer = JuliaType::from_name_or_struct("Matrix{<:Integer}");
+    let matrix_int = JuliaType::MatrixOf(Box::new(JuliaType::Int64));
+    let matrix_float = JuliaType::MatrixOf(Box::new(JuliaType::Float64));
+
+    assert!(
+        matrix_int.is_subtype_of_parametric(&matrix_integer, &[]),
+        "Matrix{{Int64}} should match Matrix{{<:Integer}}"
+    );
+    assert!(
+        !matrix_float.is_subtype_of_parametric(&matrix_integer, &[]),
+        "Matrix{{Float64}} must not match Matrix{{<:Integer}}"
+    );
 }
 
 #[test]
@@ -57,6 +178,115 @@ fn test_subtype_array() {
     assert!(JuliaType::Array.is_subtype_of(&JuliaType::AbstractArray));
     assert!(JuliaType::Array.is_subtype_of(&JuliaType::Any));
     assert!(!JuliaType::Array.is_subtype_of(&JuliaType::Number));
+}
+
+#[test]
+fn test_abstract_user_any_parent_not_universal_supertype_issue_4708() {
+    // Issue #4708 (regression guard, Issue #4710): before the fix, the
+    // AbstractUser parent fallback evaluated `self.is_subtype_of(parent)`
+    // even when parent was `Any`. Because every type is <: Any, this
+    // made every value spuriously match user-declared abstracts whose
+    // parent chain bottomed out at Any (e.g. AbstractDict and
+    // AbstractSet in boot.jl). The fix skips the recursive fallback
+    // when parent == "Any" and defers to CoreType for builtin abstract
+    // names instead. This test matrix locks the regression in place.
+
+    // The way Pure Julia's `boot.jl` declares these abstracts.
+    let abstract_dict =
+        JuliaType::AbstractUser("AbstractDict".to_string(), Some("Any".to_string()));
+    let abstract_set = JuliaType::AbstractUser("AbstractSet".to_string(), Some("Any".to_string()));
+    let some_user_abstract_any =
+        JuliaType::AbstractUser("MyAbstractAny".to_string(), Some("Any".to_string()));
+
+    // Negative cases — these MUST NOT be subtypes of the abstracts
+    // above. Before #4710 the parent-Any fallback returned true for
+    // every entry here.
+    let not_container_like = [
+        JuliaType::Array,
+        JuliaType::VectorOf(Box::new(JuliaType::Int64)),
+        JuliaType::MatrixOf(Box::new(JuliaType::Float64)),
+        JuliaType::Tuple,
+        JuliaType::TupleOf(vec![JuliaType::Int64, JuliaType::String]),
+        JuliaType::Int64,
+        JuliaType::Float64,
+        JuliaType::String,
+        JuliaType::Symbol,
+        JuliaType::Char,
+        JuliaType::Bool,
+        JuliaType::Nothing,
+    ];
+    for ty in &not_container_like {
+        assert!(
+            !ty.is_subtype_of(&abstract_dict),
+            "{ty:?} must not be <: AbstractDict (Issue #4708)"
+        );
+        assert!(
+            !ty.is_subtype_of(&abstract_set),
+            "{ty:?} must not be <: AbstractSet (Issue #4708)"
+        );
+        assert!(
+            !ty.is_subtype_of(&some_user_abstract_any),
+            "{ty:?} must not be <: a user abstract whose parent is Any (Issue #4708)"
+        );
+    }
+
+    // Positive cases — builtin containers must keep matching the
+    // CoreType-backed abstracts they belong to.
+    assert!(JuliaType::Dict.is_subtype_of(&abstract_dict));
+    assert!(JuliaType::Set.is_subtype_of(&abstract_set));
+    assert!(JuliaType::Struct("Dict{String, Int64}".to_string()).is_subtype_of(&abstract_dict));
+    assert!(JuliaType::Struct("Set{Int64}".to_string()).is_subtype_of(&abstract_set));
+
+    // Self-referential and AbstractUser parent matching still work.
+    let myabs_dict_child = JuliaType::AbstractUser(
+        "MyAbstractDictSub".to_string(),
+        Some("AbstractDict".to_string()),
+    );
+    assert!(myabs_dict_child.is_subtype_of(&abstract_dict));
+    assert!(abstract_dict.is_subtype_of(&abstract_dict));
+}
+
+#[test]
+fn test_abstract_user_specific_parent_fallback_preserved_issue_4708() {
+    // Issue #4708: the fallback `self.is_subtype_of(parent)` is *kept*
+    // for CoreType-backed abstract names, so hierarchies like AbstractVector
+    // (parent="AbstractArray") still recognise VectorOf as a matching
+    // candidate without treating rank-unknown Array as every vector. Without this, fixtures such as
+    // matmul_matrix_matrix_abstract_dispatch_4020 and
+    // nullspace_logdet_adjoint would silently regress.
+    let abstract_vector = JuliaType::AbstractUser(
+        "AbstractVector".to_string(),
+        Some("AbstractArray".to_string()),
+    );
+    assert!(JuliaType::VectorOf(Box::new(JuliaType::Int64)).is_subtype_of(&abstract_vector));
+    assert!(!JuliaType::Array.is_subtype_of(&abstract_vector));
+}
+
+#[test]
+fn test_subtype_structured_builtin_families_use_core_type() {
+    assert!(JuliaType::Struct("StepRangeLen{Float64}".to_string())
+        .is_subtype_of(&JuliaType::AbstractRange));
+    assert!(
+        JuliaType::AbstractRange.is_subtype_of(&JuliaType::Struct("AbstractVector".to_string()))
+    );
+    assert!(JuliaType::AbstractRange.is_subtype_of(&JuliaType::AbstractArray));
+    assert!(JuliaType::Struct("UnitRange{Int64}".to_string())
+        .is_subtype_of(&JuliaType::Struct("AbstractVector{Int64}".to_string())));
+    assert!(JuliaType::Struct("UnitRange{Int64}".to_string())
+        .is_subtype_of(&JuliaType::Struct("AbstractArray{Int64,1}".to_string())));
+    assert!(!JuliaType::Struct("UnitRange{Int64}".to_string())
+        .is_subtype_of(&JuliaType::Struct("AbstractVector{Integer}".to_string())));
+    assert!(!JuliaType::Struct("UnitRange{Int64}".to_string())
+        .is_subtype_of(&JuliaType::Struct("Array{Int64,1}".to_string())));
+    assert!(JuliaType::Struct("LogRange{Float64}".to_string())
+        .is_subtype_of(&JuliaType::Struct("AbstractVector{Float64}".to_string())));
+    assert!(JuliaType::Struct("LogRange{Float64}".to_string())
+        .is_subtype_of(&JuliaType::Struct("AbstractArray{Float64,1}".to_string())));
+    assert!(!JuliaType::Struct("LogRange{Float64}".to_string())
+        .is_subtype_of(&JuliaType::AbstractRange));
+    assert!(JuliaType::Struct("IOBuffer".to_string()).is_subtype_of(&JuliaType::IO));
+    assert!(JuliaType::Struct("Vector{Int64}".to_string()).is_subtype_of(&JuliaType::Array));
+    assert!(JuliaType::Struct("Tuple{Int64, String}".to_string()).is_subtype_of(&JuliaType::Tuple));
 }
 
 #[test]
@@ -243,8 +473,19 @@ fn test_matrix_of_specificity() {
 #[test]
 fn test_from_name() {
     assert_eq!(JuliaType::from_name("Int64"), Some(JuliaType::Int64));
-    assert_eq!(JuliaType::from_name("Int"), Some(JuliaType::Int64));
+    assert_eq!(
+        JuliaType::from_name("Int"),
+        Some(crate::types::native_int_julia_type())
+    );
     assert_eq!(JuliaType::from_name("Float64"), Some(JuliaType::Float64));
+    assert_eq!(
+        JuliaType::from_name("ComplexF64"),
+        Some(JuliaType::Struct("Complex{Float64}".to_string()))
+    );
+    assert_eq!(
+        JuliaType::from_name("ComplexF32"),
+        Some(JuliaType::Struct("Complex{Float32}".to_string()))
+    );
     assert_eq!(JuliaType::from_name("Number"), Some(JuliaType::Number));
     assert_eq!(JuliaType::from_name("Any"), Some(JuliaType::Any));
     assert_eq!(JuliaType::from_name("UnknownType"), None);
@@ -283,14 +524,39 @@ fn test_from_name_parametric_tuple() {
         ]))
     );
 
-    // Tuple with Nothing element
+    // Tuple with Nothing element. The Union is canonicalized (Issue #5066):
+    // `Nothing` is a singleton DataType and so sorts ahead of the `isbits`
+    // `Int64`, matching upstream's `Union{Nothing, Int64}`.
     assert_eq!(
         JuliaType::from_name("Tuple{Union{Int64, Nothing}, String}"),
         Some(JuliaType::TupleOf(vec![
-            JuliaType::Union(vec![JuliaType::Int64, JuliaType::Nothing]),
+            JuliaType::Union(vec![JuliaType::Nothing, JuliaType::Int64]),
             JuliaType::String,
         ]))
     );
+
+    // Issue #8360: user-parametric members inside a Union alias must remain
+    // nominal members, not collapse to Any during parsing/canonicalization.
+    let user_union = JuliaType::from_name_or_struct("Union{H{T}, S{T}}");
+    match user_union {
+        JuliaType::Union(members) => {
+            assert_eq!(members.len(), 2);
+            assert!(members.contains(&JuliaType::Struct("H{T}".to_string())));
+            assert!(members.contains(&JuliaType::Struct("S{T}".to_string())));
+        }
+        other => panic!("expected Union, got {other:?}"),
+    }
+
+    let actual = JuliaType::Struct("M.H{Float64, Vector{Float64}}".to_string());
+    let pattern = JuliaType::from_name_or_struct("Union{H{T}, S{T}}");
+    let params = vec![TypeParam::with_upper_bound(
+        "T".to_string(),
+        "Real".to_string(),
+    )];
+    let bindings = actual
+        .extract_type_bindings(&pattern, &params)
+        .expect("Union alias arm should bind T from matching member");
+    assert_eq!(bindings.get("T"), Some(&JuliaType::Float64));
 
     // Tuple with Any element
     assert_eq!(
@@ -298,11 +564,32 @@ fn test_from_name_parametric_tuple() {
         Some(JuliaType::TupleOf(vec![JuliaType::Any, JuliaType::Any]))
     );
 
-    // Empty Tuple{} should return plain Tuple
-    assert_eq!(JuliaType::from_name("Tuple{}"), Some(JuliaType::Tuple));
+    // Empty Tuple{} is the concrete empty tuple type, distinct from abstract Tuple.
+    assert_eq!(
+        JuliaType::from_name("Tuple{}"),
+        Some(JuliaType::TupleOf(vec![]))
+    );
 
     // Plain Tuple (no braces) should return Tuple
     assert_eq!(JuliaType::from_name("Tuple"), Some(JuliaType::Tuple));
+
+    // Fixed NTuple aliases should canonicalize to expanded TupleOf for
+    // VM-facing equality/isa checks (Issue #4281).
+    assert_eq!(
+        JuliaType::from_name("NTuple{3, Int64}"),
+        Some(JuliaType::TupleOf(vec![
+            JuliaType::Int64,
+            JuliaType::Int64,
+            JuliaType::Int64,
+        ]))
+    );
+    assert_eq!(
+        JuliaType::from_name("NTuple{2, String}"),
+        Some(JuliaType::TupleOf(vec![
+            JuliaType::String,
+            JuliaType::String
+        ]))
+    );
 
     // Nested parametric tuple: Tuple{Tuple{Int64}, String}
     assert_eq!(
@@ -322,6 +609,71 @@ fn test_from_name_parametric_tuple() {
             JuliaType::String,
         ]))
     );
+}
+
+/// Type-level `NamedTuple{names, T}` canonicalization (Issue #5063).
+///
+/// The upstream spelling must canonicalize to the same internal representation
+/// `typeof((a=1, b=2))` and the `@NamedTuple` macro produce, so subtype / isa /
+/// dispatch / `===` reuse the existing named-tuple machinery.
+#[test]
+fn test_from_name_named_tuple_type_level() {
+    // Names + field-type tuple -> concrete `@NamedTuple{...}` form (Int -> Int64).
+    assert_eq!(
+        JuliaType::from_name("NamedTuple{(:a,:b),Tuple{Int,Int}}"),
+        Some(JuliaType::Struct(
+            "@NamedTuple{a::Int64, b::Int64}".to_string()
+        ))
+    );
+    // Whitespace in the spelling is tolerated and the field types canonicalize.
+    assert_eq!(
+        JuliaType::from_name("NamedTuple{(:a, :b), Tuple{Int, Float64}}"),
+        Some(JuliaType::Struct(
+            "@NamedTuple{a::Int64, b::Float64}".to_string()
+        ))
+    );
+    // An `Any`-typed field collapses to the bare name, matching upstream printing.
+    assert_eq!(
+        JuliaType::from_name("NamedTuple{(:a,:b),Tuple{Int,Any}}"),
+        Some(JuliaType::Struct("@NamedTuple{a::Int64, b}".to_string()))
+    );
+    // Single-field concrete form keeps the field type.
+    assert_eq!(
+        JuliaType::from_name("NamedTuple{(:x,),Tuple{Int64}}"),
+        Some(JuliaType::Struct("@NamedTuple{x::Int64}".to_string()))
+    );
+
+    // Names-only form -> the `NamedTuple{(:a, :b)}` UnionAll-style marker with
+    // canonical spacing (single field carries a trailing comma).
+    assert_eq!(
+        JuliaType::from_name("NamedTuple{(:a,:b)}"),
+        Some(JuliaType::Struct("NamedTuple{(:a, :b)}".to_string()))
+    );
+    assert_eq!(
+        JuliaType::from_name("NamedTuple{(:x,)}"),
+        Some(JuliaType::Struct("NamedTuple{(:x,)}".to_string()))
+    );
+
+    // Bare `NamedTuple` is unchanged.
+    assert_eq!(
+        JuliaType::from_name("NamedTuple"),
+        Some(JuliaType::NamedTuple)
+    );
+
+    // Arity mismatch between names and field types is not a well-formed concrete
+    // named tuple; falls back to `None` (struct fallback handled by the caller).
+    assert_eq!(JuliaType::from_name("NamedTuple{(:a,:b),Tuple{Int}}"), None);
+
+    // The concrete form is a subtype of the names-only marker and of the bare
+    // `NamedTuple`, mirroring upstream's `<:` relationships.
+    let concrete = JuliaType::from_name("NamedTuple{(:a,:b),Tuple{Int,Int}}").unwrap();
+    let names_only = JuliaType::from_name("NamedTuple{(:a,:b)}").unwrap();
+    assert!(concrete.is_subtype_of(&names_only));
+    assert!(concrete.is_subtype_of(&JuliaType::NamedTuple));
+    assert!(names_only.is_subtype_of(&JuliaType::NamedTuple));
+    // A different field-name set is NOT a subtype of the marker.
+    let other = JuliaType::from_name("NamedTuple{(:x,:y),Tuple{Int,Int}}").unwrap();
+    assert!(!other.is_subtype_of(&names_only));
 }
 
 /// Test covariant subtyping for parametric tuple types (Issue #1752).
@@ -363,6 +715,25 @@ fn test_tuple_of_subtyping() {
 }
 
 #[test]
+fn test_union_type_eq_is_order_insensitive() {
+    let int_string = JuliaType::Union(vec![JuliaType::Int64, JuliaType::String]);
+    let string_int = JuliaType::Union(vec![JuliaType::String, JuliaType::Int64]);
+    assert!(int_string.type_eq(&string_int));
+
+    let tuple_left = JuliaType::TupleOf(vec![int_string]);
+    let tuple_right = JuliaType::TupleOf(vec![string_int]);
+    assert!(tuple_left.type_eq(&tuple_right));
+}
+
+#[test]
+fn test_module_struct_type_eq_ignores_imported_binding_prefix_issue_4348() {
+    let qualified = JuliaType::Struct("TestModule.MyStruct{Int64}".to_string());
+    let imported = JuliaType::Struct("MyStruct{Int64}".to_string());
+    assert!(qualified.type_eq(&imported));
+    assert!(imported.type_eq(&qualified));
+}
+
+#[test]
 fn test_is_concrete() {
     assert!(JuliaType::Int64.is_concrete());
     assert!(JuliaType::Float64.is_concrete());
@@ -370,10 +741,26 @@ fn test_is_concrete() {
     assert!(JuliaType::Array.is_concrete());
     assert!(JuliaType::Struct("Point".to_string()).is_concrete());
     assert!(JuliaType::Struct("Complex".to_string()).is_concrete()); // Complex is now a struct
+    assert!(JuliaType::Struct("Complex{Float64}".to_string()).is_concrete());
+    assert!(JuliaType::TupleOf(vec![JuliaType::Int64, JuliaType::String]).is_concrete());
+    assert!(JuliaType::TypeOf(Box::new(JuliaType::Int64)).is_concrete());
 
     assert!(!JuliaType::Any.is_concrete());
     assert!(!JuliaType::Number.is_concrete());
     assert!(!JuliaType::Real.is_concrete());
+    assert!(!JuliaType::Union(vec![JuliaType::Int64, JuliaType::Float64]).is_concrete());
+    assert!(!JuliaType::Struct("Complex{T}".to_string()).is_concrete());
+    assert!(!JuliaType::TupleOf(vec![JuliaType::TypeVar("T".to_string(), None)]).is_concrete());
+    assert!(!JuliaType::UnionAll {
+        var: "T".to_string(),
+        lower_bound: None,
+        bound: None,
+        body: Box::new(JuliaType::VectorOf(Box::new(JuliaType::TypeVar(
+            "T".to_string(),
+            None
+        )))),
+    }
+    .is_concrete());
 }
 
 #[test]
@@ -405,6 +792,18 @@ fn test_struct_type() {
         JuliaType::Struct("Point".to_string())
     );
     assert_eq!(JuliaType::from_name_or_struct("Int64"), JuliaType::Int64);
+}
+
+#[test]
+fn test_module_qualified_parametric_struct_subtypes_bare_family_issue_6117() {
+    let actual = JuliaType::from_name_or_struct("LinearAlgebra.Diagonal{Float64}");
+    let bare = JuliaType::from_name_or_struct("Diagonal");
+    let same_param = JuliaType::from_name_or_struct("Diagonal{Float64}");
+    let other_param = JuliaType::from_name_or_struct("Diagonal{Int64}");
+
+    assert!(actual.is_subtype_of(&bare));
+    assert!(actual.is_subtype_of(&same_param));
+    assert!(!actual.is_subtype_of(&other_param));
 }
 
 /// Comprehensive test to ensure all builtin types with standard names have
@@ -445,7 +844,11 @@ fn test_from_name_builtin_coverage() {
         ("Char", JuliaType::Char),
         // Collections
         ("Array", JuliaType::Array),
-        ("Vector", JuliaType::Array), // Alias
+        ("Vector", JuliaType::Struct("Vector".to_string())),
+        ("Matrix", JuliaType::Struct("Matrix".to_string())),
+        ("BitArray", JuliaType::Struct("BitArray".to_string())),
+        ("BitVector", JuliaType::Struct("BitVector".to_string())),
+        ("BitMatrix", JuliaType::Struct("BitMatrix".to_string())),
         ("Tuple", JuliaType::Tuple),
         ("NamedTuple", JuliaType::NamedTuple),
         ("Dict", JuliaType::Dict),
@@ -468,7 +871,14 @@ fn test_from_name_builtin_coverage() {
         ("AbstractString", JuliaType::AbstractString),
         ("AbstractChar", JuliaType::AbstractChar),
         ("AbstractArray", JuliaType::AbstractArray),
-        ("AbstractVector", JuliaType::AbstractArray), // Alias
+        (
+            "AbstractVector",
+            JuliaType::Struct("AbstractVector".to_string()),
+        ),
+        (
+            "AbstractMatrix",
+            JuliaType::Struct("AbstractMatrix".to_string()),
+        ),
         ("AbstractRange", JuliaType::AbstractRange),
         // Type system types
         ("IO", JuliaType::IO),
@@ -570,38 +980,58 @@ fn test_from_name_unknown_types() {
     assert_eq!(JuliaType::from_name("Func"), None); // Not "Function"
 }
 
+/// Issue #5157: register the base.jl numeric struct hierarchy that `CoreType`
+/// subtyping derives from the explicit `StructHierarchy` (instead of hardcoded
+/// type names).
+fn numeric_struct_hierarchy() -> crate::types::StructHierarchy {
+    let mut hierarchy = crate::types::StructHierarchy::new();
+    hierarchy.insert("Complex", Some("Number".to_string()), Vec::new());
+    hierarchy.insert("Rational", Some("Real".to_string()), Vec::new());
+    hierarchy
+}
+
 #[test]
 fn test_struct_subtype_of_number() {
+    let hierarchy = numeric_struct_hierarchy();
+    let number = crate::inference_core::CoreType::from(&JuliaType::Number);
+    let struct_ty =
+        |name: &str| crate::inference_core::CoreType::from(&JuliaType::Struct(name.to_string()));
+
     // Complex{T} <: Number for any T
-    assert!(JuliaType::Struct("Complex{Float64}".to_string()).is_subtype_of(&JuliaType::Number));
-    assert!(JuliaType::Struct("Complex{Int64}".to_string()).is_subtype_of(&JuliaType::Number));
-    assert!(JuliaType::Struct("Complex{Bool}".to_string()).is_subtype_of(&JuliaType::Number));
-    assert!(JuliaType::Struct("Complex{Float32}".to_string()).is_subtype_of(&JuliaType::Number));
+    assert!(struct_ty("Complex{Float64}").is_subtype_of_with_hierarchy(&number, &hierarchy));
+    assert!(struct_ty("Complex{Int64}").is_subtype_of_with_hierarchy(&number, &hierarchy));
+    assert!(struct_ty("Complex{Bool}").is_subtype_of_with_hierarchy(&number, &hierarchy));
+    assert!(struct_ty("Complex{Float32}").is_subtype_of_with_hierarchy(&number, &hierarchy));
     // Bare "Complex" (no type param) is also <: Number
-    assert!(JuliaType::Struct("Complex".to_string()).is_subtype_of(&JuliaType::Number));
+    assert!(struct_ty("Complex").is_subtype_of_with_hierarchy(&number, &hierarchy));
 
     // Rational{T} <: Number
-    assert!(JuliaType::Struct("Rational{Int64}".to_string()).is_subtype_of(&JuliaType::Number));
-    assert!(JuliaType::Struct("Rational".to_string()).is_subtype_of(&JuliaType::Number));
+    assert!(struct_ty("Rational{Int64}").is_subtype_of_with_hierarchy(&number, &hierarchy));
+    assert!(struct_ty("Rational").is_subtype_of_with_hierarchy(&number, &hierarchy));
 
     // Arbitrary user structs are NOT <: Number
-    assert!(!JuliaType::Struct("Point{Float64}".to_string()).is_subtype_of(&JuliaType::Number));
-    assert!(!JuliaType::Struct("MyStruct".to_string()).is_subtype_of(&JuliaType::Number));
+    assert!(!struct_ty("Point{Float64}").is_subtype_of_with_hierarchy(&number, &hierarchy));
+    assert!(!struct_ty("MyStruct").is_subtype_of_with_hierarchy(&number, &hierarchy));
 }
 
 #[test]
 fn test_struct_subtype_of_real() {
+    let hierarchy = numeric_struct_hierarchy();
+    let real = crate::inference_core::CoreType::from(&JuliaType::Real);
+    let struct_ty =
+        |name: &str| crate::inference_core::CoreType::from(&JuliaType::Struct(name.to_string()));
+
     // Rational{T} <: Real
-    assert!(JuliaType::Struct("Rational{Int64}".to_string()).is_subtype_of(&JuliaType::Real));
-    assert!(JuliaType::Struct("Rational".to_string()).is_subtype_of(&JuliaType::Real));
+    assert!(struct_ty("Rational{Int64}").is_subtype_of_with_hierarchy(&real, &hierarchy));
+    assert!(struct_ty("Rational").is_subtype_of_with_hierarchy(&real, &hierarchy));
 
     // Complex is NOT <: Real
-    assert!(!JuliaType::Struct("Complex{Float64}".to_string()).is_subtype_of(&JuliaType::Real));
-    assert!(!JuliaType::Struct("Complex{Int64}".to_string()).is_subtype_of(&JuliaType::Real));
-    assert!(!JuliaType::Struct("Complex".to_string()).is_subtype_of(&JuliaType::Real));
+    assert!(!struct_ty("Complex{Float64}").is_subtype_of_with_hierarchy(&real, &hierarchy));
+    assert!(!struct_ty("Complex{Int64}").is_subtype_of_with_hierarchy(&real, &hierarchy));
+    assert!(!struct_ty("Complex").is_subtype_of_with_hierarchy(&real, &hierarchy));
 
     // Arbitrary user structs are NOT <: Real
-    assert!(!JuliaType::Struct("Point{Float64}".to_string()).is_subtype_of(&JuliaType::Real));
+    assert!(!struct_ty("Point{Float64}").is_subtype_of_with_hierarchy(&real, &hierarchy));
 }
 
 // =============================================================================

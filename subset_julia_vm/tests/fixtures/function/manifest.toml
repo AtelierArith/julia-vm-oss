@@ -43,6 +43,12 @@ expected = true
 description = "Return type annotation applies convert() to return values (Issue #415)"
 
 [[tests]]
+name = "function_return_type_convert_insertion_5147"
+file = "return_type_convert_insertion_5147.jl"
+expected = true
+description = "Return type declaration f()::T inserts convert(T, ret) on all return paths; non-convertible/inexact values throw like upstream (Issue #5147)"
+
+[[tests]]
 name = "function_symbol_kwarg_default"
 file = "test_symbol_kwarg_default.jl"
 expected = true
@@ -77,3 +83,9 @@ name = "function_sync_exec_varargs_splat"
 file = "sync_exec_varargs_splat.jl"
 expected = true
 description = "sync_exec CallWithSplat collects excess args into varargs Tuple (Issue #2213)"
+
+[[tests]]
+name = "function_nothing_local_any_carrier_5081"
+file = "nothing_local_any_carrier_5081.jl"
+expected = true
+description = "Nothing locals continue to round-trip and reassign correctly after consolidating the legacy locals_nothing set into the Any carrier (Issue #5081)"

@@ -155,13 +155,19 @@ fn main() {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(output_path)
             .unwrap_or_else(|e| {
-                eprintln!("Error: failed to read metadata for '{}': {}", output_name, e);
+                eprintln!(
+                    "Error: failed to read metadata for '{}': {}",
+                    output_name, e
+                );
                 std::process::exit(1);
             })
             .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(output_path, perms).unwrap_or_else(|e| {
-            eprintln!("Error: failed to set permissions for '{}': {}", output_name, e);
+            eprintln!(
+                "Error: failed to set permissions for '{}': {}",
+                output_name, e
+            );
             std::process::exit(1);
         });
     }

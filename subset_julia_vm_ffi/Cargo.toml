@@ -1,0 +1,20 @@
+[package]
+name = "subset_julia_vm_ffi"
+version = "0.9.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "C ABI static/dynamic library for SubsetJuliaVM (iOS and native platforms)"
+
+# Preserve `libsubset_julia_vm.a` / `libsubset_julia_vm.dylib` artifact names for
+# existing Xcode / XCFramework scripts (Issue: compile-time ergonomics — FFI split).
+[lib]
+name = "subset_julia_vm"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+subset_julia_vm = { path = "../subset_julia_vm" }
+serde_json = "1"
+
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"

@@ -3,6 +3,7 @@
 //! This module implements loop optimizations including:
 //! - Loop Invariant Code Motion (LICM)
 //! - Loop unrolling for constant bounds
+#![allow(clippy::cast_sign_loss)] // known-safe index/counter casts (i64->usize)
 
 use crate::aot::ir::{AotBuiltinOp, AotExpr, AotProgram, AotStmt};
 use crate::aot::types::StaticType;
@@ -109,7 +110,7 @@ impl AotLoopOptimizer {
                             self.try_unroll_for_range(var, start, stop, step, body)
                         {
                             // Replace the loop with unrolled statements
-                            stmts.splice(i..=i, unrolled.into_iter());
+                            stmts.splice(i..=i, unrolled);
                             self.unroll_count += 1;
                             total_optimized += 1;
                             continue; // Don't increment i, we replaced the loop
@@ -245,7 +246,7 @@ impl AotLoopOptimizer {
     }
 
     /// Try to hoist loop invariants out of a loop
-    fn try_hoist_invariants(&mut self, loop_var: &str, body: &mut Vec<AotStmt>) -> Vec<AotStmt> {
+    fn try_hoist_invariants(&mut self, loop_var: &str, body: &mut [AotStmt]) -> Vec<AotStmt> {
         let mut hoisted = Vec::new();
         let mut i = 0;
 
@@ -311,20 +312,20 @@ impl AotLoopOptimizer {
             match stmt {
                 AotStmt::Let {
                     name, is_mutable, ..
+                } if *is_mutable => {
+                    modified.insert(name.clone());
+                }
+                AotStmt::Assign {
+                    target: AotExpr::Var { name, .. },
+                    ..
                 } => {
-                    if *is_mutable {
-                        modified.insert(name.clone());
-                    }
+                    modified.insert(name.clone());
                 }
-                AotStmt::Assign { target, .. } => {
-                    if let AotExpr::Var { name, .. } = target {
-                        modified.insert(name.clone());
-                    }
-                }
-                AotStmt::CompoundAssign { target, .. } => {
-                    if let AotExpr::Var { name, .. } = target {
-                        modified.insert(name.clone());
-                    }
+                AotStmt::CompoundAssign {
+                    target: AotExpr::Var { name, .. },
+                    ..
+                } => {
+                    modified.insert(name.clone());
                 }
                 AotStmt::If {
                     then_branch,
@@ -359,7 +360,8 @@ impl AotLoopOptimizer {
             | AotExpr::LitBool(_)
             | AotExpr::LitStr(_)
             | AotExpr::LitChar(_)
-            | AotExpr::LitNothing => true,
+            | AotExpr::LitNothing
+            | AotExpr::LitMissing => true,
 
             // Variable is invariant if it's not the loop variable and not modified in the loop
             AotExpr::Var { name, .. } => name != loop_var && !modified_vars.contains(name),
@@ -391,6 +393,7 @@ impl AotLoopOptimizer {
                         | AotBuiltinOp::Min
                         | AotBuiltinOp::Max
                         | AotBuiltinOp::Length
+                        | AotBuiltinOp::In
                 );
                 is_pure
                     && args
@@ -405,6 +408,38 @@ impl AotLoopOptimizer {
             AotExpr::ArrayLit { elements, .. } | AotExpr::TupleLit { elements } => elements
                 .iter()
                 .all(|e| Self::expr_is_invariant(e, loop_var, modified_vars)),
+            AotExpr::SetFromIter { iter, .. } => {
+                Self::expr_is_invariant(iter, loop_var, modified_vars)
+            }
+            AotExpr::NamedTupleLit { fields } => fields
+                .iter()
+                .all(|(_, field)| Self::expr_is_invariant(field, loop_var, modified_vars)),
+            AotExpr::Comprehension {
+                body, iter, filter, ..
+            }
+            | AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::expr_is_invariant(iter, loop_var, modified_vars)
+                    && filter.as_ref().is_none_or(|filter| {
+                        Self::expr_is_invariant(filter, loop_var, modified_vars)
+                    })
+                    && Self::expr_is_invariant(body, loop_var, modified_vars)
+            }
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                iterations
+                    .iter()
+                    .all(|(_, iter)| Self::expr_is_invariant(iter, loop_var, modified_vars))
+                    && filter.as_ref().is_none_or(|filter| {
+                        Self::expr_is_invariant(filter, loop_var, modified_vars)
+                    })
+                    && Self::expr_is_invariant(body, loop_var, modified_vars)
+            }
 
             // Array access is not invariant if the array or index depends on loop var
             AotExpr::Index { array, indices, .. } => {
@@ -420,9 +455,9 @@ impl AotLoopOptimizer {
             } => {
                 Self::expr_is_invariant(start, loop_var, modified_vars)
                     && Self::expr_is_invariant(stop, loop_var, modified_vars)
-                    && step.as_ref().map_or(true, |s| {
-                        Self::expr_is_invariant(s, loop_var, modified_vars)
-                    })
+                    && step
+                        .as_ref()
+                        .is_none_or(|s| Self::expr_is_invariant(s, loop_var, modified_vars))
             }
 
             // Field access is invariant if object is invariant
@@ -624,6 +659,7 @@ impl AotLoopOptimizer {
                 function,
                 args,
                 return_ty,
+                inline_policy,
             } => AotExpr::CallStatic {
                 function: function.clone(),
                 args: args
@@ -631,6 +667,7 @@ impl AotLoopOptimizer {
                     .map(|a| self.substitute_var_in_expr(a, var, value))
                     .collect(),
                 return_ty: return_ty.clone(),
+                inline_policy: *inline_policy,
             },
             AotExpr::CallDynamic { function, args } => AotExpr::CallDynamic {
                 function: function.clone(),
@@ -662,6 +699,10 @@ impl AotLoopOptimizer {
                     .collect(),
                 elem_ty: elem_ty.clone(),
                 shape: shape.clone(),
+            },
+            AotExpr::SetFromIter { iter, elem_ty } => AotExpr::SetFromIter {
+                iter: Box::new(self.substitute_var_in_expr(iter, var, value)),
+                elem_ty: elem_ty.clone(),
             },
             AotExpr::TupleLit { elements } => AotExpr::TupleLit {
                 elements: elements
@@ -696,6 +737,34 @@ impl AotLoopOptimizer {
                     .map(|s| Box::new(self.substitute_var_in_expr(s, var, value))),
                 elem_ty: elem_ty.clone(),
             },
+            AotExpr::Generator {
+                body,
+                var: gen_var,
+                iter,
+                filter,
+                elem_ty,
+            } => {
+                let substituted_iter = self.substitute_var_in_expr(iter, var, value);
+                if gen_var == var {
+                    AotExpr::Generator {
+                        body: body.clone(),
+                        var: gen_var.clone(),
+                        iter: Box::new(substituted_iter),
+                        filter: filter.clone(),
+                        elem_ty: elem_ty.clone(),
+                    }
+                } else {
+                    AotExpr::Generator {
+                        body: Box::new(self.substitute_var_in_expr(body, var, value)),
+                        var: gen_var.clone(),
+                        iter: Box::new(substituted_iter),
+                        filter: filter.as_ref().map(|filter| {
+                            Box::new(self.substitute_var_in_expr(filter, var, value))
+                        }),
+                        elem_ty: elem_ty.clone(),
+                    }
+                }
+            }
             AotExpr::StructNew { name, fields } => AotExpr::StructNew {
                 name: name.clone(),
                 fields: fields

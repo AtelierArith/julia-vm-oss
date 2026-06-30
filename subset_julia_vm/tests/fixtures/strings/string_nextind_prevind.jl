@@ -19,12 +19,13 @@ using Test
     @assert prevind(s, 5) == 4
 
     # === Edge cases ===
-    @assert prevind(s, 0) == 0
-    @assert nextind(s, 6) == 6
+    @test_throws BoundsError prevind(s, 0)
+    @test_throws BoundsError nextind(s, 6)
 
     # === Empty string ===
     empty = ""
     @assert nextind(empty, 0) == 1
+    @test_throws BoundsError nextind(empty, 1)
     @assert prevind(empty, 1) == 0
 
     # All tests passed

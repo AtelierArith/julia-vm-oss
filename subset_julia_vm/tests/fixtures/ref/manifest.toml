@@ -1,0 +1,37 @@
+# Test manifest for ref category (Base.RefValue{T} / Ref{T}) — Issue #5130
+
+[[tests]]
+name = "ref_construct_deref"
+file = "ref_construct_deref.jl"
+expected = true
+description = "Ref(x) construction, r[] dereference, and typeof === Base.RefValue{T}"
+
+[[tests]]
+name = "ref_assign_mutate"
+file = "ref_assign_mutate.jl"
+expected = true
+description = "r[] = v, setindex!(r, v), update operators, and aliasing semantics"
+
+[[tests]]
+name = "ref_parametric_ctor"
+file = "ref_parametric_ctor.jl"
+expected = true
+description = "Ref{T}(x) and Base.RefValue{T}(x) parametric constructors"
+
+[[tests]]
+name = "ref_dispatch_subtype"
+file = "ref_dispatch_subtype.jl"
+expected = true
+description = "isa, multiple dispatch on ::Ref/::Ref{Int}, and Ref/RefValue subtyping"
+
+[[tests]]
+name = "ref_field_show"
+file = "ref_field_show.jl"
+expected = true
+description = "fieldnames/fieldcount/.x field access and Base.RefValue{T}(value) display"
+
+[[tests]]
+name = "ref_unionall_predicates"
+file = "ref_unionall_predicates.jl"
+expected = true
+description = "bare Ref / Base.RefValue UnionAll type-object + isconcretetype/isabstracttype/isstructtype/typeof predicates (Issue #5223)"

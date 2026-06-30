@@ -26,6 +26,7 @@ pub enum AotBinOp {
     Ne,
     Egal,    // ===
     NotEgal, // !==
+    Subtype, // <:
     // Logical
     And,
     Or,
@@ -128,6 +129,7 @@ impl AotBinOp {
             AotBinOp::Ne => "!=",
             AotBinOp::Egal => "==",    // Object identity
             AotBinOp::NotEgal => "!=", // Not object identity
+            AotBinOp::Subtype => "<:",
             AotBinOp::And => "&&",
             AotBinOp::Or => "||",
             AotBinOp::BitAnd => "&",
@@ -150,6 +152,7 @@ impl AotBinOp {
                 | AotBinOp::Ne
                 | AotBinOp::Egal
                 | AotBinOp::NotEgal
+                | AotBinOp::Subtype
         )
     }
 
@@ -190,9 +193,7 @@ impl From<&crate::ir::core::BinaryOp> for AotBinOp {
             BinaryOp::Ne => AotBinOp::Ne,
             BinaryOp::Egal => AotBinOp::Egal,
             BinaryOp::NotEgal => AotBinOp::NotEgal,
-            // Workaround: Subtype (<:) has no dedicated AotBinOp variant; mapped to Lt as a structural placeholder (Issue #3342).
-            // Subtype semantics differ significantly from Lt — AoT codegen emits incorrect comparisons.
-            BinaryOp::Subtype => AotBinOp::Lt,
+            BinaryOp::Subtype => AotBinOp::Subtype,
             BinaryOp::And => AotBinOp::And,
             BinaryOp::Or => AotBinOp::Or,
         }
@@ -271,6 +272,8 @@ pub enum AotBuiltinOp {
     Div, // Integer division
     Mod, // Modulo (Euclidean)
     Rem, // Remainder
+    Fld, // Floored division
+    Cld, // Ceiling division
     // Note: Gcd, Lcm removed - now Pure Julia (base/intfuncs.jl)
 
     // Special value checks
@@ -302,6 +305,14 @@ pub enum AotBuiltinOp {
     TupleLast,
     /// isempty(arr) - Check if array is empty
     IsEmpty,
+    /// in(x, collection) - Membership test
+    In,
+    /// Dict(args...) - construct a Dict from Pair arguments
+    Dict,
+    /// haskey(dict, key) - Check whether a key exists
+    HasKey,
+    /// get(dict, key, default) - Lookup with a default
+    DictGet,
     /// collect(iter) - Collect iterator into array
     Collect,
     Zeros,
@@ -317,6 +328,8 @@ pub enum AotBuiltinOp {
     Filter,
     /// reduce(f, arr) - Left fold over array
     Reduce,
+    /// mapreduce(f, op, arr) - Map each element, then reduce with op
+    MapReduce,
     /// foreach(f, arr) - Apply function for side effects
     ForEach,
     /// any(f, arr) - Check if any element satisfies predicate
@@ -328,10 +341,14 @@ pub enum AotBuiltinOp {
     StringLength,
     Uppercase,
     Lowercase,
+    Occursin,
+    StartsWith,
+    EndsWith,
 
     // I/O operations
     Println,
     Print,
+    TimeNs,
 
     // Type operations
     TypeOf,
@@ -384,20 +401,30 @@ impl AotBuiltinOp {
             | AotBuiltinOp::Atan
             | AotBuiltinOp::Atan2
             | AotBuiltinOp::Exp
-            | AotBuiltinOp::Log
-            | AotBuiltinOp::Rand
-            | AotBuiltinOp::Randn => StaticType::F64,
+            | AotBuiltinOp::Log => StaticType::F64,
+
+            AotBuiltinOp::Rand | AotBuiltinOp::Randn => {
+                if arg_types.is_empty() {
+                    StaticType::F64
+                } else {
+                    StaticType::Array {
+                        element: Box::new(StaticType::F64),
+                        ndims: Some(arg_types.len()),
+                    }
+                }
+            }
 
             // Integer-returning functions
             AotBuiltinOp::Length
             | AotBuiltinOp::Ndims
             | AotBuiltinOp::StringLength
+            | AotBuiltinOp::TimeNs
             // Note: Gcd, Lcm removed - now Pure Julia (base/intfuncs.jl)
             => StaticType::I64,
 
             // Type-preserving functions (return same type as input)
-            AotBuiltinOp::Abs
-            | AotBuiltinOp::Floor
+            AotBuiltinOp::Abs => arg_types.first().cloned().unwrap_or(StaticType::F64),
+            AotBuiltinOp::Floor
             | AotBuiltinOp::Ceil
             | AotBuiltinOp::Round
             | AotBuiltinOp::Trunc
@@ -408,9 +435,20 @@ impl AotBuiltinOp {
             | AotBuiltinOp::Copysign
             | AotBuiltinOp::Div
             | AotBuiltinOp::Mod
-            | AotBuiltinOp::Rem => {
-                // Return type depends on input type; default to F64
-                StaticType::F64
+            | AotBuiltinOp::Rem
+            | AotBuiltinOp::Fld
+            | AotBuiltinOp::Cld => {
+                if matches!(arg_types, [StaticType::Bool, StaticType::Bool, ..]) {
+                    StaticType::Bool
+                } else if arg_types.iter().any(|ty| matches!(ty, StaticType::Bool)) {
+                    arg_types
+                        .iter()
+                        .find(|ty| ty.is_integer() && !matches!(ty, StaticType::Bool))
+                        .cloned()
+                        .unwrap_or(StaticType::I64)
+                } else {
+                    arg_types.first().cloned().unwrap_or(StaticType::F64)
+                }
             }
 
             // Boolean-returning special value checks
@@ -429,25 +467,73 @@ impl AotBuiltinOp {
                 ndims: None,
             },
 
-            // Sum returns same as element type
-            AotBuiltinOp::Sum => StaticType::F64,
+            // Sum returns the array element type, or sum(f, arr)'s mapped element type.
+            AotBuiltinOp::Sum => match arg_types {
+                [StaticType::Array { element, .. }]
+                | [StaticType::Range { element }]
+                | [StaticType::Generator { element }] => element.as_ref().clone(),
+                [StaticType::Function { ret, .. }, StaticType::Array { .. }]
+                | [StaticType::Function { ret, .. }, StaticType::Range { .. }]
+                | [StaticType::Function { ret, .. }, StaticType::Generator { .. }] => {
+                    ret.as_ref().clone()
+                }
+                _ => StaticType::F64,
+            },
 
             // Size returns tuple
             AotBuiltinOp::Size => StaticType::Tuple(vec![StaticType::I64]),
 
             // Push/Pop return array or element
             AotBuiltinOp::Push | AotBuiltinOp::PushFirst | AotBuiltinOp::Insert => {
-                StaticType::Array {
+                arg_types.first().cloned().unwrap_or(StaticType::Array {
                     element: Box::new(StaticType::Any),
                     ndims: Some(1),
-                }
+                })
             }
             AotBuiltinOp::Pop | AotBuiltinOp::PopFirst | AotBuiltinOp::DeleteAt => StaticType::Any,
 
             // Append returns the mutated array
-            AotBuiltinOp::Append | AotBuiltinOp::Collect => StaticType::Array {
+            AotBuiltinOp::Append => StaticType::Array {
                 element: Box::new(StaticType::Any),
                 ndims: Some(1),
+            },
+            AotBuiltinOp::Dict => arg_types.first().cloned().unwrap_or(StaticType::Dict {
+                key: Box::new(StaticType::Any),
+                value: Box::new(StaticType::Any),
+            }),
+            AotBuiltinOp::DictGet => match arg_types {
+                [StaticType::Dict { value, .. }, _, default, ..] => {
+                    if default == value.as_ref() {
+                        value.as_ref().clone()
+                    } else {
+                        StaticType::Union {
+                            variants: vec![value.as_ref().clone(), default.clone()],
+                        }
+                    }
+                }
+                [StaticType::Dict { value, .. }, ..] => value.as_ref().clone(),
+                [_, _, default, ..] => default.clone(),
+                _ => StaticType::Any,
+            },
+            AotBuiltinOp::Collect => match arg_types.first() {
+                Some(StaticType::Array { element, .. })
+                | Some(StaticType::Range { element })
+                | Some(StaticType::Generator { element })
+                | Some(StaticType::Set { element }) => StaticType::Array {
+                    element: element.clone(),
+                    ndims: Some(1),
+                },
+                Some(StaticType::Dict { key, value }) => StaticType::Array {
+                    element: Box::new(StaticType::Tuple(vec![
+                        key.as_ref().clone(),
+                        value.as_ref().clone(),
+                    ])),
+                    ndims: Some(1),
+                },
+                _ => StaticType::Array {
+                    element: Box::new(StaticType::Any),
+                    ndims: Some(1),
+                },
             },
 
             // Element access
@@ -457,25 +543,74 @@ impl AotBuiltinOp {
             | AotBuiltinOp::TupleLast => StaticType::Any, // Element type
 
             // Boolean predicates
-            AotBuiltinOp::IsEmpty => StaticType::Bool,
+            AotBuiltinOp::IsEmpty | AotBuiltinOp::In | AotBuiltinOp::HasKey => StaticType::Bool,
 
             // Higher-order functions
-            AotBuiltinOp::Map | AotBuiltinOp::Filter => StaticType::Array {
-                element: Box::new(StaticType::Any),
-                ndims: Some(1),
+            AotBuiltinOp::Map => match (arg_types.first(), arg_types.get(1)) {
+                (Some(StaticType::Function { ret, .. }), Some(StaticType::Array { ndims, .. })) => {
+                    StaticType::Array {
+                        element: ret.clone(),
+                        ndims: Some(ndims.unwrap_or(1)),
+                    }
+                }
+                (
+                    Some(StaticType::Function { ret, .. }),
+                    Some(StaticType::Range { .. } | StaticType::Generator { .. }),
+                ) => StaticType::Array {
+                    element: ret.clone(),
+                    ndims: Some(1),
+                },
+                _ => StaticType::Array {
+                    element: Box::new(StaticType::Any),
+                    ndims: Some(1),
+                },
             },
-            AotBuiltinOp::Reduce => StaticType::Any, // Depends on function and array type
+            AotBuiltinOp::Filter => match arg_types.get(1) {
+                Some(StaticType::Array { element, ndims }) => StaticType::Array {
+                    element: element.clone(),
+                    ndims: *ndims,
+                },
+                Some(StaticType::Range { element } | StaticType::Generator { element }) => {
+                    StaticType::Array {
+                        element: element.clone(),
+                        ndims: Some(1),
+                    }
+                }
+                _ => StaticType::Array {
+                    element: Box::new(StaticType::Any),
+                    ndims: Some(1),
+                },
+            },
+            AotBuiltinOp::Reduce => match (arg_types.first(), arg_types.get(1)) {
+                (Some(StaticType::Function { ret, .. }), _) if !matches!(ret.as_ref(), StaticType::Any) => {
+                    ret.as_ref().clone()
+                }
+                (_, Some(StaticType::Array { element, .. } | StaticType::Range { element } | StaticType::Generator { element })) => {
+                    element.as_ref().clone()
+                }
+                _ => StaticType::Any,
+            },
+            AotBuiltinOp::MapReduce => match arg_types.first() {
+                Some(StaticType::Function { ret, .. }) => match arg_types.get(1) {
+                    Some(StaticType::Function { ret: op_ret, .. }) => op_ret.as_ref().clone(),
+                    _ => ret.as_ref().clone(),
+                },
+                _ => StaticType::Any,
+            },
             AotBuiltinOp::ForEach => StaticType::Nothing,
             AotBuiltinOp::Any | AotBuiltinOp::All => StaticType::Bool,
 
             // String operations
             AotBuiltinOp::Uppercase | AotBuiltinOp::Lowercase => StaticType::Str,
+            AotBuiltinOp::Occursin | AotBuiltinOp::StartsWith | AotBuiltinOp::EndsWith => {
+                StaticType::Bool
+            }
 
             // I/O operations return nothing
             AotBuiltinOp::Println | AotBuiltinOp::Print => StaticType::Nothing,
 
             // Type operations
-            AotBuiltinOp::TypeOf => StaticType::Str, // Returns type name as string
+            AotBuiltinOp::TypeOf => StaticType::DataType,
             AotBuiltinOp::Isa => StaticType::Bool,
 
             // Type conversion intrinsics
@@ -488,10 +623,16 @@ impl AotBuiltinOp {
             // String concatenation
             AotBuiltinOp::StringConcat => StaticType::Str,
 
-            // Complex number operations (Issue #3410)
-            AotBuiltinOp::Abs2 => StaticType::F64,
-            AotBuiltinOp::Real => StaticType::F64,
-            AotBuiltinOp::Imag => StaticType::F64,
+            // Complex number operations (Issue #3410, #7041)
+            AotBuiltinOp::Abs2 | AotBuiltinOp::Real | AotBuiltinOp::Imag => arg_types
+                .first()
+                .and_then(|ty| match ty {
+                    StaticType::Struct { name, .. } => {
+                        StaticType::complex_param_type_from_name(name)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(StaticType::F64),
 
             // Transpose — returns same type as input
             AotBuiltinOp::Adjoint => {
@@ -540,6 +681,8 @@ impl AotBuiltinOp {
             "div" => Some(AotBuiltinOp::Div),
             "mod" => Some(AotBuiltinOp::Mod),
             "rem" => Some(AotBuiltinOp::Rem),
+            "fld" => Some(AotBuiltinOp::Fld),
+            "cld" => Some(AotBuiltinOp::Cld),
             // Note: gcd, lcm removed - now Pure Julia (base/intfuncs.jl)
 
             // Special value checks
@@ -561,6 +704,10 @@ impl AotBuiltinOp {
             "first" => Some(AotBuiltinOp::First),
             "last" => Some(AotBuiltinOp::Last),
             "isempty" => Some(AotBuiltinOp::IsEmpty),
+            "in" | "∈" => Some(AotBuiltinOp::In),
+            "Dict" => Some(AotBuiltinOp::Dict),
+            "haskey" => Some(AotBuiltinOp::HasKey),
+            "get" => Some(AotBuiltinOp::DictGet),
             "collect" => Some(AotBuiltinOp::Collect),
             "zeros" => Some(AotBuiltinOp::Zeros),
             "ones" => Some(AotBuiltinOp::Ones),
@@ -571,6 +718,7 @@ impl AotBuiltinOp {
             "map" => Some(AotBuiltinOp::Map),
             "filter" => Some(AotBuiltinOp::Filter),
             "reduce" | "foldl" => Some(AotBuiltinOp::Reduce),
+            "mapreduce" => Some(AotBuiltinOp::MapReduce),
             "foreach" => Some(AotBuiltinOp::ForEach),
             "any" => Some(AotBuiltinOp::Any),
             "all" => Some(AotBuiltinOp::All),
@@ -578,12 +726,16 @@ impl AotBuiltinOp {
             // I/O and misc
             "println" => Some(AotBuiltinOp::Println),
             "print" => Some(AotBuiltinOp::Print),
+            "time_ns" => Some(AotBuiltinOp::TimeNs),
             "typeof" => Some(AotBuiltinOp::TypeOf),
             "isa" => Some(AotBuiltinOp::Isa),
             "rand" => Some(AotBuiltinOp::Rand),
             "randn" => Some(AotBuiltinOp::Randn),
             "uppercase" => Some(AotBuiltinOp::Uppercase),
             "lowercase" => Some(AotBuiltinOp::Lowercase),
+            "occursin" => Some(AotBuiltinOp::Occursin),
+            "startswith" => Some(AotBuiltinOp::StartsWith),
+            "endswith" => Some(AotBuiltinOp::EndsWith),
 
             // Type conversion intrinsics
             "sitofp" => Some(AotBuiltinOp::Sitofp),
@@ -635,6 +787,8 @@ impl fmt::Display for AotBuiltinOp {
             AotBuiltinOp::Div => "div",
             AotBuiltinOp::Mod => "mod",
             AotBuiltinOp::Rem => "rem",
+            AotBuiltinOp::Fld => "fld",
+            AotBuiltinOp::Cld => "cld",
             // Note: gcd, lcm removed - now Pure Julia (base/intfuncs.jl)
 
             // Special value checks
@@ -658,6 +812,10 @@ impl fmt::Display for AotBuiltinOp {
             AotBuiltinOp::TupleFirst => "first",
             AotBuiltinOp::TupleLast => "last",
             AotBuiltinOp::IsEmpty => "isempty",
+            AotBuiltinOp::In => "in",
+            AotBuiltinOp::Dict => "Dict",
+            AotBuiltinOp::HasKey => "haskey",
+            AotBuiltinOp::DictGet => "get",
             AotBuiltinOp::Collect => "collect",
             AotBuiltinOp::Zeros => "zeros",
             AotBuiltinOp::Ones => "ones",
@@ -668,6 +826,7 @@ impl fmt::Display for AotBuiltinOp {
             AotBuiltinOp::Map => "map",
             AotBuiltinOp::Filter => "filter",
             AotBuiltinOp::Reduce => "reduce",
+            AotBuiltinOp::MapReduce => "mapreduce",
             AotBuiltinOp::ForEach => "foreach",
             AotBuiltinOp::Any => "any",
             AotBuiltinOp::All => "all",
@@ -675,12 +834,16 @@ impl fmt::Display for AotBuiltinOp {
             // I/O and misc
             AotBuiltinOp::Println => "println",
             AotBuiltinOp::Print => "print",
+            AotBuiltinOp::TimeNs => "time_ns",
             AotBuiltinOp::TypeOf => "typeof",
             AotBuiltinOp::Isa => "isa",
             AotBuiltinOp::Rand => "rand",
             AotBuiltinOp::Randn => "randn",
             AotBuiltinOp::Uppercase => "uppercase",
             AotBuiltinOp::Lowercase => "lowercase",
+            AotBuiltinOp::Occursin => "occursin",
+            AotBuiltinOp::StartsWith => "startswith",
+            AotBuiltinOp::EndsWith => "endswith",
             AotBuiltinOp::StringLength => "length",
 
             // Type conversion intrinsics

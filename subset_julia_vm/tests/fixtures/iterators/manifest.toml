@@ -1,6 +1,12 @@
 # Test manifest for iterators category
 
 [[tests]]
+name = "iterators_first_n_iterator_5750"
+file = "first_n_iterator_5750.jl"
+expected = true
+description = "first(itr, n) works for non-indexable iterators (generators, tuples, Iterators.cycle) via Iterators.take; indexable types keep type-preserving slicing (Issue #5750)"
+
+[[tests]]
 name = "iterators_countfrom_basic"
 file = "countfrom_basic.jl"
 expected = true
@@ -65,3 +71,45 @@ name = "iterators_reexports"
 file = "iterators_reexports.jl"
 expected = true
 description = "Iterators module re-exports: filter, map, reverse, accumulate, takewhile, dropwhile, flatmap (Issue #2159)"
+
+[[tests]]
+name = "iterators_map_lazy_generator"
+file = "map_lazy_generator.jl"
+expected = true
+description = "Iterators.map returns lazy Base.Generator and preserves collect behavior (Issue #4115)"
+
+[[tests]]
+name = "iterators_function_valued_map"
+file = "function_valued_map.jl"
+expected = true
+description = "Iterators.map as a function value returns lazy Base.Generator with runtime callables (Issue #4118)"
+
+[[tests]]
+name = "iterators_module_function_identity_4119"
+file = "module_function_identity_4119.jl"
+expected = true
+description = "Module-qualified Iterators function values preserve qualified identity and dispatch correctly (Issue #4119)"
+
+[[tests]]
+name = "iterators_map_direct_module_method_4121"
+file = "map_direct_module_method_4121.jl"
+expected = true
+description = "Direct Iterators.map dispatches through the module-owned Pure Julia method while preserving lazy unary/vararg behavior (Issue #4121)"
+
+[[tests]]
+name = "iterators_map_empty_default_eltype_4153"
+file = "map_empty_default_eltype_4153.jl"
+expected = true
+description = "map(f, empty) preserves Julia Base default eltype for type and named-function callables (Issue #4153)"
+
+[[tests]]
+name = "iterators_filter_lazy_4134"
+file = "filter_lazy_4134.jl"
+expected = true
+description = "Iterators.filter returns a lazy Base.Filter and defers predicate calls until iteration (Issue #4134)"
+
+[[tests]]
+name = "iterators_hasshape_collect_dispatch_5850"
+file = "iterators_hasshape_collect_dispatch_5850.jl"
+expected = true
+description = "IteratorSize over a statically-ranked array infers the concrete HasShape{N} (mirroring IteratorSize(::AbstractArray{T,N})=HasShape{N}()), so Base._collect statically dispatches to the ::HasShape method instead of the ::IteratorSize catch-all and collect preserves array shape. Sharpened in both the Expr::Call and Expr::ModuleCall (Base.IteratorSize) inference arms (Issue #5850)."

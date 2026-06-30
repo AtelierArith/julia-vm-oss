@@ -23,3 +23,21 @@ name = "abstract_parametric"
 file = "abstract_parametric.jl"
 expected = true
 description = "Abstract types with parametric struct subtypes"
+
+[[tests]]
+name = "abstract_multilevel_ancestor_chain_5056"
+file = "multilevel_ancestor_chain_5056.jl"
+expected = true
+description = "Multi-level abstract ancestry: supertype/<:/isa/dispatch through user abstracts to a built-in abstract (Issue #5056)"
+
+[[tests]]
+name = "abstract_const_alias_parametric_supertype_7235"
+file = "const_alias_parametric_supertype_7235.jl"
+expected = true
+description = "A struct declaring its supertype via a const alias for a parametric abstract type (`const CUD = Dist{Uni,Cont}; struct Norm <: CUD`) satisfies `isa`/`<:`/dispatch on the underlying bare abstract: the alias is resolved to its underlying parametric type when the struct's declared parent is recorded (Issue #7235 sub1)"
+
+[[tests]]
+name = "abstract_parametric_abstract_supertype_dispatch_7235"
+file = "parametric_abstract_supertype_dispatch_7235.jl"
+expected = true
+description = "A method on a bare abstract type matches when that abstract type has a parametric abstract supertype (`abstract type Dist{F,S} <: Sampleable{F,S} end`): the parser's top-level parametric-parent node no longer overwrites the abstract type's own name, so the abstract type is registered and `isa`/`<:`/dispatch on it (and its grandparent) all work (Issue #7235 sub2)"

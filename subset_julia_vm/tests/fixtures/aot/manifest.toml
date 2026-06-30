@@ -1,0 +1,13 @@
+# Test manifest for AoT parity fixtures
+
+[[tests]]
+name = "aot_builtin_stdout_parity_6999"
+file = "builtin_stdout_parity_6999.jl"
+expected = true
+description = "AoT generated binary stdout matches upstream Julia for supported scalar operators and builtins (Issue #6999)"
+
+[[tests]]
+name = "aot_mandelbrot_scalar_aot"
+file = "mandelbrot_scalar_aot.jl"
+expected = true
+description = "AoT scalar Mandelbrot: typed Float64/Int64 arithmetic, nested while loops, early return — no Complex or broadcasting"

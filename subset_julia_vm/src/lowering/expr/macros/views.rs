@@ -1,9 +1,9 @@
 //! @views and @. (broadcast) macro support.
 
+use super::super::lower_expr_with_ctx;
 use crate::ir::core::{Expr, Literal};
 use crate::lowering::LowerResult;
 use crate::parser::cst::{CstWalker, Node, NodeKind};
-use super::super::lower_expr_with_ctx;
 
 /// Recursively transform an expression to broadcast all operations (Issue #2547).
 pub(super) fn dotify_expr(expr: Expr, span: crate::span::Span) -> Expr {
@@ -12,57 +12,140 @@ pub(super) fn dotify_expr(expr: Expr, span: crate::span::Span) -> Expr {
 
     match expr {
         Expr::Call {
-            function, args, kwargs, splat_mask, kwargs_splat_mask, span: call_span,
+            function,
+            args,
+            kwargs,
+            splat_mask,
+            kwargs_splat_mask,
+            span: call_span,
         } => {
             if function == "materialize" || function == "Broadcasted" {
-                return Expr::Call { function, args, kwargs, splat_mask, kwargs_splat_mask, span: call_span };
+                return Expr::Call {
+                    function,
+                    args,
+                    kwargs,
+                    splat_mask,
+                    kwargs_splat_mask,
+                    span: call_span,
+                };
             }
             let dotified_args: Vec<Expr> = args.into_iter().map(|a| dotify_expr(a, span)).collect();
             make_broadcasted_call(&function, dotified_args, call_span)
         }
-        Expr::BinaryOp { op, left, right, span: op_span } => {
+        Expr::BinaryOp {
+            op,
+            left,
+            right,
+            span: op_span,
+        } => {
             let dotified_left = dotify_expr(*left, span);
             let dotified_right = dotify_expr(*right, span);
             let op_name = match op {
-                BinaryOp::Add => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
-                BinaryOp::Div => "/", BinaryOp::Mod => "%", BinaryOp::Pow => "^",
-                BinaryOp::Lt => "<", BinaryOp::Gt => ">", BinaryOp::Le => "<=",
-                BinaryOp::Ge => ">=", BinaryOp::Eq => "==", BinaryOp::Ne => "!=",
-                BinaryOp::And => "andand", BinaryOp::Or => "oror",
+                BinaryOp::Add => "+",
+                BinaryOp::Sub => "-",
+                BinaryOp::Mul => "*",
+                BinaryOp::Div => "/",
+                BinaryOp::Mod => "%",
+                BinaryOp::Pow => "^",
+                BinaryOp::Lt => "<",
+                BinaryOp::Gt => ">",
+                BinaryOp::Le => "<=",
+                BinaryOp::Ge => ">=",
+                BinaryOp::Eq => "==",
+                BinaryOp::Ne => "!=",
+                BinaryOp::And => "andand",
+                BinaryOp::Or => "oror",
                 _ => {
-                    return Expr::BinaryOp { op, left: Box::new(dotified_left), right: Box::new(dotified_right), span: op_span };
+                    return Expr::BinaryOp {
+                        op,
+                        left: Box::new(dotified_left),
+                        right: Box::new(dotified_right),
+                        span: op_span,
+                    };
                 }
             };
             make_broadcasted_call(op_name, vec![dotified_left, dotified_right], op_span)
         }
-        Expr::AssignExpr { var, value, span: assign_span } => {
+        Expr::AssignExpr {
+            var,
+            value,
+            span: assign_span,
+        } => {
             let dotified_value = dotify_expr(*value, span);
-            Expr::AssignExpr { var, value: Box::new(dotified_value), span: assign_span }
-        }
-        Expr::LetBlock { bindings, body, span: block_span } => {
-            let dotified_stmts: Vec<crate::ir::core::Stmt> = body.stmts.into_iter().map(|stmt| match stmt {
-                crate::ir::core::Stmt::Expr { expr, span: s } => crate::ir::core::Stmt::Expr { expr: dotify_expr(expr, span), span: s },
-                other => other,
-            }).collect();
-            Expr::LetBlock { bindings, body: crate::ir::core::Block { stmts: dotified_stmts, span: body.span }, span: block_span }
-        }
-        Expr::Builtin { name, args: builtin_args, span: builtin_span } => {
-            use crate::ir::core::BuiltinOp;
-            let fn_name = match name { BuiltinOp::Sqrt => Some("sqrt"), _ => None };
-            if let Some(fn_name) = fn_name {
-                let dotified_args: Vec<Expr> = builtin_args.into_iter().map(|a| dotify_expr(a, span)).collect();
-                make_broadcasted_call(fn_name, dotified_args, builtin_span)
-            } else {
-                Expr::Builtin { name, args: builtin_args, span: builtin_span }
+            Expr::AssignExpr {
+                var,
+                value: Box::new(dotified_value),
+                span: assign_span,
             }
         }
-        Expr::UnaryOp { op, operand, span: op_span } => {
+        Expr::LetBlock {
+            bindings,
+            body,
+            span: block_span,
+        } => {
+            let dotified_stmts: Vec<crate::ir::core::Stmt> = body
+                .stmts
+                .into_iter()
+                .map(|stmt| match stmt {
+                    crate::ir::core::Stmt::Expr { expr, span: s } => crate::ir::core::Stmt::Expr {
+                        expr: dotify_expr(expr, span),
+                        span: s,
+                    },
+                    other => other,
+                })
+                .collect();
+            Expr::LetBlock {
+                bindings,
+                body: crate::ir::core::Block {
+                    stmts: dotified_stmts,
+                    span: body.span,
+                },
+                span: block_span,
+            }
+        }
+        Expr::Builtin {
+            name,
+            args: builtin_args,
+            span: builtin_span,
+        } => {
+            use crate::ir::core::BuiltinOp;
+            let fn_name = match name {
+                BuiltinOp::Sqrt => Some("sqrt"),
+                _ => None,
+            };
+            if let Some(fn_name) = fn_name {
+                let dotified_args: Vec<Expr> = builtin_args
+                    .into_iter()
+                    .map(|a| dotify_expr(a, span))
+                    .collect();
+                make_broadcasted_call(fn_name, dotified_args, builtin_span)
+            } else {
+                Expr::Builtin {
+                    name,
+                    args: builtin_args,
+                    span: builtin_span,
+                }
+            }
+        }
+        Expr::UnaryOp {
+            op,
+            operand,
+            span: op_span,
+        } => {
             let dotified_operand = dotify_expr(*operand, span);
-            let op_name = match op { crate::ir::core::UnaryOp::Neg => Some("-"), crate::ir::core::UnaryOp::Not => Some("!"), _ => None };
+            let op_name = match op {
+                crate::ir::core::UnaryOp::Neg => Some("-"),
+                crate::ir::core::UnaryOp::Not => Some("!"),
+                _ => None,
+            };
             if let Some(op_name) = op_name {
                 make_broadcasted_call(op_name, vec![dotified_operand], op_span)
             } else {
-                Expr::UnaryOp { op, operand: Box::new(dotified_operand), span: op_span }
+                Expr::UnaryOp {
+                    op,
+                    operand: Box::new(dotified_operand),
+                    span: op_span,
+                }
             }
         }
         other => other,
@@ -179,7 +262,11 @@ mod tests {
         };
         let result = dotify_expr(assign, s());
         // AssignExpr is preserved, but value is dotified
-        assert!(matches!(result, Expr::AssignExpr { .. }), "Expected AssignExpr, got {:?}", result);
+        assert!(
+            matches!(result, Expr::AssignExpr { .. }),
+            "Expected AssignExpr, got {:?}",
+            result
+        );
         if let Expr::AssignExpr { var, value, .. } = result {
             assert_eq!(var, "x");
             assert!(
@@ -220,12 +307,16 @@ pub(crate) fn lower_expr_with_views<'a>(
     match kind {
         NodeKind::IndexExpression => {
             let children: Vec<Node<'a>> = walker.named_children(&node);
-            if children.is_empty() { return lower_expr_with_ctx(walker, node, lambda_ctx); }
+            if children.is_empty() {
+                return lower_expr_with_ctx(walker, node, lambda_ctx);
+            }
 
             let array_node = children[0];
             let index_nodes = &children[1..];
 
-            let has_range_index = index_nodes.iter().any(|idx| matches!(walker.kind(idx), NodeKind::RangeExpression));
+            let has_range_index = index_nodes
+                .iter()
+                .any(|idx| matches!(walker.kind(idx), NodeKind::RangeExpression));
 
             if has_range_index {
                 let array_expr = lower_expr_with_views(walker, array_node, lambda_ctx)?;
@@ -234,15 +325,26 @@ pub(crate) fn lower_expr_with_views<'a>(
                     let index_expr = lower_expr_with_views(walker, *index_node, lambda_ctx)?;
                     call_args.push(index_expr);
                 }
-                Ok(Expr::Call { function: "view".to_string(), args: call_args, kwargs: vec![], splat_mask: vec![], kwargs_splat_mask: vec![], span })
+                Ok(Expr::Call {
+                    function: "view".to_string(),
+                    args: call_args,
+                    kwargs: vec![],
+                    splat_mask: vec![],
+                    kwargs_splat_mask: vec![],
+                    span,
+                })
             } else {
                 lower_expr_with_ctx(walker, node, lambda_ctx)
             }
         }
         NodeKind::CompoundStatement => {
             let children: Vec<Node<'a>> = walker.named_children(&node);
-            if children.is_empty() { return Ok(Expr::Literal(Literal::Nothing, span)); }
-            if children.len() == 1 { return lower_expr_with_views(walker, children[0], lambda_ctx); }
+            if children.is_empty() {
+                return Ok(Expr::Literal(Literal::Nothing, span));
+            }
+            if children.len() == 1 {
+                return lower_expr_with_views(walker, children[0], lambda_ctx);
+            }
 
             let mut stmts = Vec::new();
             for child in &children {
@@ -250,7 +352,11 @@ pub(crate) fn lower_expr_with_views<'a>(
                 stmts.push(crate::ir::core::Stmt::Expr { expr, span });
             }
 
-            Ok(Expr::LetBlock { bindings: vec![], body: crate::ir::core::Block { stmts, span }, span })
+            Ok(Expr::LetBlock {
+                bindings: vec![],
+                body: crate::ir::core::Block { stmts, span },
+                span,
+            })
         }
         _ => lower_expr_with_ctx(walker, node, lambda_ctx),
     }

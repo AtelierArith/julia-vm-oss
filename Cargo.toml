@@ -1,14 +1,70 @@
 [workspace]
 members = [
     "subset_julia_vm",
+    "subset_julia_vm_ffi",
+    "subset_julia_vm_parser",
+    "subset_julia_vm_web",
+    "subset_julia_vm_runtime",
+]
+default-members = [
+    "subset_julia_vm",
     "subset_julia_vm_parser",
     "subset_julia_vm_web",
     "subset_julia_vm_runtime",
 ]
 resolver = "2"
 
+# Vendored, locally-patched astro-float-num (Issue #6794): bounds the Ziv
+# precision-refinement loops in exp/ln so fractional BigFloat powers
+# (e.g. big(4.0)^0.5) no longer hang on table-maker's-dilemma inputs.
+# See vendor/astro-float-num/ (upstream 0.3.6 + patch). `astro-float` (the meta
+# crate we depend on) transitively uses this patched astro-float-num.
+[patch.crates-io]
+astro-float-num = { path = "vendor/astro-float-num" }
+
 # Workspace-level lint configuration (Issue #3108)
 # Warn when a public type lacks a Debug implementation, so test authors
 # can always use `{:?}` in assert!(matches!()) failure messages.
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
+
+# WASM size-optimized profile (Issue #6922).
+#
+# Cargo only honours `[profile.*]` at the workspace root, so the old
+# `[profile.release]` block in `subset_julia_vm_web/Cargo.toml` was silently
+# ignored — the web/WASM build was getting the DEFAULT release settings
+# (`opt-level = 3`, `lto = false`), not the intended size optimization.
+#
+# We do NOT move those settings onto the shared `[profile.release]`: that would
+# force `opt-level = "s"` + fat `lto` onto every crate's release build, slowing
+# the VM (CLAUDE.md design principle #6) and bloating the constant
+# `cargo nextest run --release` compile times. `lto` also cannot be set in a
+# per-package override (`[profile.release.package.*]`), so a per-package tweak
+# can't express the full intent either.
+#
+# Instead this dedicated profile inherits `release` and adds the web-only size
+# knobs. Build the web crate with it via wasm-pack's `--profile` flag (verified
+# with wasm-pack 0.15):
+#   wasm-pack build --target web --profile web-release
+# `scripts/wasm_build_with_cache.sh` defaults to this profile automatically.
+[profile.web-release]
+inherits = "release"
+opt-level = "s" # optimize for small code size
+lto = true
+
+# Faster local iteration profiles (compile-time ergonomics).
+#
+# dev-fast: quicker than release for sjulia/fixture loops; slower than `cargo check`.
+#   cargo build --profile dev-fast --bin sjulia --features repl
+#   target/dev-fast/sjulia path/to/fixture.jl
+#
+# release-fast: release-like gates with shorter compile; not for perf benchmarks or shipping.
+#   cargo nextest run --profile release-fast --test fixture_tests <category>::
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+
+[profile.release-fast]
+inherits = "release"
+codegen-units = 256
+lto = false

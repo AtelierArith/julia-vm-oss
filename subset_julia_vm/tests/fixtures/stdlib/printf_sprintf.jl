@@ -34,10 +34,15 @@ end
     @test sprintf("%o", 64) == "100"
 end
 
+# Issue #6746: sprintf is now a pure-Julia Printf engine that matches upstream
+# C-style formatting — %f defaults to 6 fractional digits, %e to mantissa+exponent
+# (the old Rust builtin wrongly dropped the default precision).
 @testset "sprintf float formatting (%f)" begin
-    @test sprintf("%f", 3.14) == "3.14"
-    @test sprintf("%f", -2.5) == "-2.5"
-    @test sprintf("%e", 1.5) == "1.5"
+    @test sprintf("%f", 3.14) == "3.140000"
+    @test sprintf("%f", -2.5) == "-2.500000"
+    @test sprintf("%e", 1.5) == "1.500000e+00"
+    @test sprintf("%.2f", 3.14159) == "3.14"
+    @test sprintf("%8.2f", 3.14159) == "    3.14"
 end
 
 @testset "sprintf char formatting (%c)" begin

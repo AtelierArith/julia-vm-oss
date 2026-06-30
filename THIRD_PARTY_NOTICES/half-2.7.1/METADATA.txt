@@ -1,0 +1,5 @@
+crate: half
+version: 2.7.1
+license: MIT OR Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/VoidStarKat/half-rs

@@ -1,0 +1,5 @@
+crate: once_cell
+version: 1.21.4
+license: MIT OR Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/matklad/once_cell

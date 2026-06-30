@@ -18,8 +18,39 @@
 //! let filtered_program = call_graph.filter_program(&program);
 //! ```
 
+use crate::aot::types::StaticType;
 use crate::ir::core::{Block, Expr, Function, Module, Program, Stmt};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// String-only functions that AoT lowers directly to Rust string methods at the
+/// call site (Issue #7058). Their pure-Julia Base bodies reach parametric /
+/// iterator machinery (`HasShape{1}`, …) that AoT cannot lower, so they are
+/// treated as call-graph leaves and their definitions are skipped during
+/// conversion. Limited to functions with no Array overload.
+pub(crate) fn is_intercepted_string_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "uppercase" | "lowercase" | "occursin" | "startswith" | "endswith"
+    )
+}
+
+/// Binary operators that the AoT IR converter always folds into nested binary
+/// `BinOp` nodes when called with >= 2 non-splat positional arguments. Julia's
+/// parser flattens chained `+`/`*` into n-ary calls like `+(a, b, c)`, and the
+/// converter unfolds them back to `((a + b) + c)` (see
+/// `IrConverter::map_operator_to_binop` and the operator-call fold in
+/// `analyze/ir_converter/expr.rs`). Such calls never reach a user/prelude
+/// method, so the call graph must NOT create an edge to e.g. `+`: doing so
+/// spuriously marks the variadic `+(xs...)` / `afoldl` prelude path reachable,
+/// which AoT cannot lower (`HasShape{1}`) and which breaks codegen for n-ary
+/// arithmetic like `a + b + c` (Issue #8180). Keep this list in sync with
+/// `map_operator_to_binop`.
+pub(crate) fn is_folded_binary_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "+" | "-" | "*" | "/" | "÷" | "div" | "%" | "^" | "&" | "|" | "⊻" | "xor" | "<<" | ">>"
+    )
+}
 
 /// Call graph for a program
 #[derive(Debug)]
@@ -60,7 +91,15 @@ impl CallGraph {
 
         // Build edges for each function
         for func in &program.functions {
-            let calls = graph.collect_calls_in_block(&func.body);
+            // String functions AoT intercepts as builtins are leaves in the
+            // call graph: not traversing their pure-Julia bodies prunes the
+            // parametric/iterator machinery (`HasShape{1}`, …) they would
+            // otherwise keep reachable (Issue #7058).
+            let calls = if is_intercepted_string_builtin(&func.name) {
+                HashSet::new()
+            } else {
+                graph.collect_calls_in_block(&func.body)
+            };
             graph.edges.insert(func.name.clone(), calls);
         }
 
@@ -234,13 +273,13 @@ impl CallGraph {
             Stmt::TestThrows { expr, .. } => {
                 self.collect_calls_in_expr(expr, calls);
             }
-            Stmt::Using { .. } | Stmt::Export { .. } => {}
-            Stmt::FunctionDef { func, .. } => {
+            Stmt::Using { .. } | Stmt::Export { .. } | Stmt::Global { .. } => {}
+            Stmt::FunctionDef { func, .. } | Stmt::EvalFunctionDef { func, .. } => {
                 // Add edges from this function definition
                 calls.extend(self.collect_calls_in_block(&func.body));
             }
-            // Label, Goto, and EnumDef are low-level control flow / declarations that don't contain function calls
-            Stmt::Label { .. } | Stmt::Goto { .. } | Stmt::EnumDef { .. } => {}
+            // Metadata, labels, gotos, and enum declarations don't contain function calls.
+            Stmt::Meta { .. } | Stmt::Label { .. } | Stmt::Goto { .. } | Stmt::EnumDef { .. } => {}
         }
     }
 
@@ -251,9 +290,23 @@ impl CallGraph {
                 function,
                 args,
                 kwargs,
+                splat_mask,
                 ..
             } => {
-                calls.insert(function.clone());
+                // Operator calls (`+(a, b, c)`, `*(a, b)`, …) are always folded by
+                // the IR converter into nested binary `BinOp` nodes and never reach
+                // a user/prelude method. Adding an edge to e.g. `+` would wrongly
+                // pull in the variadic `+(xs...)` / `afoldl` prelude path, which AoT
+                // cannot lower (Issue #8180). Skip the edge for non-splat operator
+                // calls with >= 2 positional args, matching the fold; still recurse
+                // into the operands so calls nested in them stay tracked.
+                let folded_operator_call = is_folded_binary_operator(function)
+                    && kwargs.is_empty()
+                    && args.len() >= 2
+                    && !splat_mask.iter().any(|&splatted| splatted);
+                if !folded_operator_call {
+                    calls.insert(function.clone());
+                }
                 for arg in args {
                     self.collect_calls_in_expr(arg, calls);
                 }
@@ -379,10 +432,8 @@ impl CallGraph {
             Expr::AssignExpr { value, .. } => {
                 self.collect_calls_in_expr(value, calls);
             }
-            Expr::ReturnExpr { value, .. } => {
-                if let Some(v) = value {
-                    self.collect_calls_in_expr(v, calls);
-                }
+            Expr::ReturnExpr { value: Some(v), .. } => {
+                self.collect_calls_in_expr(v, calls);
             }
             Expr::StringConcat { parts, .. } => {
                 for p in parts {
@@ -401,10 +452,12 @@ impl CallGraph {
                     self.collect_calls_in_expr(arg, calls);
                 }
             }
-            Expr::Literal(_, _)
-            | Expr::Var(_, _)
-            | Expr::SliceAll { .. }
-            | Expr::TypedEmptyArray { .. } => {}
+            Expr::Var(name, _) => {
+                if self.all_functions.contains(name) {
+                    calls.insert(name.clone());
+                }
+            }
+            Expr::Literal(_, _) | Expr::SliceAll { .. } | Expr::TypedEmptyArray { .. } => {}
             // Handle other expression types
             _ => {
                 // For any unhandled cases, recursively check if they contain calls
@@ -466,10 +519,10 @@ impl CallGraph {
                 self.collect_struct_refs_in_expr(condition);
                 self.collect_struct_refs_in_block(body);
             }
-            Stmt::Return { value, .. } => {
-                if let Some(expr) = value {
-                    self.collect_struct_refs_in_expr(expr);
-                }
+            Stmt::Return {
+                value: Some(expr), ..
+            } => {
+                self.collect_struct_refs_in_expr(expr);
             }
             _ => {}
         }
@@ -477,25 +530,9 @@ impl CallGraph {
 
     /// Collect struct references in an expression
     fn collect_struct_refs_in_expr(&mut self, expr: &Expr) {
-        match expr {
-            Expr::Call { function, args, .. } => {
-                // Constructor calls look like struct names
-                if function.chars().next().map_or(false, |c| c.is_uppercase()) {
-                    self.referenced_structs.insert(function.clone());
-                }
-                for arg in args {
-                    self.collect_struct_refs_in_expr(arg);
-                }
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                self.collect_struct_refs_in_expr(left);
-                self.collect_struct_refs_in_expr(right);
-            }
-            Expr::UnaryOp { operand, .. } => {
-                self.collect_struct_refs_in_expr(operand);
-            }
-            _ => {}
-        }
+        let mut refs = HashSet::new();
+        self.collect_struct_refs_in_expr_to_set(expr, &mut refs);
+        self.referenced_structs.extend(refs);
     }
 
     /// Collect module names referenced via ModuleCall in a block
@@ -552,10 +589,10 @@ impl CallGraph {
                 self.collect_module_refs_in_expr(condition);
                 self.collect_module_refs_in_block(body);
             }
-            Stmt::Return { value, .. } => {
-                if let Some(expr) = value {
-                    self.collect_module_refs_in_expr(expr);
-                }
+            Stmt::Return {
+                value: Some(expr), ..
+            } => {
+                self.collect_module_refs_in_expr(expr);
             }
             _ => {}
         }
@@ -687,6 +724,7 @@ impl CallGraph {
             functions: filtered_functions,
             structs: filtered_structs,
             abstract_types: filtered_abstract_types,
+            primitive_types: program.primitive_types.clone(),
             type_aliases: program.type_aliases.clone(),
             modules: filtered_modules,
             usings: program.usings.clone(),
@@ -794,10 +832,10 @@ impl CallGraph {
                 self.collect_struct_refs_in_expr_to_set(condition, refs);
                 self.collect_struct_refs_in_block_to_set(body, refs);
             }
-            Stmt::Return { value, .. } => {
-                if let Some(expr) = value {
-                    self.collect_struct_refs_in_expr_to_set(expr, refs);
-                }
+            Stmt::Return {
+                value: Some(expr), ..
+            } => {
+                self.collect_struct_refs_in_expr_to_set(expr, refs);
             }
             _ => {}
         }
@@ -805,11 +843,23 @@ impl CallGraph {
 
     fn collect_struct_refs_in_expr_to_set(&self, expr: &Expr, refs: &mut HashSet<String>) {
         match expr {
-            Expr::Call { function, args, .. } => {
-                if function.chars().next().map_or(false, |c| c.is_uppercase()) {
-                    refs.insert(function.clone());
+            Expr::Call {
+                function,
+                args,
+                kwargs,
+                ..
+            } => {
+                if function.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    if let Some((base, _)) = StaticType::parametric_type_parts(function) {
+                        refs.insert(base.to_string());
+                    } else {
+                        refs.insert(function.clone());
+                    }
                 }
                 for arg in args {
+                    self.collect_struct_refs_in_expr_to_set(arg, refs);
+                }
+                for (_, arg) in kwargs {
                     self.collect_struct_refs_in_expr_to_set(arg, refs);
                 }
             }
@@ -824,6 +874,94 @@ impl CallGraph {
                 for e in elements {
                     self.collect_struct_refs_in_expr_to_set(e, refs);
                 }
+            }
+            Expr::TupleLiteral { elements, .. } => {
+                for e in elements {
+                    self.collect_struct_refs_in_expr_to_set(e, refs);
+                }
+            }
+            Expr::NamedTupleLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    self.collect_struct_refs_in_expr_to_set(value, refs);
+                }
+            }
+            Expr::Index { array, indices, .. } => {
+                self.collect_struct_refs_in_expr_to_set(array, refs);
+                for index in indices {
+                    self.collect_struct_refs_in_expr_to_set(index, refs);
+                }
+            }
+            Expr::FieldAccess { object, .. } => {
+                self.collect_struct_refs_in_expr_to_set(object, refs);
+            }
+            Expr::Range {
+                start, stop, step, ..
+            } => {
+                self.collect_struct_refs_in_expr_to_set(start, refs);
+                self.collect_struct_refs_in_expr_to_set(stop, refs);
+                if let Some(step) = step {
+                    self.collect_struct_refs_in_expr_to_set(step, refs);
+                }
+            }
+            Expr::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.collect_struct_refs_in_expr_to_set(condition, refs);
+                self.collect_struct_refs_in_expr_to_set(then_expr, refs);
+                self.collect_struct_refs_in_expr_to_set(else_expr, refs);
+            }
+            Expr::LetBlock { bindings, body, .. } => {
+                for (_, value) in bindings {
+                    self.collect_struct_refs_in_expr_to_set(value, refs);
+                }
+                self.collect_struct_refs_in_block_to_set(body, refs);
+            }
+            Expr::AssignExpr { value, .. }
+            | Expr::ReturnExpr {
+                value: Some(value), ..
+            } => {
+                self.collect_struct_refs_in_expr_to_set(value, refs);
+            }
+            Expr::Comprehension {
+                body, iter, filter, ..
+            }
+            | Expr::Generator {
+                body, iter, filter, ..
+            } => {
+                self.collect_struct_refs_in_expr_to_set(body, refs);
+                self.collect_struct_refs_in_expr_to_set(iter, refs);
+                if let Some(filter) = filter {
+                    self.collect_struct_refs_in_expr_to_set(filter, refs);
+                }
+            }
+            Expr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                self.collect_struct_refs_in_expr_to_set(body, refs);
+                for (_, iter) in iterations {
+                    self.collect_struct_refs_in_expr_to_set(iter, refs);
+                }
+                if let Some(filter) = filter {
+                    self.collect_struct_refs_in_expr_to_set(filter, refs);
+                }
+            }
+            Expr::StringConcat { parts, .. } => {
+                for part in parts {
+                    self.collect_struct_refs_in_expr_to_set(part, refs);
+                }
+            }
+            // A bare uppercase identifier in value position is a type reference
+            // (e.g. the operands of `T <: S`, a type used as a value). Keep its
+            // definition so type-level uses such as static subtype folding can
+            // see the struct/abstract hierarchy (Issue #7037).
+            Expr::Var(name, _) if name.chars().next().is_some_and(char::is_uppercase) => {
+                refs.insert(name.clone());
             }
             _ => {}
         }
@@ -857,7 +995,9 @@ pub struct CallGraphStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::core::{StructDef, StructField};
     use crate::span::Span;
+    use crate::types::{TypeExpr, TypeParam};
 
     fn dummy_span() -> Span {
         Span::new(0, 0, 1, 1, 0, 0)
@@ -872,6 +1012,99 @@ mod tests {
             kwargs_splat_mask: vec![],
             span: dummy_span(),
         }
+    }
+
+    fn make_call_expr_with_var_args(name: &str, arg_vars: &[&str]) -> Expr {
+        Expr::Call {
+            function: name.to_string(),
+            args: arg_vars
+                .iter()
+                .map(|v| Expr::Var(v.to_string(), dummy_span()))
+                .collect(),
+            kwargs: vec![],
+            splat_mask: vec![false; arg_vars.len()],
+            kwargs_splat_mask: vec![],
+            span: dummy_span(),
+        }
+    }
+
+    /// Issue #8180: `a + b + c` lowers to an n-ary `+(a, b, c)` call which the
+    /// AoT IR converter unfolds into nested binary ops. The call graph must NOT
+    /// create an edge to the operator `+`, otherwise the variadic prelude
+    /// `+(xs...)` / `afoldl` path (which AoT cannot lower) is wrongly marked
+    /// reachable. A non-operator n-ary call must still create its edge.
+    #[test]
+    fn nary_operator_call_does_not_mark_operator_reachable_8180() {
+        let f = Function {
+            name: "f".to_string(),
+            params: vec![],
+            kwparams: vec![],
+            type_params: vec![],
+            return_type: None,
+            body: Block {
+                stmts: vec![
+                    Stmt::Expr {
+                        expr: make_call_expr_with_var_args("+", &["a", "b", "c"]),
+                        span: dummy_span(),
+                    },
+                    Stmt::Expr {
+                        expr: make_call_expr_with_var_args("*", &["a", "b"]),
+                        span: dummy_span(),
+                    },
+                    Stmt::Expr {
+                        expr: make_call_expr_with_var_args("user_sum", &["a", "b", "c"]),
+                        span: dummy_span(),
+                    },
+                ],
+                span: dummy_span(),
+            },
+            is_base_extension: false,
+            is_runtime_eval: false,
+            span: dummy_span(),
+        };
+        let program = Program {
+            functions: vec![
+                f,
+                make_function("+", vec![]),
+                make_function("*", vec![]),
+                make_function("user_sum", vec![]),
+            ],
+            structs: vec![],
+            abstract_types: vec![],
+            primitive_types: vec![],
+            type_aliases: vec![],
+            modules: vec![],
+            usings: vec![],
+            macros: vec![],
+            enums: vec![],
+            base_function_count: 0,
+            main: Block {
+                stmts: vec![Stmt::Expr {
+                    expr: make_call_expr("f"),
+                    span: dummy_span(),
+                }],
+                span: dummy_span(),
+            },
+        };
+
+        let graph = CallGraph::from_program(&program);
+        let reachable = graph.reachable_functions();
+
+        assert!(reachable.contains("f"));
+        // Folded operator calls must not pull the operator methods in.
+        assert!(
+            !reachable.contains("+"),
+            "n-ary `+(a, b, c)` must not mark the variadic `+` reachable (Issue #8180)"
+        );
+        assert!(
+            !reachable.contains("*"),
+            "`*(a, b)` operator call must not mark `*` reachable (Issue #8180)"
+        );
+        // Non-operator n-ary calls must still create edges.
+        assert!(
+            reachable.contains("user_sum"),
+            "ordinary n-ary calls must still create call-graph edges"
+        );
     }
 
     fn make_function(name: &str, calls: Vec<&str>) -> Function {
@@ -894,6 +1127,23 @@ mod tests {
                 span: dummy_span(),
             },
             is_base_extension: false,
+            is_runtime_eval: false,
+            span: dummy_span(),
+        }
+    }
+
+    fn make_parametric_box_struct() -> StructDef {
+        StructDef {
+            name: "Box".to_string(),
+            is_mutable: false,
+            type_params: vec![TypeParam::new("T".to_string())],
+            parent_type: None,
+            fields: vec![StructField {
+                name: "x".to_string(),
+                type_expr: Some(TypeExpr::TypeVar("T".to_string())),
+                span: dummy_span(),
+            }],
+            inner_constructors: vec![],
             span: dummy_span(),
         }
     }
@@ -908,6 +1158,7 @@ mod tests {
             ],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![],
             usings: vec![],
@@ -932,6 +1183,58 @@ mod tests {
     }
 
     #[test]
+    fn filter_program_keeps_parametric_struct_constructed_inside_let_issue_7040() {
+        let inner = Expr::LetBlock {
+            bindings: vec![("b".to_string(), make_call_expr("Box{Int64}"))],
+            body: Block {
+                stmts: vec![],
+                span: dummy_span(),
+            },
+            span: dummy_span(),
+        };
+        let program = Program {
+            functions: vec![],
+            structs: vec![make_parametric_box_struct()],
+            abstract_types: vec![],
+            primitive_types: vec![],
+            type_aliases: vec![],
+            modules: vec![],
+            usings: vec![],
+            macros: vec![],
+            enums: vec![],
+            base_function_count: 0,
+            main: Block {
+                stmts: vec![Stmt::Expr {
+                    expr: Expr::LetBlock {
+                        bindings: vec![],
+                        body: Block {
+                            stmts: vec![Stmt::Expr {
+                                expr: inner,
+                                span: dummy_span(),
+                            }],
+                            span: dummy_span(),
+                        },
+                        span: dummy_span(),
+                    },
+                    span: dummy_span(),
+                }],
+                span: dummy_span(),
+            },
+        };
+
+        let graph = CallGraph::from_program(&program);
+        let filtered = graph.filter_program(&program);
+
+        assert!(
+            filtered
+                .structs
+                .iter()
+                .any(|struct_def| struct_def.name == "Box"),
+            "DCE must keep the bare parametric struct definition for Box{{Int64}}"
+        );
+    }
+
+    #[test]
     fn test_recursive_function() {
         let factorial = make_function("factorial", vec!["factorial"]);
 
@@ -939,6 +1242,7 @@ mod tests {
             functions: vec![factorial],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![],
             usings: vec![],
@@ -972,6 +1276,7 @@ mod tests {
             ],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![],
             usings: vec![],
@@ -1020,6 +1325,7 @@ mod tests {
             functions: vec![foo],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![],
             usings: vec![],
@@ -1046,6 +1352,8 @@ mod tests {
             function: function.to_string(),
             args: vec![],
             kwargs: vec![],
+            splat_mask: vec![],
+            kwargs_splat_mask: vec![],
             span: dummy_span(),
         }
     }
@@ -1057,6 +1365,7 @@ mod tests {
             functions: vec![],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             submodules: vec![],
             usings: vec![],
@@ -1081,6 +1390,7 @@ mod tests {
             functions: vec![],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![used_module, unused_module],
             usings: vec![],
@@ -1113,6 +1423,7 @@ mod tests {
             functions: vec![],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![module_a, module_b],
             usings: vec![],
@@ -1149,6 +1460,7 @@ mod tests {
             functions: vec![make_function("foo", vec![])],
             structs: vec![],
             abstract_types: vec![],
+            primitive_types: vec![],
             type_aliases: vec![],
             modules: vec![module_a, module_b],
             usings: vec![],

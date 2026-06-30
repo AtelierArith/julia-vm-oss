@@ -17,7 +17,7 @@
 //! ```
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use once_cell::sync::Lazy;
 
@@ -52,6 +52,25 @@ pub fn is_includable(path: &str) -> bool {
 /// Get all registered include paths.
 pub fn registered_paths() -> Vec<&'static str> {
     INCLUDE_REGISTRY.keys().copied().collect()
+}
+
+fn normalized_registry_path(path: &Path) -> String {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                parts.push(prefix.as_os_str().to_string_lossy().to_string());
+            }
+            Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                parts.pop();
+            }
+            Component::Normal(part) => {
+                parts.push(part.to_string_lossy().to_string());
+            }
+        }
+    }
+    parts.join("/")
 }
 
 /// Register a new includable file dynamically.
@@ -100,17 +119,24 @@ pub fn resolve_include_path(path: &str, base_dir: Option<&Path>) -> PathBuf {
 }
 
 /// Read an include file from the filesystem or registry.
-/// On native platforms, tries filesystem first, then falls back to registry.
-/// On iOS/WASM, only uses the registry.
+/// On native platforms, tries registries first, then falls back to filesystem.
+/// On iOS/WASM, only uses the registries.
 #[cfg(not(any(target_os = "ios", target_arch = "wasm32")))]
 pub fn read_include_file(path: &Path) -> Result<String, IncludeError> {
-    // First try the static registry (for bundled files)
     let path_str = path.to_string_lossy();
-    if let Some(content) = get_include_source(&path_str) {
+    let normalized = normalized_registry_path(path);
+
+    // Check static include registry first.
+    if let Some(content) = get_include_source(&normalized) {
         return Ok(content.to_string());
     }
 
-    // Then try filesystem
+    // Check embedded package includes (virtual paths like /embedded_packages/...).
+    if let Some(content) = crate::julia::packages::get_package_include(&normalized) {
+        return Ok(content.to_string());
+    }
+
+    // Fall back to filesystem.
     std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             IncludeError::FileNotFound {
@@ -126,15 +152,23 @@ pub fn read_include_file(path: &Path) -> Result<String, IncludeError> {
     })
 }
 
-/// On iOS/WASM, include is completely disabled.
-/// Returns an error for any include() call.
+/// On iOS/WASM, only the static and package include registries are available.
 #[cfg(any(target_os = "ios", target_arch = "wasm32"))]
 pub fn read_include_file(path: &Path) -> Result<String, IncludeError> {
     let path_str = path.to_string_lossy();
+    let normalized = normalized_registry_path(path);
+
+    if let Some(content) = get_include_source(&normalized) {
+        return Ok(content.to_string());
+    }
+
+    if let Some(content) = crate::julia::packages::get_package_include(&normalized) {
+        return Ok(content.to_string());
+    }
+
     Err(IncludeError::NotSupported {
         reason: format!(
-            "include('{}') is not supported on iOS/WASM. \
-             Define functions directly in the source code instead.",
+            "include('{}') is not supported on iOS/WASM outside of embedded packages.",
             path_str
         ),
     })

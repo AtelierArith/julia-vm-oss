@@ -346,6 +346,16 @@ fn test_structure_broadcast_dotted_operator() {
     assert_eq!(node.children[0].kind, NodeKind::Operator);
 }
 
+#[test]
+fn test_structure_broadcast_dotted_not_prefix() {
+    let node = parse_expr(".!flags");
+    assert_eq!(node.kind, NodeKind::BroadcastCallExpression);
+    assert_eq!(node.children.len(), 2); // operator + operand
+    assert_eq!(node.children[0].kind, NodeKind::Operator);
+    assert_eq!(node.children[0].text.as_deref(), Some(".!"));
+    assert_eq!(node.children[1].kind, NodeKind::Identifier);
+}
+
 // ==================== Collection Structure Tests ====================
 
 #[test]
@@ -399,6 +409,22 @@ fn test_structure_matrix_expression() {
     // Each row has 2 elements
     assert_eq!(node.children[0].children.len(), 2);
     assert_eq!(node.children[1].children.len(), 2);
+}
+
+#[test]
+fn test_structure_matrix_symbol_literals_are_separate_elements_issue_4576() {
+    let node = parse_expr("[:x :y; :z :w]");
+    assert_structure(
+        &node,
+        NodeKind::MatrixExpression,
+        &[NodeKind::MatrixRow, NodeKind::MatrixRow],
+    );
+    assert_eq!(node.children[0].children.len(), 2);
+    assert_eq!(node.children[1].children.len(), 2);
+    assert_eq!(node.children[0].children[0].kind, NodeKind::QuoteExpression);
+    assert_eq!(node.children[0].children[1].kind, NodeKind::QuoteExpression);
+    assert_eq!(node.children[1].children[0].kind, NodeKind::QuoteExpression);
+    assert_eq!(node.children[1].children[1].kind, NodeKind::QuoteExpression);
 }
 
 // ==================== Statement Structure Tests ====================

@@ -21,3 +21,21 @@ name = "iocontext_get_haskey"
 file = "iocontext_get_haskey.jl"
 expected = true
 description = "Test get() and haskey() dispatch on IOContext (Issue #3152)"
+
+[[tests]]
+name = "iocontext_direct_pair_constructor_6409"
+file = "iocontext_direct_pair_constructor_6409.jl"
+expected = true
+description = "Test upstream-compatible IOContext direct Pair property constructors (Issue #6409)"
+
+[[tests]]
+name = "iocontext_empty_constructor_6468"
+file = "iocontext_empty_constructor_6468.jl"
+expected = true
+description = "Test upstream-compatible IOContext(io) empty constructor (Issue #6468)"
+
+[[tests]]
+name = "iocontext_context_constructor_6467"
+file = "iocontext_context_constructor_6467.jl"
+expected = true
+description = "Test upstream-compatible IOContext(io, context) property inheritance (Issue #6467)"

@@ -15,3 +15,45 @@ name = "bigfloat_rounding"
 file = "rounding.jl"
 expected = true
 description = "Test rounding() and setrounding() for BigFloat"
+
+[[tests]]
+name = "bigfloat_bigfloat_display_6789"
+file = "bigfloat_display_6789.jl"
+expected = true
+description = "BigFloat display matches upstream Julia 1.12 Base.MPFR formatting (Issue #6789): positional decimal for exponents in [-4,5] (5.0, 0.25, 0.1000…625), scientific e±NN signed/zero-padded otherwise (1.0e+06, 1.5e+08, …e-05). Previously emitted astro_float's raw scientific form (5.e+0, 2.5e-1, 1.0e+6). Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_power_6790"
+file = "bigfloat_power_6790.jl"
+expected = true
+description = "BigFloat ^ integer exponent computes inline as a BigFloat power instead of infinite-recursing through `^` dispatch → stack overflow (Issue #6790). Covers BigFloat^Int (incl. 0, 1, negative, and 2.0^100), integer-valued float/BigFloat exponents, and a power loop. Genuinely fractional exponents (^0.5) are out of scope (astro-float exp/ln convergence, tracked separately). Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_div_zero_6791"
+file = "bigfloat_div_zero_6791.jl"
+expected = true
+description = "BigFloat division by zero follows IEEE semantics (±Inf / NaN) instead of raising DivisionByZero (Issue #6791). The DivBigFloat intrinsic's zero-divisor guard was removed; astro_float's div yields the correct ±Inf (sign-aware) and 0/0 → NaN, displayed via the #6789 Inf/NaN formatter. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_rem_mod_6796"
+file = "bigfloat_rem_mod_6796.jl"
+expected = true
+description = "BigFloat % / rem / mod (Issue #6796). Previously 'Unsupported BigFloat operation: Mod'. A RemBigFloat intrinsic (astro_float rem) is wired into the typed `%` compile path AND the dynamic CallDynamicBinaryBoth fallback (SremInt → RemBigFloat, mirroring BigInt), so both `big%big` and the untyped pure-Julia rem/mod functions work. rem/% take the sign of the dividend, mod the divisor (base/math.jl), x%0 → NaN, mixed BigFloat/Int/Float operands promote. divrem/fldmod (need floor/div on BigFloat) and broadcast .% are separate gaps. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_rounding_div_6801"
+file = "bigfloat_rounding_div_6801.jl"
+expected = true
+description = "BigFloat floor/ceil/round/trunc and div/fld/cld/divrem/fldmod (Issue #6801). Previously 'expected numeric value, got BigFloat' — the rounding paths converted to f64 and failed on BigFloat. apply_unary_rounding_op_with_heap now routes BigFloat through astro_float's native floor/ceil/int/round(0,ToEven) at every rounding site (FloorF64/CeilF64 instrs, Round/Trunc builtins, *Llvm intrinsics, and the CallDynamicOrBuiltin dynamic path), preserving arbitrary precision (floor of a 24-digit value is exact). round is ties-to-even; trunc rounds toward zero. div/fld/cld/divrem/fldmod follow from floor/ceil over x/y. Out of scope: floor(Int,::BigFloat) needs Int(::BigFloat) conversion; div/divrem trunc-vs-floor for negatives and tuple==over BigFloat elements are separate pre-existing gaps. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_tuple_eq_6892"
+file = "bigfloat_tuple_eq_6892.jl"
+expected = true
+description = "Tuple `==` over mixed BigFloat / Float64 / Int elements (Issue #6892). Previously returned `false` even when element-wise comparisons were `true`: the `TupleEquals` builtin (values_equal_tristate) folded BigFloat-vs-Float64/Int element pairs through the Debug-string fallback (unequal across representations) instead of promoting to BigFloat like scalar `==`. The tristate fold now coerces any BigFloat-involving numeric pair to BigFloat (value_to_bigfloat, mirroring StackOps::pop_bigfloat) and compares by value. Covers BigFloat vs Float64/Int, mixed and nested tuples, the divrem-result case from #6801, and inequality staying false. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_int_conversion_6890"
+file = "bigfloat_int_conversion_6890.jl"
+expected = true
+description = "BigFloat -> integer conversion (Issue #6890). `Int(big(2.0))` and the typed rounding forms floor/ceil/round/trunc(Int, ::BigFloat) (= T(round(x)), base/floatfuncs.jl) previously failed with 'Cannot convert BigFloat(...) to Int64' — convert_to_iNN/uNN had no BigFloat arm. RustBigFloat::to_bigint_exact extracts the exact integer (integer-valued check via trunc, then astro_float decimal Display parsed to num_bigint::BigInt) and each converter range-checks it via ToPrimitive, raising InexactError on non-finite/fractional/out-of-range values like upstream (::Type{<:Integer})(::BigFloat). Covers signed/unsigned widths, negatives, ties-to-even round, and precision beyond Float64 (2^70, 18-digit). Rust-only, no base cache regen. Verified vs julia 1.12.6."

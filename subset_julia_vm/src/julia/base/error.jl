@@ -731,22 +731,23 @@ CapturedException(ex) = CapturedException(ex, "")
 """
     CompositeException
 
-Wrap a collection of exceptions thrown by multiple tasks.
+Wrap a `Vector` of exceptions thrown by multiple tasks.
 
 For example, if a group of workers are executing several tasks, and multiple
 workers fail, the resulting CompositeException will contain information from
 each worker indicating where and why the exception(s) occurred.
-
-Note: In official Julia, `exceptions` is `Vector{Any}`.
-Here we use a count-based representation for simplicity.
 """
-struct CompositeException <: Exception
-    count::Int64
-    first_msg::AbstractString
+mutable struct CompositeException <: Exception
+    exceptions::Vector{Any}
 end
 
 # Default constructor
-CompositeException() = CompositeException(0, "")
+CompositeException() = CompositeException(Any[])
+
+length(c::CompositeException) = length(c.exceptions)
+isempty(c::CompositeException) = isempty(c.exceptions)
+iterate(c::CompositeException) = iterate(c.exceptions)
+iterate(c::CompositeException, state) = iterate(c.exceptions, state)
 
 # =============================================================================
 # TaskFailedException Exception
@@ -756,19 +757,17 @@ CompositeException() = CompositeException(0, "")
     TaskFailedException
 
 This exception is thrown by a `wait(t)` call when task `t` fails.
+Wraps the failed task so callers can inspect it.
 
-When waiting for a task that has failed, this exception wraps the original
-failure information.
-
-Note: In official Julia, this contains a reference to the failed Task.
-Here we use a simplified version with just a message.
+Note: The `task` field is typed `Any` because `Task` is defined in task.jl
+which is loaded after this file.
 """
 struct TaskFailedException <: Exception
-    msg::AbstractString
+    task::Any  # actually Task, but Task not yet defined here
 end
 
-# Default constructor
-TaskFailedException() = TaskFailedException("")
+# Default no-arg constructor
+TaskFailedException() = TaskFailedException(nothing)
 
 # =============================================================================
 # ProcessFailedException Exception
@@ -856,19 +855,40 @@ length(ebo::ExponentialBackOff) = ebo.n
 # Note: eltype(::Type{ExponentialBackOff}) = Float64 is not implemented as
 # type-parameterized eltype is not yet supported in SubsetJuliaVM
 
-# =============================================================================
-# retry function
-# =============================================================================
-# Based on julia/base/error.jl
-#
-# Note: The full retry() function is not yet implemented because:
-# 1. It requires closures that capture keyword arguments
-# 2. Return from try blocks doesn't work correctly (see Issue #1447)
-#
-# The full Julia signature is:
-#   retry(f; delays=ExponentialBackOff(), check=nothing) -> Function
-#
-# TODO: Implement retry() once Issue #1447 is fixed.
+"""
+    retry(f; delays=ExponentialBackOff(), check=nothing) -> Function
+
+Return a function that calls `f`. If `f` throws, call it again after each
+delay while `check` is `nothing` or returns `true`.
+"""
+function retry(f; delays=ExponentialBackOff(), check=nothing)
+    return (args...; kwargs...) -> begin
+        y = iterate(delays)
+        while y !== nothing
+            delay = y[1]
+            state = y[2]
+            try
+                return f(args...; kwargs...)
+            catch err
+                if check !== nothing
+                    result = check(state, err)
+                    if length(result) == 2
+                        state = result[1]
+                        retry_or_not = result[2]
+                    else
+                        retry_or_not = result
+                    end
+                    if !retry_or_not
+                        rethrow()
+                    end
+                end
+            end
+            sleep(delay)
+            y = iterate(delays, state)
+        end
+        return f(args...; kwargs...)
+    end
+end
 
 # =============================================================================
 # Backtrace Functions (Stub Implementations)

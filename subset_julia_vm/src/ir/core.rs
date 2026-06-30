@@ -3,6 +3,25 @@ use crate::types::{JuliaType, TypeExpr, TypeParam};
 use half::f16;
 use serde::{Deserialize, Serialize};
 
+pub const BASE_USER_MAIN_BOUNDARY_META: &str = "__sjulia_base_user_main_boundary";
+
+const TUPLE_COMPREHENSION_BINDING_PREFIX: &str = "__tuple_comprehension_binding__:";
+
+pub fn encode_tuple_comprehension_binding(vars: &[String]) -> String {
+    format!("{}{}", TUPLE_COMPREHENSION_BINDING_PREFIX, vars.join(","))
+}
+
+pub fn decode_tuple_comprehension_binding(var: &str) -> Option<Vec<String>> {
+    var.strip_prefix(TUPLE_COMPREHENSION_BINDING_PREFIX)
+        .map(|encoded| {
+            encoded
+                .split(',')
+                .filter(|name| !name.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+}
+
 /// Using/import statement representation
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsingImport {
@@ -15,6 +34,19 @@ pub struct UsingImport {
     /// not stdlib or external packages.
     #[serde(default)]
     pub is_relative: bool,
+    /// Number of leading dots in a relative import. `using .M` has level 1,
+    /// `using ..M` has level 2. Non-relative imports keep this at 0.
+    #[serde(default)]
+    pub relative_level: usize,
+    /// Renaming aliases introduced by `... as ...` (Issue #8117). Each entry is
+    /// `(source_dotted_path, target_name)` and is realized as a runtime binding
+    /// `target_name = source_dotted_path` so the alias name resolves to the
+    /// imported entity. A whole-module `import M as N` yields `("M", "N")`; a
+    /// symbol alias `using M: f as g` yields `("M.f", "g")`. Aliased symbols are
+    /// kept out of [`symbols`] (only the renamed name is bound, mirroring Julia
+    /// where the original name stays unbound).
+    #[serde(default)]
+    pub alias_bindings: Vec<(String, String)>,
     pub span: Span,
 }
 
@@ -23,6 +55,9 @@ pub struct UsingImport {
 pub struct Program {
     #[serde(default)]
     pub abstract_types: Vec<AbstractTypeDef>,
+    /// User-declared primitive type definitions (`primitive type Name Bits end`)
+    #[serde(default)]
+    pub primitive_types: Vec<PrimitiveTypeDef>,
     /// Type alias definitions (const TypeName = TypeExpr)
     #[serde(default)]
     pub type_aliases: Vec<TypeAliasDef>,
@@ -57,6 +92,9 @@ pub struct Module {
     /// Abstract type definitions within this module
     #[serde(default)]
     pub abstract_types: Vec<AbstractTypeDef>,
+    /// Primitive type definitions within this module
+    #[serde(default)]
+    pub primitive_types: Vec<PrimitiveTypeDef>,
     /// Type alias definitions within this module
     #[serde(default)]
     pub type_aliases: Vec<TypeAliasDef>,
@@ -113,6 +151,22 @@ pub struct AbstractTypeDef {
     pub span: Span,
 }
 
+/// Primitive type definition: `primitive type MyBits 8 end`
+///
+/// Also supports an explicit supertype: `primitive type MyU8 <: Unsigned 8 end`.
+/// The number of bits must be a positive multiple of 8 (matching upstream Julia).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrimitiveTypeDef {
+    pub name: String,
+    /// Parent abstract type (e.g., "Unsigned" in `primitive type MyU8 <: Unsigned 8 end`).
+    /// If None, defaults to Any.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// Number of bits declared for the primitive type (always a multiple of 8).
+    pub bits: u32,
+    pub span: Span,
+}
+
 /// Type alias definition: `const IntOrFloat = Union{Int64, Float64}`
 ///
 /// Type aliases allow creating shorthand names for complex type expressions.
@@ -127,6 +181,11 @@ pub struct TypeAliasDef {
     /// The target type expression as a string (e.g., "Union{Int64, Float64}", "Complex{Float64}")
     /// Stored as string to preserve the original syntax for resolution at compile time.
     pub target_type: String,
+    /// Positional type parameter names for parametric aliases (Issue #5055).
+    /// For `MyVec{T} = Vector{T}` this is `["T"]`; empty for non-parametric
+    /// aliases such as `const ComplexF64 = Complex{Float64}`.
+    #[serde(default)]
+    pub params: Vec<String>,
     pub span: Span,
 }
 
@@ -305,6 +364,18 @@ pub struct KwParam {
     /// Collects all remaining keyword arguments as a NamedTuple.
     #[serde(default)]
     pub is_varargs: bool,
+    /// True when this keyword argument's default expression must be
+    /// (re-)evaluated inside the function body on every call where the keyword
+    /// is omitted, rather than baked into a constant or run by the throwaway
+    /// default side-interpreter (Issue #5121). When set, the kwsorter binds a
+    /// sentinel (`Value::Undef`) to the slot and a prologue injected into the
+    /// body evaluates `default` in the real call frame, so side effects (e.g.
+    /// a default that calls a counter) persist and per-call semantics match
+    /// upstream Julia. The `default` expression is retained here unchanged so
+    /// the prologue can consume it (and so `is_required_kwarg` still sees a
+    /// non-`Undef` default and does NOT mistake this for a required kwarg).
+    #[serde(default)]
+    pub body_evaluated_default: bool,
     pub span: Span,
 }
 
@@ -321,6 +392,7 @@ impl KwParam {
             default,
             type_annotation,
             is_varargs: false,
+            body_evaluated_default: false,
             span,
         }
     }
@@ -332,6 +404,7 @@ impl KwParam {
             default: Expr::Literal(Literal::Nothing, span),
             type_annotation: None,
             is_varargs: true,
+            body_evaluated_default: false,
             span,
         }
     }
@@ -360,6 +433,9 @@ pub struct Function {
     /// Base extension functions do NOT shadow builtin operators for primitive types.
     #[serde(default)]
     pub is_base_extension: bool,
+    /// True for methods introduced by runtime `@eval`.
+    #[serde(default)]
+    pub is_runtime_eval: bool,
     pub span: Span,
 }
 
@@ -368,6 +444,20 @@ pub struct Function {
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub span: Span,
+}
+
+/// Compiler metadata annotation retained in lowered IR.
+///
+/// Upstream Julia represents inference/optimization hints such as
+/// `@inline`, `@nospecialize`, and `Base.@constprop` as `Expr(:meta, ...)`.
+/// SubsetJuliaVM keeps the supported statement-position subset explicit so
+/// later inference/cache/optimizer work can consume it instead of recovering
+/// intent from a no-op expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MetaAnnotation {
+    pub name: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 /// Statement in Core IR.
@@ -442,6 +532,11 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
+    /// Compiler metadata marker retained from upstream-compatible meta macros.
+    Meta {
+        annotation: MetaAnnotation,
+        span: Span,
+    },
     /// @time macro: execute body, measure and print elapsed time
     /// Note: @time is now Pure Julia but Timed IR is kept for backwards compatibility
     Timed {
@@ -509,6 +604,11 @@ pub enum Stmt {
         func: Box<Function>,
         span: Span,
     },
+    /// Function definition introduced by runtime `@eval`.
+    EvalFunctionDef {
+        func: Box<Function>,
+        span: Span,
+    },
     /// Label statement: @label name
     /// Defines a jump target for @goto. Part of Julia's low-level control flow.
     Label {
@@ -525,6 +625,19 @@ pub enum Stmt {
     /// Creates an integer-backed enum type with named constants.
     EnumDef {
         enum_def: EnumDef,
+        span: Span,
+    },
+    /// Global declaration: `global x` (or `global x, y`).
+    ///
+    /// Records that the named variables resolve to the top-level (module)
+    /// binding for the remainder of the enclosing local scope, rather than
+    /// introducing local bindings. The compiler collects these names so that
+    /// assignments route to the global frame and reads fall back to it,
+    /// matching upstream Julia (Issues #5548, #5549). A bare declaration
+    /// compiles to a no-op; `global x = v` / `global x += v` are lowered to a
+    /// `Global` marker followed by the assignment.
+    Global {
+        names: Vec<String>,
         span: Span,
     },
 }
@@ -595,13 +708,29 @@ pub enum Expr {
         filter: Option<Box<Expr>>,
         span: Span,
     },
-    /// Multi-variable comprehension: [expr for i in R1, j in R2] (Issue #2143)
-    /// Produces a flat array via cartesian product of iterators.
+    /// Multi-variable comprehension. Two distinct source forms lower here
+    /// (Issue #8014):
+    ///
+    /// * Comma / cartesian form `[expr for i in R1, j in R2]` (`flatten ==
+    ///   false`): a single `for` clause with comma-separated bindings. Produces
+    ///   an `N`-dimensional array (rank = number of bindings) via the cartesian
+    ///   product of independent iterators (Issue #2143).
+    /// * Whitespace / flatten form `[expr for i in R1 for j in R2]` (`flatten ==
+    ///   true`): multiple `for` clauses separated by whitespace. Produces a
+    ///   1-D `Vector` with `Iterators.flatten` semantics — the inner iterators
+    ///   may depend on outer variables and are re-evaluated per outer step.
+    ///
+    /// For the flatten form `iterations` is stored in outermost→innermost loop
+    /// order (lowering already reverses bindings inside a comma-grouped clause
+    /// so a comma group iterates column-major within the flatten).
     MultiComprehension {
         body: Box<Expr>,
         /// Each iteration clause: (variable_name, iterator_expression)
         iterations: Vec<(String, Expr)>,
         filter: Option<Box<Expr>>,
+        /// Whitespace `for ... for ...` flatten form (1-D Vector) vs comma
+        /// cartesian form (N-D Array). See the variant docs (Issue #8014).
+        flatten: bool,
         span: Span,
     },
     /// Generator expression: (expr for var in iter) or (expr for var in iter if cond)
@@ -670,6 +799,8 @@ pub enum Expr {
         function: String,
         args: Vec<Expr>,
         kwargs: Vec<(String, Expr)>,
+        splat_mask: Vec<bool>,
+        kwargs_splat_mask: Vec<bool>,
         span: Span,
     },
     /// Ternary conditional expression: cond ? then_expr : else_expr
@@ -694,8 +825,16 @@ pub enum Expr {
     DynamicTypeConstruct {
         /// Base type name (e.g., "Complex", "Vector")
         base: String,
+        /// Runtime expression for a dynamically bound base type, e.g.
+        /// `T1{Int,2}` where `T1` is a `UnionAll` value.
+        base_expr: Option<Box<Expr>>,
         /// Expressions that evaluate to DataType values
         type_args: Vec<Expr>,
+        /// Parallel to `type_args`: `splat_mask[i] == true` means `type_args[i]`
+        /// is a `...`-splat of a collection of type values whose elements
+        /// become individual type parameters (`Tuple{xs...}`). Empty or
+        /// all-false means no splats (Issue #5112).
+        splat_mask: Vec<bool>,
         span: Span,
     },
     /// Quoted expression: :symbol or :(expr)
@@ -752,6 +891,8 @@ pub enum Literal {
     Undef,
     /// Module literal (e.g., Base, Core, Main)
     Module(String),
+    /// DataType literal for type objects produced by macro expansion.
+    DataType(String),
     /// Array literal with data and shape (for REPL persistence)
     Array(Vec<f64>, Vec<usize>),
     /// Int64 array literal with data and shape (for REPL persistence)
@@ -875,31 +1016,30 @@ pub enum BuiltinOp {
     // Broadcasting control
     Ref, // Ref(x) - wrap value to protect from broadcasting (treated as scalar)
     // Type operations
-    TypeOf,        // typeof(x) - get type name as string
-    Isa,           // isa(x, T) - check if x is of type T
-    Eltype,        // eltype(x) - get element type of collection
-    Keytype,       // keytype(x) - get key type of collection
-    Valtype,       // valtype(x) - get value type of collection
-    Sizeof,        // sizeof(x) - size of value in bytes
-    Isbits,        // isbits(x) - check if x is a bits type instance
-    Isbitstype,    // isbitstype(T) - check if T is a bits type
-    Supertype,     // supertype(T) - get parent type
-    Supertypes,    // supertypes(T) - tuple of all supertypes
-    Subtypes,      // subtypes(T) - vector of direct subtypes
-    Typeintersect, // typeintersect(A, B) - type intersection
-    // Typejoin removed - now Pure Julia (base/reflection.jl)
+    TypeOf,  // typeof(x) - get type name as string
+    Isa,     // isa(x, T) - check if x is of type T
+    Eltype,  // eltype(x) - get element type of collection
+    Keytype, // keytype(x) - get key type of collection
+    Valtype, // valtype(x) - get value type of collection
+    Sizeof,  // sizeof(x) - size of value in bytes
+    // Isbits removed - pure Julia (Issue #6738)
+    Isbitstype,   // isbitstype(T) - check if T is a bits type
+    Supertype,    // _supertype(T) - internal parent type intrinsic
+    Typename,     // _typename(T) - canonical TypeName symbol (Issue #5106)
+    FunctionName, // _function_name(f) - function name symbol (Issue #5580)
+    Subtypes,     // subtypes(T) - vector of direct subtypes
+    // Typeintersect and Typejoin removed - now Pure Julia (base/reflection.jl)
     // Fieldcount removed - now Pure Julia (base/reflection.jl)
-    Hasfield, // hasfield(T, name) - check if field exists
+    // Hasfield removed - pure Julia (Issue #6738)
     // Isconcretetype, Isabstracttype, Isprimitivetype, Isstructtype, Ismutabletype
     // removed - now Pure Julia (base/reflection.jl) with internal intrinsics
-    Ismutable, // ismutable(x) - is x mutable
+    // Ismutable removed - pure Julia (Issue #6738)
     // NameOf removed - now Pure Julia (base/reflection.jl)
     Objectid,    // objectid(x) - unique object identifier
     Isunordered, // isunordered(x) - check if x is unordered (NaN, Missing)
     // Reflection (method introspection)
-    Methods,   // methods(f) - get all methods for function
+    Methods,   // _methods_by_ftype(f[, types]) - method query intrinsic
     HasMethod, // hasmethod(f, types) - check if method exists
-    Which,     // which(f, types) - get specific method
     // Set operations
     In, // in(x, collection) - check if element is in collection
     // RNG seeding
@@ -930,6 +1070,17 @@ pub enum BuiltinOp {
     TestSetEnd,       // _testset_end!() - end test set and print summary
     // Variable reflection
     IsDefined, // @isdefined(x) - check if variable is defined
+    // Compiler-internal generated-function compatibility eval. Appended for
+    // serialized IR discriminant compatibility (Issue #5936).
+    GeneratedEval,
+    // MersenneTwister(seed) - create MT19937-64 RNG instance (Issue #7306).
+    // Appended at the end (NOT grouped with the other RNG constructors above)
+    // to preserve serialized IR/BuiltinOp discriminant compatibility: BuiltinOp
+    // derives Serialize/Deserialize and round-trips through the base/prelude
+    // bincode caches by declaration order, so inserting a variant mid-enum
+    // shifts every later discriminant and corrupts cached bytecode (same
+    // rationale as GeneratedEval / Issue #5936).
+    MersenneTwisterRNG,
 }
 
 impl Expr {
@@ -986,6 +1137,7 @@ impl Stmt {
             Self::Try { span, .. } => *span,
             Self::Return { span, .. } => *span,
             Self::Expr { span, .. } => *span,
+            Self::Meta { span, .. } => *span,
             Self::Timed { span, .. } => *span,
             Self::Test { span, .. } => *span,
             Self::TestSet { span, .. } => *span,
@@ -997,9 +1149,11 @@ impl Stmt {
             Self::Using { span, .. } => *span,
             Self::Export { span, .. } => *span,
             Self::FunctionDef { span, .. } => *span,
+            Self::EvalFunctionDef { span, .. } => *span,
             Self::Label { span, .. } => *span,
             Self::Goto { span, .. } => *span,
             Self::EnumDef { span, .. } => *span,
+            Self::Global { span, .. } => *span,
         }
     }
 }

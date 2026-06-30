@@ -7,7 +7,6 @@
 // SAFETY: i64→u64 cast for sleep duration is guarded by a prior check that
 // rejects negative values with an error before the cast occurs.
 #![allow(clippy::cast_sign_loss)]
-
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
@@ -18,22 +17,13 @@ use super::super::instr::Instr;
 use super::super::stack_ops::StackOps;
 use super::super::value::Value;
 use super::super::Vm;
-
-/// Result of executing a sleep instruction.
-pub(super) enum SleepResult {
-    /// Instruction not handled by this module
-    NotHandled,
-    /// Instruction handled successfully
-    Handled,
-    /// Error was raised and caught by handler, continue to next iteration
-    Continue,
-}
+use super::DispatchAction;
 
 impl<R: RngLike> Vm<R> {
     /// Execute sleep instructions.
     /// Returns the execution result.
     #[inline]
-    pub(super) fn execute_sleep(&mut self, instr: &Instr) -> Result<SleepResult, VmError> {
+    pub(super) fn execute_sleep(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::SleepF64 => {
                 let secs = self.pop_f64_or_i64()?;
@@ -43,13 +33,13 @@ impl<R: RngLike> Vm<R> {
                     self.raise(VmError::DomainError(
                         "sleep() duration cannot be negative".to_string(),
                     ))?;
-                    return Ok(SleepResult::Continue);
+                    return Ok(DispatchAction::Continue);
                 }
                 if !secs.is_finite() {
                     self.raise(VmError::DomainError(
                         "sleep() duration must be finite".to_string(),
                     ))?;
-                    return Ok(SleepResult::Continue);
+                    return Ok(DispatchAction::Continue);
                 }
 
                 // Sleep for the specified duration
@@ -58,7 +48,7 @@ impl<R: RngLike> Vm<R> {
 
                 // Push nothing (Julia's sleep() returns nothing)
                 self.stack.push(Value::Nothing);
-                Ok(SleepResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
             Instr::SleepI64 => {
@@ -69,7 +59,7 @@ impl<R: RngLike> Vm<R> {
                     self.raise(VmError::DomainError(
                         "sleep() duration cannot be negative".to_string(),
                     ))?;
-                    return Ok(SleepResult::Continue);
+                    return Ok(DispatchAction::Continue);
                 }
 
                 // Sleep for the specified duration
@@ -78,10 +68,10 @@ impl<R: RngLike> Vm<R> {
 
                 // Push nothing
                 self.stack.push(Value::Nothing);
-                Ok(SleepResult::Handled)
+                Ok(DispatchAction::Continue)
             }
 
-            _ => Ok(SleepResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

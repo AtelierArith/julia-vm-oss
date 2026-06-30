@@ -4,13 +4,159 @@
 //! splat parameters, and type name resolution.
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
-use crate::ir::core::{Expr, KwParam, Literal, TypedParam};
+use crate::ir::core::{Block, Expr, KwParam, Literal, Stmt, TypedParam};
 use crate::lowering::expr::lower_expr;
 use crate::lowering::LowerResult;
 use crate::parser::cst::{CstWalker, Node, NodeKind};
 use crate::types::{JuliaType, TypeParam};
 
 use super::where_clause::parse_where_expression;
+
+const PARAM_DESTRUCTURING_PREFIX: &str = "__param_destructure__";
+
+/// Resolve the function name for a `Module.field` definition callee
+/// (`function Base.:+(...)`, `function Inner.f(...)`, `Inner.f(...) = ...`).
+///
+/// For `Base`, returns the bare operator/function name with
+/// `is_base_extension = true` so the method joins Base's generic function. For
+/// any other module, returns the module-qualified name `"Module.field"` (with
+/// `is_base_extension = false`) so the method extends that module's existing
+/// function — `build_method_tables` registers it under both `Module.field` and
+/// the bare `field` table so a later `Inner.f(2.0)` AND the unqualified `f(2.0)`
+/// brought in by `using .Inner` both dispatch across the module-owned methods
+/// (Issue #8052).
+///
+/// `module_text` is the left side of the field expression (may be a dotted path
+/// like `A.B`); `field_text` is the field, possibly a quoted operator (`:+`,
+/// `:(==)`) or parenthesized operator (`(==)`).
+pub(super) fn module_extension_function_name(
+    module_text: &str,
+    field_text: &str,
+) -> (String, bool) {
+    let mut field = field_text
+        .strip_prefix(':')
+        .unwrap_or(field_text)
+        .to_string();
+    if field.starts_with('(') && field.ends_with(')') {
+        field = field[1..field.len() - 1].to_string();
+    }
+    if module_text == "Base" {
+        (field, true)
+    } else {
+        (format!("{}.{}", module_text, field), false)
+    }
+}
+
+pub(crate) fn inject_parameter_destructuring_prologue(
+    params: Vec<TypedParam>,
+    mut body: Block,
+) -> (Vec<TypedParam>, Block) {
+    let mut prologue = Vec::new();
+
+    for param in &params {
+        if let Some(targets) = decode_destructuring_param_name(&param.name) {
+            let temp = format!(
+                "{}tmp_{}_{}",
+                PARAM_DESTRUCTURING_PREFIX, param.span.start, param.span.end
+            );
+            prologue.push(Stmt::Assign {
+                var: temp.clone(),
+                value: Expr::Var(param.name.clone(), param.span),
+                span: param.span,
+            });
+
+            for (idx, target) in targets.into_iter().enumerate() {
+                prologue.push(Stmt::Assign {
+                    var: target,
+                    value: Expr::Index {
+                        array: Box::new(Expr::Var(temp.clone(), param.span)),
+                        indices: vec![Expr::Literal(Literal::Int((idx + 1) as i64), param.span)],
+                        span: param.span,
+                    },
+                    span: param.span,
+                });
+            }
+        }
+    }
+
+    if !prologue.is_empty() {
+        prologue.extend(body.stmts);
+        body.stmts = prologue;
+    }
+
+    (params, body)
+}
+
+fn encode_destructuring_param_name(span: crate::span::Span, targets: &[String]) -> String {
+    format!(
+        "{}{}_{}:{}",
+        PARAM_DESTRUCTURING_PREFIX,
+        span.start,
+        span.end,
+        targets.join(",")
+    )
+}
+
+fn decode_destructuring_param_name(name: &str) -> Option<Vec<String>> {
+    let rest = name.strip_prefix(PARAM_DESTRUCTURING_PREFIX)?;
+    let (_, targets) = rest.split_once(':')?;
+    let targets: Vec<String> = targets
+        .split(',')
+        .filter(|target| !target.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    (!targets.is_empty()).then_some(targets)
+}
+
+fn parse_destructuring_parameter<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+) -> LowerResult<Option<TypedParam>> {
+    let span = walker.span(&node);
+    let pattern = match walker.kind(&node) {
+        NodeKind::TupleExpression => Some(node),
+        NodeKind::Parameter => walker
+            .named_children(&node)
+            .into_iter()
+            .find(|child| walker.kind(child) == NodeKind::TupleExpression),
+        _ => None,
+    };
+
+    let Some(pattern) = pattern else {
+        return Ok(None);
+    };
+
+    let mut targets = Vec::new();
+    for child in walker.named_children(&pattern) {
+        match walker.kind(&child) {
+            NodeKind::Identifier => targets.push(walker.text(&child).to_string()),
+            _ => {
+                return Err(UnsupportedFeature::new(
+                    UnsupportedFeatureKind::Other(
+                        "nested destructuring function parameters are not yet supported"
+                            .to_string(),
+                    ),
+                    walker.span(&child),
+                )
+                .with_hint(
+                    "parameter destructuring currently supports a flat tuple of identifiers",
+                ));
+            }
+        }
+    }
+
+    if targets.is_empty() {
+        return Err(UnsupportedFeature::new(
+            UnsupportedFeatureKind::Other("empty destructuring function parameter".to_string()),
+            span,
+        ));
+    }
+
+    Ok(Some(TypedParam::untyped(
+        encode_destructuring_param_name(span, &targets),
+        span,
+    )))
+}
 
 pub(super) fn parse_signature_call<'a>(
     walker: &CstWalker<'a>,
@@ -26,6 +172,9 @@ pub(super) fn parse_signature_call<'a>(
     }
 
     let callee = named[0];
+    // For callable struct definitions `(self::Type)(args)`, the struct instance
+    // binds to `self` as a synthetic leading parameter (Issue #5127).
+    let mut self_param: Option<TypedParam> = None;
     let (name, is_base_extension) = match walker.kind(&callee) {
         NodeKind::Identifier => (walker.text(&callee).to_string(), false),
         NodeKind::Operator => {
@@ -34,40 +183,18 @@ pub(super) fn parse_signature_call<'a>(
         }
         NodeKind::ParametrizedTypeExpression => {
             // Parametric constructor: function Complex{Float64}(x, y) ... end
-            (walker.text(&callee).to_string(), false)
+            (type_name_text(walker, &callee), false)
         }
         NodeKind::FieldExpression => {
-            // Handle Base.:+ syntax: function Base.:+(a, b) ... end
-            // Also handle Base.show syntax: Base.show(io, x) = ...
+            // Handle `Base.:+`/`Base.show` (Base extension) and `Inner.f` (extend
+            // another module's function, Issue #8052). For non-Base modules the
+            // method is registered under the module-qualified name so it joins the
+            // target module's existing generic function.
             let children = walker.named_children(&callee);
             if children.len() >= 2 {
                 let module = walker.text(&children[0]);
                 let field_text = walker.text(&children[1]);
-                // Check if it's Base module
-                if module == "Base" {
-                    // The field can be an operator node, a quote_expression, or a plain identifier
-                    // For :+, the text might be just "+" or ":+"
-                    // For :(==), the text might be ":(==)" or "(==)"
-                    // For show, the text is just "show"
-                    let mut op_name = if let Some(stripped) = field_text.strip_prefix(':') {
-                        stripped.to_string()
-                    } else {
-                        field_text.to_string()
-                    };
-                    // Strip parentheses if present (e.g., "(==)" -> "==")
-                    if op_name.starts_with('(') && op_name.ends_with(')') {
-                        op_name = op_name[1..op_name.len() - 1].to_string();
-                    }
-                    (op_name, true)
-                } else {
-                    return Err(UnsupportedFeature::new(
-                        UnsupportedFeatureKind::Other(format!(
-                            "only Base module supported for operator extension, got {}",
-                            module
-                        )),
-                        walker.span(&callee),
-                    ));
-                }
+                module_extension_function_name(module, field_text)
             } else {
                 return Err(UnsupportedFeature::new(
                     UnsupportedFeatureKind::Other(
@@ -78,8 +205,10 @@ pub(super) fn parse_signature_call<'a>(
             }
         }
         NodeKind::ParenthesizedExpression => {
-            // Callable struct syntax: (::Type)(args) = body
-            // The parenthesized expression contains a UnaryTypedExpression
+            // Callable struct syntax: (::Type)(args) = body  (anonymous self)
+            //                     or: (self::Type)(args) = body  (bound self; field access)
+            // The parenthesized expression contains a UnaryTypedExpression (anonymous)
+            // or a TypedExpression (`self::Type`).
             let inner_children = walker.named_children(&callee);
             if inner_children.len() == 1 {
                 let inner = inner_children[0];
@@ -97,6 +226,13 @@ pub(super) fn parse_signature_call<'a>(
                             let type_name = type_text.strip_prefix("::").unwrap_or(type_text);
                             (format!("__callable_{}", type_name), false)
                         }
+                    }
+                    NodeKind::TypedExpression => {
+                        // Bound form `(self::Type)(args)`: bind the struct instance to `self`
+                        // so the method body can read its fields (Issue #5127).
+                        let (param, type_name) = parse_callable_self_param(walker, inner)?;
+                        self_param = Some(param);
+                        (format!("__callable_{}", type_name), false)
                     }
                     _ => {
                         return Err(UnsupportedFeature::new(
@@ -257,7 +393,44 @@ pub(super) fn parse_signature_call<'a>(
         }
     }
 
+    // Bound callable struct: inject `self` as the leading parameter so the body
+    // can read the struct's fields. The runtime prepends the struct instance to
+    // the call arguments (Issue #5127).
+    if let Some(self_param) = self_param {
+        params.insert(0, self_param);
+    }
+
     Ok((name, params, kwparams, is_base_extension))
+}
+
+/// Parse the `self::Type` binding for a callable struct definition `(self::Type)(args)`.
+///
+/// Returns the `self` parameter (typed by the struct type) and the type *name*
+/// used to form the `__callable_<TypeName>` dispatch name. The type name strips
+/// any `{...}` parameter list so `(f::Fix2{F,T})(x)` dispatches on `Fix2`
+/// (Issue #5127).
+pub(super) fn parse_callable_self_param<'a>(
+    walker: &CstWalker<'a>,
+    inner: Node<'a>,
+) -> LowerResult<(TypedParam, String)> {
+    let param = parse_parameter(walker, inner)?;
+    // The dispatch table keys callable methods by the bare type name, so strip
+    // any parametric `{...}` suffix from the annotated type.
+    let type_name = match &param.type_annotation {
+        Some(t) => {
+            let full = t.to_string();
+            full.split('{').next().unwrap_or(&full).to_string()
+        }
+        None => {
+            return Err(UnsupportedFeature::new(
+                UnsupportedFeatureKind::Other(
+                    "callable struct binding `(self::Type)` requires a struct type".to_string(),
+                ),
+                walker.span(&inner),
+            ))
+        }
+    };
+    Ok((param, type_name))
 }
 
 /// Parse a kwargs varargs parameter from a SplatParameter node (e.g., `kwargs...`)
@@ -305,18 +478,46 @@ pub(super) fn parse_kwparam<'a>(
     let name_node = children[0];
     let value_node = children[1];
 
-    if walker.kind(&name_node) != NodeKind::Identifier {
-        return Ok(None);
-    }
-
-    let name = walker.text(&name_node).to_string();
+    // The kwarg name is a plain `Identifier` for an unannotated kwarg (`n = 0`),
+    // but a `TypedExpression` / `TypedParameter` for an annotated one
+    // (`n::Int = 0`), whose first `Identifier` child is the name. Issue #5422:
+    // the short-form `f(; n::Int = 0) = ...` path previously bailed out here for
+    // the annotated case, silently dropping the keyword parameter and leaving
+    // `n` undefined in the body. Match the long-form path
+    // (`parse_kwparam_from_kw_node`), which registers the name (the type
+    // annotation is not carried on kwparams in either path).
+    let name = match walker.kind(&name_node) {
+        NodeKind::Identifier => walker.text(&name_node).to_string(),
+        NodeKind::TypedExpression | NodeKind::TypedParameter => {
+            match walker
+                .named_children(&name_node)
+                .into_iter()
+                .find(|n| walker.kind(n) == NodeKind::Identifier)
+            {
+                Some(ident) => walker.text(&ident).to_string(),
+                None => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
+    };
     let default = lower_expr(walker, value_node)?;
 
     Ok(Some(KwParam::new(name, default, None, span)))
 }
 
-/// Parse a keyword parameter from a KwParameter node (Pure Rust parser)
-/// Structure: KwParameter { Identifier, [TypeClause,] [default_value] }
+/// Parse a keyword parameter from a KwParameter node (Pure Rust parser).
+///
+/// Structure (positional in the child list):
+///   KwParameter { Identifier name, [type_expr,] [default_value] }
+///
+/// The type expression has no surrounding wrapper node — it's whatever
+/// `parse_type_expression` produced (typically an `Identifier` for plain
+/// types like `Bool` / `Int64`, or `ParametrizedTypeExpression` for
+/// parametric types like `Vector{Int64}`). That makes it impossible to
+/// distinguish `Identifier` (type) from `Identifier` (default value
+/// like `true`/`false`/`nothing`) by node-kind alone, so we use a
+/// text-based heuristic on the node source — `name::Type=default` has
+/// both `::` and `=`, while `name=default` has only `=`. (Issue #3653.)
 pub(super) fn parse_kwparam_from_kw_node<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
@@ -328,28 +529,52 @@ pub(super) fn parse_kwparam_from_kw_node<'a>(
         return Ok(None);
     }
 
+    // Detect whether the source text contains `::` and `=`. The parser
+    // consumed both before producing the children, so the node's text
+    // span is a reliable signal.
+    let node_text = walker.text(&node);
+    let has_type_annotation = node_text.contains("::");
+    let has_default = node_text.contains('=');
+
     let mut name: Option<String> = None;
     let mut default_value: Option<crate::ir::core::Expr> = None;
+    // `seen_type_identifier`: when the kwarg has a type annotation that
+    // produced a bare Identifier (e.g. `::Bool`, `::Int64`), we need to
+    // skip exactly one Identifier-after-the-name before treating the
+    // next child as the default. Without this, a kwarg like
+    // `x::Bool=true` would lower as `default = expression "Bool"` —
+    // dropping the actual `true` literal entirely (Issue #3653).
+    let mut seen_type_identifier = false;
 
     for child in children {
         match walker.kind(&child) {
             NodeKind::Identifier => {
                 if name.is_none() {
                     name = Some(walker.text(&child).to_string());
-                } else {
-                    // Second Identifier could be a default value like `nothing` or `true`/`false`
-                    if default_value.is_none() {
-                        default_value = Some(lower_expr(walker, child)?);
-                    }
+                } else if has_type_annotation && !seen_type_identifier {
+                    // Second Identifier when `::` was consumed: this is
+                    // the type expression (e.g. `Bool`), not a default.
+                    seen_type_identifier = true;
+                } else if default_value.is_none() {
+                    // Otherwise this is the default value (e.g.
+                    // identifier-defaults like `nothing` / `true` /
+                    // `false`, or the third child after a type when a
+                    // default is also present).
+                    default_value = Some(lower_expr(walker, child)?);
                 }
             }
             NodeKind::TypeClause
             | NodeKind::TypedParameter
             | NodeKind::ParametrizedTypeExpression => {
-                // Type annotation - skipped in kwarg default parsing
+                // Type annotation wrapped in a recognisable node — just
+                // skip it. Mark `seen_type_identifier` so any later
+                // bare-Identifier child is correctly treated as the
+                // default value.
+                seen_type_identifier = true;
             }
             _ => {
-                // This should be the default value expression
+                // Anything else is the default value expression
+                // (Literals, function calls, etc.).
                 if default_value.is_none() {
                     default_value = Some(lower_expr(walker, child)?);
                 }
@@ -362,12 +587,20 @@ pub(super) fn parse_kwparam_from_kw_node<'a>(
         None => return Ok(None),
     };
 
-    // Use Undef to mark required keyword parameters (no default value)
+    // Use Undef to mark required keyword parameters (no default value).
     let default = match default_value {
         Some(v) => v,
         None => {
-            // No default value - mark as required with Undef
-            crate::ir::core::Expr::Literal(crate::ir::core::Literal::Undef, span)
+            if has_default {
+                // The source had `=` but we somehow failed to extract a
+                // default. Fall through to Undef so the call site will
+                // surface the missing-default error rather than
+                // silently using an unrelated value.
+                crate::ir::core::Expr::Literal(crate::ir::core::Literal::Undef, span)
+            } else {
+                // No default value - mark as required with Undef.
+                crate::ir::core::Expr::Literal(crate::ir::core::Literal::Undef, span)
+            }
         }
     };
 
@@ -398,10 +631,12 @@ pub(super) fn parse_kwparam_from_keyword_arg<'a>(
 
     let name = walker.text(&name_node).to_string();
 
-    // Check for shorthand: if name == value text, it's a required kwarg (shorthand x -> x=x)
-    // In the actual function definition, this should be a required kwarg with Undef default
-    let is_shorthand =
-        walker.kind(&value_node) == NodeKind::Identifier && walker.text(&value_node) == name;
+    // The parser may represent bare shorthand `f(; x)` as a KeywordArgument
+    // with repeated identifier children. Only that no-`=` form is required;
+    // an explicit `x=x` default must resolve the outer binding (Issue #8378).
+    let is_shorthand = !walker.text(&node).contains('=')
+        && walker.kind(&value_node) == NodeKind::Identifier
+        && walker.text(&value_node) == name;
 
     let default = if is_shorthand {
         // Shorthand like `a` in `f(; a)` - this is a required keyword argument
@@ -439,10 +674,8 @@ pub(super) fn parse_signature<'a>(
 
     for child in &named {
         match walker.kind(child) {
-            NodeKind::Identifier => {
-                if name.is_none() {
-                    name = Some(walker.text(child).to_string());
-                }
+            NodeKind::Identifier if name.is_none() => {
+                name = Some(walker.text(child).to_string());
             }
             NodeKind::CallExpression => {
                 // The signature might be structured as a call expression inside
@@ -529,10 +762,8 @@ pub(super) fn parse_signature_with_where<'a>(
 
     for child in &named {
         match walker.kind(child) {
-            NodeKind::Identifier => {
-                if name.is_none() {
-                    name = Some(walker.text(child).to_string());
-                }
+            NodeKind::Identifier if name.is_none() => {
+                name = Some(walker.text(child).to_string());
             }
             NodeKind::CallExpression => {
                 let (sig_name, sig_params, sig_kwparams, sig_is_base) =
@@ -617,11 +848,15 @@ pub(super) fn parse_signature_with_where<'a>(
 /// Prior to the fix, only `SplatParameter` was handled for varargs, causing short-form
 /// function definitions like `sum(args...) = ...` to fail with "Undefined variable" errors.
 /// The fix added `SplatExpression` handling to ensure both forms work identically.
-pub(super) fn parse_parameter<'a>(
+pub(crate) fn parse_parameter<'a>(
     walker: &CstWalker<'a>,
     node: Node<'a>,
 ) -> LowerResult<TypedParam> {
     let span = walker.span(&node);
+
+    if let Some(param) = parse_destructuring_parameter(walker, node)? {
+        return Ok(param);
+    }
 
     match walker.kind(&node) {
         NodeKind::Identifier => {
@@ -661,6 +896,19 @@ pub(super) fn parse_parameter<'a>(
             // Used in promote_rule, convert signatures
             parse_unary_typed_parameter(walker, node)
         }
+        NodeKind::MacroCall => {
+            // Argument-position specialization annotations such as
+            // `f(@nospecialize(x)) = ...` or `f(@specialize(x::T)) = ...`
+            // (Issue #5122). Upstream Julia accepts `@nospecialize`/`@specialize`
+            // as argument annotations that control inference specialization while
+            // the parameter still binds the value with its declared type. The
+            // full-form `function f(@nospecialize x) ... end` already unwraps to a
+            // plain parameter in the parser; this handles the short-form path where
+            // the annotation survives as a MacrocallExpression inside the argument
+            // list. SubsetJuliaVM has no JIT/specialization, so the annotation is a
+            // no-op: unwrap to the inner parameter node and parse that.
+            parse_specialization_annotated_parameter(walker, node)
+        }
         _ => Err(UnsupportedFeature::new(
             UnsupportedFeatureKind::Other(format!(
                 "unsupported function parameter: {:?}",
@@ -669,6 +917,63 @@ pub(super) fn parse_parameter<'a>(
             span,
         )),
     }
+}
+
+/// Parse a parameter wrapped in a `@nospecialize` / `@specialize` argument
+/// annotation, e.g. `@nospecialize(x)` or `@specialize(x::Number)` (Issue #5122).
+///
+/// The macro node has a leading `MacroIdentifier` naming the macro followed by
+/// the actual parameter node (an `Identifier`, `TypedExpression`, etc.). Only the
+/// specialization-control macros are accepted here; any other macro in argument
+/// position is rejected with a precise span. The annotation has no runtime effect
+/// in SubsetJuliaVM (no inference specialization), so the inner parameter is
+/// parsed and returned unchanged.
+fn parse_specialization_annotated_parameter<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+) -> LowerResult<TypedParam> {
+    let span = walker.span(&node);
+
+    let macro_name = walker
+        .find_child(&node, NodeKind::MacroIdentifier)
+        .map(|ident| walker.text(&ident).trim_start_matches('@').to_string());
+
+    match macro_name.as_deref() {
+        Some("nospecialize") | Some("specialize") => {}
+        _ => {
+            return Err(UnsupportedFeature::new(
+                UnsupportedFeatureKind::Other(
+                    "only @nospecialize/@specialize are supported as argument annotations"
+                        .to_string(),
+                ),
+                span,
+            ))
+        }
+    }
+
+    // The inner parameter is the first named child that is not the macro name.
+    // tree-sitter wraps the arguments in a MacroArgumentList; the Pure Rust parser
+    // emits them as direct children. Handle both by unwrapping a MacroArgumentList
+    // when present.
+    let inner = if let Some(arg_list) = walker.find_child(&node, NodeKind::MacroArgumentList) {
+        walker.named_children(&arg_list).into_iter().next()
+    } else {
+        walker
+            .named_children(&node)
+            .into_iter()
+            .find(|child| walker.kind(child) != NodeKind::MacroIdentifier)
+    };
+
+    let inner = inner.ok_or_else(|| {
+        UnsupportedFeature::new(
+            UnsupportedFeatureKind::Other(
+                "@nospecialize/@specialize argument annotation requires a parameter".to_string(),
+            ),
+            span,
+        )
+    })?;
+
+    parse_parameter(walker, inner)
 }
 
 /// Parse a typed parameter (x::Int64).
@@ -700,6 +1005,23 @@ pub(super) fn parse_typed_parameter<'a>(
     // default expression as a type annotation.
     let has_default = node_text.contains('=');
     let has_type_annotation = node_text.contains("::");
+    let text_type_annotation = if has_type_annotation {
+        parameter_type_text(node_text)
+            .filter(|text| text.contains('{'))
+            .map(|text| parse_type_name(&text, span))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    let flat_type_annotation = if has_type_annotation && !has_default {
+        flat_parametric_parameter_type_text(walker, &named, is_anonymous)
+            .map(|text| parse_type_name(&text, span))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
 
     for child in named {
         // If this Parameter has a default value, stop after extracting name (and type if present).
@@ -729,8 +1051,8 @@ pub(super) fn parse_typed_parameter<'a>(
             }
             NodeKind::ParametrizedTypeExpression => {
                 // Handle parametric types like Complex{T} directly
-                let type_name = walker.text(&child);
-                type_annotation = parse_type_name(type_name, walker.span(&child))?;
+                let type_name = type_name_text(walker, &child);
+                type_annotation = parse_type_name(&type_name, walker.span(&child))?;
             }
             NodeKind::TypeClause => {
                 // ::Int64 or ::Complex{Float64} - extract the type from the clause
@@ -746,7 +1068,7 @@ pub(super) fn parse_typed_parameter<'a>(
                         }
                         NodeKind::ParametrizedTypeExpression => {
                             // Handle parametric types like Complex{Float64}
-                            let mut type_name = walker.text(&type_child).to_string();
+                            let mut type_name = type_name_text(walker, &type_child);
                             // Strip trailing "..." if this is a varargs parameter
                             if is_varargs && type_name.ends_with("...") {
                                 type_name = type_name[..type_name.len() - 3].to_string();
@@ -774,6 +1096,12 @@ pub(super) fn parse_typed_parameter<'a>(
 
     // For anonymous typed parameters (::Complex), generate a synthetic name
     let name = name.unwrap_or_else(|| "_".to_string());
+    if let Some(text_ty) = text_type_annotation {
+        type_annotation = Some(text_ty);
+    }
+    if let Some(flat_ty) = flat_type_annotation {
+        type_annotation = Some(flat_ty);
+    }
 
     // Detect Vararg{T} and Vararg{T,N} type annotations (Issue #2525)
     // f(x::Vararg{Int64}) is equivalent to f(x::Int64...)
@@ -875,8 +1203,9 @@ pub(super) fn parse_splat_parameter<'a>(
                             type_annotation = parse_type_name(type_name, walker.span(&type_child))?;
                         }
                         NodeKind::ParametrizedTypeExpression => {
-                            let type_name = walker.text(&type_child);
-                            type_annotation = parse_type_name(type_name, walker.span(&type_child))?;
+                            let type_name = type_name_text(walker, &type_child);
+                            type_annotation =
+                                parse_type_name(&type_name, walker.span(&type_child))?;
                         }
                         _ => {}
                     }
@@ -888,8 +1217,8 @@ pub(super) fn parse_splat_parameter<'a>(
                 type_annotation = parse_type_name(type_name, walker.span(&type_node))?;
             }
             NodeKind::ParametrizedTypeExpression => {
-                let type_name = walker.text(&type_node);
-                type_annotation = parse_type_name(type_name, walker.span(&type_node))?;
+                let type_name = type_name_text(walker, &type_node);
+                type_annotation = parse_type_name(&type_name, walker.span(&type_node))?;
             }
             _ => {}
         }
@@ -946,8 +1275,8 @@ pub(super) fn parse_splat_expression_as_parameter<'a>(
             for child in inner_children.iter().skip(1) {
                 match walker.kind(child) {
                     NodeKind::Identifier | NodeKind::ParametrizedTypeExpression => {
-                        let type_name = walker.text(child);
-                        type_annotation = parse_type_name(type_name, walker.span(child))?;
+                        let type_name = type_name_text(walker, child);
+                        type_annotation = parse_type_name(&type_name, walker.span(child))?;
                         break;
                     }
                     _ => {}
@@ -985,8 +1314,8 @@ pub(super) fn parse_unary_typed_parameter<'a>(
             }
             NodeKind::ParametrizedTypeExpression => {
                 // Parametric type: ::Type{T} or ::Complex{Float64}
-                let type_name = walker.text(&child);
-                let type_annotation = parse_type_name(type_name, walker.span(&child))?;
+                let type_name = type_name_text(walker, &child);
+                let type_annotation = parse_type_name(&type_name, walker.span(&child))?;
                 return Ok(TypedParam::new("_".to_string(), type_annotation, span));
             }
             _ => {
@@ -1013,6 +1342,86 @@ pub(super) fn parse_type_name(
     type_name: &str,
     _span: crate::parser::span::Span,
 ) -> LowerResult<Option<JuliaType>> {
+    // Issue #5055: expand user-defined type aliases (e.g. `MyVec{Int}` ->
+    // `Vector{Int}`) before parsing so parameter annotations dispatch on the
+    // aliased target type.
+    let expanded = crate::lowering::type_alias::expand(type_name);
     // Use from_name_or_struct to treat unknown types as user-defined structs
-    Ok(Some(JuliaType::from_name_or_struct(type_name)))
+    Ok(Some(JuliaType::from_name_or_struct(&expanded)))
+}
+
+fn type_name_text<'a>(walker: &CstWalker<'a>, node: &Node<'a>) -> String {
+    if walker.kind(node) != NodeKind::ParametrizedTypeExpression {
+        return walker.text(node).to_string();
+    }
+
+    let children = walker.named_children(node);
+    let Some((base, args)) = children.split_first() else {
+        return walker.text(node).to_string();
+    };
+    if args.is_empty() {
+        return walker.text(node).to_string();
+    }
+
+    let base = walker.text(base);
+    let args = args
+        .iter()
+        .map(|arg| match walker.kind(arg) {
+            NodeKind::ParametrizedTypeExpression => type_name_text(walker, arg),
+            _ => walker.text(arg).to_string(),
+        })
+        .collect::<Vec<_>>();
+    format!("{}{{{}}}", base, args.join(", "))
+}
+
+fn parameter_type_text(node_text: &str) -> Option<String> {
+    let (_, rhs) = node_text.split_once("::")?;
+    let type_part = rhs
+        .split_once('=')
+        .map_or(rhs, |(before_default, _)| before_default);
+    let type_part = type_part.trim().trim_end_matches("...").trim();
+    (!type_part.is_empty()).then(|| type_part.to_string())
+}
+
+fn flat_parametric_parameter_type_text<'a>(
+    walker: &CstWalker<'a>,
+    children: &[Node<'a>],
+    is_anonymous: bool,
+) -> Option<String> {
+    let start = if is_anonymous { 0 } else { 1 };
+    let base = children.get(start)?;
+    if walker.kind(base) != NodeKind::Identifier {
+        return None;
+    }
+    let args = children.get(start + 1..)?;
+    if args.is_empty() {
+        return None;
+    }
+    if !args
+        .iter()
+        .all(|arg| is_flat_parametric_type_arg(walker.kind(arg)))
+    {
+        return None;
+    }
+
+    let base = walker.text(base);
+    let args = args
+        .iter()
+        .map(|arg| match walker.kind(arg) {
+            NodeKind::ParametrizedTypeExpression => type_name_text(walker, arg),
+            _ => walker.text(arg).to_string(),
+        })
+        .collect::<Vec<_>>();
+    Some(format!("{}{{{}}}", base, args.join(", ")))
+}
+
+fn is_flat_parametric_type_arg(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Identifier
+            | NodeKind::UnaryExpression
+            | NodeKind::ParametrizedTypeExpression
+            | NodeKind::SubtypeExpression
+            | NodeKind::BinaryExpression
+    )
 }

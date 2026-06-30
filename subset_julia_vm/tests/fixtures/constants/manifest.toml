@@ -23,3 +23,9 @@ name = "constants_type_limits"
 file = "constants_type_limits.jl"
 expected = true
 description = "Integer type limits for Int8, Int16, Int32, UInt variants"
+
+[[tests]]
+name = "constants_uint64_comparison"
+file = "uint64_comparison.jl"
+expected = true
+description = "UInt64 comparisons compare natively without Int64 round-trip (Issue #3566)"

@@ -1,0 +1,7 @@
+package: JSXGraph
+version: 0.1.0
+local_uuid: 97e4c2e4-f0cb-461e-a268-312dec255b76
+registry_uuid: 97e4c2e4-f0cb-461e-a268-312dec255b76
+repository: https://github.com/JuliaJSXGraph/JSXGraph.jl
+license: MIT selected for JSXGraph.jl and bundled upstream JSXGraph dual MIT/LGPL notice
+license_source: LICENSE.md at ref v0.1.0

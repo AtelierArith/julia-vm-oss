@@ -264,6 +264,53 @@ fn test_function_multiple_where() {
     assert_parses("function foo(x::T, y::S) where T where S\n  x + y\nend");
 }
 
+#[test]
+fn test_function_where_supertype_bound() {
+    // Lower bound only: T >: Integer (Issue #5051).
+    assert_parses("foo(x::T) where {T>:Integer} = x");
+}
+
+#[test]
+fn test_function_where_double_bound() {
+    // Double bound: Integer <: T <: Real (Issue #5051). The constraint is
+    // emitted as a SubtypeConstraint with three children [name, upper, lower].
+    let source = "foo(x::T) where {Integer<:T<:Real} = x";
+    let cst = parse(source).unwrap_or_else(|_| panic!("Failed to parse: {}", source));
+
+    fn find_subtype_constraint(
+        node: &subset_julia_vm_parser::cst::CstNode,
+    ) -> Option<&subset_julia_vm_parser::cst::CstNode> {
+        if node.kind == NodeKind::SubtypeConstraint {
+            return Some(node);
+        }
+        node.children.iter().find_map(find_subtype_constraint)
+    }
+
+    let constraint = find_subtype_constraint(&cst)
+        .expect("expected a SubtypeConstraint node for the double bound");
+    assert_eq!(
+        constraint.children.len(),
+        3,
+        "double bound should have three children [name, upper, lower]"
+    );
+    let text_of = |n: &subset_julia_vm_parser::cst::CstNode| {
+        n.text
+            .clone()
+            .unwrap_or_else(|| source[n.span.start..n.span.end].to_string())
+    };
+    assert_eq!(text_of(&constraint.children[0]), "T", "name child");
+    assert_eq!(
+        text_of(&constraint.children[1]),
+        "Real",
+        "upper bound child"
+    );
+    assert_eq!(
+        text_of(&constraint.children[2]),
+        "Integer",
+        "lower bound child"
+    );
+}
+
 // Parametric function (old syntax)
 #[test]
 fn test_function_parametric() {
@@ -373,4 +420,72 @@ fn test_anonymous_function() {
 #[test]
 fn test_anonymous_function_typed() {
     assert_parses("function (x::Int)::Int\n  x^2\nend");
+}
+
+// =============================================================================
+// Callable struct / functor definitions (Issue #5126)
+// =============================================================================
+
+/// Helper: locate the FunctionDefinition node's children for structural checks.
+fn function_def_children(source: &str) -> Vec<NodeKind> {
+    let cst = parse(source).unwrap_or_else(|_| panic!("Failed to parse: {}", source));
+    assert_eq!(cst.kind, NodeKind::SourceFile);
+    let func = &cst.children[0];
+    assert_eq!(
+        func.kind,
+        NodeKind::FunctionDefinition,
+        "Expected FunctionDefinition for: {}",
+        source
+    );
+    func.children.iter().map(|c| c.kind).collect()
+}
+
+// Anonymous callable struct: full form `function (::Type)(args) ... end`
+#[test]
+fn test_callable_struct_anonymous_full_form() {
+    assert_parses("function (::Doubler)(x)\n  x * 2\nend");
+}
+
+// Bound callable struct: full form `function (self::Type)(args) ... end`.
+// The parenthesized head `(p::Poly)` must be parsed as the function name, and
+// the following `(x)` as the parameter list — NOT the head as the parameter
+// list and `(x)` as a body expression (Issue #5126).
+#[test]
+fn test_callable_struct_bound_full_form_parses() {
+    assert_parses("function (p::Poly)(x)\n  p.coeff * x\nend");
+}
+
+#[test]
+fn test_callable_struct_bound_full_form_structure() {
+    let kinds = function_def_children("function (p::Poly)(x)\n  p.coeff * x\nend");
+    // name (parenthesized head), parameter list, body block
+    assert_eq!(kinds[0], NodeKind::ParenthesizedExpression);
+    assert_eq!(kinds[1], NodeKind::ParameterList);
+    assert_eq!(kinds[kinds.len() - 1], NodeKind::Block);
+}
+
+// Parametric bound callable struct with where clause.
+#[test]
+fn test_callable_struct_parametric_where_full_form() {
+    assert_parses("function (s::Scaler{T})(x) where T\n  s.factor * x\nend");
+}
+
+#[test]
+fn test_callable_struct_parametric_where_structure() {
+    let kinds = function_def_children("function (s::Scaler{T})(x) where T\n  s.factor * x\nend");
+    assert_eq!(kinds[0], NodeKind::ParenthesizedExpression);
+    assert_eq!(kinds[1], NodeKind::ParameterList);
+    assert!(
+        kinds.contains(&NodeKind::WhereClause),
+        "Expected a WhereClause child, got {:?}",
+        kinds
+    );
+}
+
+// Regression: a genuine anonymous function must still parse with `(x)` as its
+// parameter list, not be misread as a callable-object head.
+#[test]
+fn test_anonymous_function_not_callable() {
+    let kinds = function_def_children("function (x)\n  x + 1\nend");
+    assert_eq!(kinds[0], NodeKind::ParameterList);
 }

@@ -10,13 +10,87 @@
 #   - ulp_approx (use eps)
 #   - round_digits (use round(x, digits=n))
 #
-# NOTE: The following functions are implemented as Rust builtins and must NOT
-# be redefined here (doing so breaks prelude compilation - see Issue #2103):
-#   - exponent(x) -> BuiltinId::Exponent
-#   - significand(x) -> BuiltinId::Significand
-#   - frexp(x) -> BuiltinId::Frexp
-#   - nextfloat(x) -> BuiltinId::NextFloat
-#   - prevfloat(x) -> BuiltinId::PrevFloat
+# NOTE: exponent / significand / frexp / issubnormal / nextfloat / prevfloat are
+# now pure Julia in base/float.jl (Issue #6740), built on `reinterpret` + the
+# per-type IEEE bit-field helpers there. They are no longer Rust builtins.
+
+# =============================================================================
+# Rounding: floor / ceil / trunc / round (Issue #6742)
+# =============================================================================
+# Pure-Julia rounding over the CPU intrinsics floor_llvm / ceil_llvm /
+# trunc_llvm / rint_llvm (base/boot.jl). These dispatch-first ahead of the legacy
+# Rust round builtins (which remain only as a no-method fallback). `round` uses
+# round-to-nearest-ties-to-even (the default `RoundNearest`), matching upstream
+# (round(2.5) == 2.0, round(0.5) == 0.0) — the old Rust dynamic-dispatch path
+# wrongly used round-half-away-from-zero.
+#
+# The plain forms use `where {T<:AbstractFloat}` so the concrete float type is
+# preserved (round(3.0f0) isa Float32). The digits/sigdigits/base keyword forms
+# are folded into the same methods (keyword args default to `nothing`).
+
+# --- float forms (preserve the float type) with digits/sigdigits/base keywords ---
+# Each method folds the plain form (no keywords → the CPU intrinsic) and the
+# digits/sigdigits scaling into one definition (a positional method and a keyword
+# method would share the same signature and conflict). The scaling reproduces the
+# `x*factor`/`factor` algorithm of the former Rust round-digits builtins. `_scale`
+# returns the (factor) for a given digits/sigdigits request.
+function _round_scale(x, digits, sigdigits, base)
+    if digits !== nothing
+        return float(base) ^ digits
+    end
+    # sigdigits: scale so `sigdigits` significant digits survive (base-`base`).
+    d = floor(Int, log(float(base), abs(x))) + 1
+    return float(base) ^ (sigdigits - d)
+end
+
+function floor(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
+    if digits === nothing && sigdigits === nothing
+        return floor_llvm(x)
+    end
+    (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
+    factor = _round_scale(x, digits, sigdigits, base)
+    return floor_llvm(x * factor) / factor
+end
+
+function ceil(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
+    if digits === nothing && sigdigits === nothing
+        return ceil_llvm(x)
+    end
+    (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
+    factor = _round_scale(x, digits, sigdigits, base)
+    return ceil_llvm(x * factor) / factor
+end
+
+function trunc(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
+    if digits === nothing && sigdigits === nothing
+        return trunc_llvm(x)
+    end
+    (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
+    factor = _round_scale(x, digits, sigdigits, base)
+    return trunc_llvm(x * factor) / factor
+end
+
+function round(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
+    if digits === nothing && sigdigits === nothing
+        return rint_llvm(x)
+    end
+    (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
+    factor = _round_scale(x, digits, sigdigits, base)
+    return rint_llvm(x * factor) / factor
+end
+
+# --- integer identity (floor(5) === 5, not 5.0) ---
+floor(x::Integer) = x
+ceil(x::Integer) = x
+trunc(x::Integer) = x
+round(x::Integer) = x
+
+# --- typed forms: floor(Int, x) etc. round, then convert to the requested type
+#     (round(Int8, 3.5) === Int8(4), preserving the requested integer type) ---
+floor(::Type{T}, x) where {T<:Integer} = T(floor(x))
+ceil(::Type{T}, x) where {T<:Integer} = T(ceil(x))
+trunc(::Type{T}, x) where {T<:Integer} = T(trunc(x))
+round(::Type{T}, x) where {T<:Integer} = T(round(x))
 
 # isinteger: check if value is an integer
 function isinteger(x)
@@ -128,6 +202,15 @@ function floatmin(x::Float64)
     return 2.2250738585072014e-308
 end
 
+# Float32 / Float16 smallest positive normalized values (Issue #5688).
+function floatmin(::Type{Float32})
+    return Float32(1.1754943508222875e-38)
+end
+
+function floatmin(::Type{Float16})
+    return Float16(6.103515625e-5)
+end
+
 # floatmax: largest finite floating-point number
 function floatmax()
     return 1.7976931348623157e308
@@ -139,6 +222,15 @@ end
 
 function floatmax(x::Float64)
     return 1.7976931348623157e308
+end
+
+# Float32 / Float16 largest finite values (Issue #5688).
+function floatmax(::Type{Float32})
+    return Float32(3.4028234663852886e38)
+end
+
+function floatmax(::Type{Float16})
+    return Float16(65504.0)
 end
 
 # =============================================================================
@@ -153,15 +245,15 @@ function typemin(::Type{Int64})
 end
 
 function typemin(::Type{Int32})
-    return -2147483648
+    return Int32(-2147483648)
 end
 
 function typemin(::Type{Int16})
-    return -32768
+    return Int16(-32768)
 end
 
 function typemin(::Type{Int8})
-    return -128
+    return Int8(-128)
 end
 
 # typemax: maximum value for an integer type
@@ -170,15 +262,15 @@ function typemax(::Type{Int64})
 end
 
 function typemax(::Type{Int32})
-    return 2147483647
+    return Int32(2147483647)
 end
 
 function typemax(::Type{Int16})
-    return 32767
+    return Int16(32767)
 end
 
 function typemax(::Type{Int8})
-    return 127
+    return Int8(127)
 end
 
 # typemin/typemax for floating-point types (Issue #2094)

@@ -19,6 +19,84 @@ expected = true
 description = "broadcast!(f, dest, A, B) in-place broadcast"
 
 [[tests]]
+name = "broadcast_scalar_array_fused_assignment_8368"
+file = "scalar_array_fused_assignment_8368.jl"
+expected = true
+description = "Fused scalar-array dotted assignment keeps multi-argument dispatch cache keys distinct for nested Broadcasted preprocessing (Issue #8368)"
+
+[[tests]]
+name = "broadcast_reshape_shared_storage"
+file = "reshape_shared_storage.jl"
+expected = true
+description = "Broadcast reads logical elements from reshape-shared Array storage (Issue #3927)"
+
+[[tests]]
+name = "broadcast_memory_first_results"
+file = "memory_first_results.jl"
+expected = true
+description = "Broadcast result arrays preserve shape and independence across Memory-first VM fallback paths (Issue #3962)"
+
+[[tests]]
+name = "broadcast_predicate_specialization_5094"
+file = "predicate_specialization_5094.jl"
+expected = true
+description = "broadcast(iszero/isone/signbit/iseven/isodd, ::Vector{T}) uses concrete typed helper paths and returns BitVector for Bool results (Issue #5094, Issue #5484)"
+
+[[tests]]
+name = "broadcast_bitvector_predicate_broadcast_5484"
+file = "bitvector_predicate_broadcast_5484.jl"
+expected = true
+description = "predicate broadcast materializes Bool vector results as BitVector (Issue #5484)"
+
+[[tests]]
+name = "broadcast_unary_specialization_5094"
+file = "unary_specialization_5094.jl"
+expected = true
+description = "broadcast(identity/abs/abs2/-, ::Vector{T}) routes representative concrete vectors through typed unary map paths (Issue #5094)"
+
+[[tests]]
+name = "broadcast_unary_minus_array_7212"
+file = "unary_minus_array_7212.jl"
+expected = true
+description = "Unary minus on arrays and broadcast results routes through broadcasted negation (Issue #7212)"
+
+[[tests]]
+name = "broadcast_binary_specialization_5094"
+file = "binary_specialization_5094.jl"
+expected = true
+description = "broadcast(+/-/*/min/max and numeric /, ::Vector{T}, ::Vector{T}) routes same-length representative concrete vectors through typed binary map paths (Issue #5094)"
+
+[[tests]]
+name = "broadcast_nary_plus_specialization_5094"
+file = "nary_plus_specialization_5094.jl"
+expected = true
+description = "broadcast(+/*/min/max, ::Vector{T}, ::Vector{T}, ::Vector{T}...) routes same-length representative concrete vectors through typed n-ary map paths (Issue #5094)"
+
+[[tests]]
+name = "broadcast_nary_int32_singleton_fallback_5499"
+file = "nary_int32_singleton_fallback_5499.jl"
+expected = true
+description = "broadcast(+, ::Vector{Int32}, singleton ::Vector{Int32}, ::Vector{Int32}) preserves Int32 results through dynamic fallback (Issue #5499)"
+
+[[tests]]
+name = "broadcast_materialization_type_preservation_4628"
+file = "materialization_type_preservation_4628.jl"
+expected = true
+description = "Broadcast materialization preserves representative Float32, small integer, and String result types (Issues #4019, #4628)"
+
+[[tests]]
+name = "broadcast_vector_any_tuple_destructuring_4627"
+file = "vector_any_tuple_destructuring_4627.jl"
+expected = true
+description = "Vector{Any} typed array constructor preserves tuple elements for for-loop destructuring around broadcast probes (Issues #4019, #4627)"
+
+[[tests]]
+name = "broadcast_dynamic_ops_array_like_guards_3908"
+file = "dynamic_ops_array_like_guards_3908.jl"
+expected = true
+description = "dynamic_ops/mod.rs Array-like guard refactor: dynamic_add/sub/div route Any-typed array operands through the is_array_like_value helper (Issue #3908)"
+
+[[tests]]
 name = "tuple_binary_add"
 file = "tuple_binary_add.jl"
 expected = 21.0
@@ -278,6 +356,18 @@ file = "broadcast_perf_int_fastpath_regression.jl"
 expected = true
 description = "Regression: same-shape Int array broadcast should not be drastically slower than for loop"
 
+[[tests]]
+name = "broadcast_mixed_float_int_arith_7587"
+file = "mixed_float_int_arith_7587.jl"
+expected = true
+description = "Mixed Float/Int arithmetic value and type parity, scalar and broadcast (Issue #7587)"
+
+[[tests]]
+name = "broadcast_perf_mixed_float_int_7587"
+file = "broadcast_perf_mixed_float_int_7587.jl"
+expected = true
+description = "Regression: Float64-array × Int-scalar broadcast should not be drastically slower than Float-scalar form (Issue #7587)"
+
 # === Phase 5-1: flatten/isflat loop fusion (Issue #2544) ===
 
 [[tests]]
@@ -303,6 +393,18 @@ expected = true
 description = "broadcasted/broadcast/broadcast! Pure Julia entry points (Issue #2548)"
 
 [[tests]]
+name = "broadcast_four_arg_dispatch_4019"
+file = "broadcast_four_arg_dispatch_4019.jl"
+expected = true
+description = "Four-argument broadcast and broadcast! route through the Pure Julia Broadcasted pipeline (Issue #4019)"
+
+[[tests]]
+name = "broadcast_unary_dot_not_4626"
+file = "unary_dot_not_4626.jl"
+expected = true
+description = "Prefix dotted not syntax .!xs and parenthesized callable ! broadcast lower through broadcast materialization (Issues #4626, #4640)"
+
+[[tests]]
 name = "broadcast_range_size_2d"
 file = "test_range_size_broadcast.jl"
 expected = true
@@ -321,3 +423,9 @@ name = "scalar_broadcast"
 file = "scalar_broadcast.jl"
 expected = 16.0
 description = "Scalar broadcasting returns scalar, not array (Issue #4)"
+
+[[tests]]
+name = "broadcast_prefix_unary_dot_7234"
+file = "prefix_unary_dot_7234.jl"
+expected = true
+description = "Prefix dotted unary operators .-v / .+v / .~v broadcast elementwise (Issue #7234)"

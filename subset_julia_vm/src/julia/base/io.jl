@@ -68,19 +68,26 @@ end
 # =============================================================================
 # IOContext Construction Helpers
 # =============================================================================
-# Note: In SubsetJuliaVM, the struct's implicit constructor takes precedence
-# over outer constructor functions. To work around this, use the `iocontext()`
-# function instead of `IOContext()` when creating IOContext with properties.
-#
-# Example:
-#   ctx = iocontext(stdout, :compact => true)   # Works correctly
-#   ctx = IOContext(stdout, :compact => true)   # Uses struct constructor directly (not recommended)
+# Normalize properties stored by direct IOContext constructor calls.
+# The implicit struct constructor can store a single Pair directly
+# (`IOContext(io, :key => value)`, Issue #6409) or an existing IOContext
+# (`IOContext(io, ctx)`, Issue #6467), while Julia's public constructor API
+# treats both forms as property collections.
+function _normalize_ioproperties(props)
+    if isa(props, Pair)
+        return [props]
+    elseif isa(props, IOContext)
+        return _ioproperties(props)
+    else
+        return props
+    end
+end
 
-# Helper function to get properties from an IO
-# Returns empty array for plain IO, or the properties from IOContext
+# Helper function to get properties from an IO.
+# Returns empty array for plain IO, or normalized properties from IOContext.
 function _ioproperties(io)
     if isa(io, IOContext)
-        return io.properties
+        return _normalize_ioproperties(io.properties)
     else
         return []
     end
@@ -98,6 +105,48 @@ function _add_property(props, key::Symbol, value)
     end
     return result
 end
+
+function _iocontext_with_pair(io, pair)
+    props = _ioproperties(io)
+    props = _add_property(props, pair[1], pair[2])
+    return IOContext(io, props)
+end
+
+function _iocontext_with_pairs(io, p1, p2)
+    props = _ioproperties(io)
+    props = _add_property(props, p1[1], p1[2])
+    props = _add_property(props, p2[1], p2[2])
+    return IOContext(io, props)
+end
+
+function _iocontext_with_pairs(io, p1, p2, p3)
+    props = _ioproperties(io)
+    props = _add_property(props, p1[1], p1[2])
+    props = _add_property(props, p2[1], p2[2])
+    props = _add_property(props, p3[1], p3[2])
+    return IOContext(io, props)
+end
+
+function _iocontext_with_pairs(io, p1, p2, p3, p4)
+    props = _ioproperties(io)
+    props = _add_property(props, p1[1], p1[2])
+    props = _add_property(props, p2[1], p2[2])
+    props = _add_property(props, p3[1], p3[2])
+    props = _add_property(props, p4[1], p4[2])
+    return IOContext(io, props)
+end
+
+IOContext(io::IOContext) = io
+IOContext(io) = IOContext(io, _ioproperties(io))
+IOContext(io, context::IOContext) = IOContext(io, _ioproperties(context))
+IOContext(io, pair::Pair) = _iocontext_with_pair(io, pair)
+IOContext(io, pair::Tuple) = _iocontext_with_pair(io, pair)
+IOContext(io, p1::Pair, p2::Pair) = _iocontext_with_pairs(io, p1, p2)
+IOContext(io, p1::Tuple, p2::Tuple) = _iocontext_with_pairs(io, p1, p2)
+IOContext(io, p1::Pair, p2::Pair, p3::Pair) = _iocontext_with_pairs(io, p1, p2, p3)
+IOContext(io, p1::Tuple, p2::Tuple, p3::Tuple) = _iocontext_with_pairs(io, p1, p2, p3)
+IOContext(io, p1::Pair, p2::Pair, p3::Pair, p4::Pair) = _iocontext_with_pairs(io, p1, p2, p3, p4)
+IOContext(io, p1::Tuple, p2::Tuple, p3::Tuple, p4::Tuple) = _iocontext_with_pairs(io, p1, p2, p3, p4)
 
 # =============================================================================
 # IOContext Property Access
@@ -132,10 +181,11 @@ ioget(ctx, :limit, false)    # => false (not set, returns default)
 ```
 """
 function ioget(ctx::IOContext, key::Symbol, default)
-    n = length(ctx.properties)
+    props = _ioproperties(ctx)
+    n = length(props)
     i = 1
     while i <= n
-        p = ctx.properties[i]
+        p = props[i]
         if p[1] === key
             return p[2]
         end
@@ -167,10 +217,11 @@ iohaskey(ctx, :limit)    # => false
 ```
 """
 function iohaskey(ctx::IOContext, key::Symbol)
-    n = length(ctx.properties)
+    props = _ioproperties(ctx)
+    n = length(props)
     i = 1
     while i <= n
-        p = ctx.properties[i]
+        p = props[i]
         if p[1] === key
             return true
         end
@@ -243,10 +294,11 @@ Return an array of all property keys in the IOContext.
 """
 function iokeys(ctx::IOContext)
     result = Symbol[]
-    n = length(ctx.properties)
+    props = _ioproperties(ctx)
+    n = length(props)
     i = 1
     while i <= n
-        push!(result, ctx.properties[i][1])
+        push!(result, props[i][1])
         i = i + 1
     end
     return result
@@ -290,9 +342,8 @@ pipe_writer(ctx::IOContext) = ctx.io
 
 Create an IOContext wrapping `io` with optional properties.
 
-This is the recommended way to create IOContext with properties in SubsetJuliaVM.
-Using `IOContext()` directly with properties may not work as expected due to
-struct constructor precedence.
+This helper is kept for backward compatibility with older SubsetJuliaVM code.
+New code can use the standard `IOContext(io, :key => value, ...)` constructor.
 
 # Examples
 ```julia
@@ -306,38 +357,40 @@ function iocontext(io)
     return IOContext(io, _ioproperties(io))
 end
 
+function iocontext(io, first_pair::Pair)
+    return _iocontext_with_pair(io, first_pair)
+end
+
 function iocontext(io, first_pair::Tuple)
-    props = _ioproperties(io)
-    new_props = _add_property(props, first_pair[1], first_pair[2])
-    return IOContext(io, new_props)
+    return _iocontext_with_pair(io, first_pair)
+end
+
+function iocontext(io, p1::Pair, p2::Pair)
+    return _iocontext_with_pairs(io, p1, p2)
 end
 
 function iocontext(io, p1::Tuple, p2::Tuple)
-    props = _ioproperties(io)
-    props = _add_property(props, p1[1], p1[2])
-    props = _add_property(props, p2[1], p2[2])
-    return IOContext(io, props)
+    return _iocontext_with_pairs(io, p1, p2)
+end
+
+function iocontext(io, p1::Pair, p2::Pair, p3::Pair)
+    return _iocontext_with_pairs(io, p1, p2, p3)
 end
 
 function iocontext(io, p1::Tuple, p2::Tuple, p3::Tuple)
-    props = _ioproperties(io)
-    props = _add_property(props, p1[1], p1[2])
-    props = _add_property(props, p2[1], p2[2])
-    props = _add_property(props, p3[1], p3[2])
-    return IOContext(io, props)
+    return _iocontext_with_pairs(io, p1, p2, p3)
+end
+
+function iocontext(io, p1::Pair, p2::Pair, p3::Pair, p4::Pair)
+    return _iocontext_with_pairs(io, p1, p2, p3, p4)
 end
 
 function iocontext(io, p1::Tuple, p2::Tuple, p3::Tuple, p4::Tuple)
-    props = _ioproperties(io)
-    props = _add_property(props, p1[1], p1[2])
-    props = _add_property(props, p2[1], p2[2])
-    props = _add_property(props, p3[1], p3[2])
-    props = _add_property(props, p4[1], p4[2])
-    return IOContext(io, props)
+    return _iocontext_with_pairs(io, p1, p2, p3, p4)
 end
 
 function iocontext(io, context::IOContext)
-    return IOContext(io, context.properties)
+    return IOContext(io, _ioproperties(context))
 end
 
 # =============================================================================
@@ -750,41 +803,284 @@ function _show_matrix(io, m)
     end
 end
 
+# Whether a *value* `x`'s concrete type is "implicit" for array-show purposes,
+# mirroring upstream Julia's `typeinfo_implicit` (`julia/base/arrayshow.jl`).
+# Implicit values (`Int64`/`Float64`/`Char`/`String`/`Symbol`, and `Tuple`/`Pair`
+# whose components are all implicit) print WITHOUT a `T[...]` prefix; everything
+# else (other numeric widths, `Bool`, `Complex`, user structs, …) is prefixed.
+#
+# This is value-driven rather than type-driven because sjulia's `fieldtypes`
+# does not preserve the precise `Tuple`/`Pair` parameters (see
+# `docs/vm/UNIMPLEMENTED.md`), so the implicit-ness of a `Pair`/`Tuple` element
+# is decided from its actual field values.
+function _value_typeinfo_implicit(@nospecialize(x))
+    T = typeof(x)
+    (T === Float64 || T === Int64 || T === Char || T === String || T === Symbol) && return true
+    if x isa Pair
+        return _value_typeinfo_implicit(x.first) && _value_typeinfo_implicit(x.second)
+    end
+    if x isa Tuple
+        for e in x
+            _value_typeinfo_implicit(e) || return false
+        end
+        return true
+    end
+    # Nested arrays: `Array{T,N}` of an implicit eltype is implicit
+    # (upstream `typeinfo_implicit`), so `[[1, 2], [3, 4]]` prints bare.
+    if x isa AbstractArray
+        return _type_typeinfo_implicit(eltype(x))
+    end
+    return false
+end
+
+# Per-element implicit/type info for value-driven prefix derivation over
+# `Any`-eltype arrays (`Any[1, "x"]` etc.). Returns `(typename::String,
+# implicit::Bool)`. For homogeneous implicit elements the type name is unused
+# (the prefix is dropped); for non-implicit elements it becomes the `T[...]`
+# prefix (e.g. `Foo`, `Complex{Int64}`).
+function _elem_show_type(@nospecialize(x))
+    return (string(typeof(x)), _value_typeinfo_implicit(x))
+end
+
+# Whether a (non-`Any`) element *type* `T` is implicit. Used only for arrays
+# whose `eltype` is a precise scalar/struct/array type — `Int64`/`Float64`/`Char`/
+# `String`/`Symbol` are implicit, `Array{T,N}` of an implicit eltype is implicit,
+# all other concrete types are prefixed.
+function _type_typeinfo_implicit(@nospecialize(T))
+    (T === Float64 || T === Int64 || T === Char || T === String || T === Symbol) && return true
+    if T <: AbstractArray
+        return _type_typeinfo_implicit(eltype(T))
+    end
+    return false
+end
+
+# Whether a *value* `x` has a type that sjulia widens to `Any` in an array
+# literal where upstream Julia would have inferred a precise element type —
+# `Pair`, `Tuple`, and nested `AbstractArray` (see docs/vm/UNIMPLEMENTED.md).
+# These are the only element kinds for which the value-driven prefix derivation
+# may drop the `Any[...]` prefix; a *scalar* element under an `Any` eltype means
+# an explicit `Any[...]` literal, which keeps its prefix (Issue #7303).
+function _value_is_inference_widened_composite(@nospecialize(x))
+    return x isa Pair || x isa Tuple || x isa AbstractArray
+end
+
+# Compute the array-show type prefix and whether the eltype is implicit,
+# mirroring upstream `typeinfo_prefix`/`typeinfo_implicit`. For a precise
+# (non-`Any`) eltype the answer comes straight from `eltype(v)`; for an `Any`
+# eltype the effective type is derived from the element values. A genuine
+# `Vector{Any}` keeps the `Any[...]` prefix (upstream's `typeinfo_implicit(Any)`
+# is `false`, so `Any[1, 2, 3]` prints `Any[...]`, not bare) — the prefix is
+# dropped only for a homogeneous run of an inference-widened composite eltype
+# (`Pair`/`Tuple`/nested array, e.g. `[1 => 2]`) that sjulia stores under the
+# `Any` tag but upstream infers precisely. Issues #5236 / #5237 / #7303.
+function _array_show_prefix(v)
+    et = eltype(v)
+    if et !== Any
+        return _type_typeinfo_implicit(et) ? ("", true) : (string(et), false)
+    end
+    # Any eltype: derive from element values.
+    n = length(v)
+    n == 0 && return ("Any", false)
+    name, implicit = _elem_show_type(v[firstindex(v)])
+    all_widened = _value_is_inference_widened_composite(v[firstindex(v)])
+    for i in (firstindex(v) + 1):lastindex(v)
+        nm, im = _elem_show_type(v[i])
+        if nm != name
+            return ("Any", false)
+        end
+        implicit = implicit && im
+        all_widened = all_widened && _value_is_inference_widened_composite(v[i])
+    end
+    # A homogeneous *scalar* implicit run under an `Any` eltype is an explicit
+    # `Any[...]` literal → keep the `Any[...]` prefix; only inference-widened
+    # composites drop it.
+    implicit || return (name, false)
+    return all_widened ? ("", true) : ("Any", false)
+end
+
+# Render one array element honoring upstream's `:typeinfo`-aware show: when the
+# array carries a `Float32`/`Float16` type prefix, the per-element decorations
+# (`1.5f0`, `Float16(1.5)`) are dropped because the context already records the
+# eltype (e.g. `Float32[1.0, 2.0]`). Bool elements render as `1`/`0`.
+function _show_array_elem(io, x, et)
+    if et === Bool
+        print(io, x ? "1" : "0")
+    elseif et === Float32 || et === Float16
+        print(io, x)
+    else
+        show(io, x)
+    end
+end
+
+# Internal helper for showing 1D arrays (vectors) — compact 2-arg
+# `show(io, v)` form: "[a, b, c]" (Issue #4731). Matches upstream
+# Julia's `show(io, ::AbstractVector)`, which prints inline without
+# newlines so `repr(v)` returns "[1, 2, 3]".
+#
+# Issue #4733: empty typed vectors render as "<eltype>[]" (e.g.
+# "Int64[]"), preserving the element type the way upstream Julia
+# does. Without this special case the compact form would drop the
+# type info and an `eval(Meta.parse(...))` round-trip would land in
+# `Vector{Any}` instead of the original `Vector{T}`.
+#
+# Issues #5236 / #5237: non-implicit eltypes carry the upstream
+# `typeinfo_prefix` type prefix (`Int8[...]`, `Float32[...]`,
+# `Complex{Int64}[...]`, `Foo[...]`, `Bool[1, 0]`, `Any[1, "x"]`),
+# while implicit eltypes (`Int64`/`Float64`/`Char`/`String`/`Symbol`/
+# implicit `Tuple`/`Pair`) print bare (`[1, 2]`, `[1 => 2]`). See
+# `_array_show_prefix` / `_typeinfo_implicit_T`.
+function _show_vector_compact(io, v)
+    n = length(v)
+    if n == 0
+        print(io, eltype(v), "[]")
+        return
+    end
+    prefix, _implicit = _array_show_prefix(v)
+    et = eltype(v)
+    print(io, prefix, "[")
+    for i in 1:n
+        _show_array_elem(io, v[i], et)
+        if i < n
+            print(io, ", ")
+        end
+    end
+    print(io, "]")
+end
+
+# Internal helper for showing 2D arrays (matrices) — compact 2-arg
+# `show(io, m)` form: "[1 2; 3 4]" (Issue #4731). For empty matrices
+# (Issue #4733), match upstream's `Matrix{T}(undef, rows, cols)`
+# constructor form so the element type and dimensions are preserved
+# across round-trips.
+#
+# Issues #5236 / #5237: non-implicit eltypes carry the upstream
+# `typeinfo_prefix` type prefix (`Bool[1 0; 0 1]`,
+# `Complex{Int64}[1 + 1im 2 + 2im; ...]`, `Any[...]`), while implicit
+# eltypes print bare. Empty matrices keep the
+# `Matrix{T}(undef, r, c)` form above, which already matches upstream.
+function _show_matrix_compact(io, m)
+    s = size(m)
+    rows = s[1]
+    cols = s[2]
+    if rows == 0 || cols == 0
+        print(io, "Matrix{", eltype(m), "}(undef, ", rows, ", ", cols, ")")
+        return
+    end
+    prefix, _implicit = _array_show_prefix(m)
+    et = eltype(m)
+    print(io, prefix, "[")
+    for r in 1:rows
+        for c in 1:cols
+            _show_array_elem(io, m[r, c], et)
+            if c < cols
+                print(io, " ")
+            end
+        end
+        if r < rows
+            print(io, "; ")
+        end
+    end
+    print(io, "]")
+end
+
 """
     show(io::IO, arr::Array)
 
-Display an array with its element type using `eltype`.
-For 1D arrays (Vectors), shows "n-element Vector{T}".
-For 2D arrays (Matrices), shows "m×n Matrix{T}".
-For higher dimensions, shows a summary.
+Display an array in its compact form (Issue #4731). For 1D arrays
+this is `"[a, b, c]"`; for 2D arrays `"[a b; c d]"`. The multi-line
+"n-element Vector{T}:" / "m×n Matrix{T}:" form is the
+`MIME"text/plain"` representation used by REPL display, kept in
+`_show_vector` and `_show_matrix` for that purpose.
 
 # Examples
 ```julia
 julia> show(stdout, [1, 2, 3])
-3-element Vector{Int64}:
- 1
- 2
- 3
+[1, 2, 3]
 
 julia> show(stdout, [1 2; 3 4])
-2×2 Matrix{Int64}:
- 1  2
- 3  4
+[1 2; 3 4]
 ```
 """
 function show(io::IO, arr::Array)
     nd = ndims(arr)
-    if nd == 1
-        _show_vector(io, arr)
-    elseif nd == 2
-        _show_matrix(io, arr)
+    if nd == 1 || nd == 2
+        # Issue #7893: route the compact 1D/2D form through `print(io, arr)`.
+        # The VM's `print` path renders each array element via its registered
+        # `Base.show(io, ::T)` (e.g. `Symbolics.Num`), which the per-element
+        # `show(io, x)` inside `_show_vector_compact`/`_show_matrix_compact`
+        # cannot do: a direct `show` call in this Base-library function freezes
+        # its candidate method set at Base-compile time, so a user `show`
+        # registered later is never a dispatch candidate and the element falls
+        # to the generic struct dump. `print(io, arr)` and the pure-Julia
+        # compact helpers produce identical output for every other eltype
+        # (numbers/strings/chars/symbols/nested containers all quote/format the
+        # same), so this only changes the previously-wrong struct-element case.
+        print(io, arr)
     else
         # Higher dimensional arrays - show summary
         s = size(arr)
         et = eltype(arr)
         print(io, "Array{", et, ", ", nd, "} with size ", s)
-        println(io)
     end
+end
+
+# =============================================================================
+# show - Containers
+# =============================================================================
+# Based on Julia's base/dict.jl and base/show.jl
+#
+# `show(io::IO, d::AbstractDict)` writes the compact `Dict(...)` form.
+# Without this method, dispatching `show(io, d)` falls onto whichever
+# AbstractUser-typed `show` happens to match an Any-shaped Dict — the
+# stdlib `show(io, ::CartesianIndex)` was wrongly picked, then crashed
+# trying to `getfield(d, 1)` on the Dict (Issue #4737). The format
+# matches `format_dict_value` from PR #4736 (Issue #4735) so `repr(d)`
+# and `string(d)` agree.
+
+"""
+    show(io::IO, d::AbstractDict)
+
+Compact `Dict("key" => value, ...)` display, matching upstream Julia's
+2-arg `show` form. Quotes String keys and values, prefixes `:` on
+Symbol keys (Issue #4737, follows PR #4736).
+"""
+function _show_dict_compact(io::IO, d)
+    print(io, "Dict(")
+    first = true
+    for (k, v) in d
+        if !first
+            print(io, ", ")
+        end
+        first = false
+        show(io, k)
+        print(io, " => ")
+        show(io, v)
+    end
+    print(io, ")")
+end
+
+show(io::IO, d::AbstractDict) = _show_dict_compact(io, d)
+show(io::IO, d::Dict{K,V}) where {K,V} = _show_dict_compact(io, d)
+
+"""
+    show(io::IO, s::AbstractSet)
+
+Compact `Set([e1, e2, ...])` display (Issue #4739). Without this
+method, `repr(Set(...))` would mis-dispatch to
+`show(IO, CartesianIndex)` (same family of dispatch crashes as the
+Dict case fixed in Issue #4737).
+"""
+function show(io::IO, s::AbstractSet)
+    print(io, "Set([")
+    first = true
+    for x in s
+        if !first
+            print(io, ", ")
+        end
+        first = false
+        show(io, x)
+    end
+    print(io, "])")
 end
 
 # =============================================================================
@@ -794,6 +1090,71 @@ end
 #
 # These show methods handle the 2-argument form: show(io, x)
 # They write a textual representation of x to the IO stream.
+
+"""
+    show(x)
+
+Single-argument `show` writes a textual representation of `x` to the standard
+output stream, mirroring upstream Julia's `show(x) = show(stdout::IO, x)`
+(Issue #4988). This lets `show(m)` and other reflection probes run without an
+explicit IO argument.
+"""
+show(x) = show(stdout, x)
+
+"""
+    show(io::IO, x)
+
+Generic fallback for user-defined structs (Issue #4768). Without it,
+`repr(user_struct)` had no matching `show(io, ::T)` method and
+silently mis-dispatched to a built-in arm that tried to index the
+value, producing "indexing not supported for I64(N)".
+
+Mirrors upstream Julia's default `Base.show_default`: print the
+type name, then a parenthesized list of field values in show form.
+The specific arms below for built-in types (`::Bool`, `::Int8`,
+`::String`, `::Pair`, `::Dict`, ...) take precedence via the
+most-specific-method rule.
+"""
+function show(io::IO, x)
+    # Irrational singletons (π, ℯ) reach this generic fallback when called with a
+    # statically-Any argument (e.g. inside `repr`'s `show(io, x)`), bypassing the
+    # `show(io, ::AbstractIrrational)` method. Catch them at runtime (Issue #5656).
+    if x isa AbstractIrrational
+        print(io, string(x))
+        return nothing
+    end
+    print(io, typeof(x))
+    print(io, "(")
+    names = fieldnames(typeof(x))
+    n = length(names)
+    for i in 1:n
+        show(io, getfield(x, names[i]))
+        if i < n
+            print(io, ", ")
+        end
+    end
+    print(io, ")")
+end
+
+"""
+    show(io::IO, x::Type)
+
+Display a Type value by its name (Issue #5010). Without this method,
+Type values (e.g. `Symbol`, `typeof(:foo)`, `Int64`) fell through to
+the generic struct fallback `show(io::IO, x)`, which printed
+`typeof(x)` = `DataType` followed by a parenthesized field list,
+producing the wrong `DataType()` text in `repr`/`show`.
+
+`string(::Type)` already renders the correct name, so we route through
+it. The most-specific-method rule selects this `::Type` arm over the
+generic `show(io::IO, x)` fallback.
+"""
+show(io::IO, x::Type) = print(io, string(x))
+
+# Irrational singletons (π, ℯ, ...) show as their symbol name, not the generic
+# `Irrational{:π}()` struct dump (Issue #5656). `string(x)` already renders the
+# symbol, so route through it like the `::Type` arm above.
+show(io::IO, x::AbstractIrrational) = print(io, string(x))
 
 """
     show(io::IO, x::Bool)
@@ -808,6 +1169,16 @@ show(io::IO, x::Bool) = print(io, string(x))
 Display the nothing value.
 """
 show(io::IO, ::Nothing) = print(io, "nothing")
+
+"""
+    show(io::IO, ::Missing)
+
+Display the missing value (Issue #4743). Without an explicit method,
+`repr(missing)` would mis-dispatch into
+`show(io, ::CartesianIndex)` (same family as Dict #4737 / Set #4739)
+and crash on `getfield(missing, 1)`.
+"""
+show(io::IO, ::Missing) = print(io, "missing")
 
 """
     show(io::IO, x::Int8)
@@ -882,16 +1253,20 @@ show(io::IO, x::UInt128) = print(io, "0x", string(x, base=16, pad=32))
 """
     show(io::IO, x::Float16)
 
-Display a Float16 value.
+Display a Float16 value with the `Float16(...)` constructor wrapper
+(Issue #4747). This preserves the element type across `repr` round
+trips: `eval(Meta.parse(repr(Float16(1.5)))) === Float16(1.5)`.
 """
-show(io::IO, x::Float16) = print(io, x)
+show(io::IO, x::Float16) = print(io, "Float16(", x, ")")
 
 """
     show(io::IO, x::Float32)
 
-Display a Float32 value.
+Display a Float32 value with the `f0` typed-literal suffix
+(Issue #4747). This preserves the element type across `repr` round
+trips: `eval(Meta.parse(repr(Float32(1.5)))) === Float32(1.5)`.
 """
-show(io::IO, x::Float32) = print(io, x)
+show(io::IO, x::Float32) = print(io, x, "f0")
 
 """
     show(io::IO, x::Float64)
@@ -901,25 +1276,65 @@ Display a Float64 value.
 show(io::IO, x::Float64) = print(io, x)
 
 """
+    show(io::IO, x::BigInt)
+
+Display a BigInt value (Issue #3530 — show on BigInt was not previously
+exercised because literals were narrowed to Int64).
+"""
+show(io::IO, x::BigInt) = print(io, x)
+
+"""
+    show(io::IO, x::BigFloat)
+
+Display a BigFloat value (Issue #3530).
+"""
+show(io::IO, x::BigFloat) = print(io, x)
+
+"""
     show(io::IO, x::Char)
 
-Display a Char value with single quotes.
+Display a Char value with single quotes, escaping special characters
+(newline, tab, backslash, single quote, etc.) so the result is a
+valid Julia source literal (Issue #4749).
 """
-show(io::IO, x::Char) = print(io, "'", x, "'")
+function show(io::IO, x::Char)
+    if x == '\\'
+        print(io, "'\\\\'")
+    elseif x == '\''
+        print(io, "'\\''")
+    elseif x == '\n'
+        print(io, "'\\n'")
+    elseif x == '\r'
+        print(io, "'\\r'")
+    elseif x == '\t'
+        print(io, "'\\t'")
+    elseif x == '\0'
+        print(io, "'\\0'")
+    else
+        print(io, "'", x, "'")
+    end
+end
 
 """
     show(io::IO, x::String)
 
-Display a String value with double quotes.
+Display a String value with double quotes, escaping special
+characters via `escape_string` so the result is a valid Julia
+source literal (Issue #4749).
 """
-show(io::IO, x::String) = print(io, '"', x, '"')
+show(io::IO, x::String) = print(io, '"', escape_string(x), '"')
 
 """
     show(io::IO, x::Symbol)
 
-Display a Symbol value with a colon prefix.
+Display a Symbol value with a leading `:` prefix. Distinct from
+`print(io, ::Symbol)`, which writes only the bare name. Before
+Issue #4741 the `:` happened to come from sjulia's print path
+treating Symbols as show-form, so `show(io, x) = print(io, x)`
+accidentally produced the right output. After PR #4742 (#4741)
+print is correctly bare, so `show` must write the `:` explicitly.
 """
-show(io::IO, x::Symbol) = print(io, x)
+show(io::IO, x::Symbol) = print(io, ":", x)
 
 # =============================================================================
 # show - Container Types
@@ -933,15 +1348,19 @@ Display a Tuple with parentheses. Single-element tuples have a trailing comma.
 function show(io::IO, t::Tuple)
     print(io, "(")
     n = length(t)
-    for i in 1:n
-        show(io, t[i])
-        if i < n
-            print(io, ", ")
-        elseif n == 1
-            print(io, ",")
+    if n == 0
+        print(io, ")")
+    else
+        for i in 1:n
+            show(io, t[i])
+            if i < n
+                print(io, ", ")
+            elseif n == 1
+                print(io, ",")
+            end
         end
+        print(io, ")")
     end
-    print(io, ")")
 end
 
 """
@@ -949,10 +1368,13 @@ end
 
 Display a Pair with the => operator.
 """
+_pair_first_any(p) = p[1]
+_pair_second_any(p) = p[2]
+
 function show(io::IO, p::Pair)
-    show(io, p[1])
+    show(io, _pair_first_any(p))
     print(io, " => ")
-    show(io, p[2])
+    show(io, _pair_second_any(p))
 end
 
 """
@@ -966,7 +1388,11 @@ function show(io::IO, nt::NamedTuple)
     vs = values(nt)
     n = length(ks)
     for i in 1:n
-        print(io, ks[i], " = ")
+        # Issue #4739: print bare field name like "x = 1", not ":x = 1".
+        # sjulia's `print(io, sym)` falls back to the show-form (with `:`
+        # prefix) for Symbols, so route through `string(sym)` to drop
+        # the colon — matches upstream's `(x = 1, y = 2)` NamedTuple repr.
+        print(io, string(ks[i]), " = ")
         show(io, vs[i])
         if i < n
             print(io, ", ")
@@ -1006,28 +1432,58 @@ function show(io::IO, r::StepRange)
     show(io, last(r))
 end
 
+# Issue #4759: VM-native Value::Range is reported as StepRangeLen/LinRange but
+# is not backed by struct fields, so Pure-Julia field-access methods like
+# first(r::StepRangeLen) crash on it. Forwarding through an untyped helper
+# forces dynamic dispatch, which routes first/last/step to the VM Range
+# builtins for VM-native ranges while still working for real struct values.
+
+"""
+    show(io::IO, r::StepRangeLen)
+
+Display a StepRangeLen as start:step:stop (Issue #4759).
+"""
+function show(io::IO, r::StepRangeLen)
+    _show_steprangelen_dynamic(io, r)
+end
+
+function _show_steprangelen_dynamic(io, r)
+    show(io, first(r))
+    print(io, ":")
+    show(io, step(r))
+    print(io, ":")
+    show(io, last(r))
+end
+
+"""
+    show(io::IO, r::LinRange)
+
+Display a LinRange as LinRange{T}(start, stop, len) (Issue #4759).
+"""
+function show(io::IO, r::LinRange)
+    _show_linrange_dynamic(io, r)
+end
+
+function _show_linrange_dynamic(io, r)
+    print(io, "LinRange{")
+    print(io, eltype(r))
+    print(io, "}(")
+    show(io, first(r))
+    print(io, ", ")
+    show(io, last(r))
+    print(io, ", ")
+    show(io, length(r))
+    print(io, ")")
+end
+
 # =============================================================================
 # show - Numeric Types (Complex, Rational)
 # =============================================================================
 
-"""
-    show(io::IO, z::Complex)
-
-Display a Complex number in the form "a + bi" or "a - bi".
-"""
-function show(io::IO, z::Complex)
-    r = real(z)
-    i = imag(z)
-    show(io, r)
-    if i < 0
-        print(io, " - ")
-        show(io, -i)
-    else
-        print(io, " + ")
-        show(io, i)
-    end
-    print(io, "im")
-end
+# Note: `show(io::IO, z::Complex)` lives in base/complex.jl (matching upstream
+# Julia's file layout) and handles the `Complex{Bool}` / imaginary-unit special
+# cases and `:compact` context. Keeping it there avoids a duplicate, ambiguous
+# registration under the shared "Complex" show-method key (Issue #5155).
 
 """
     show(io::IO, x::Rational)
@@ -1149,6 +1605,43 @@ function repr(x)
 end
 
 # =============================================================================
+# eachline - File line iterator
+# =============================================================================
+# Vector-backed filename iteration for package initialization paths that expect
+# Base.eachline(filename), including MacroTools animals loading (Issue #7593).
+struct EachLine
+    lines
+end
+
+function eachline(filename::AbstractString; keep::Bool=false)
+    lines = readlines(filename)
+    if keep
+        n = length(lines)
+        i = 1
+        while i <= n
+            lines[i] = string(lines[i], "\n")
+            i = i + 1
+        end
+    end
+    return EachLine(lines)
+end
+
+function iterate(iter::EachLine)
+    return iterate(iter, 1)
+end
+
+function iterate(iter::EachLine, state)
+    if state > length(iter.lines)
+        return nothing
+    end
+    return (iter.lines[state], state + 1)
+end
+
+length(iter::EachLine) = length(iter.lines)
+collect(iter::EachLine) = copy(iter.lines)
+map(f, iter::EachLine) = map(f, iter.lines)
+
+# =============================================================================
 # summary - Return a string giving a brief description of a value
 # =============================================================================
 # summary(x) returns a string describing the type of x.
@@ -1166,8 +1659,21 @@ end
 # "2×3 Matrix{Float64}"
 # ```
 
-# Generic fallback: return the type name as a string
+# Generic fallback: return the type name as a string.
+# Issue #4706: also handle AbstractString and AbstractDict here rather
+# than via separate `summary(::AbstractString)` / `summary(::AbstractDict)`
+# method overloads, because adding those overloads currently triggers an
+# `AmbiguousMethod` error for `summary([1,2,3])` (the dispatcher does not
+# filter the AbstractString / AbstractDict candidates out for `Array`).
 function summary(x)
+    if x isa AbstractString
+        prefix = isempty(x) ? "empty" : string(ncodeunits(x), "-codeunit")
+        return string(prefix, " ", typeof(x))
+    elseif x isa AbstractDict
+        n = length(x)
+        suffix = n == 1 ? " entry" : " entries"
+        return string(typeof(x), " with ", n, suffix)
+    end
     return string(typeof(x))
 end
 

@@ -1,0 +1,7 @@
+package: StatsBase
+version: 0.34.0
+local_uuid: 2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91
+registry_uuid: 2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91
+repository: https://github.com/JuliaStats/StatsBase.jl
+license: MIT
+license_source: LICENSE.md at ref v0.34.0

@@ -40,6 +40,7 @@ end
 end
 
 @testset "Iterators.cycle" begin
+    @test IteratorSize(Iterators.cycle([1,2,3])) isa IsInfinite
     r = collect(Iterators.take(Iterators.cycle([1,2,3]), 7))
     @test r == [1,2,3,1,2,3,1]
 end

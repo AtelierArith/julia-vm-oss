@@ -17,6 +17,21 @@ function square(x)
     return x * x
 end
 
+function globalref_dispatch_3910(x)
+    return :any
+end
+
+function globalref_dispatch_3910(x::Int64)
+    return :int
+end
+
+struct GlobalRefAbsBox3910
+    x::Int64
+end
+
+Base.abs(x::GlobalRefAbsBox3910) = :box_abs
+Base.length(x::Symbol) = 3910
+
 @testset "GlobalRef callable: calling user-defined functions" begin
     # Test 1: Call function with multiple arguments
     # Note: In official Julia, GlobalRef takes a Module, but SubsetJuliaVM also accepts Symbol
@@ -28,6 +43,19 @@ end
     ref2 = GlobalRef(Main, :square)
     result2 = ref2(7)
     @test result2 == 49
+end
+
+@testset "GlobalRef callable: shared dispatch resolver (Issue #3910)" begin
+    ref_dispatch = GlobalRef(Main, :globalref_dispatch_3910)
+    @test ref_dispatch(1) === :int
+    @test ref_dispatch("value") === :any
+
+    ref_abs_dispatch = GlobalRef(Base, :abs)
+    @test ref_abs_dispatch(GlobalRefAbsBox3910(1)) === :box_abs
+
+    ref_length_dispatch = GlobalRef(Base, :length)
+    @test ref_length_dispatch(:x) == 3910
+    @test ref_length_dispatch([1, 2, 3]) == 3
 end
 
 @testset "GlobalRef callable: calling Base builtins" begin

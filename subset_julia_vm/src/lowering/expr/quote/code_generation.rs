@@ -4,9 +4,10 @@
 //! into actual executable IR code for macro expansion.
 
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
+use crate::expr_heads::ExprHead;
 use crate::ir::core::{BuiltinOp, Expr, Literal};
 use crate::lowering::LowerResult;
-use crate::parser::cst::{CstWalker, Node};
+use crate::parser::cst::{CstWalker, Node, NodeKind};
 
 use super::super::lower_expr_with_ctx;
 use super::handlers::{
@@ -15,6 +16,240 @@ use super::handlers::{
     handle_while_expr,
 };
 use super::HygieneContext;
+
+/// Map an identifier that is one of Julia's value-keywords to its
+/// literal value, when present.
+///
+/// In a quoted expression these names are stored as the Symbols
+/// `:nothing` / `:missing` / `:true` / `:false` (Issue #4895). When the
+/// quote is converted back into executable code (macro expansion), they
+/// must resolve to the corresponding literal value rather than a `Var`
+/// reference — otherwise a macro body whose `quote ... end` block ends
+/// in a bare `nothing` raises `UndefVarError: nothing not defined`.
+fn value_keyword_literal(name: &str) -> Option<Literal> {
+    match name {
+        "nothing" => Some(Literal::Nothing),
+        "missing" => Some(Literal::Missing),
+        "true" => Some(Literal::Bool(true)),
+        "false" => Some(Literal::Bool(false)),
+        _ => None,
+    }
+}
+
+fn lower_quote_template_arg<'a>(
+    walker: &CstWalker<'a>,
+    node: Node<'a>,
+    lambda_ctx: &crate::lowering::LambdaContext,
+) -> LowerResult<Expr> {
+    match walker.kind(&node) {
+        NodeKind::UnaryExpression if walker.text(&node).starts_with('$') => {
+            let children = walker.named_children(&node);
+            let Some(inner) = children.last().copied() else {
+                return lower_expr_with_ctx(walker, node, lambda_ctx);
+            };
+            match walker.kind(&inner) {
+                NodeKind::ParenthesizedExpression => {
+                    let paren_children = walker.named_children(&inner);
+                    if let Some(paren_inner) = paren_children.first().copied() {
+                        return lower_quote_template_arg(walker, paren_inner, lambda_ctx);
+                    }
+                    lower_expr_with_ctx(walker, inner, lambda_ctx)
+                }
+                _ => lower_quote_template_arg(walker, inner, lambda_ctx),
+            }
+        }
+        NodeKind::SplatExpression => {
+            let children = walker.named_children(&node);
+            if let Some(inner) = children.first().copied() {
+                lower_expr_with_ctx(walker, inner, lambda_ctx)
+            } else {
+                lower_expr_with_ctx(walker, node, lambda_ctx)
+            }
+        }
+        _ => lower_expr_with_ctx(walker, node, lambda_ctx),
+    }
+}
+
+fn substitute_quote_template_params<'a>(
+    expr: &Expr,
+    params: &[String],
+    args: &[Node<'a>],
+    walker: &CstWalker<'a>,
+    lambda_ctx: &crate::lowering::LambdaContext,
+    has_varargs: bool,
+) -> LowerResult<Expr> {
+    match expr {
+        Expr::Var(name, span) => {
+            if let Some(idx) = params.iter().position(|p| p == name) {
+                if has_varargs && idx == params.len() - 1 {
+                    let fixed_param_count = params.len() - 1;
+                    let elements: Result<Vec<_>, _> = args[fixed_param_count..]
+                        .iter()
+                        .map(|arg| lower_quote_template_arg(walker, *arg, lambda_ctx))
+                        .collect();
+                    Ok(Expr::TupleLiteral {
+                        elements: elements?,
+                        span: *span,
+                    })
+                } else {
+                    lower_quote_template_arg(walker, args[idx], lambda_ctx)
+                }
+            } else {
+                Ok(Expr::Var(name.clone(), *span))
+            }
+        }
+        Expr::QuoteLiteral { constructor, span } => quote_constructor_to_code_with_varargs(
+            constructor,
+            params,
+            args,
+            *span,
+            walker,
+            lambda_ctx,
+            has_varargs,
+        ),
+        Expr::BinaryOp {
+            op,
+            left,
+            right,
+            span,
+        } => {
+            let left = substitute_quote_template_params(
+                left,
+                params,
+                args,
+                walker,
+                lambda_ctx,
+                has_varargs,
+            )?;
+            let right = substitute_quote_template_params(
+                right,
+                params,
+                args,
+                walker,
+                lambda_ctx,
+                has_varargs,
+            )?;
+            Ok(Expr::BinaryOp {
+                op: *op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: *span,
+            })
+        }
+        Expr::UnaryOp { op, operand, span } => {
+            let operand = substitute_quote_template_params(
+                operand,
+                params,
+                args,
+                walker,
+                lambda_ctx,
+                has_varargs,
+            )?;
+            Ok(Expr::UnaryOp {
+                op: *op,
+                operand: Box::new(operand),
+                span: *span,
+            })
+        }
+        Expr::Call {
+            function,
+            args: call_args,
+            kwargs,
+            splat_mask,
+            kwargs_splat_mask,
+            span,
+        } => {
+            let new_call_args = call_args
+                .iter()
+                .map(|arg| {
+                    substitute_quote_template_params(
+                        arg,
+                        params,
+                        args,
+                        walker,
+                        lambda_ctx,
+                        has_varargs,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let new_kwargs = kwargs
+                .iter()
+                .map(|(key, value)| {
+                    substitute_quote_template_params(
+                        value,
+                        params,
+                        args,
+                        walker,
+                        lambda_ctx,
+                        has_varargs,
+                    )
+                    .map(|value| (key.clone(), value))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::Call {
+                function: function.clone(),
+                args: new_call_args,
+                kwargs: new_kwargs,
+                splat_mask: splat_mask.clone(),
+                kwargs_splat_mask: kwargs_splat_mask.clone(),
+                span: *span,
+            })
+        }
+        Expr::Builtin {
+            name,
+            args: builtin_args,
+            span,
+        } => {
+            if *name == BuiltinOp::SplatInterpolation && builtin_args.len() == 1 {
+                if let Expr::Var(param_name, _) = &builtin_args[0] {
+                    if let Some(idx) = params.iter().position(|p| p == param_name) {
+                        let arg = args[idx];
+                        if walker.kind(&arg) == NodeKind::SplatExpression {
+                            if let Some(inner) = walker.named_children(&arg).first() {
+                                return Ok(Expr::Builtin {
+                                    name: *name,
+                                    args: vec![lower_quote_template_arg(
+                                        walker, *inner, lambda_ctx,
+                                    )?],
+                                    span: *span,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if *name == BuiltinOp::Esc && builtin_args.len() == 1 {
+                return substitute_quote_template_params(
+                    &builtin_args[0],
+                    params,
+                    args,
+                    walker,
+                    lambda_ctx,
+                    has_varargs,
+                );
+            }
+            let new_builtin_args = builtin_args
+                .iter()
+                .map(|arg| {
+                    substitute_quote_template_params(
+                        arg,
+                        params,
+                        args,
+                        walker,
+                        lambda_ctx,
+                        has_varargs,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::Builtin {
+                name: *name,
+                args: new_builtin_args,
+                span: *span,
+            })
+        }
+        _ => Ok(expr.clone()),
+    }
+}
 
 /// Convert a quote constructor expression to actual executable code.
 /// This is used for macro expansion where we need to "eval" the quote.
@@ -127,6 +362,15 @@ fn substitute_local_bindings_in_constructor(
             }
         }
         Expr::Builtin { name, args, span } => {
+            if *name == BuiltinOp::SymbolNew {
+                if let Some(Expr::Literal(Literal::Str(symbol_name), _)) = args.first() {
+                    if let Some(binding_name) = symbol_name.strip_prefix('$') {
+                        if let Some(bound_value) = local_bindings.get(binding_name) {
+                            return bound_value.clone();
+                        }
+                    }
+                }
+            }
             // Recursively substitute in builtin arguments
             let new_args: Vec<Expr> = args
                 .iter()
@@ -221,8 +465,8 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
             // First arg should be SymbolNew("call") or similar
             let head = extract_symbol_from_constructor(&builtin_args[0])?;
 
-            match head.as_str() {
-                "call" => handle_call_expr(
+            match ExprHead::from_name(&head) {
+                Some(ExprHead::Call) => handle_call_expr(
                     builtin_args,
                     params,
                     args,
@@ -232,7 +476,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "block" => handle_block_expr(
+                Some(ExprHead::Block) => handle_block_expr(
                     builtin_args,
                     params,
                     args,
@@ -242,7 +486,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "macrocall" => handle_macrocall_expr(
+                Some(ExprHead::MacroCall) => handle_macrocall_expr(
                     builtin_args,
                     params,
                     args,
@@ -252,7 +496,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "tuple" => handle_tuple_expr(
+                Some(ExprHead::Tuple) => handle_tuple_expr(
                     builtin_args,
                     params,
                     args,
@@ -262,7 +506,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "try" => handle_try_expr(
+                Some(ExprHead::Try) => handle_try_expr(
                     builtin_args,
                     params,
                     args,
@@ -272,7 +516,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "if" => handle_if_expr(
+                Some(ExprHead::If) => handle_if_expr(
                     builtin_args,
                     params,
                     args,
@@ -282,7 +526,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "for" => handle_for_expr(
+                Some(ExprHead::For) => handle_for_expr(
                     builtin_args,
                     params,
                     args,
@@ -292,7 +536,7 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     hygiene,
                     has_varargs,
                 ),
-                "while" => handle_while_expr(
+                Some(ExprHead::While) => handle_while_expr(
                     builtin_args,
                     params,
                     args,
@@ -339,6 +583,17 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
                     } else {
                         lower_expr_with_ctx(walker, args[idx], lambda_ctx)
                     }
+                } else if let Some(lit) = value_keyword_literal(name) {
+                    // Issue #4895: `nothing` / `missing` (and `true` /
+                    // `false`) quote to the `:nothing` / `:missing`
+                    // Symbols, so a macro body that ends its
+                    // `quote ... end` block with a bare `nothing`
+                    // reaches here as `SymbolNew("nothing")`. When the
+                    // quoted block is converted *back* into executable
+                    // code (macro-expansion-scope), these identifiers
+                    // must resolve to their literal value rather than a
+                    // `Var` reference that would raise `UndefVarError`.
+                    Ok(Expr::Literal(lit, span))
                 } else {
                     // Apply hygiene renaming if applicable
                     let resolved_name = hygiene.resolve(name);
@@ -383,13 +638,13 @@ pub(super) fn quote_constructor_to_code_with_hygiene<'a>(
         Expr::Literal(lit, _) => Ok(Expr::Literal(lit.clone(), span)),
 
         // For other expressions, just substitute parameters
-        _ => super::super::macros::substitute_params_in_macro_expr(
+        _ => substitute_quote_template_params(
             constructor,
             params,
             args,
             walker,
             lambda_ctx,
-            false,
+            has_varargs,
         ),
     }
 }

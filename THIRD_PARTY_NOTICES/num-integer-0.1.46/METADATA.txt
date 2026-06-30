@@ -1,0 +1,5 @@
+crate: num-integer
+version: 0.1.46
+license: MIT OR Apache-2.0
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/rust-num/num-integer

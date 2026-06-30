@@ -44,14 +44,47 @@ impl<'a> Parser<'a> {
         let macro_id =
             CstNode::with_children(NodeKind::MacroIdentifier, macro_id_span, vec![name.clone()]);
 
+        self.finish_macro_call(start, name.span.end, macro_id)
+    }
+
+    pub(crate) fn finish_macro_call(
+        &mut self,
+        start: usize,
+        name_end: usize,
+        macro_id: CstNode,
+    ) -> ParseResult<CstNode> {
         let mut children = vec![macro_id];
+
+        // Check if immediately followed by '{' (braces argument style).
+        // This is used by type-construction macros like `@NamedTuple{a::Int, b}`
+        // (mirrors upstream Julia's `:braces` macro argument). The braces are
+        // parsed into a CurlyExpression node whose children are the field
+        // declarations (`a::Int`, `b`, ...).
+        if self.check(&Token::LBrace) {
+            if let Some(lbrace_token) = self.current.as_ref() {
+                // Require no gap between the macro name and '{' so that
+                // `@foo {x}` (space-separated single-set argument) is left to
+                // the original space-separated parsing path.
+                if lbrace_token.span.start == name_end {
+                    let braces = self.parse_macro_braces()?;
+                    let end = braces.span.end;
+                    children.push(braces);
+                    let span = self.source_map.span(start, end);
+                    return Ok(CstNode::with_children(
+                        NodeKind::MacrocallExpression,
+                        span,
+                        children,
+                    ));
+                }
+            }
+        }
 
         // Check if immediately followed by '(' (parenthesized call style)
         // We detect this by checking if the LParen starts right after the macro name
         if self.check(&Token::LParen) {
             if let Some(lparen_token) = self.current.as_ref() {
                 // Check for no gap between macro name and '('
-                if lparen_token.span.start == name.span.end {
+                if lparen_token.span.start == name_end {
                     // Parenthesized call style: @macro(args)
                     self.advance(); // consume '('
 
@@ -65,7 +98,12 @@ impl<'a> Parser<'a> {
                             if self.check(&Token::RParen) {
                                 break;
                             }
-                            let arg = self.parse_expression()?;
+                            let arg =
+                                if self.check(&Token::KwStruct) || self.check(&Token::KwMutable) {
+                                    self.parse_struct_definition()?
+                                } else {
+                                    self.parse_expression()?
+                                };
                             children.push(arg);
                             if !self.check(&Token::Comma) {
                                 break;
@@ -88,10 +126,12 @@ impl<'a> Parser<'a> {
 
         // Space-separated arguments (original behavior)
         // Parse macro arguments until end of line or newline
+        let mut saw_comma = false;
         while !self.is_at_end()
             && !self.check(&Token::Newline)
             && !self.check(&Token::Semicolon)
             && !self.check(&Token::KwEnd)
+            && !self.check(&Token::Comma)
             && !self.check(&Token::RParen)
             && !self.check(&Token::RBracket)
         {
@@ -110,20 +150,28 @@ impl<'a> Parser<'a> {
                 break; // Struct definition is the last argument
             }
 
-            // Special case: if we see `for`, parse as for statement
-            // This is needed for macros like @simd and @inbounds that take for loops
+            // Special case: if we see `for`, parse as for statement.
+            // This is needed for macros like @simd and @inbounds that take for loops.
+            // We do NOT break afterwards: upstream Julia collects any further
+            // space-separated arguments that follow the block on the same line,
+            // e.g. `@animate for ... end every 10` packs `:every` and `10` as extra
+            // macro arguments (Issue #7272). A newline after `end` ends the call (the
+            // while condition stops at `Token::Newline`), so next-line statements
+            // remain separate.
             if self.check(&Token::KwFor) {
                 let for_stmt = self.parse_for_statement()?;
                 children.push(for_stmt);
-                break; // For statement is the last argument
+                continue;
             }
 
-            // Special case: if we see `while`, parse as while statement
-            // This is needed for macros like @inbounds that take while loops
+            // Special case: if we see `while`, parse as while statement.
+            // This is needed for macros like @inbounds that take while loops, and for
+            // `@animate while ... end every N` (Issue #7272). Like the for-loop case
+            // above we keep collecting trailing same-line arguments.
             if self.check(&Token::KwWhile) {
                 let while_stmt = self.parse_while_statement()?;
                 children.push(while_stmt);
-                break; // While statement is the last argument
+                continue;
             }
 
             // Special case: if we see `if`, parse as if statement
@@ -134,22 +182,99 @@ impl<'a> Parser<'a> {
                 break; // If statement is the last argument
             }
 
-            // Parse expression as argument
-            let arg = self.parse_expression()?;
+            // Special case: if we see `function`, parse as function definition.
+            // This is needed for compiler annotation macros like @noinline and
+            // Base.@nospecializeinfer that decorate a method definition.
+            if self.check(&Token::KwFunction) {
+                let function_def = self.parse_function_definition()?;
+                children.push(function_def);
+                break; // Function definition is the last argument
+            }
+
+            // Parse expression as argument.
+            //
+            // Macro arguments are space-separated, so a space before `(` or `[`
+            // must NOT fuse into a call/index: `@m foo (bar)` is two arguments
+            // (`foo`, `bar`), `@m foo(bar)` is one call argument (Issue #5494).
+            // Enable whitespace sensitivity for the top level of this argument;
+            // it is cleared again inside any grouping (see `enter_grouping`).
+            let saved_space_sensitive = self.macro_arg_space_sensitive;
+            self.macro_arg_space_sensitive = true;
+            let arg = self.parse_expression();
+            self.macro_arg_space_sensitive = saved_space_sensitive;
+            let arg = arg?;
             children.push(arg);
 
             // Consume optional comma between arguments
             if self.check(&Token::Comma) {
+                saw_comma = true;
                 self.advance();
             }
             // Don't break - let the while condition handle when to stop
             // Julia macros are space-separated, so continue parsing
         }
 
+        if saw_comma && children.len() > 1 {
+            let args = children.split_off(1);
+            let tuple_start = args.first().map(|arg| arg.span.start).unwrap_or(start);
+            let tuple_end = args.last().map(|arg| arg.span.end).unwrap_or(tuple_start);
+            let tuple = CstNode::with_children(
+                NodeKind::TupleExpression,
+                self.source_map.span(tuple_start, tuple_end),
+                args,
+            );
+            children.push(tuple);
+        }
+
         let end = children.last().unwrap().span.end;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::MacrocallExpression,
+            span,
+            children,
+        ))
+    }
+
+    /// Parse a braced macro argument: `{ decl, decl, ... }`.
+    ///
+    /// Each declaration is parsed as an ordinary expression (e.g. a typed
+    /// expression `a::Int` or a bare identifier `b`). The result is a
+    /// `CurlyExpression` node whose children are the declarations, which the
+    /// lowering phase interprets per-macro (currently only `@NamedTuple`).
+    pub(crate) fn parse_macro_braces(&mut self) -> ParseResult<CstNode> {
+        let start_token = self.expect(Token::LBrace)?;
+        let start = start_token.span.start;
+
+        let mut children = Vec::new();
+        if !self.check(&Token::RBrace) {
+            loop {
+                // Skip newlines/semicolons inside the braces.
+                while self.check(&Token::Newline) || self.check(&Token::Semicolon) {
+                    self.advance();
+                }
+                if self.check(&Token::RBrace) {
+                    break;
+                }
+
+                children.push(self.parse_expression()?);
+
+                // Field declarations may be separated by commas, newlines, or
+                // semicolons (the latter for forms split across lines).
+                if self.check(&Token::Comma)
+                    || self.check(&Token::Semicolon)
+                    || self.check(&Token::Newline)
+                {
+                    self.advance();
+                } else if !self.check(&Token::RBrace) {
+                    break;
+                }
+            }
+        }
+
+        let end_token = self.expect(Token::RBrace)?;
+        let span = self.source_map.span(start, end_token.span.end);
+        Ok(CstNode::with_children(
+            NodeKind::CurlyExpression,
             span,
             children,
         ))

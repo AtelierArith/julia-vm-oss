@@ -1,4 +1,5 @@
 //! Integration tests: Structs, parametric types, HOFs, kwargs, do syntax, randn, iOS samples
+#![allow(dead_code)]
 
 mod common;
 use common::*;
@@ -8,7 +9,6 @@ use subset_julia_vm::vm::Value;
 // ==================== Struct Tests ====================
 // These tests use the Core IR pipeline (tree-sitter → lowering → compile_core)
 
-#[test]
 fn test_struct_basic_immutable() {
     // Basic immutable struct with typed fields
     let src = r#"
@@ -28,7 +28,6 @@ p.x + p.y
     }
 }
 
-#[test]
 fn test_struct_field_access() {
     // Test accessing individual fields
     let src = r#"
@@ -48,7 +47,6 @@ v.y - v.x
     }
 }
 
-#[test]
 fn test_mutable_struct_field_assignment() {
     // Test mutable struct field assignment
     let src = r#"
@@ -68,7 +66,6 @@ c.value
     }
 }
 
-#[test]
 fn test_struct_in_expression() {
     // Test struct fields in arithmetic expressions
     let src = r#"
@@ -89,7 +86,6 @@ area
     }
 }
 
-#[test]
 fn test_struct_euclidean_distance() {
     // Test struct with sqrt calculation (Euclidean distance)
     let src = r#"
@@ -114,7 +110,6 @@ sqrt(dx*dx + dy*dy)
 
 // ==================== Parametric Type Tests ====================
 
-#[test]
 fn test_parametric_struct_explicit_type() {
     // Test parametric struct with explicit type parameter
     let src = r#"
@@ -134,7 +129,6 @@ p.x + p.y
     }
 }
 
-#[test]
 fn test_parametric_struct_type_inference() {
     // Test parametric struct with type inference from constructor arguments
     let src = r#"
@@ -155,7 +149,6 @@ p.x + p.y
     }
 }
 
-#[test]
 fn test_parametric_struct_int_type() {
     // Test parametric struct with Int64 type parameter
     let src = r#"
@@ -175,7 +168,6 @@ p.x + p.y
     }
 }
 
-#[test]
 fn test_parametric_struct_multiple_params() {
     // Test parametric struct with multiple type parameters
     let src = r#"
@@ -196,7 +188,6 @@ pair.second * 4.0
     }
 }
 
-#[test]
 fn test_parametric_struct_with_bound() {
     // Test parametric struct with type bound
     let src = r#"
@@ -215,7 +206,6 @@ n.value
     }
 }
 
-#[test]
 fn test_parametric_nested_array_field() {
     // Test parametric struct with Array{T} field type
     let src = r#"
@@ -234,7 +224,6 @@ c.items[1]
     }
 }
 
-#[test]
 fn test_parametric_nested_struct_type() {
     // Test nested parametric struct: Container{Point{Float64}}
     let src = r#"
@@ -259,7 +248,6 @@ c.item.x + c.item.y
     }
 }
 
-#[test]
 fn test_parametric_double_nested() {
     // Test doubly nested parametric struct: Wrapper{Wrapper{Float64}}
     let src = r#"
@@ -281,7 +269,6 @@ outer.value.value
 
 // ==================== Break and Continue ====================
 
-#[test]
 fn test_while_break() {
     // Test break statement in while loop
     let src = r#"
@@ -304,7 +291,6 @@ sum
     }
 }
 
-#[test]
 fn test_for_break() {
     // Test break statement in for loop
     let src = r#"
@@ -325,7 +311,6 @@ sum
     }
 }
 
-#[test]
 fn test_while_continue() {
     // Test continue statement in while loop (skip numbers less than 5)
     let src = r#"
@@ -348,7 +333,6 @@ sum
     }
 }
 
-#[test]
 fn test_for_continue() {
     // Test continue statement in for loop (skip numbers less than 5)
     let src = r#"
@@ -369,7 +353,6 @@ sum
     }
 }
 
-#[test]
 fn test_nested_loops_break() {
     // Test break in nested loops (should only break inner loop)
     let src = r#"
@@ -396,7 +379,6 @@ outer_sum + inner_sum
 
 // ==================== Try/Catch/Finally ====================
 
-#[test]
 fn test_try_catch_finally_with_message() {
     let src = r#"
 x = 0
@@ -419,7 +401,6 @@ x
     }
 }
 
-#[test]
 fn test_try_else_finally_no_error() {
     let src = r#"
 x = 0
@@ -442,7 +423,6 @@ x
     }
 }
 
-#[test]
 fn test_try_catch_finally_no_error_no_else() {
     // This is the failing case from code_samples_tests
     let src = r#"
@@ -466,7 +446,6 @@ result
 
 // ==================== Array Slicing ====================
 
-#[test]
 fn test_slice_range_1d() {
     let src = r#"
 a = [10, 20, 30, 40]
@@ -481,7 +460,6 @@ b[2] + b[3]
     }
 }
 
-#[test]
 fn test_slice_full_matrix() {
     let src = r#"
 m = [1 2; 3 4]
@@ -498,7 +476,6 @@ s[1, 2] + s[2, 1]
 
 // ==================== Phase A: Mandelbrot Broadcast Support ====================
 
-#[test]
 fn test_transpose_1d_array() {
     // 1D array [n] becomes row vector [1, n]
     let src = r#"
@@ -513,7 +490,6 @@ length(b)
     }
 }
 
-#[test]
 fn test_transpose_2d_basic() {
     // Test that transpose changes the shape
     // [1 2; 3 4] is 2x2, transpose is also 2x2
@@ -531,7 +507,6 @@ t[1, 1]
     }
 }
 
-#[test]
 fn test_im_literal() {
     // im should be complex(0, 1)
     // Use complex operations to verify
@@ -548,7 +523,6 @@ z
     }
 }
 
-#[test]
 fn test_im_in_expression() {
     // Test that im can be used in assignment and returned
     // Full Complex arithmetic (2.0 * im) is planned for Phase C
@@ -570,7 +544,6 @@ a
     }
 }
 
-#[test]
 fn test_range_with_length() {
     // range(0.0, 1.0; length=5) should give [0.0, 0.25, 0.5, 0.75, 1.0]
     let src = r#"
@@ -584,7 +557,6 @@ length(xs)
     }
 }
 
-#[test]
 fn test_range_length_first_element() {
     // range(0.0, 1.0; length=5) first element should be 0.0
     let src = r#"
@@ -598,7 +570,6 @@ xs[1]
     }
 }
 
-#[test]
 fn test_transpose_with_broadcast() {
     // xs' .+ 0 should give a row vector
     let src = r#"
@@ -613,7 +584,6 @@ length(ys)
     }
 }
 
-#[test]
 fn test_transpose_function() {
     // transpose() function should work like ' for real arrays
     let src = r#"
@@ -628,7 +598,6 @@ length(ys)
     }
 }
 
-#[test]
 fn test_kwarg_function_definition_simple() {
     // Test function with keyword arguments using defaults
     // Note: explicit return is required for correct behavior
@@ -646,7 +615,6 @@ f(5)
     }
 }
 
-#[test]
 fn test_kwarg_function_with_explicit_kwarg() {
     // Test function with keyword argument explicitly provided
     let src = r#"
@@ -663,7 +631,6 @@ f(5; y=20)
     }
 }
 
-#[test]
 fn test_kwarg_function_multiple_kwargs() {
     // Test function with multiple keyword arguments
     let src = r#"
@@ -680,7 +647,6 @@ f(10)
     }
 }
 
-#[test]
 fn test_kwarg_function_multiple_kwargs_partial_override() {
     // Test overriding only some keyword arguments
     let src = r#"
@@ -699,7 +665,6 @@ f(10; z=100)
 
 /// Test keyword argument with float default value (Issue #1328).
 /// This test verifies that functions with float default kwargs compile and run correctly.
-#[test]
 fn test_kwarg_function_float_default() {
     // Test keyword argument with float default
     let src = r#"
@@ -716,7 +681,6 @@ f(2.0)
 }
 
 /// Test keyword argument with float default and explicit override (Issue #1328).
-#[test]
 fn test_kwarg_function_float_default_override() {
     let src = r#"
 function f(x; y=1.5)
@@ -731,7 +695,6 @@ f(2.0; y=0.5)
     }
 }
 
-#[test]
 fn test_kwarg_range_length() {
     // Test range with length keyword argument (already implemented)
     let src = r#"
@@ -745,7 +708,6 @@ length(xs)
     }
 }
 
-#[test]
 fn test_kwarg_range_length_int() {
     // Test range with Int64 length keyword argument
     // Note: Julia's range(start, stop; length=N) requires Integer for length
@@ -763,7 +725,6 @@ length(xs)
 
 // ==================== Short Function Definition ====================
 
-#[test]
 fn test_short_function_single_arg() {
     // f(x) = x^2
     let src = r#"
@@ -778,7 +739,6 @@ f(3)
     }
 }
 
-#[test]
 fn test_short_function_two_args() {
     // f(x, y) = x + y
     let src = r#"
@@ -793,7 +753,6 @@ add(10, 32)
     }
 }
 
-#[test]
 fn test_short_function_expression_body() {
     // Expression with multiple operations in body
     let src = r#"
@@ -808,7 +767,6 @@ compute(1, 2, 3)
     }
 }
 
-#[test]
 fn test_short_function_with_regular_function() {
     // Short function and regular function in same file
     let src = r#"
@@ -828,7 +786,6 @@ square(3) + cube(2)
     }
 }
 
-#[test]
 fn test_short_function_multiple_definitions() {
     // Multiple short function definitions
     let src = r#"
@@ -850,7 +807,6 @@ double(5) + triple(5) + quadruple(5)
     }
 }
 
-#[test]
 fn test_short_function_no_args() {
     // Short function with no arguments
     let src = r#"
@@ -861,7 +817,12 @@ get_pi()
     match result {
         Value::F64(v) => {
             let expected = 314_159.0 / 100_000.0;
-            assert!((v - expected).abs() < 1e-10, "Expected {}, got {}", expected, v);
+            assert!(
+                (v - expected).abs() < 1e-10,
+                "Expected {}, got {}",
+                expected,
+                v
+            );
         }
         _ => panic!("Unexpected result type: {:?}", result),
     }
@@ -869,7 +830,6 @@ get_pi()
 
 // ==================== Lambda Assignment Tests ====================
 
-#[test]
 fn test_lambda_assignment_basic() {
     // Test: f = x -> x ^ 3 + 1
     let src = r#"
@@ -885,7 +845,6 @@ f(2)
     }
 }
 
-#[test]
 fn test_lambda_assignment_multi_param() {
     let src = r#"
 f = (x, y) -> x + y * 2
@@ -899,7 +858,6 @@ f(3, 4)
     }
 }
 
-#[test]
 fn test_lambda_assignment_simple() {
     let src = r#"
 square = x -> x * x
@@ -914,7 +872,6 @@ square(5)
 
 // ==================== Higher-Order Function Tests ====================
 
-#[test]
 fn test_map_with_lambda() {
     let src = r#"
 arr = [1.0, 2.0, 3.0]
@@ -928,7 +885,6 @@ result[3]
     }
 }
 
-#[test]
 fn test_map_with_named_function() {
     let src = r#"
 double(x) = x * 2.0
@@ -943,7 +899,6 @@ result[2]
     }
 }
 
-#[test]
 fn test_filter_with_lambda() {
     let src = r#"
 arr = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -957,7 +912,6 @@ length(result)
     }
 }
 
-#[test]
 fn test_filter_first_element() {
     let src = r#"
 arr = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -971,7 +925,6 @@ result[1]
     }
 }
 
-#[test]
 fn test_reduce_with_lambda() {
     let src = r#"
 arr = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -984,7 +937,6 @@ reduce((a, b) -> a + b, arr)
     }
 }
 
-#[test]
 fn test_reduce_with_init() {
     let src = r#"
 arr = [1.0, 2.0, 3.0]
@@ -997,7 +949,6 @@ reduce((a, b) -> a + b, arr, 10.0)
     }
 }
 
-#[test]
 fn test_sum_with_lambda() {
     let src = r#"
 arr = [1.0, 2.0, 3.0, 4.0]
@@ -1010,7 +961,6 @@ sum(x -> x * x, arr)
     }
 }
 
-#[test]
 fn test_sum_with_implicit_mult_lambda() {
     // Test sum(x -> 2x, [1,2,3]) - implicit multiplication in lambda
     let src = r#"
@@ -1024,7 +974,6 @@ sum(x -> 2x, arr)
     }
 }
 
-#[test]
 fn test_sum_with_implicit_mult_inline_array() {
     // Test sum(x -> 2x, [1,2,3]) with inline integer array
     let src = r#"
@@ -1038,7 +987,6 @@ sum(x -> 2x, [1, 2, 3])
     }
 }
 
-#[test]
 fn test_map_with_implicit_mult_lambda() {
     // Test map with implicit multiplication: map(x -> 3x, [1,2,3])
     let src = r#"
@@ -1052,7 +1000,6 @@ result[2]
     }
 }
 
-#[test]
 fn test_sum_with_named_function() {
     let src = r#"
 square(x) = x * x
@@ -1066,7 +1013,6 @@ sum(square, arr)
     }
 }
 
-#[test]
 fn test_map_empty_array() {
     let src = r#"
 arr = zeros(0)
@@ -1080,7 +1026,6 @@ length(result)
     }
 }
 
-#[test]
 fn test_filter_empty_result() {
     let src = r#"
 arr = [1.0, 2.0, 3.0]
@@ -1094,22 +1039,20 @@ length(result)
     }
 }
 
-#[test]
 fn test_sum_empty_array() {
     let src = r#"
 arr = zeros(0)
 sum(x -> x * x, arr)
 "#;
-    let result = run_core_pipeline(src, 0).unwrap();
-    match result {
-        Value::F64(v) => assert!((v - 0.0).abs() < 1e-10),
-        _ => panic!("Expected F64, got {:?}", result),
-    }
+    let err = run_core_pipeline(src, 0).unwrap_err();
+    assert!(
+        err.contains("reducing over an empty collection is not allowed"),
+        "Unexpected error: {err}"
+    );
 }
 
 // ==================== do Syntax Tests ====================
 
-#[test]
 fn test_do_syntax_map() {
     let src = r#"
 result = map([1.0, 2.0, 3.0]) do x
@@ -1124,7 +1067,6 @@ result[2]
     }
 }
 
-#[test]
 fn test_do_syntax_filter() {
     let src = r#"
 result = filter([1.0, 2.0, 3.0, 4.0, 5.0]) do x
@@ -1139,7 +1081,6 @@ length(result)
     }
 }
 
-#[test]
 fn test_do_syntax_reduce() {
     let src = r#"
 reduce([1.0, 2.0, 3.0, 4.0, 5.0]) do a, b
@@ -1153,7 +1094,6 @@ end
     }
 }
 
-#[test]
 fn test_do_syntax_sum() {
     let src = r#"
 sum([1.0, 2.0, 3.0, 4.0]) do x
@@ -1167,7 +1107,6 @@ end
     }
 }
 
-#[test]
 fn test_do_syntax_multiline() {
     let src = r#"
 result = map([1.0, 2.0, 3.0]) do x
@@ -1185,7 +1124,6 @@ result[1]
 
 // ==================== Standard Normal Distribution (randn) ====================
 
-#[test]
 fn test_randn_basic() {
     let src = r#"
 x = randn()
@@ -1205,7 +1143,6 @@ x
     }
 }
 
-#[test]
 fn test_randn_deterministic() {
     let src = r#"
 randn()
@@ -1230,7 +1167,6 @@ randn()
     }
 }
 
-#[test]
 fn test_randn_array_1d() {
     let src = r#"
 arr = randn(5)
@@ -1245,7 +1181,6 @@ length(arr)
     }
 }
 
-#[test]
 fn test_randn_array_2d() {
     let src = r#"
 mat = randn(3, 4)
@@ -1260,7 +1195,6 @@ length(mat)
     }
 }
 
-#[test]
 fn test_randn_multiple_calls() {
     let src = r#"
 x1 = randn()
@@ -1280,7 +1214,6 @@ x1 + x2 + x3
 
 // ==================== Higher-Order Functions Samples ====================
 
-#[test]
 fn test_ios_sample_map_function() {
     let src = r#"
 # map(f, arr) applies function f to each element
@@ -1302,7 +1235,6 @@ squared[5]
     }
 }
 
-#[test]
 fn test_ios_sample_filter_function() {
     // Note: Using > 5 instead of modulo since % is not supported in core pipeline
     let src = r#"
@@ -1317,7 +1249,6 @@ length(large)
     }
 }
 
-#[test]
 fn test_ios_sample_reduce_function() {
     let src = r#"
 # reduce(f, arr) combines elements using binary function f
@@ -1341,7 +1272,6 @@ product
     }
 }
 
-#[test]
 fn test_ios_sample_do_syntax_map() {
     let src = r#"
 # do...end block creates anonymous function as first argument
@@ -1365,7 +1295,6 @@ result[5]
     }
 }
 
-#[test]
 fn test_ios_sample_do_syntax_filter_reduce() {
     let src = r#"
 # do syntax works with filter and reduce too
@@ -1390,7 +1319,6 @@ total
     }
 }
 
-#[test]
 fn test_ios_sample_chaining_higher_order() {
     let src = r#"
 # Chain map, filter, reduce for data processing pipelines
@@ -1417,7 +1345,6 @@ total
 
 // ==================== Structures Samples ====================
 
-#[test]
 fn test_ios_sample_basic_struct() {
     let src = r#"
 # Define an immutable struct with typed fields
@@ -1441,7 +1368,6 @@ distance
     }
 }
 
-#[test]
 fn test_ios_sample_mutable_struct() {
     let src = r#"
 # Mutable structs allow field modification
@@ -1469,7 +1395,6 @@ c.value
     }
 }
 
-#[test]
 fn test_ios_sample_struct_with_functions() {
     // Note: Struct field access in functions requires main block calculation
     let src = r#"
@@ -1488,7 +1413,6 @@ area
     }
 }
 
-#[test]
 fn test_ios_sample_euclidean_distance() {
     // Note: Using main block for struct field access (same as existing test_struct_euclidean_distance)
     let src = r#"
@@ -1509,7 +1433,6 @@ sqrt(dx*dx + dy*dy)
     }
 }
 
-#[test]
 fn test_ios_sample_particle_simulation() {
     // Note: Using main block for mutable struct field access
     let src = r#"
@@ -1541,7 +1464,6 @@ sqrt(particle.x^2 + particle.y^2)
 
 // ==================== Error Handling Samples ====================
 
-#[test]
 fn test_ios_sample_try_catch_basics() {
     let src = r#"
 # try/catch handles runtime errors gracefully
@@ -1569,7 +1491,6 @@ x
 // Note: test_ios_sample_try_catch_finally skipped - try block assignment without error
 // has known issues. Use test_ios_sample_try_catch_basics for error catching tests.
 
-#[test]
 fn test_ios_sample_error_recovery() {
     let src = r#"
 result = 0.0
@@ -1588,7 +1509,6 @@ result
     }
 }
 
-#[test]
 fn test_ios_sample_error_recovery_with_error() {
     let src = r#"
 result = 0.0
@@ -1614,7 +1534,6 @@ result
 
 // ==================== Monte Carlo randn Samples ====================
 
-#[test]
 fn test_ios_sample_normal_distribution() {
     let src = r#"
 arr = randn(10)
@@ -1635,7 +1554,6 @@ mean
     }
 }
 
-#[test]
 fn test_ios_sample_normal_distribution_matrix() {
     let src = r#"
 mat = randn(3, 4)
@@ -1664,7 +1582,6 @@ std
     }
 }
 
-#[test]
 fn test_ios_sample_histogram_visualization() {
     // Simplified test: count values in [-1, 1] range
     let src = r#"
@@ -1699,7 +1616,6 @@ count
 // ==================== Broadcast Compound Assignment ====================
 // These tests use the Core IR pipeline (tree-sitter → lowering → compile_core)
 
-#[test]
 fn test_broadcast_add_assign() {
     // Test .+= broadcast compound assignment
     let src = r#"
@@ -1717,7 +1633,6 @@ a[1] + a[2] + a[3]
     }
 }
 
-#[test]
 fn test_broadcast_mul_assign() {
     // Test .*= broadcast compound assignment
     let src = r#"
@@ -1735,7 +1650,6 @@ a[1] + a[2] + a[3]
     }
 }
 
-#[test]
 fn test_broadcast_sub_assign() {
     // Test .-= broadcast compound assignment
     let src = r#"
@@ -1753,7 +1667,6 @@ a[1] + a[2] + a[3]
     }
 }
 
-#[test]
 fn test_broadcast_and_assign() {
     // Test .&= broadcast compound assignment
     // Bitwise & is only defined for integer types, not Float64 (Issue #2704)
@@ -1774,7 +1687,6 @@ a[1] + a[2] + a[3] + a[4]
 // ==================== Regular Compound Assignment ====================
 // These tests use the Core IR pipeline (tree-sitter → lowering → compile_core)
 
-#[test]
 fn test_minus_assign_new() {
     // Test -= compound assignment
     let src = r#"
@@ -1790,7 +1702,6 @@ a
     }
 }
 
-#[test]
 fn test_mul_assign_new() {
     // Test *= compound assignment (using core pipeline)
     let src = r#"
@@ -1806,7 +1717,6 @@ a
     }
 }
 
-#[test]
 fn test_div_assign_new() {
     // Test /= compound assignment
     let src = r#"
@@ -1822,7 +1732,6 @@ a
     }
 }
 
-#[test]
 fn test_pow_assign_new() {
     // Test ^= compound assignment
     let src = r#"
@@ -1836,4 +1745,130 @@ a
         Value::I64(x) => assert_eq!(x, 8, "Expected 8, got {}", x),
         _ => panic!("Unexpected result type: {:?}", result),
     }
+}
+
+// Generated aggregate chunks for nextest process amortization.
+#[test]
+fn chunk_000() {
+    test_struct_basic_immutable();
+    test_struct_field_access();
+    test_mutable_struct_field_assignment();
+    test_struct_in_expression();
+    test_struct_euclidean_distance();
+    test_parametric_struct_explicit_type();
+    test_parametric_struct_type_inference();
+    test_parametric_struct_int_type();
+    test_parametric_struct_multiple_params();
+    test_parametric_struct_with_bound();
+    test_parametric_nested_array_field();
+    test_parametric_nested_struct_type();
+    test_parametric_double_nested();
+    test_while_break();
+    test_for_break();
+    test_while_continue();
+}
+
+#[test]
+fn chunk_001() {
+    test_for_continue();
+    test_nested_loops_break();
+    test_try_catch_finally_with_message();
+    test_try_else_finally_no_error();
+    test_try_catch_finally_no_error_no_else();
+    test_slice_range_1d();
+    test_slice_full_matrix();
+    test_transpose_1d_array();
+    test_transpose_2d_basic();
+    test_im_literal();
+    test_im_in_expression();
+    test_range_with_length();
+    test_range_length_first_element();
+    test_transpose_with_broadcast();
+    test_transpose_function();
+    test_kwarg_function_definition_simple();
+}
+
+#[test]
+fn chunk_002() {
+    test_kwarg_function_with_explicit_kwarg();
+    test_kwarg_function_multiple_kwargs();
+    test_kwarg_function_multiple_kwargs_partial_override();
+    test_kwarg_function_float_default();
+    test_kwarg_function_float_default_override();
+    test_kwarg_range_length();
+    test_kwarg_range_length_int();
+    test_short_function_single_arg();
+    test_short_function_two_args();
+    test_short_function_expression_body();
+    test_short_function_with_regular_function();
+    test_short_function_multiple_definitions();
+    test_short_function_no_args();
+    test_lambda_assignment_basic();
+    test_lambda_assignment_multi_param();
+    test_lambda_assignment_simple();
+}
+
+#[test]
+fn chunk_003() {
+    test_map_with_lambda();
+    test_map_with_named_function();
+    test_filter_with_lambda();
+    test_filter_first_element();
+    test_reduce_with_lambda();
+    test_reduce_with_init();
+    test_sum_with_lambda();
+    test_sum_with_implicit_mult_lambda();
+    test_sum_with_implicit_mult_inline_array();
+    test_map_with_implicit_mult_lambda();
+    test_sum_with_named_function();
+    test_map_empty_array();
+    test_filter_empty_result();
+    test_sum_empty_array();
+    test_do_syntax_map();
+    test_do_syntax_filter();
+}
+
+#[test]
+fn chunk_004() {
+    test_do_syntax_reduce();
+    test_do_syntax_sum();
+    test_do_syntax_multiline();
+    test_randn_basic();
+    test_randn_deterministic();
+    test_randn_array_1d();
+    test_randn_array_2d();
+    test_randn_multiple_calls();
+    test_ios_sample_map_function();
+    test_ios_sample_filter_function();
+    test_ios_sample_reduce_function();
+    test_ios_sample_do_syntax_map();
+    test_ios_sample_do_syntax_filter_reduce();
+    test_ios_sample_chaining_higher_order();
+    test_ios_sample_basic_struct();
+    test_ios_sample_mutable_struct();
+}
+
+#[test]
+fn chunk_005() {
+    test_ios_sample_struct_with_functions();
+    test_ios_sample_euclidean_distance();
+    test_ios_sample_particle_simulation();
+    test_ios_sample_try_catch_basics();
+    test_ios_sample_error_recovery();
+    test_ios_sample_error_recovery_with_error();
+    test_ios_sample_normal_distribution();
+    test_ios_sample_normal_distribution_matrix();
+    test_ios_sample_histogram_visualization();
+    test_broadcast_add_assign();
+    test_broadcast_mul_assign();
+    test_broadcast_sub_assign();
+    test_broadcast_and_assign();
+    test_minus_assign_new();
+    test_mul_assign_new();
+    test_div_assign_new();
+}
+
+#[test]
+fn chunk_006() {
+    test_pow_assign_new();
 }

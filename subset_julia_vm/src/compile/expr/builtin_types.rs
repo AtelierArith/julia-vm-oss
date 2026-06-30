@@ -3,7 +3,8 @@
 //! Handles compilation of Julia type constructors:
 //! - String(chars): Construct string from Vector{Char}
 //! - Char(n): Codepoint to character
-//! - Int(x): Convert to Int64
+//! - Int(x): Convert to native signed word integer
+//! - UInt(x): Convert to native unsigned word integer
 //! - BigInt(x): Arbitrary precision integer
 //! - BigFloat(x): Arbitrary precision float
 //! - Int8, Int16, Int32, Int64, Int128: Signed integer types
@@ -24,6 +25,32 @@ impl CoreCompiler<'_> {
         name: &str,
         args: &[Expr],
     ) -> CResult<Option<ValueType>> {
+        if matches!(
+            name,
+            "Bool"
+                | "Char"
+                | "Int"
+                | "UInt"
+                | "BigInt"
+                | "BigFloat"
+                | "Int8"
+                | "Int16"
+                | "Int32"
+                | "Int64"
+                | "Int128"
+                | "UInt8"
+                | "UInt16"
+                | "UInt32"
+                | "UInt64"
+                | "UInt128"
+                | "Float16"
+                | "Float32"
+                | "Float64"
+        ) && args.len() != 1
+        {
+            return err(format!("{} requires exactly 1 argument", name));
+        }
+
         match name {
             "String" => {
                 // String(chars) - construct string from Vector{Char} (Issue #2038)
@@ -40,12 +67,41 @@ impl CoreCompiler<'_> {
                 self.emit(Instr::CallBuiltin(BuiltinId::IntToChar, 1));
                 Ok(Some(ValueType::Char))
             }
-            "Int" => {
-                // Int(x) - convert to Int64 (works for Char, Int*, Float*, BigInt, etc.)
-                // Note: Int64 builtin's convert_to_i64() handles Char -> codepoint conversion
+            "Bool" => {
+                // Bool(x) - only 0/1 are valid; routes through the range-checked
+                // BuiltinId::Bool (shared convert(Bool, x)) so e.g. Bool(2) raises
+                // InexactError (Issue #7971).
                 self.compile_expr(&args[0])?;
-                self.emit(Instr::CallBuiltin(BuiltinId::Int64, 1));
-                Ok(Some(ValueType::I64))
+                self.emit(Instr::CallBuiltin(BuiltinId::Bool, 1));
+                Ok(Some(ValueType::Bool))
+            }
+            "Int" => {
+                // Int(x) - convert to the platform-native signed word type.
+                self.compile_expr(&args[0])?;
+                match crate::types::native_int_type_name() {
+                    "Int32" => {
+                        self.emit(Instr::CallBuiltin(BuiltinId::Int32, 1));
+                        Ok(Some(ValueType::I32))
+                    }
+                    _ => {
+                        self.emit(Instr::CallBuiltin(BuiltinId::Int64, 1));
+                        Ok(Some(ValueType::I64))
+                    }
+                }
+            }
+            "UInt" => {
+                // UInt(x) - convert to the platform-native unsigned word type.
+                self.compile_expr(&args[0])?;
+                match crate::types::native_uint_type_name() {
+                    "UInt32" => {
+                        self.emit(Instr::CallBuiltin(BuiltinId::UInt32, 1));
+                        Ok(Some(ValueType::U32))
+                    }
+                    _ => {
+                        self.emit(Instr::CallBuiltin(BuiltinId::UInt64, 1));
+                        Ok(Some(ValueType::U64))
+                    }
+                }
             }
             "BigInt" => {
                 // BigInt(x) - convert to arbitrary precision integer
@@ -75,8 +131,8 @@ impl CoreCompiler<'_> {
                             return Ok(Some(ValueType::DataType));
                         }
                         // Integer types -> BigInt type
-                        "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt8" | "UInt16"
-                        | "UInt32" | "UInt64" | "UInt128" | "BigInt" => {
+                        "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt"
+                        | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "BigInt" => {
                             self.emit(Instr::PushDataType("BigInt".to_string()));
                             return Ok(Some(ValueType::DataType));
                         }
@@ -167,6 +223,17 @@ impl CoreCompiler<'_> {
                 self.emit(Instr::CallBuiltin(BuiltinId::Float64, 1));
                 Ok(Some(ValueType::F64))
             }
+            "names" => {
+                // names(m::Module) -> Vector{Symbol}. This default form is the
+                // upstream path used by AbstractAlgebra's @alias macro (Issue
+                // #7938).
+                if args.len() != 1 {
+                    return err("names currently supports exactly one Module argument");
+                }
+                self.compile_expr(&args[0])?;
+                self.emit(Instr::CallBuiltin(BuiltinId::Names, 1));
+                Ok(Some(ValueType::Array))
+            }
             // Module introspection (Julia 1.11+)
             "isexported" => {
                 // isexported(m::Module, s::Symbol) -> Bool
@@ -188,6 +255,20 @@ impl CoreCompiler<'_> {
                 self.compile_expr(&args[0])?; // module
                 self.compile_expr(&args[1])?; // symbol
                 self.emit(Instr::CallBuiltin(BuiltinId::IsPublic, 2));
+                Ok(Some(ValueType::Bool))
+            }
+            "_isdefined_module_binding" => {
+                // _isdefined_module_binding(m::Module, s::Symbol) -> Bool
+                // Internal reflection primitive backing function-form
+                // isdefined(::Module, ::Symbol) (Issue #5002/#4958).
+                if args.len() != 2 {
+                    return err(
+                        "_isdefined_module_binding requires exactly 2 arguments: (module, symbol)",
+                    );
+                }
+                self.compile_expr(&args[0])?; // module
+                self.compile_expr(&args[1])?; // symbol
+                self.emit(Instr::CallBuiltin(BuiltinId::IsdefinedModuleBinding, 2));
                 Ok(Some(ValueType::Bool))
             }
             // BigFloat precision control (Issue #345)

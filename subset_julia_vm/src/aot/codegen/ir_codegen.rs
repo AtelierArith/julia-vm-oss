@@ -8,7 +8,7 @@ use crate::aot::ir::{
     BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction, IrModule, Terminator, UnaryOpKind,
     VarRef,
 };
-use crate::aot::types::JuliaType;
+use crate::aot::types::StaticType;
 use crate::aot::AotResult;
 
 /// Rust code generator
@@ -64,7 +64,7 @@ impl RustCodeGenerator {
     }
 
     /// Generate type annotation
-    fn type_to_rust(&self, ty: &JuliaType) -> String {
+    fn type_to_rust(&self, ty: &StaticType) -> String {
         ty.to_rust_type()
     }
 
@@ -209,6 +209,31 @@ impl RustCodeGenerator {
                     self.write_line(&format!("{};", call));
                 }
             }
+            Instruction::CallMulti { dests, func, args } => {
+                let args_str: Vec<_> = args.iter().map(|a| self.var_to_rust(a)).collect();
+                let dests_str: Vec<_> = dests.iter().map(|d| self.var_to_rust(d)).collect();
+                self.write_line(&format!(
+                    "let ({}) = {}({});",
+                    dests_str.join(", "),
+                    func,
+                    args_str.join(", ")
+                ));
+            }
+            Instruction::StructNew {
+                dest,
+                size,
+                align,
+                fields,
+            } => {
+                let dest_name = self.var_to_rust(dest);
+                self.write_line(&format!(
+                    "// struct {} stack layout: size={}, align={}, fields={}",
+                    dest_name,
+                    size,
+                    align,
+                    fields.len()
+                ));
+            }
             Instruction::GetIndex { dest, array, index } => {
                 let dest_name = self.var_to_rust(dest);
                 let array_name = self.var_to_rust(array);
@@ -245,6 +270,19 @@ impl RustCodeGenerator {
                     dest_name, ty, object_name, field
                 ));
             }
+            Instruction::GetFieldOffset {
+                dest,
+                object,
+                offset,
+            } => {
+                let dest_name = self.var_to_rust(dest);
+                let object_name = self.var_to_rust(object);
+                let ty = self.type_to_rust(&dest.ty);
+                self.write_line(&format!(
+                    "let {}: {} = /* load {} + {} */ Default::default();",
+                    dest_name, ty, object_name, offset
+                ));
+            }
             Instruction::SetField {
                 object,
                 field,
@@ -253,6 +291,18 @@ impl RustCodeGenerator {
                 let object_name = self.var_to_rust(object);
                 let value_name = self.var_to_rust(value);
                 self.write_line(&format!("{}.{} = {};", object_name, field, value_name));
+            }
+            Instruction::SetFieldOffset {
+                object,
+                offset,
+                value,
+            } => {
+                let object_name = self.var_to_rust(object);
+                let value_name = self.var_to_rust(value);
+                self.write_line(&format!(
+                    "/* store {} + {} */ {};",
+                    object_name, offset, value_name
+                ));
             }
             Instruction::TypeAssert { dest, src, ty } => {
                 let dest_name = self.var_to_rust(dest);
@@ -290,6 +340,10 @@ impl RustCodeGenerator {
             }
             Terminator::Return(None) => {
                 self.write_line("return;");
+            }
+            Terminator::ReturnMany(vars) => {
+                let vars_str: Vec<_> = vars.iter().map(|var| self.var_to_rust(var)).collect();
+                self.write_line(&format!("return ({});", vars_str.join(", ")));
             }
             Terminator::Jump(label) => {
                 self.write_line(&format!("// goto {}", label));
@@ -416,7 +470,7 @@ mod tests {
     use super::*;
     use crate::aot::codegen::CodeGenerator;
     use crate::aot::ir::{IrFunction, IrModule, Terminator, VarRef};
-    use crate::aot::types::JuliaType;
+    use crate::aot::types::StaticType;
 
     #[test]
     fn test_rust_codegen_simple_function() {
@@ -424,8 +478,8 @@ mod tests {
 
         let mut func = IrFunction::new(
             "add_one".to_string(),
-            vec![("x".to_string(), JuliaType::Int64)],
-            JuliaType::Int64,
+            vec![("x".to_string(), StaticType::I64)],
+            StaticType::I64,
         );
 
         // Add return terminator
@@ -433,7 +487,7 @@ mod tests {
             .unwrap()
             .set_terminator(Terminator::Return(Some(VarRef::new(
                 "x".to_string(),
-                JuliaType::Int64,
+                StaticType::I64,
             ))));
 
         let result = codegen.generate_function(&func).unwrap();
@@ -446,7 +500,7 @@ mod tests {
         let mut codegen = RustCodeGenerator::default_config();
 
         let mut module = IrModule::new("test".to_string());
-        let mut func = IrFunction::new("main".to_string(), vec![], JuliaType::Nothing);
+        let mut func = IrFunction::new("main".to_string(), vec![], StaticType::Nothing);
         func.entry_block_mut()
             .unwrap()
             .set_terminator(Terminator::Return(None));

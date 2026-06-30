@@ -10,8 +10,9 @@ use crate::ir::core::{BinaryOp, BuiltinOp, Expr, UnaryOp};
 pub fn infer_builtin_effects(name: &str, arg_effects: &[Effects]) -> Effects {
     match name {
         // Pure arithmetic operations
-        "+" | "-" | "*" | "/" | "^" | "//" | "div" | "rem" | "mod" | "%" => {
-            infer_arithmetic_effects(arg_effects)
+        "+" | "-" | "*" | "/" | "^" | "//" => infer_arithmetic_effects(arg_effects),
+        "div" | "rem" | "mod" | "%" => {
+            merge_with_args(Effects::effect_free_may_throw(), arg_effects)
         }
 
         // Comparison operations (pure)
@@ -29,10 +30,11 @@ pub fn infer_builtin_effects(name: &str, arg_effects: &[Effects]) -> Effects {
         // IMPORTANT: This list is an effect inference hint, independent of whether the
         // function is a Rust builtin or Pure Julia. Do NOT remove entries during
         // builtin migration. See Issue #2634 and docs/vm/BUILTIN_REMOVAL.md Layer 5.
-        "sqrt" | "sin" | "cos" | "tan" | "exp" | "log" | "log10" | "log2" | "abs" | "sign"
-        | "floor" | "ceil" | "round" | "trunc" | "isnan" | "isinf" | "isfinite" => {
-            Effects::pure_arithmetic()
+        "sqrt" | "log" | "log10" | "log2" => {
+            merge_with_args(Effects::effect_free_may_throw(), arg_effects)
         }
+        "sin" | "cos" | "tan" | "exp" | "abs" | "sign" | "floor" | "ceil" | "round" | "trunc"
+        | "isnan" | "isinf" | "isfinite" => Effects::pure_arithmetic(),
 
         // Array indexing (getindex) - may throw BoundsError
         "getindex" => Effects::array_getindex(),
@@ -40,8 +42,10 @@ pub fn infer_builtin_effects(name: &str, arg_effects: &[Effects]) -> Effects {
         // Array mutation (setindex!) - side effects
         "setindex!" => Effects::array_setindex(),
 
-        // Array construction (pure)
-        "zeros" | "ones" | "fill" | "similar" | "copy" => Effects::pure_arithmetic(),
+        // Array construction: effect-free + nothrow but NOT consistent — each call
+        // returns a fresh, independently-mutable array, so they must not be CSE'd
+        // or hoisted into a shared allocation (Issue #7176).
+        "zeros" | "ones" | "fill" | "similar" | "copy" => Effects::allocating(),
 
         // Array properties (pure)
         "length" | "size" | "ndims" | "eltype" | "axes" | "eachindex" => Effects::pure_arithmetic(),
@@ -55,17 +59,34 @@ pub fn infer_builtin_effects(name: &str, arg_effects: &[Effects]) -> Effects {
             Effects::pure_arithmetic()
         }
 
-        // Type operations (pure)
-        "typeof" | "isa" | "convert" | "promote_type" => Effects::pure_arithmetic(),
+        // Core builtins classified by upstream semantic category, mirroring
+        // `julia/Compiler/src/tfuncs.jl builtin_effects` (Issue #4274).
+        //
+        // Pure builtins (`_PURE_BUILTINS`) and the consistent + effect-free +
+        // inaccessiblememonly builtins that are nothrow for well-typed concrete
+        // arguments: consistent, effect-free, nothrow, total.
+        "typeof" | "isa" | "nfields" | "typeassert" | "sizeof" | "ifelse" | "convert"
+        | "promote_type" => Effects::pure_arithmetic(),
 
-        // Tuple/NamedTuple operations (pure)
-        "tuple" | "getfield" | "fieldnames" => Effects::pure_arithmetic(),
+        // Tuple construction (`_PURE_BUILTINS`): always nothrow, total.
+        "tuple" => Effects::pure_arithmetic(),
+
+        // Consistent + effect-free builtins that may throw (e.g. an invalid
+        // field selector). Upstream taints only `:nothrow`; the inferred
+        // exception type is `Any` (Issue #4274).
+        "getfield" | "fieldtype" => Effects::effect_free_may_throw(),
+
+        // `fieldnames` is effect-free and pure for the reflected signatures.
+        "fieldnames" => Effects::pure_arithmetic(),
 
         // Collection operations (pure)
         "push!" | "pop!" | "append!" | "deleteat!" => Effects::array_setindex(), // Mutation
 
         // Iteration operations (pure)
-        "iterate" | "first" | "last" | "collect" => Effects::pure_arithmetic(),
+        "iterate" | "first" | "last" => Effects::pure_arithmetic(),
+
+        // `collect` materializes a fresh mutable array — allocating, not consistent.
+        "collect" => Effects::allocating(),
 
         // Range operations (pure)
         "range" | ":" | "step" => Effects::pure_arithmetic(),
@@ -73,11 +94,9 @@ pub fn infer_builtin_effects(name: &str, arg_effects: &[Effects]) -> Effects {
         // Random number generation (side effects, modifies RNG state)
         "rand" | "randn" | "randexp" => Effects::with_side_effects(),
 
-        // Default: conservative (arbitrary effects)
-        _ => {
-            // For unknown functions, merge argument effects conservatively
-            merge_arg_effects(arg_effects)
-        }
+        // Default: conservative (arbitrary effects). Unknown calls may throw
+        // or perform arbitrary work even when their arguments are pure.
+        _ => Effects::arbitrary(),
     }
 }
 
@@ -97,6 +116,7 @@ fn infer_arithmetic_effects(arg_effects: &[Effects]) -> Effects {
 }
 
 /// Merge argument effects conservatively.
+#[cfg(test)]
 fn merge_arg_effects(arg_effects: &[Effects]) -> Effects {
     if arg_effects.is_empty() {
         return Effects::arbitrary();
@@ -155,17 +175,11 @@ pub fn infer_binary_op_effects(op: &BinaryOp, left: &Effects, right: &Effects) -
 
     match op {
         // Arithmetic operations - pure if operands are pure
-        BinaryOp::Add
-        | BinaryOp::Sub
-        | BinaryOp::Mul
-        | BinaryOp::Div
-        | BinaryOp::IntDiv
-        | BinaryOp::Mod
-        | BinaryOp::Pow => {
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
             Effects {
                 consistent: merged.consistent,
                 effect_free: merged.effect_free,
-                nothrow: merged.nothrow, // Division may throw DivideError
+                nothrow: merged.nothrow,
                 terminates: true,
                 notaskstate: merged.notaskstate,
                 inaccessiblememonly: merged.inaccessiblememonly,
@@ -173,6 +187,10 @@ pub fn infer_binary_op_effects(op: &BinaryOp, left: &Effects, right: &Effects) -
                 nonoverlayed: merged.nonoverlayed,
                 nortcall: merged.nortcall,
             }
+        }
+
+        BinaryOp::IntDiv | BinaryOp::Mod => {
+            merge_with_args(Effects::effect_free_may_throw(), &[*left, *right])
         }
 
         // Comparison operations - pure
@@ -380,6 +398,54 @@ mod tests {
     }
 
     #[test]
+    fn test_issue_4274_throwing_effect_free_numeric_builtins() {
+        for name in ["div", "rem", "mod", "%", "sqrt", "log", "log10", "log2"] {
+            let effects = infer_builtin_effects(name, &[]);
+            assert!(effects.consistent.is_always_true(), "{name}");
+            assert!(effects.effect_free.is_always_true(), "{name}");
+            assert!(!effects.nothrow, "{name}");
+        }
+    }
+
+    #[test]
+    fn test_issue_4274_pure_core_builtins_are_total() {
+        // Pure / consistent+effect-free+nothrow Core builtins infer to TOTAL,
+        // matching upstream `builtin_effects` category composition.
+        for name in [
+            "tuple",
+            "typeof",
+            "nfields",
+            "isa",
+            "typeassert",
+            "sizeof",
+            "ifelse",
+        ] {
+            let effects = infer_builtin_effects(name, &[]);
+            assert!(effects.consistent.is_always_true(), "{name} consistent");
+            assert!(effects.effect_free.is_always_true(), "{name} effect_free");
+            assert!(effects.nothrow, "{name} nothrow");
+            assert!(effects.is_pure(), "{name} pure");
+            assert!(effects.is_foldable(), "{name} foldable");
+        }
+    }
+
+    #[test]
+    fn test_issue_4274_consistent_throwing_core_builtins() {
+        // `getfield` / `fieldtype` are consistent + effect-free but may throw,
+        // so upstream taints only `:nothrow` (inferred exception type `Any`).
+        for name in ["getfield", "fieldtype"] {
+            let effects = infer_builtin_effects(name, &[]);
+            assert!(effects.consistent.is_always_true(), "{name} consistent");
+            assert!(effects.effect_free.is_always_true(), "{name} effect_free");
+            assert!(!effects.nothrow, "{name} nothrow tainted");
+            // Effect-free + may-throw is not pure but is still foldable-eligible
+            // once the throw is ruled out (consistent + effect-free + terminates).
+            assert!(!effects.is_pure(), "{name} not pure");
+            assert!(effects.terminates, "{name} terminates");
+        }
+    }
+
+    #[test]
     fn test_infer_builtin_println() {
         let effects = infer_builtin_effects("println", &[]);
         assert!(!effects.is_pure());
@@ -408,6 +474,18 @@ mod tests {
         let right = Effects::pure_arithmetic();
         let effects = infer_binary_op_effects(&BinaryOp::Add, &left, &right);
         assert!(effects.is_pure());
+    }
+
+    #[test]
+    fn test_issue_4274_throwing_effect_free_binary_ops() {
+        let left = Effects::pure_arithmetic();
+        let right = Effects::pure_arithmetic();
+        for op in [BinaryOp::IntDiv, BinaryOp::Mod] {
+            let effects = infer_binary_op_effects(&op, &left, &right);
+            assert!(effects.consistent.is_always_true());
+            assert!(effects.effect_free.is_always_true());
+            assert!(!effects.nothrow);
+        }
     }
 
     #[test]

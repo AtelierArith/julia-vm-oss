@@ -46,6 +46,17 @@ fn test_identifiers() {
 }
 
 #[test]
+fn test_superscript_identifier_suffix() {
+    let mut lexer = Token::lexer("dderiv⁻¹ dderiv² dderiv³");
+    assert_eq!(lexer.next(), Some(Ok(Token::Identifier)));
+    assert_eq!(lexer.slice(), "dderiv⁻¹");
+    assert_eq!(lexer.next(), Some(Ok(Token::Identifier)));
+    assert_eq!(lexer.slice(), "dderiv²");
+    assert_eq!(lexer.next(), Some(Ok(Token::Identifier)));
+    assert_eq!(lexer.slice(), "dderiv³");
+}
+
+#[test]
 fn test_unicode_operators() {
     let mut lexer = Token::lexer("≤ ≥ ≠ ∈ ⊆ √");
     assert_eq!(lexer.next(), Some(Ok(Token::LessEqual)));

@@ -3,9 +3,9 @@
 # =============================================================================
 # Based on Julia's base/mathconstants.jl
 #
-# Mathematical constants are defined as Float64 values for simplicity.
-# Julia's official implementation uses the Irrational type for higher precision,
-# but SubsetJuliaVM uses Float64 for simplicity and compatibility.
+# Mathematical constants are represented as Irrational singleton values, matching
+# Julia's public type surface while VM numeric constructors provide Float64 and
+# BigFloat conversion.
 #
 # IMPORTANT: Only π, pi, and ℯ are exported from Base.
 # Other constants (e, γ, eulergamma, φ, golden, catalan) are only available
@@ -13,11 +13,11 @@
 
 # Top-level constants exported from Base (see julia/base/exports.jl)
 # π (pi) - ratio of circumference to diameter
-const π = 3.141592653589793
+const π = Irrational{:π}()
 const pi = π
 
 # ℯ (Euler's number) - base of natural logarithm
-const ℯ = 2.718281828459045
+const ℯ = Irrational{:ℯ}()
 
 # =============================================================================
 # MathConstants module - organized access to mathematical constants
@@ -47,12 +47,12 @@ export π, pi, ℯ, e, γ, eulergamma, catalan, φ, golden
 
 # π (pi) - ratio of circumference to diameter
 # The constant π is the ratio of a circle's circumference to its diameter.
-const π = 3.141592653589793
+const π = Irrational{:π}()
 const pi = π
 
 # ℯ (Euler's number) - base of natural logarithm
 # Also known as Napier's constant.
-const ℯ = 2.718281828459045
+const ℯ = Irrational{:ℯ}()
 const e = ℯ
 
 # γ (gamma) - Euler-Mascheroni constant

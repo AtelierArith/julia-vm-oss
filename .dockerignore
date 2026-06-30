@@ -1,0 +1,14 @@
+.git
+target
+
+julia
+SubsetJuliaVMApp
+mobile
+web
+benchmarks
+
+**/target
+**/*.xcframework
+**/build
+
+.DS_Store

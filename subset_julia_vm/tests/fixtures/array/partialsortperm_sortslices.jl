@@ -2,17 +2,17 @@
 
 using Test
 
-@testset "partialsortperm basic" begin
+@testset "partialsortperm basic (Issue #5745)" begin
     arr = [3.0, 1.0, 4.0, 1.5, 2.0]
-    # k=1: index of smallest element (1.0 at index 2)
-    p1 = partialsortperm(arr, 1)
-    @test p1[1] == 2
+    # Integer k returns a single index (the k-th order statistic), not the
+    # whole permutation.
+    @test partialsortperm(arr, 1) == 2   # 1.0 at index 2
+    @test partialsortperm(arr, 3) == 5   # 2.0 at index 5 (3rd smallest)
+    @test partialsortperm(arr, 1) isa Integer
 
-    # k=3: indices of 3 smallest elements in sorted order
-    p3 = partialsortperm(arr, 3)
-    @test p3[1] == 2  # 1.0
-    @test p3[2] == 4  # 1.5
-    @test p3[3] == 5  # 2.0
+    # A range k returns the vector of indices for those order statistics.
+    @test partialsortperm(arr, 1:3) == [2, 4, 5]   # 1.0, 1.5, 2.0
+    @test partialsortperm(arr, 2:4) == [4, 5, 1]   # 1.5, 2.0, 3.0
 end
 
 @testset "partialsortperm! in-place" begin

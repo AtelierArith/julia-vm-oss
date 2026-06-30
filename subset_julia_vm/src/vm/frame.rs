@@ -1,16 +1,16 @@
 use super::value::{
-    ArrayRef, DictValue, GeneratorValue, NamedTupleValue, RangeValue, SymbolValue, TupleValue,
-    Value,
+    native_array_ref_value as array_value, native_array_value_ref, ArrayRef, GeneratorValue,
+    NamedTupleValue, RangeValue, SymbolValue, TupleValue, Value,
 };
 use crate::rng::RngInstance;
 use crate::types::JuliaType;
 use half::f16;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Tag identifying which typed HashMap a variable is stored in.
 /// Enables O(1) lookup/removal instead of cascading through all maps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VarTypeTag {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum VarTypeTag {
     I64,
     F64,
     F32,
@@ -21,6 +21,7 @@ pub(crate) enum VarTypeTag {
     Tuple,
     NamedTuple,
     Dict,
+    Set,
     Struct,
     Range,
     Rng,
@@ -30,38 +31,96 @@ pub(crate) enum VarTypeTag {
     Nothing,
     Bool,
     ValSymbol,
+    Symbol,
+}
+
+fn is_narrow_int_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::I8(_)
+            | Value::I16(_)
+            | Value::I32(_)
+            | Value::I128(_)
+            | Value::U8(_)
+            | Value::U16(_)
+            | Value::U32(_)
+            | Value::U64(_)
+            | Value::U128(_)
+    )
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LazyLocalMap<V> {
+    inner: Option<HashMap<String, V>>,
+}
+
+impl<V> LazyLocalMap<V> {
+    fn new() -> Self {
+        Self { inner: None }
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Option<&V> {
+        self.inner.as_ref()?.get(name)
+    }
+
+    pub(crate) fn get_mut(&mut self, name: &str) -> Option<&mut V> {
+        self.inner.as_mut()?.get_mut(name)
+    }
+
+    pub(crate) fn insert(&mut self, name: String, value: V) -> Option<V> {
+        self.inner
+            .get_or_insert_with(HashMap::new)
+            .insert(name, value)
+    }
+
+    pub(crate) fn remove(&mut self, name: &str) -> Option<V> {
+        self.inner.as_mut()?.remove(name)
+    }
+
+    pub(crate) fn clear(&mut self) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.clear();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.inner.as_ref().is_none_or(HashMap::is_empty)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capacity(&self) -> usize {
+        self.inner.as_ref().map_or(0, HashMap::capacity)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn contains_key(&self, name: &str) -> bool {
+        self.inner
+            .as_ref()
+            .is_some_and(|inner| inner.contains_key(name))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Frame {
+    /// Single contiguous slot store (Issue #6344). The former 19 typed
+    /// "sidecar" `Vec`s were pure mirrors of this store — every write kept
+    /// them in sync with the `Value` here — so typed access is now served by
+    /// the `slot_*` accessor methods matching directly on this vector,
+    /// eliminating 19 heap buffers per frame and the 19 sidecar writes that
+    /// every slot store previously performed.
     pub locals_slots: Vec<Option<Value>>,
-    pub locals_i64: HashMap<String, i64>,
-    pub locals_f64: HashMap<String, f64>,
-    pub locals_f32: HashMap<String, f32>,
-    pub locals_f16: HashMap<String, f16>,
-    pub locals_array: HashMap<String, ArrayRef>,
-    // Complex is now stored in locals_struct (heap allocation)
-    pub locals_str: HashMap<String, String>,
-    pub locals_char: HashMap<String, char>,
-    pub locals_struct: HashMap<String, usize>, // Index into VM's struct_heap (includes Complex)
-    pub locals_rng: HashMap<String, RngInstance>,
-    pub locals_range: HashMap<String, RangeValue>,
-    pub locals_tuple: HashMap<String, TupleValue>,
-    pub locals_named_tuple: HashMap<String, NamedTupleValue>,
-    pub locals_dict: HashMap<String, Box<DictValue>>,
-    pub locals_generator: HashMap<String, GeneratorValue>,
-    pub locals_any: HashMap<String, Value>,
-    /// Narrow integer types (I8/I16/I32/I128/U8–U128) stored as Value to preserve type info.
-    /// Separate from locals_any to avoid mixing with untyped catch-all values.
-    pub locals_narrow_int: HashMap<String, Value>,
-    pub locals_nothing: HashSet<String>, // Track variables holding Nothing
+    pub locals_any: LazyLocalMap<Value>,
     /// Type parameter bindings from where clauses (e.g., T -> Float64)
     pub type_bindings: HashMap<String, JuliaType>,
-    /// Boolean type parameters from Val{true}/Val{false} patterns
-    pub locals_bool: HashMap<String, bool>,
-    /// Symbol type parameters from Val{:symbol} patterns
-    pub locals_val_symbol: HashMap<String, String>,
     pub func_index: Option<usize>,
+    pub world_age: u64,
+    /// Operand stack height at function entry, after call arguments have been
+    /// consumed. Internal returns truncate back to this boundary before pushing
+    /// the return value.
+    pub stack_base: usize,
+    /// True when this frame was entered from an `@inbounds` call context.
+    pub inbounds_context: bool,
     /// Captured variables from closure environment.
     /// When calling a closure, these values are populated from the ClosureValue's captures.
     pub captured_vars: HashMap<String, Value>,
@@ -78,30 +137,229 @@ impl Frame {
     pub fn new_with_slots(slot_count: usize, func_index: Option<usize>) -> Self {
         Self {
             locals_slots: vec![None; slot_count],
-            locals_i64: HashMap::new(),
-            locals_f64: HashMap::new(),
-            locals_f32: HashMap::new(),
-            locals_f16: HashMap::new(),
-            locals_array: HashMap::new(),
-            // Complex is now stored in locals_struct
-            locals_str: HashMap::new(),
-            locals_char: HashMap::new(),
-            locals_struct: HashMap::new(),
-            locals_rng: HashMap::new(),
-            locals_range: HashMap::new(),
-            locals_tuple: HashMap::new(),
-            locals_named_tuple: HashMap::new(),
-            locals_dict: HashMap::new(),
-            locals_generator: HashMap::new(),
-            locals_any: HashMap::new(),
-            locals_narrow_int: HashMap::new(),
-            locals_nothing: HashSet::new(),
+            locals_any: LazyLocalMap::new(),
             type_bindings: HashMap::new(),
-            locals_bool: HashMap::new(),
-            locals_val_symbol: HashMap::new(),
             func_index,
+            world_age: 1,
+            stack_base: 0,
+            inbounds_context: false,
             captured_vars: HashMap::new(),
             var_types: HashMap::new(),
+        }
+    }
+
+    #[inline]
+    fn store_slot(&mut self, slot: usize, value: Value) -> bool {
+        if let Some(slot_ref) = self.locals_slots.get_mut(slot) {
+            *slot_ref = Some(value);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn set_slot_i64(&mut self, slot: usize, value: i64) -> bool {
+        self.store_slot(slot, Value::I64(value))
+    }
+
+    pub(crate) fn set_slot_f64(&mut self, slot: usize, value: f64) -> bool {
+        self.store_slot(slot, Value::F64(value))
+    }
+
+    pub(crate) fn set_slot_f32(&mut self, slot: usize, value: f32) -> bool {
+        self.store_slot(slot, Value::F32(value))
+    }
+
+    pub(crate) fn set_slot_f16(&mut self, slot: usize, value: f16) -> bool {
+        self.store_slot(slot, Value::F16(value))
+    }
+
+    pub(crate) fn set_slot_bool(&mut self, slot: usize, value: bool) -> bool {
+        self.store_slot(slot, Value::Bool(value))
+    }
+
+    pub(crate) fn set_slot_str(&mut self, slot: usize, value: String) -> bool {
+        self.store_slot(slot, Value::Str(value))
+    }
+
+    pub(crate) fn set_slot_char(&mut self, slot: usize, value: char) -> bool {
+        self.store_slot(slot, Value::Char(value))
+    }
+
+    pub(crate) fn set_slot_symbol(&mut self, slot: usize, value: SymbolValue) -> bool {
+        self.store_slot(slot, Value::Symbol(value))
+    }
+
+    pub(crate) fn set_slot_narrow_int(&mut self, slot: usize, value: Value) -> bool {
+        self.store_slot(slot, value)
+    }
+
+    pub(crate) fn set_slot_nothing(&mut self, slot: usize) -> bool {
+        self.store_slot(slot, Value::Nothing)
+    }
+
+    pub(crate) fn set_slot_array(&mut self, slot: usize, value: ArrayRef) -> bool {
+        self.store_slot(slot, array_value(value))
+    }
+
+    pub(crate) fn set_slot_tuple(&mut self, slot: usize, value: TupleValue) -> bool {
+        self.store_slot(slot, Value::Tuple(value))
+    }
+
+    pub(crate) fn set_slot_named_tuple(&mut self, slot: usize, value: NamedTupleValue) -> bool {
+        self.store_slot(slot, Value::NamedTuple(value))
+    }
+
+    pub(crate) fn set_slot_struct_ref(&mut self, slot: usize, heap_idx: usize) -> bool {
+        self.store_slot(slot, Value::StructRef(heap_idx))
+    }
+
+    pub(crate) fn set_slot_range(&mut self, slot: usize, value: RangeValue) -> bool {
+        self.store_slot(slot, Value::Range(value))
+    }
+
+    pub(crate) fn set_slot_rng(&mut self, slot: usize, value: RngInstance) -> bool {
+        self.store_slot(slot, Value::Rng(value))
+    }
+
+    pub(crate) fn set_slot_generator(&mut self, slot: usize, value: Box<GeneratorValue>) -> bool {
+        self.store_slot(slot, Value::Generator(value))
+    }
+
+    pub(crate) fn set_slot_value(&mut self, slot: usize, value: Value) -> bool {
+        self.store_slot(slot, value)
+    }
+
+    /// Typed slot accessors (Issue #6344). These replace the former typed
+    /// sidecar vectors: each reads `locals_slots` and yields the payload only
+    /// when the slot currently holds a value of the requested type.
+    #[inline]
+    pub(crate) fn slot_i64(&self, slot: usize) -> Option<i64> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::I64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_f64(&self, slot: usize) -> Option<f64> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::F64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_f32(&self, slot: usize) -> Option<f32> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::F32(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_f16(&self, slot: usize) -> Option<f16> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::F16(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_bool(&self, slot: usize) -> Option<bool> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Bool(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_str(&self, slot: usize) -> Option<&String> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Str(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_char(&self, slot: usize) -> Option<char> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Char(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_symbol(&self, slot: usize) -> Option<&SymbolValue> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Symbol(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_narrow_int(&self, slot: usize) -> Option<&Value> {
+        self.locals_slots
+            .get(slot)?
+            .as_ref()
+            .filter(|v| is_narrow_int_value(v))
+    }
+
+    #[inline]
+    pub(crate) fn slot_nothing(&self, slot: usize) -> bool {
+        matches!(self.locals_slots.get(slot), Some(Some(Value::Nothing)))
+    }
+
+    #[inline]
+    pub(crate) fn slot_array(&self, slot: usize) -> Option<&ArrayRef> {
+        native_array_value_ref(self.locals_slots.get(slot)?.as_ref()?)
+    }
+
+    #[inline]
+    pub(crate) fn slot_tuple(&self, slot: usize) -> Option<&TupleValue> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Tuple(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_named_tuple(&self, slot: usize) -> Option<&NamedTupleValue> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::NamedTuple(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_struct(&self, slot: usize) -> Option<usize> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::StructRef(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_range(&self, slot: usize) -> Option<&RangeValue> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Range(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_rng(&self, slot: usize) -> Option<&RngInstance> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Rng(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn slot_generator(&self, slot: usize) -> Option<&GeneratorValue> {
+        match self.locals_slots.get(slot)?.as_ref()? {
+            Value::Generator(v) => Some(v),
+            _ => None,
         }
     }
 
@@ -117,85 +375,89 @@ impl Frame {
     /// Direct lookup using the type tag -- O(1) dispatch to the correct map.
     fn get_by_tag(&self, name: &str, tag: VarTypeTag) -> Option<Value> {
         match tag {
-            VarTypeTag::I64 => self.locals_i64.get(name).map(|v| Value::I64(*v)),
-            VarTypeTag::F64 => self.locals_f64.get(name).map(|v| Value::F64(*v)),
-            VarTypeTag::F32 => self.locals_f32.get(name).map(|v| Value::F32(*v)),
-            VarTypeTag::F16 => self.locals_f16.get(name).map(|v| Value::F16(*v)),
-            VarTypeTag::Str => self.locals_str.get(name).map(|v| Value::Str(v.clone())),
-            VarTypeTag::Char => self.locals_char.get(name).map(|v| Value::Char(*v)),
-            VarTypeTag::Array => self.locals_array.get(name).map(|v| Value::Array(v.clone())),
-            VarTypeTag::Tuple => self.locals_tuple.get(name).map(|v| Value::Tuple(v.clone())),
-            VarTypeTag::NamedTuple => self
-                .locals_named_tuple
+            VarTypeTag::I64 => self.locals_any.get(name).and_then(|v| match v {
+                Value::I64(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::F64 => self.locals_any.get(name).and_then(|v| match v {
+                Value::F64(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::F32 => self.locals_any.get(name).and_then(|v| match v {
+                Value::F32(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::F16 => self.locals_any.get(name).and_then(|v| match v {
+                Value::F16(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Str => self.locals_any.get(name).and_then(|v| match v {
+                Value::Str(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Char => self.locals_any.get(name).and_then(|v| match v {
+                Value::Char(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Array => self
+                .locals_any
                 .get(name)
-                .map(|v| Value::NamedTuple(v.clone())),
-            VarTypeTag::Dict => self.locals_dict.get(name).map(|v| Value::Dict(v.clone())),
-            VarTypeTag::Struct => self.locals_struct.get(name).map(|v| Value::StructRef(*v)),
-            VarTypeTag::Range => self.locals_range.get(name).map(|v| Value::Range(v.clone())),
-            VarTypeTag::Rng => self.locals_rng.get(name).map(|v| Value::Rng(v.clone())),
-            VarTypeTag::Generator => self
-                .locals_generator
-                .get(name)
-                .map(|v| Value::Generator(v.clone())),
+                .and_then(|v| native_array_value_ref(v).map(|arr| array_value(arr.clone()))),
+            VarTypeTag::Tuple => self.locals_any.get(name).and_then(|v| match v {
+                Value::Tuple(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::NamedTuple => self.locals_any.get(name).and_then(|v| match v {
+                Value::NamedTuple(_) => Some(v.clone()),
+                _ => None,
+            }),
+            // `Value::Dict`/`Value::Set` were retired (Issues #6731/#6732); a
+            // Dict/Set local is a StructRef resolved via the Struct/Any tags.
+            VarTypeTag::Dict | VarTypeTag::Set => None,
+            VarTypeTag::Struct => self.locals_any.get(name).and_then(|v| match v {
+                Value::StructRef(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Range => self.locals_any.get(name).and_then(|v| match v {
+                Value::Range(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Rng => self.locals_any.get(name).and_then(|v| match v {
+                Value::Rng(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Generator => self.locals_any.get(name).and_then(|v| match v {
+                Value::Generator(_) => Some(v.clone()),
+                _ => None,
+            }),
             VarTypeTag::Any => self.locals_any.get(name).cloned(),
-            VarTypeTag::NarrowInt => self.locals_narrow_int.get(name).cloned(),
-            VarTypeTag::Nothing => {
-                if self.locals_nothing.contains(name) {
-                    Some(Value::Nothing)
-                } else {
-                    None
-                }
-            }
-            VarTypeTag::Bool => self.locals_bool.get(name).map(|v| Value::Bool(*v)),
-            VarTypeTag::ValSymbol => self
-                .locals_val_symbol
+            VarTypeTag::NarrowInt => self
+                .locals_any
                 .get(name)
-                .map(|v| Value::Symbol(SymbolValue::new(v))),
+                .filter(|v| is_narrow_int_value(v))
+                .cloned(),
+            VarTypeTag::Nothing => self.locals_any.get(name).and_then(|v| match v {
+                Value::Nothing => Some(Value::Nothing),
+                _ => None,
+            }),
+            VarTypeTag::Bool => self.locals_any.get(name).and_then(|v| match v {
+                Value::Bool(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::ValSymbol => self.locals_any.get(name).and_then(|v| match v {
+                Value::Symbol(_) => Some(v.clone()),
+                _ => None,
+            }),
+            VarTypeTag::Symbol => self.locals_any.get(name).and_then(|v| match v {
+                Value::Symbol(_) => Some(v.clone()),
+                _ => None,
+            }),
         }
     }
 
     /// Fallback linear search for variables without a tag (safety net).
     fn get_by_cascade(&self, name: &str) -> Option<Value> {
-        if let Some(v) = self.locals_narrow_int.get(name) {
-            return Some(v.clone());
-        } else if let Some(v) = self.locals_any.get(name) {
-            return Some(v.clone());
-        } else if let Some(v) = self.locals_array.get(name) {
-            return Some(Value::Array(v.clone()));
-        } else if let Some(v) = self.locals_i64.get(name) {
-            return Some(Value::I64(*v));
-        } else if let Some(v) = self.locals_f64.get(name) {
-            return Some(Value::F64(*v));
-        } else if let Some(v) = self.locals_f32.get(name) {
-            return Some(Value::F32(*v));
-        } else if let Some(v) = self.locals_f16.get(name) {
-            return Some(Value::F16(*v));
-        } else if let Some(v) = self.locals_str.get(name) {
-            return Some(Value::Str(v.clone()));
-        } else if let Some(v) = self.locals_char.get(name) {
-            return Some(Value::Char(*v));
-        } else if let Some(v) = self.locals_tuple.get(name) {
-            return Some(Value::Tuple(v.clone()));
-        } else if let Some(v) = self.locals_named_tuple.get(name) {
-            return Some(Value::NamedTuple(v.clone()));
-        } else if let Some(v) = self.locals_dict.get(name) {
-            return Some(Value::Dict(v.clone()));
-        } else if let Some(&idx) = self.locals_struct.get(name) {
-            return Some(Value::StructRef(idx));
-        } else if let Some(v) = self.locals_range.get(name) {
-            return Some(Value::Range(v.clone()));
-        } else if let Some(v) = self.locals_rng.get(name) {
-            return Some(Value::Rng(v.clone()));
-        } else if let Some(v) = self.locals_generator.get(name) {
-            return Some(Value::Generator(v.clone()));
-        } else if self.locals_nothing.contains(name) {
-            return Some(Value::Nothing);
-        } else if let Some(v) = self.locals_bool.get(name) {
-            return Some(Value::Bool(*v));
-        }
-        self.locals_val_symbol
-            .get(name)
-            .map(|v| Value::Symbol(SymbolValue::new(v)))
+        self.locals_any.get(name).cloned()
     }
 
     /// O(1) removal: remove variable from its tagged map, then clear the tag.
@@ -210,62 +472,112 @@ impl Frame {
     /// Targeted removal from a specific typed map.
     fn remove_by_tag(&mut self, name: &str, tag: VarTypeTag) {
         match tag {
-            VarTypeTag::I64 => { self.locals_i64.remove(name); }
-            VarTypeTag::F64 => { self.locals_f64.remove(name); }
-            VarTypeTag::F32 => { self.locals_f32.remove(name); }
-            VarTypeTag::F16 => { self.locals_f16.remove(name); }
-            VarTypeTag::Str => { self.locals_str.remove(name); }
-            VarTypeTag::Char => { self.locals_char.remove(name); }
-            VarTypeTag::Array => { self.locals_array.remove(name); }
-            VarTypeTag::Tuple => { self.locals_tuple.remove(name); }
-            VarTypeTag::NamedTuple => { self.locals_named_tuple.remove(name); }
-            VarTypeTag::Dict => { self.locals_dict.remove(name); }
-            VarTypeTag::Struct => { self.locals_struct.remove(name); }
-            VarTypeTag::Range => { self.locals_range.remove(name); }
-            VarTypeTag::Rng => { self.locals_rng.remove(name); }
-            VarTypeTag::Generator => { self.locals_generator.remove(name); }
-            VarTypeTag::Any => { self.locals_any.remove(name); }
-            VarTypeTag::NarrowInt => { self.locals_narrow_int.remove(name); }
-            VarTypeTag::Nothing => { self.locals_nothing.remove(name); }
-            VarTypeTag::Bool => { self.locals_bool.remove(name); }
-            VarTypeTag::ValSymbol => { self.locals_val_symbol.remove(name); }
+            VarTypeTag::I64 => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::F64 => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::F32 => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::F16 => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Str => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Char => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Array => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Tuple => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::NamedTuple => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Dict => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Set => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Struct => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Range => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Rng => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Generator => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Any => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::NarrowInt => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Nothing => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Bool => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::ValSymbol => {
+                self.locals_any.remove(name);
+            }
+            VarTypeTag::Symbol => {
+                self.locals_any.remove(name);
+            }
         }
     }
 
     /// Fallback: remove from all typed maps (for untagged variables).
     fn remove_from_all(&mut self, name: &str) {
-        self.locals_i64.remove(name);
-        self.locals_f64.remove(name);
-        self.locals_f32.remove(name);
-        self.locals_f16.remove(name);
-        self.locals_str.remove(name);
-        self.locals_char.remove(name);
-        self.locals_array.remove(name);
-        self.locals_tuple.remove(name);
-        self.locals_named_tuple.remove(name);
-        self.locals_dict.remove(name);
-        self.locals_struct.remove(name);
-        self.locals_range.remove(name);
-        self.locals_rng.remove(name);
-        self.locals_generator.remove(name);
         self.locals_any.remove(name);
-        self.locals_narrow_int.remove(name);
-        self.locals_nothing.remove(name);
-        self.locals_bool.remove(name);
-        self.locals_val_symbol.remove(name);
     }
 
-    /// Create a new frame with captured variables from a closure.
-    pub fn new_with_captures(
-        slot_count: usize,
-        func_index: Option<usize>,
-        captures: Vec<(String, Value)>,
-    ) -> Self {
-        let mut frame = Self::new_with_slots(slot_count, func_index);
-        for (name, value) in captures {
-            frame.captured_vars.insert(name, value);
-        }
-        frame
+    /// Empty a retired frame before it is returned to the VM's frame pool
+    /// (Issue #5172).
+    ///
+    /// `HashMap::clear`/`Vec::clear` drop all entries but
+    /// *retain* the allocated table/buffer, so a frame pulled back out of the
+    /// pool skips the heap allocations that `new_with_slots` would otherwise
+    /// perform for every map on every call. Clearing at retirement (rather than
+    /// at reuse) also releases the contained `Value`s — e.g. refcounted array
+    /// handles and struct-heap indices — promptly, instead of pinning them in
+    /// the pool until the slot is next reused.
+    pub fn clear_for_pool(&mut self) {
+        self.locals_slots.clear();
+        self.locals_any.clear();
+        self.type_bindings.clear();
+        self.captured_vars.clear();
+        self.var_types.clear();
+    }
+
+    /// Prepare a pooled frame (already emptied by [`clear_for_pool`]) for a fresh
+    /// call: size `locals_slots` to `slot_count` and reset the scalar bookkeeping
+    /// fields to their fresh-frame defaults (Issue #5172).
+    ///
+    /// The maps are assumed already empty; only `locals_slots` is (re)filled with
+    /// `None` and the scalars are set. Keeping this separate from
+    /// [`clear_for_pool`] lets the VM release a frame's values at retirement while
+    /// deferring the (slot-count-dependent) re-initialization to reuse time.
+    pub fn prepare_for_reuse(&mut self, slot_count: usize, func_index: Option<usize>) {
+        debug_assert!(
+            self.locals_slots.is_empty(),
+            "prepare_for_reuse expects a frame cleared via clear_for_pool"
+        );
+        self.locals_slots.resize(slot_count, None);
+        self.func_index = func_index;
+        self.stack_base = 0;
+        self.inbounds_context = false;
     }
 }
 
@@ -276,197 +588,411 @@ pub(crate) struct Handler {
     pub stack_len: usize,
     pub frame_len: usize,
     pub return_ip_len: usize,
+    pub caught_exception_len: usize,
 }
 
-/// Kind of higher-order function operation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Variant coverage intentionally includes staged op kinds used by dispatch tables.
-#[allow(dead_code)]
-pub(crate) enum HofOpKind {
-    Broadcast,         // Original broadcast: apply f to each element
-    Broadcast2,        // broadcast(f, A, B): apply f to each element pair with shape broadcasting
-    Broadcast2InPlace, // broadcast!(f, dest, A, B): in-place version of Broadcast2
-    // Note: Map, Filter, Reduce, Foldr, ForEach removed - now Pure Julia
-    MapInPlace,    // map!(f, dest, src): apply f to each element of src, store in dest
-    FilterInPlace, // filter!(f, arr): filter elements in-place
-    MapReduce,     // mapreduce(f, op, arr): apply f, then reduce with op
-    MapFoldr,      // mapfoldr(f, op, arr): apply f, then right-fold with op
-    Sum,           // sum(f, arr): apply f to each element and sum the results
-    Any,           // any(f, arr): check if f returns true for any element
-    All,           // all(f, arr): check if f returns true for all elements
-    Count,         // count(f, arr): count elements where f returns true
-    FindAll,       // findall(f, arr): return Int64 indices where f returns true
-    FindFirst,     // findfirst(f, arr): return first index where f returns true, or nothing
-    FindLast,      // findlast(f, arr): return last index where f returns true, or nothing
-    Ntuple,        // ntuple(f, n): apply f to 1..n, collect into tuple
-    TupleMap,      // map(f, tuple): apply f to each tuple element, return tuple
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Input data for broadcast/HOF operations - supports both f64 and struct arrays
-#[derive(Debug, Clone)]
-pub(crate) enum BroadcastInput {
-    /// F64 array data (legacy path)
-    F64(Vec<f64>),
-    /// Values from TypedArray (supports any element type including structs)
-    Values(Vec<Value>),
-}
+    #[test]
+    fn clear_then_prepare_resets_all_state() {
+        let mut frame = Frame::new_with_slots(3, Some(7));
+        // Populate a representative sample of the typed maps + bookkeeping.
+        frame.locals_any.insert("a".to_string(), Value::I64(1));
+        frame
+            .locals_any
+            .insert("b".to_string(), Value::Str("x".to_string()));
+        frame.locals_any.insert("c".to_string(), Value::Nothing);
+        frame.var_types.insert("a".to_string(), VarTypeTag::I64);
+        frame.var_types.insert("c".to_string(), VarTypeTag::Nothing);
+        frame.captured_vars.insert("d".to_string(), Value::I64(2));
+        frame.locals_slots[0] = Some(Value::I64(9));
+        frame.locals_slots[1] = Some(Value::Str("slot".to_string()));
+        frame.stack_base = 42;
+        frame.inbounds_context = true;
 
-impl BroadcastInput {
-    pub fn get(&self, index: usize) -> Option<Value> {
-        match self {
-            BroadcastInput::F64(v) => v.get(index).map(|&x| Value::F64(x)),
-            BroadcastInput::Values(v) => v.get(index).cloned(),
+        // Pool retirement empties everything (releasing values).
+        frame.clear_for_pool();
+        assert!(frame.locals_any.is_empty());
+        assert!(frame.var_types.is_empty());
+        assert!(frame.captured_vars.is_empty());
+        assert!(frame.locals_slots.is_empty());
+
+        // Reuse re-sizes the slots and resets the scalar fields.
+        frame.prepare_for_reuse(2, Some(11));
+        assert_eq!(frame.locals_slots.len(), 2);
+        assert!(frame.locals_slots.iter().all(|s| s.is_none()));
+        assert_eq!(frame.func_index, Some(11));
+        assert_eq!(frame.stack_base, 0);
+        assert!(!frame.inbounds_context);
+    }
+
+    #[test]
+    fn typed_slot_accessors_read_primitive_values_issue_6344() {
+        let mut frame = Frame::new_with_slots(9, None);
+
+        assert!(frame.set_slot_i64(0, 11));
+        assert!(frame.set_slot_f64(1, 2.5));
+        assert!(frame.set_slot_f32(2, 3.5));
+        assert!(frame.set_slot_f16(3, f16::from_f32(4.5)));
+        assert!(frame.set_slot_bool(4, true));
+        assert!(frame.set_slot_str(5, "value".to_string()));
+        assert!(frame.set_slot_char(6, 'x'));
+        assert!(frame.set_slot_narrow_int(7, Value::U64(7)));
+        assert!(frame.set_slot_nothing(8));
+
+        assert!(matches!(frame.locals_slots[0], Some(Value::I64(11))));
+        assert_eq!(frame.slot_i64(0), Some(11));
+        assert!(matches!(frame.locals_slots[1], Some(Value::F64(v)) if v == 2.5));
+        assert_eq!(frame.slot_f64(1), Some(2.5));
+        assert!(matches!(frame.locals_slots[2], Some(Value::F32(v)) if v == 3.5));
+        assert_eq!(frame.slot_f32(2), Some(3.5));
+        assert!(matches!(frame.locals_slots[3], Some(Value::F16(v)) if v == f16::from_f32(4.5)));
+        assert_eq!(frame.slot_f16(3), Some(f16::from_f32(4.5)));
+        assert!(matches!(frame.locals_slots[4], Some(Value::Bool(true))));
+        assert_eq!(frame.slot_bool(4), Some(true));
+        assert!(matches!(frame.locals_slots[5], Some(Value::Str(ref v)) if v == "value"));
+        assert_eq!(frame.slot_str(5).map(String::as_str), Some("value"));
+        assert!(matches!(frame.locals_slots[6], Some(Value::Char('x'))));
+        assert_eq!(frame.slot_char(6), Some('x'));
+        assert!(matches!(frame.locals_slots[7], Some(Value::U64(7))));
+        assert!(matches!(frame.slot_narrow_int(7), Some(Value::U64(7))));
+        assert!(matches!(frame.locals_slots[8], Some(Value::Nothing)));
+        assert!(frame.slot_nothing(8));
+
+        // A typed accessor only matches the type currently stored.
+        assert_eq!(frame.slot_str(0), None);
+        assert_eq!(frame.slot_i64(1), None);
+        // Out-of-bounds slots read as empty rather than panicking.
+        assert_eq!(frame.slot_i64(99), None);
+        assert!(!frame.slot_nothing(99));
+
+        assert!(frame.set_slot_value(0, Value::Str("changed".to_string())));
+        assert_eq!(frame.slot_i64(0), None);
+        assert_eq!(frame.slot_str(0).map(String::as_str), Some("changed"));
+        assert!(matches!(frame.locals_slots[0], Some(Value::Str(ref v)) if v == "changed"));
+    }
+
+    #[test]
+    fn typed_slot_accessors_read_container_values_issue_6344() {
+        use crate::vm::value::{new_array_ref, ArrayValue};
+
+        let mut frame = Frame::new_with_slots(9, None);
+        let array = new_array_ref(ArrayValue::ones_i64(vec![3]));
+        let tuple = TupleValue::new(vec![Value::I64(1), Value::Bool(true)]);
+        let named_tuple = NamedTupleValue::new(
+            vec!["a".to_string(), "b".to_string()],
+            vec![Value::I64(1), Value::Bool(true)],
+        )
+        .expect("valid named tuple");
+        let range = RangeValue::unit_range(1.0, 3.0);
+        let rng = RngInstance::stable(1);
+        let generator = Box::new(GeneratorValue::eager(Value::Tuple(tuple.clone())));
+
+        assert!(frame.set_slot_array(0, array.clone()));
+        assert!(frame.set_slot_tuple(1, tuple.clone()));
+        assert!(frame.set_slot_named_tuple(2, named_tuple.clone()));
+        assert!(frame.set_slot_struct_ref(5, 17));
+        assert!(frame.set_slot_range(6, range.clone()));
+        assert!(frame.set_slot_rng(7, rng.clone()));
+        assert!(frame.set_slot_generator(8, generator.clone()));
+
+        assert!(matches!(frame.locals_slots[0], Some(Value::ExprArgs(_))));
+        assert!(frame.slot_array(0).is_some());
+        assert!(
+            matches!(frame.locals_slots[1], Some(Value::Tuple(ref v)) if v.elements.len() == 2)
+        );
+        assert_eq!(frame.slot_tuple(1).map(|v| v.elements.len()), Some(2));
+        assert!(matches!(frame.locals_slots[2], Some(Value::NamedTuple(_))));
+        assert!(frame.slot_named_tuple(2).is_some());
+        assert!(matches!(frame.locals_slots[5], Some(Value::StructRef(17))));
+        assert_eq!(frame.slot_struct(5), Some(17));
+        assert!(matches!(frame.locals_slots[6], Some(Value::Range(_))));
+        assert!(frame.slot_range(6).is_some());
+        assert!(matches!(frame.locals_slots[7], Some(Value::Rng(_))));
+        assert!(frame.slot_rng(7).is_some());
+        assert!(matches!(frame.locals_slots[8], Some(Value::Generator(_))));
+        assert!(frame.slot_generator(8).is_some());
+
+        assert!(frame.set_slot_value(5, Value::I64(99)));
+        assert_eq!(frame.slot_struct(5), None);
+        assert_eq!(frame.slot_i64(5), Some(99));
+    }
+
+    #[test]
+    fn clear_for_pool_retains_map_capacity() {
+        let mut frame = Frame::new_with_slots(0, None);
+        for i in 0..32 {
+            frame.locals_any.insert(format!("v{i}"), Value::I64(i));
         }
-    }
-}
+        let cap_before = frame.locals_any.capacity();
+        assert!(cap_before > 0);
 
-/// Result storage for broadcast/HOF operations
-#[derive(Debug, Clone)]
-pub(crate) enum BroadcastResults {
-    /// F64 results (legacy path)
-    F64(Vec<f64>),
-    /// Value results (for struct arrays and mixed types)
-    Values(Vec<Value>),
-}
+        frame.clear_for_pool();
 
-impl BroadcastResults {
-    pub fn new_f64(capacity: usize) -> Self {
-        BroadcastResults::F64(Vec::with_capacity(capacity))
+        // clear() retains the allocated table -- this is the whole point of the
+        // pool: a recycled frame avoids re-allocating its backing maps.
+        assert!(frame.locals_any.is_empty());
+        assert_eq!(frame.locals_any.capacity(), cap_before);
     }
 
-    pub fn new_values(capacity: usize) -> Self {
-        BroadcastResults::Values(Vec::with_capacity(capacity))
+    #[test]
+    fn empty_frames_do_not_allocate_legacy_local_maps_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+
+        assert_eq!(frame.locals_any.capacity(), 0);
+
+        frame.locals_any.insert("x".to_string(), Value::I64(1));
+        assert!(frame.locals_any.capacity() > 0);
     }
 
-    pub fn is_empty(&self) -> bool {
-        match self {
-            BroadcastResults::F64(v) => v.is_empty(),
-            BroadcastResults::Values(v) => v.is_empty(),
-        }
+    #[test]
+    fn nothing_locals_use_any_carrier_with_nothing_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert("x".to_string(), Value::Nothing);
+        frame.var_types.insert("x".to_string(), VarTypeTag::Nothing);
+
+        assert!(matches!(frame.get_local("x"), Some(Value::Nothing)));
+        frame.remove_var("x");
+        assert!(frame.get_local("x").is_none());
+        assert!(!frame.locals_any.contains_key("x"));
     }
 
-    pub fn clear(&mut self) {
-        match self {
-            BroadcastResults::F64(v) => v.clear(),
-            BroadcastResults::Values(v) => v.clear(),
-        }
+    #[test]
+    fn rng_locals_use_any_carrier_with_rng_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        let rng = RngInstance::stable(1);
+        frame.locals_any.insert("r".to_string(), Value::Rng(rng));
+        frame.var_types.insert("r".to_string(), VarTypeTag::Rng);
+
+        assert!(matches!(frame.get_local("r"), Some(Value::Rng(_))));
+        frame.remove_var("r");
+        assert!(frame.get_local("r").is_none());
+        assert!(!frame.locals_any.contains_key("r"));
     }
 
-    pub fn push_f64(&mut self, val: f64) {
-        match self {
-            BroadcastResults::F64(v) => v.push(val),
-            BroadcastResults::Values(v) => v.push(Value::F64(val)),
-        }
+    #[test]
+    fn val_symbol_locals_use_any_carrier_with_val_symbol_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame
+            .locals_any
+            .insert("mode".to_string(), Value::Symbol(SymbolValue::new("fast")));
+        frame
+            .var_types
+            .insert("mode".to_string(), VarTypeTag::ValSymbol);
+
+        assert!(
+            matches!(frame.get_local("mode"), Some(Value::Symbol(ref s)) if s.as_str() == "fast")
+        );
+        frame.remove_var("mode");
+        assert!(frame.get_local("mode").is_none());
+        assert!(!frame.locals_any.contains_key("mode"));
     }
 
-    pub fn push_i64(&mut self, val: i64) {
-        match self {
-            BroadcastResults::F64(v) => v.push(val as f64),
-            BroadcastResults::Values(v) => v.push(Value::I64(val)),
-        }
+    #[test]
+    fn narrow_int_locals_use_any_carrier_with_narrow_int_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert("x".to_string(), Value::I8(7));
+        frame
+            .var_types
+            .insert("x".to_string(), VarTypeTag::NarrowInt);
+
+        assert!(matches!(frame.get_local("x"), Some(Value::I8(7))));
+        frame.remove_var("x");
+        assert!(frame.get_local("x").is_none());
+        assert!(!frame.locals_any.contains_key("x"));
     }
 
-    pub fn push_value(&mut self, val: Value) {
-        match self {
-            BroadcastResults::F64(v) => {
-                if let Value::F64(f) = val {
-                    v.push(f);
-                } else if let Value::I64(i) = val {
-                    v.push(i as f64);
-                }
-            }
-            BroadcastResults::Values(v) => v.push(val),
-        }
+    #[test]
+    fn f16_locals_use_any_carrier_with_f16_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        let value = f16::from_f32(1.5);
+        frame.locals_any.insert("x".to_string(), Value::F16(value));
+        frame.var_types.insert("x".to_string(), VarTypeTag::F16);
+
+        assert!(matches!(frame.get_local("x"), Some(Value::F16(v)) if v == value));
+        frame.remove_var("x");
+        assert!(frame.get_local("x").is_none());
+        assert!(!frame.locals_any.contains_key("x"));
     }
 
-    pub fn take_f64(&mut self) -> Vec<f64> {
-        match self {
-            BroadcastResults::F64(v) => std::mem::take(v),
-            BroadcastResults::Values(v) => v
-                .drain(..)
-                .map(|val| match val {
-                    Value::F64(f) => f,
-                    Value::I64(i) => i as f64,
-                    _ => 0.0,
-                })
-                .collect(),
-        }
+    #[test]
+    fn f32_locals_use_any_carrier_with_f32_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert("x".to_string(), Value::F32(1.5));
+        frame.var_types.insert("x".to_string(), VarTypeTag::F32);
+
+        assert!(matches!(frame.get_local("x"), Some(Value::F32(v)) if v == 1.5));
+        frame.remove_var("x");
+        assert!(frame.get_local("x").is_none());
+        assert!(!frame.locals_any.contains_key("x"));
     }
 
-    pub fn take_i64(&mut self) -> Vec<i64> {
-        match self {
-            BroadcastResults::F64(v) => v.drain(..).map(|f| f as i64).collect(),
-            BroadcastResults::Values(v) => v
-                .drain(..)
-                .map(|val| match val {
-                    Value::I64(i) => i,
-                    Value::F64(f) => f as i64,
-                    _ => 0,
-                })
-                .collect(),
-        }
+    #[test]
+    fn f64_locals_use_any_carrier_with_f64_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert("x".to_string(), Value::F64(1.5));
+        frame.var_types.insert("x".to_string(), VarTypeTag::F64);
+
+        assert!(matches!(frame.get_local("x"), Some(Value::F64(v)) if v == 1.5));
+        frame.remove_var("x");
+        assert!(frame.get_local("x").is_none());
+        assert!(!frame.locals_any.contains_key("x"));
     }
 
-    pub fn take_values(&mut self) -> Vec<Value> {
-        match self {
-            BroadcastResults::F64(v) => v.drain(..).map(Value::F64).collect(),
-            BroadcastResults::Values(v) => std::mem::take(v),
-        }
+    #[test]
+    fn i64_locals_use_any_carrier_with_i64_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert("x".to_string(), Value::I64(42));
+        frame.var_types.insert("x".to_string(), VarTypeTag::I64);
+
+        assert!(matches!(frame.get_local("x"), Some(Value::I64(42))));
+        frame.remove_var("x");
+        assert!(frame.get_local("x").is_none());
+        assert!(!frame.locals_any.contains_key("x"));
     }
-}
 
-/// State for user-defined function broadcast execution
-pub(crate) struct BroadcastState {
-    pub func_index: usize,
-    /// Input data - can be f64 array or values array
-    pub input: BroadcastInput,
-    pub input_shape: Vec<usize>,
-    /// Second input for broadcast(f, A, B) - None for single-array HOF
-    pub input2: Option<BroadcastInput>,
-    pub input2_shape: Option<Vec<usize>>,
-    /// Result shape after broadcasting (for Broadcast2 mode)
-    pub result_shape: Option<Vec<usize>>,
-    /// Destination array for in-place operations (broadcast!)
-    pub dest_array: Option<super::value::ArrayRef>,
-    /// Results storage - can be f64 or values
-    pub results: BroadcastResults,
-    pub current_index: usize,
-    pub return_ip_after_broadcast: usize,
-    /// Kind of HOF operation
-    pub op_kind: HofOpKind,
-    /// For reduce: the accumulator value (changed from f64 to Value for flexibility)
-    pub accumulator: Option<Value>,
-    /// Extra arguments for broadcast (e.g., Ref(x) in f.(arr, Ref(x)))
-    pub extra_args: Vec<Value>,
-    /// Frame depth when HOF function is called - used to detect when HOF function returns
-    /// (vs when nested functions inside the HOF function body return)
-    pub hof_frame_depth: usize,
-    /// Whether we're using the Value-based path (for struct arrays)
-    pub is_value_mode: bool,
-    /// For mapreduce: the reduce function index (separate from the map func_index)
-    pub reduce_func_index: Option<usize>,
-}
+    #[test]
+    fn bool_locals_use_any_carrier_with_bool_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame
+            .locals_any
+            .insert("flag".to_string(), Value::Bool(true));
+        frame.var_types.insert("flag".to_string(), VarTypeTag::Bool);
 
-/// State for composed function call execution: (f ∘ g)(x) = f(g(x))
-/// When calling a composed function, we first call the inner function,
-/// then when it returns, we call the outer function with the result.
-pub(crate) struct ComposedCallState {
-    /// Stack of pending outer functions to call (in order: first to pop is next to call)
-    /// For (a ∘ b ∘ c)(x), this will be [a, b] and c is called first
-    pub pending_outers: Vec<super::value::Value>,
-    /// Return IP after the entire composed call completes
-    pub return_ip: usize,
-    /// Frame depth when composed call started - used to detect return
-    pub call_frame_depth: usize,
-}
+        assert!(matches!(frame.get_local("flag"), Some(Value::Bool(true))));
+        frame.remove_var("flag");
+        assert!(frame.get_local("flag").is_none());
+        assert!(!frame.locals_any.contains_key("flag"));
+    }
 
-/// State for sprint function call execution.
-/// sprint(f, args...) calls f(io, args...) and returns the IOBuffer content as a string.
-pub(crate) struct SprintState {
-    /// The IOBuffer being written to (with interior mutability)
-    pub io: super::value::IORef,
-    /// Return IP after sprint completes
-    pub return_ip: usize,
-    /// Frame depth when sprint call started - used to detect when f returns
-    pub call_frame_depth: usize,
+    #[test]
+    fn char_locals_use_any_carrier_with_char_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert("ch".to_string(), Value::Char('x'));
+        frame.var_types.insert("ch".to_string(), VarTypeTag::Char);
+
+        assert!(matches!(frame.get_local("ch"), Some(Value::Char('x'))));
+        frame.remove_var("ch");
+        assert!(frame.get_local("ch").is_none());
+        assert!(!frame.locals_any.contains_key("ch"));
+    }
+
+    #[test]
+    fn str_locals_use_any_carrier_with_str_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame
+            .locals_any
+            .insert("s".to_string(), Value::Str("abc".to_string()));
+        frame.var_types.insert("s".to_string(), VarTypeTag::Str);
+
+        assert!(matches!(frame.get_local("s"), Some(Value::Str(ref v)) if v == "abc"));
+        frame.remove_var("s");
+        assert!(frame.get_local("s").is_none());
+        assert!(!frame.locals_any.contains_key("s"));
+    }
+
+    #[test]
+    fn range_locals_use_any_carrier_with_range_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert(
+            "r".to_string(),
+            Value::Range(RangeValue::unit_range(1.0, 3.0)),
+        );
+        frame.var_types.insert("r".to_string(), VarTypeTag::Range);
+
+        assert!(matches!(frame.get_local("r"), Some(Value::Range(_))));
+        frame.remove_var("r");
+        assert!(frame.get_local("r").is_none());
+        assert!(!frame.locals_any.contains_key("r"));
+    }
+
+    #[test]
+    fn tuple_locals_use_any_carrier_with_tuple_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame.locals_any.insert(
+            "t".to_string(),
+            Value::Tuple(TupleValue::new(vec![Value::I64(1), Value::Bool(true)])),
+        );
+        frame.var_types.insert("t".to_string(), VarTypeTag::Tuple);
+
+        assert!(matches!(frame.get_local("t"), Some(Value::Tuple(ref v)) if v.elements.len() == 2));
+        frame.remove_var("t");
+        assert!(frame.get_local("t").is_none());
+        assert!(!frame.locals_any.contains_key("t"));
+    }
+
+    #[test]
+    fn named_tuple_locals_use_any_carrier_with_named_tuple_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        let named = NamedTupleValue::new(
+            vec!["a".to_string(), "b".to_string()],
+            vec![Value::I64(1), Value::Str("x".to_string())],
+        )
+        .expect("valid named tuple");
+        frame
+            .locals_any
+            .insert("nt".to_string(), Value::NamedTuple(named));
+        frame
+            .var_types
+            .insert("nt".to_string(), VarTypeTag::NamedTuple);
+
+        assert!(
+            matches!(frame.get_local("nt"), Some(Value::NamedTuple(ref v)) if v.names.len() == 2)
+        );
+        frame.remove_var("nt");
+        assert!(frame.get_local("nt").is_none());
+        assert!(!frame.locals_any.contains_key("nt"));
+    }
+
+    #[test]
+    fn array_locals_use_any_carrier_with_array_tag_issue_5081() {
+        use crate::vm::value::{new_array_ref, ArrayValue};
+
+        let mut frame = Frame::new_with_slots(0, None);
+        let array = new_array_ref(ArrayValue::ones_i64(vec![3]));
+        frame
+            .locals_any
+            .insert("a".to_string(), array_value(array.clone()));
+        frame.var_types.insert("a".to_string(), VarTypeTag::Array);
+
+        assert!(matches!(frame.get_local("a"), Some(Value::ExprArgs(_))));
+        frame.remove_var("a");
+        assert!(frame.get_local("a").is_none());
+        assert!(!frame.locals_any.contains_key("a"));
+    }
+
+    #[test]
+    fn struct_locals_use_any_carrier_with_struct_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        frame
+            .locals_any
+            .insert("s".to_string(), Value::StructRef(17));
+        frame.var_types.insert("s".to_string(), VarTypeTag::Struct);
+
+        assert!(matches!(frame.get_local("s"), Some(Value::StructRef(17))));
+        frame.remove_var("s");
+        assert!(frame.get_local("s").is_none());
+        assert!(!frame.locals_any.contains_key("s"));
+    }
+
+    #[test]
+    fn generator_locals_use_any_carrier_with_generator_tag_issue_5081() {
+        let mut frame = Frame::new_with_slots(0, None);
+        let generator = Box::new(GeneratorValue::eager(Value::Tuple(TupleValue::new(vec![
+            Value::I64(1),
+        ]))));
+        frame
+            .locals_any
+            .insert("g".to_string(), Value::Generator(generator));
+        frame
+            .var_types
+            .insert("g".to_string(), VarTypeTag::Generator);
+
+        assert!(matches!(frame.get_local("g"), Some(Value::Generator(_))));
+        frame.remove_var("g");
+        assert!(frame.get_local("g").is_none());
+        assert!(!frame.locals_any.contains_key("g"));
+    }
 }

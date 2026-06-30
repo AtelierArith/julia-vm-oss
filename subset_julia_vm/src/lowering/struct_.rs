@@ -3,6 +3,7 @@
 use crate::error::{UnsupportedFeature, UnsupportedFeatureKind};
 use crate::ir::core::{Block, InnerConstructor, StructDef, StructField, TypedParam};
 use crate::lowering::expr::lower_expr;
+use crate::lowering::function::where_clause::parse_where_clause_type_params;
 use crate::lowering::stmt;
 use crate::lowering::LowerResult;
 use crate::parser::cst::{CstWalker, Node, NodeKind};
@@ -144,6 +145,26 @@ pub fn lower_struct_definition<'a>(
         (vec![], vec![])
     };
 
+    // Issue #7235 (sub-case 1): a struct may declare its supertype through a
+    // `const` type alias (`const CUD = Dist{Uni,Cont}; struct Norm <: CUD`).
+    // Upstream resolves the alias to the underlying parametric type when the
+    // subtype relation is recorded; mirror that here by expanding the parent
+    // name against the alias table registered during the pre-scan. Without this
+    // the recorded parent stays the bare alias name (`CUD`), so the hierarchy
+    // chain walk cannot follow `Norm -> Dist` and `Norm <: Dist` / `isa Dist`
+    // (and dispatch on `::Dist`) all fail.
+    //
+    // Issue #7840: a struct's own declared type parameters are lexically scoped
+    // to the struct, so they must shadow any same-named top-level global/alias
+    // when lowering the declared parent. Without excluding them, a global like
+    // `T = Int64` would substitute its *value* into the parametric parent
+    // template (`AbstractVector{T}` frozen to `AbstractVector{Int64}`),
+    // corrupting the subtype relation (`Wrap{Float64} <: AbstractVector{Float64}`
+    // wrongly false). Exclude the struct's own param names from substitution.
+    let own_param_names: Vec<String> = type_params.iter().map(|p| p.name.clone()).collect();
+    let parent_type =
+        parent_type.map(|p| crate::lowering::type_alias::expand_excluding(&p, &own_param_names));
+
     Ok(StructDef {
         name,
         is_mutable,
@@ -245,10 +266,8 @@ fn parse_parametrized_type_head<'a>(
 
     for child in walker.named_children(&node) {
         match walker.kind(&child) {
-            NodeKind::Identifier => {
-                if name.is_none() {
-                    name = Some(walker.text(&child).to_string());
-                }
+            NodeKind::Identifier if name.is_none() => {
+                name = Some(walker.text(&child).to_string());
             }
             NodeKind::CurlyExpression => {
                 type_params = parse_curly_type_params(walker, child)?;
@@ -444,16 +463,12 @@ fn try_parse_inner_constructor<'a>(
 
     for child in walker.named_children(&node) {
         match walker.kind(&child) {
-            NodeKind::Identifier => {
-                if name.is_none() {
-                    name = Some(walker.text(&child).to_string());
-                }
+            NodeKind::Identifier if name.is_none() => {
+                name = Some(walker.text(&child).to_string());
             }
-            NodeKind::ParametrizedTypeExpression => {
+            NodeKind::ParametrizedTypeExpression if name.is_none() => {
                 // Handle parametric constructor name like Rational{T}
-                if name.is_none() {
-                    name = Some(walker.text(&child).to_string());
-                }
+                name = Some(walker.text(&child).to_string());
             }
             NodeKind::TypeParameters => {
                 // Handle type parameters from Pure Rust parser: {T} after function name
@@ -493,66 +508,13 @@ fn try_parse_inner_constructor<'a>(
                 }
             }
             NodeKind::WhereClause => {
-                // Handle where clause from Pure Rust parser
-                // WhereClause can contain:
-                // - Identifier (simple: where T)
-                // - TypeParameters (multiple: where {T, S} or where {T<:Real})
-                // - SubtypeExpression (bounded: where T<:Real)
-                for where_child in walker.named_children(&child) {
-                    match walker.kind(&where_child) {
-                        NodeKind::Identifier => {
-                            let param_name = walker.text(&where_child).to_string();
-                            type_params.push(TypeParam::new(param_name));
-                        }
-                        NodeKind::TypeParameters => {
-                            // Handle where {T, S} or where {T<:Real}
-                            for tp_child in walker.named_children(&where_child) {
-                                match walker.kind(&tp_child) {
-                                    NodeKind::TypeParameter => {
-                                        let tp_children = walker.named_children(&tp_child);
-                                        if tp_children.len() >= 2 {
-                                            let param_name =
-                                                walker.text(&tp_children[0]).to_string();
-                                            let bound = walker.text(&tp_children[1]).to_string();
-                                            type_params
-                                                .push(TypeParam::with_bound(param_name, bound));
-                                        } else if !tp_children.is_empty() {
-                                            let param_name =
-                                                walker.text(&tp_children[0]).to_string();
-                                            type_params.push(TypeParam::new(param_name));
-                                        }
-                                    }
-                                    NodeKind::Identifier => {
-                                        let param_name = walker.text(&tp_child).to_string();
-                                        type_params.push(TypeParam::new(param_name));
-                                    }
-                                    NodeKind::SubtypeExpression | NodeKind::BinaryExpression => {
-                                        let children = walker.named_children(&tp_child);
-                                        if children.len() >= 2 {
-                                            let param_name = walker.text(&children[0]).to_string();
-                                            let bound = walker.text(&children[1]).to_string();
-                                            type_params
-                                                .push(TypeParam::with_bound(param_name, bound));
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        NodeKind::SubtypeExpression | NodeKind::BinaryExpression => {
-                            let children = walker.named_children(&where_child);
-                            if children.len() >= 2 {
-                                let param_name = walker.text(&children[0]).to_string();
-                                let bound = walker.text(&children[1]).to_string();
-                                type_params.push(TypeParam::with_bound(param_name, bound));
-                            } else if !children.is_empty() {
-                                let param_name = walker.text(&children[0]).to_string();
-                                type_params.push(TypeParam::new(param_name));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                // Handle where clause from Pure Rust parser via the shared
+                // helper (Issue #6537). The previous hand-rolled copy read the
+                // bound of a `BinaryExpression [T, <:, Real]` from `children[1]`
+                // — the bare `<:` operator (the #5374 bug pattern) — and did
+                // not recognize the `SubtypeConstraint` nodes the parser now
+                // emits for unbraced constraints.
+                type_params.extend(parse_where_clause_type_params(walker, child)?);
             }
             NodeKind::CallExpression => {
                 let (sig_name, sig_params) = parse_ctor_signature(walker, child)?;
@@ -693,14 +655,31 @@ fn parse_ctor_type_constraints<'a>(
                 Ok(vec![TypeParam::new(name)])
             }
         }
-        NodeKind::CurlyExpression => {
-            // Multiple constraints: where {T, S<:Number}
+        NodeKind::CurlyExpression | NodeKind::TypeParameterList | NodeKind::TypeParameters => {
+            // Multiple constraints: where {T, S<:Number}. The short-form
+            // `where` clause surfaces these as a `TypeParameterList`
+            // (Issue #5059); recurse into each constraint child.
             let mut type_params = Vec::new();
             for child in walker.named_children(&node) {
                 let child_params = parse_ctor_type_constraints(walker, child)?;
                 type_params.extend(child_params);
             }
             Ok(type_params)
+        }
+        NodeKind::TypeParameter => {
+            // A single `where {T}` / `where {T<:Real}` constraint child.
+            let children = walker.named_children(&node);
+            if children.len() >= 2 {
+                let name = walker.text(&children[0]).to_string();
+                let bound = walker.text(&children[1]).to_string();
+                Ok(vec![TypeParam::with_bound(name, bound)])
+            } else if let Some(first) = children.first() {
+                let name = walker.text(first).to_string();
+                Ok(vec![TypeParam::new(name)])
+            } else {
+                let name = walker.text(&node).to_string();
+                Ok(vec![TypeParam::new(name)])
+            }
         }
         _ => {
             // Unknown node - try to treat as identifier
@@ -731,12 +710,26 @@ fn try_parse_short_constructor<'a>(
     let lhs = named[0];
     let rhs = named[1];
 
-    if walker.kind(&lhs) != NodeKind::CallExpression {
-        return Ok(None);
-    }
+    // The LHS is either a plain call (`Point(x, y) = ...`) or a `where`
+    // expression wrapping the call for parametric inner constructors
+    // (`Foo{T}(x) where T = new{T}(x)`). The latter carries the type
+    // parameters that the body's `new{T}(...)` needs in order to build the
+    // correctly instantiated, field-ordered struct (Issue #5059).
+    let (sig_name, params, type_params) = match walker.kind(&lhs) {
+        NodeKind::CallExpression => {
+            let (sig_name, params) = parse_ctor_signature(walker, lhs)?;
+            (sig_name, params, Vec::new())
+        }
+        NodeKind::WhereExpression => parse_ctor_where_expression(walker, lhs)?,
+        _ => return Ok(None),
+    };
 
-    let (sig_name, params) = parse_ctor_signature(walker, lhs)?;
-    if sig_name != struct_name {
+    // Strip type parameters for comparison: `Foo{T}` should match `Foo`.
+    let base_sig_name = match sig_name.find('{') {
+        Some(idx) => &sig_name[..idx],
+        None => &sig_name,
+    };
+    if base_sig_name != struct_name {
         return Ok(None);
     }
 
@@ -752,7 +745,7 @@ fn try_parse_short_constructor<'a>(
     Ok(Some(InnerConstructor {
         params,
         kwparams: vec![],
-        type_params: vec![],
+        type_params,
         body,
         span,
     }))
@@ -802,41 +795,12 @@ fn parse_ctor_signature<'a>(
     let callee = named[0];
     let name = walker.text(&callee).to_string();
 
-    // Debug: print what we found
-    #[cfg(debug_assertions)]
-    {
-        use std::io::Write;
-        let _ = writeln!(
-            std::io::stderr(),
-            "parse_ctor_signature: found callee={}, named count={}, kinds={:?}",
-            name,
-            named.len(),
-            named
-                .iter()
-                .map(|n| format!("{:?}", walker.kind(n)))
-                .collect::<Vec<_>>()
-        );
-    }
-
     let mut params = Vec::new();
 
     for arg in named.iter().skip(1) {
         match walker.kind(arg) {
             NodeKind::ArgumentList => {
                 let arg_children = walker.named_children(arg);
-                #[cfg(debug_assertions)]
-                {
-                    use std::io::Write;
-                    let _ = writeln!(
-                        std::io::stderr(),
-                        "  ArgumentList children: count={}, kinds={:?}",
-                        arg_children.len(),
-                        arg_children
-                            .iter()
-                            .map(|n| format!("{:?}={}", walker.kind(n), walker.text(n)))
-                            .collect::<Vec<_>>()
-                    );
-                }
                 for param in arg_children {
                     match walker.kind(&param) {
                         NodeKind::Identifier => {
@@ -976,12 +940,11 @@ fn parse_parameterized_type_expr<'a>(
 
     for child in walker.named_children(&node) {
         match walker.kind(&child) {
+            NodeKind::Identifier if base_name.is_none() => {
+                base_name = Some(walker.text(&child).to_string());
+            }
             NodeKind::Identifier => {
-                if base_name.is_none() {
-                    base_name = Some(walker.text(&child).to_string());
-                } else {
-                    params.push(parse_type_expr_from_node(walker, child, type_params));
-                }
+                params.push(parse_type_expr_from_node(walker, child, type_params));
             }
             NodeKind::CurlyExpression => {
                 for param_child in walker.named_children(&child) {
@@ -1160,6 +1123,57 @@ fn parse_type_parameters<'a>(
 mod tests {
     use super::*;
 
+    // ── inner constructor where-clause bounds (Issue #6537) ──────────────────
+
+    fn parse_struct(source: &str) -> StructDef {
+        let mut parser = crate::parser::Parser::new().expect("Failed to init parser");
+        let parse_outcome = parser.parse(source).expect("Failed to parse");
+        let mut lowering = crate::lowering::Lowering::new(source);
+        let program = lowering.lower(parse_outcome).expect("Failed to lower");
+        assert!(!program.structs.is_empty(), "No struct definition found");
+        program.structs[0].clone()
+    }
+
+    #[test]
+    fn test_inner_ctor_unbraced_where_bound_recorded() {
+        // The previous hand-rolled WhereClause copy read the bound of the
+        // pure parser's `BinaryExpression [T, <:, Real]` from `children[1]`
+        // (the bare `<:` operator); after the parser switched unbraced
+        // constraints to SubtypeConstraint nodes it would have been dropped
+        // entirely. Shared helper records the real bound (Issue #6537).
+        let s = parse_struct(
+            "struct Pos{T}\n    v::T\n    function Pos{T}(v) where T<:Real\n        new(v)\n    end\nend",
+        );
+        assert_eq!(s.inner_constructors.len(), 1);
+        let tps = &s.inner_constructors[0].type_params;
+        assert_eq!(tps.len(), 1, "expected one ctor type param, got {tps:?}");
+        assert_eq!(tps[0].name, "T");
+        assert_eq!(
+            tps[0].get_upper_bound().map(String::as_str),
+            Some("Real"),
+            "inner ctor unbraced where bound must be the type name: {:?}",
+            tps[0]
+        );
+        assert_eq!(tps[0].bound.as_deref(), Some("Real"));
+    }
+
+    #[test]
+    fn test_inner_ctor_braced_where_bound_recorded() {
+        let s = parse_struct(
+            "struct Pos{T}\n    v::T\n    function Pos{T}(v) where {T<:Real}\n        new(v)\n    end\nend",
+        );
+        assert_eq!(s.inner_constructors.len(), 1);
+        let tps = &s.inner_constructors[0].type_params;
+        assert_eq!(tps.len(), 1, "expected one ctor type param, got {tps:?}");
+        assert_eq!(tps[0].name, "T");
+        assert_eq!(
+            tps[0].get_upper_bound().map(String::as_str),
+            Some("Real"),
+            "inner ctor braced where bound must be the type name, not `<:`: {:?}",
+            tps[0]
+        );
+    }
+
     // ── parse_subtype_from_text ───────────────────────────────────────────────
 
     #[test]
@@ -1204,7 +1218,8 @@ mod tests {
         let result = parse_type_expr_from_text("Float64", &[]);
         assert!(
             matches!(&result, Some(TypeExpr::Concrete(_))),
-            "Expected Concrete, got {:?}", result
+            "Expected Concrete, got {:?}",
+            result
         );
     }
 
@@ -1215,7 +1230,8 @@ mod tests {
         let result = parse_type_expr_from_text("T", &[tp]);
         assert!(
             matches!(&result, Some(TypeExpr::TypeVar(name)) if name == "T"),
-            "Expected TypeVar(T), got {:?}", result
+            "Expected TypeVar(T), got {:?}",
+            result
         );
     }
 
@@ -1225,7 +1241,8 @@ mod tests {
         let result = parse_type_expr_from_text("Foo", &[]);
         assert!(
             matches!(&result, Some(TypeExpr::TypeVar(name)) if name == "Foo"),
-            "Expected TypeVar(Foo), got {:?}", result
+            "Expected TypeVar(Foo), got {:?}",
+            result
         );
     }
 
@@ -1235,7 +1252,8 @@ mod tests {
         let result = parse_type_expr_from_text("Array{Float64}", &[]);
         assert!(
             matches!(&result, Some(TypeExpr::Parameterized { base, .. }) if base == "Array"),
-            "Expected Parameterized(Array, ...), got {:?}", result
+            "Expected Parameterized(Array, ...), got {:?}",
+            result
         );
     }
 

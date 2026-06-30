@@ -13,5 +13,8 @@
   "types": "subset_julia_vm_web.d.ts",
   "sideEffects": [
     "./snippets/*"
-  ]
+  ],
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
 }

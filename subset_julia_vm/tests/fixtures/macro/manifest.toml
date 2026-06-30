@@ -121,6 +121,12 @@ expected = 42.0
 description = "Test module macros: @test, @testset, @test_throws"
 
 [[tests]]
+name = "macro_testset_reuse_local_slot_type_6256"
+file = "testset_reuse_local_slot_type_6256.jl"
+expected = true
+description = "@testset local variable reuse does not keep stale slot type (Issue #6256)"
+
+[[tests]]
 name = "macro_assert_pure_julia"
 file = "assert_pure_julia.jl"
 expected = 42.0
@@ -209,3 +215,57 @@ name = "macro_show_user_defined_function"
 file = "show_user_defined_function.jl"
 expected = true
 description = "@show macro with user-defined functions (Issue #1330)"
+
+[[tests]]
+name = "macro_eval_real_dispatch_4976"
+file = "eval_real_dispatch_4976.jl"
+expected = 42.0
+description = "eval() dispatches real functions/constructors (identity, Val(x), Val{N}(), user fn) through the VM call path instead of the mini-interpreter (Issue #4976)"
+
+[[tests]]
+name = "macro_eval_dispatch_depth_bound_5014"
+file = "eval_dispatch_depth_bound_5014.jl"
+expected = 47
+description = "Bounded eval-initiated VM dispatch (g(5) = eval(g(0)) + 5 = 47) still works after the eval re-entrancy/depth-bound fix that makes runaway eval recursion fail safely (Issue #5014)"
+
+[[tests]]
+name = "macro_eval_nested_quote_5978"
+file = "macro_eval_nested_quote_5978.jl"
+expected = true
+description = "eval mini-interpreter handles a nested quote literal (Expr head :quote): eval(Expr(:quote, e)) returns e unevaluated, so eval(:(eval(:(f())))) works (Issue #5978)"
+
+[[tests]]
+name = "macro_expansion_helper_call_6616"
+file = "expansion_helper_call_6616.jl"
+expected = true
+description = "User-defined macro bodies execute at expansion time, so Symbolics-style helper calls such as parse_vars(:variables, Real, xs) produce the returned AST (Issue #6616)"
+
+[[tests]]
+name = "macro_macro_expanded_pair_7639"
+file = "macro_expanded_pair_7639.jl"
+expected = true
+description = "Macro-expanded Expr(:call, :=>, ...) is restored to Pair IR before Dict construction (Issue #7639)"
+
+[[tests]]
+name = "macro_quote_vector_assignment_lhs_7641"
+file = "quote_vector_assignment_lhs_7641.jl"
+expected = true
+description = "Quoted assignment preserves vector-pattern LHS as Expr(:vect, ...) instead of Symbol(\"[a, b]\") (Issue #7641)"
+
+[[tests]]
+name = "macro_named_tuple_return_7765"
+file = "macro_named_tuple_return_7765.jl"
+expected = true
+description = "Runtime macro-return converter lowers Expr(:tuple, Expr(:(=), :name, value), ...) as a NamedTuple (not a plain Tuple) so field access works; mixed/plain tuples still lower to Tuple (Issue #7765)"
+
+[[tests]]
+name = "macro_value_in_statement_position_7764"
+file = "macro_value_in_statement_position_7764.jl"
+expected = 7
+description = "A value-producing macro expanded as the final top-level statement preserves its result as the program value instead of dropping it via Stmt::Block (Issue #7764)"
+
+[[tests]]
+name = "macro_statement_tail_stmt_7805"
+file = "macro_statement_tail_stmt_7805.jl"
+expected = true
+description = "A macro expanded in statement position whose returned block ends in a statement-only Expr head (:function or :+=) lowers through the statement path instead of the value-preserving tail path (Issue #7805)"

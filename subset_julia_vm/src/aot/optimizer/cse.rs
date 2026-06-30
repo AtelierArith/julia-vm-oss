@@ -19,14 +19,11 @@ use std::collections::{HashMap, HashSet};
 /// ```
 /// Becomes:
 /// ```julia
-/// _cse_0 = a + b
-/// x = _cse_0
-/// y = _cse_0
+/// x = a + b
+/// y = x
 /// ```
 #[derive(Debug)]
 pub struct AotCSE {
-    /// Counter for generating unique CSE variable names
-    var_counter: usize,
     /// Number of eliminations performed
     elimination_count: usize,
     /// Set of pure builtin functions that can be CSE'd
@@ -51,7 +48,6 @@ impl AotCSE {
             pure_builtins.insert(name.to_string());
         }
         Self {
-            var_counter: 0,
             elimination_count: 0,
             pure_builtins,
         }
@@ -60,13 +56,6 @@ impl AotCSE {
     /// Get the number of eliminations performed
     pub fn elimination_count(&self) -> usize {
         self.elimination_count
-    }
-
-    /// Generate a unique CSE variable name
-    fn gen_cse_var(&mut self) -> String {
-        let name = format!("_cse_{}", self.var_counter);
-        self.var_counter += 1;
-        name
     }
 
     /// Optimize an AoT program with CSE
@@ -85,12 +74,19 @@ impl AotCSE {
     }
 
     /// Optimize a list of statements
-    fn optimize_stmts(&mut self, stmts: &mut Vec<AotStmt>) -> usize {
-        // Map from expression canonical form to (variable name, type)
-        let mut expr_map: HashMap<String, (String, StaticType)> = HashMap::new();
-        // Track which variables have been modified (invalidates expressions using them)
-        let mut modified_vars: HashSet<String> = HashSet::new();
+    fn optimize_stmts(&mut self, stmts: &mut [AotStmt]) -> usize {
+        self.optimize_stmts_with_available(stmts, HashMap::new(), HashSet::new())
+    }
 
+    /// Optimize a statement list with expressions available from dominating
+    /// structured parents. The returned availability is intentionally not
+    /// merged back through branches/loops; this is a dominator-only CSE slice.
+    fn optimize_stmts_with_available(
+        &mut self,
+        stmts: &mut [AotStmt],
+        mut expr_map: HashMap<String, (String, StaticType)>,
+        mut modified_vars: HashSet<String>,
+    ) -> usize {
         let mut eliminations = 0;
         let mut i = 0;
 
@@ -174,13 +170,22 @@ impl AotCSE {
                     ref then_branch,
                     ref else_branch,
                 } => {
-                    // Recursively optimize branches (with fresh scope)
+                    // Recursively optimize branches with expressions available
+                    // from the dominating parent scope.
                     let mut then_stmts = then_branch.clone();
-                    eliminations += self.optimize_stmts(&mut then_stmts);
+                    eliminations += self.optimize_stmts_with_available(
+                        &mut then_stmts,
+                        expr_map.clone(),
+                        modified_vars.clone(),
+                    );
 
                     let mut else_stmts = else_branch.clone().unwrap_or_default();
                     if !else_stmts.is_empty() {
-                        eliminations += self.optimize_stmts(&mut else_stmts);
+                        eliminations += self.optimize_stmts_with_available(
+                            &mut else_stmts,
+                            expr_map.clone(),
+                            modified_vars.clone(),
+                        );
                     }
 
                     stmts[i] = AotStmt::If {
@@ -201,9 +206,22 @@ impl AotCSE {
                     ref condition,
                     ref body,
                 } => {
-                    // Optimize loop body with fresh scope
+                    // Optimize loop body with parent expressions that remain
+                    // valid for every iteration. Anything touched by the loop
+                    // body is invalidated before seeding the body scope.
+                    let loop_modified = Self::collect_modified_vars(body);
+                    let mut body_expr_map = expr_map.clone();
+                    let mut body_modified_vars = modified_vars.clone();
+                    for var in &loop_modified {
+                        body_modified_vars.insert(var.clone());
+                        self.invalidate_expr_map(&mut body_expr_map, var);
+                    }
                     let mut body_stmts = body.clone();
-                    eliminations += self.optimize_stmts(&mut body_stmts);
+                    eliminations += self.optimize_stmts_with_available(
+                        &mut body_stmts,
+                        body_expr_map,
+                        body_modified_vars,
+                    );
 
                     stmts[i] = AotStmt::While {
                         condition: condition.clone(),
@@ -222,10 +240,23 @@ impl AotCSE {
                 } => {
                     // Loop variable is modified
                     modified_vars.insert(var.clone());
+                    let mut body_expr_map = expr_map.clone();
+                    let mut body_modified_vars = modified_vars.clone();
+                    self.invalidate_expr_map(&mut body_expr_map, var);
+
+                    let loop_modified = Self::collect_modified_vars(body);
+                    for modified in &loop_modified {
+                        body_modified_vars.insert(modified.clone());
+                        self.invalidate_expr_map(&mut body_expr_map, modified);
+                    }
 
                     // Optimize loop body
                     let mut body_stmts = body.clone();
-                    eliminations += self.optimize_stmts(&mut body_stmts);
+                    eliminations += self.optimize_stmts_with_available(
+                        &mut body_stmts,
+                        body_expr_map,
+                        body_modified_vars,
+                    );
 
                     stmts[i] = AotStmt::ForRange {
                         var: var.clone(),
@@ -244,9 +275,22 @@ impl AotCSE {
                     ref body,
                 } => {
                     modified_vars.insert(var.clone());
+                    let mut body_expr_map = expr_map.clone();
+                    let mut body_modified_vars = modified_vars.clone();
+                    self.invalidate_expr_map(&mut body_expr_map, var);
+
+                    let loop_modified = Self::collect_modified_vars(body);
+                    for modified in &loop_modified {
+                        body_modified_vars.insert(modified.clone());
+                        self.invalidate_expr_map(&mut body_expr_map, modified);
+                    }
 
                     let mut body_stmts = body.clone();
-                    eliminations += self.optimize_stmts(&mut body_stmts);
+                    eliminations += self.optimize_stmts_with_available(
+                        &mut body_stmts,
+                        body_expr_map,
+                        body_modified_vars,
+                    );
 
                     stmts[i] = AotStmt::ForEach {
                         var: var.clone(),
@@ -267,6 +311,51 @@ impl AotCSE {
         eliminations
     }
 
+    fn collect_modified_vars(stmts: &[AotStmt]) -> HashSet<String> {
+        let mut modified = HashSet::new();
+
+        for stmt in stmts {
+            match stmt {
+                AotStmt::Let { name, .. } => {
+                    modified.insert(name.clone());
+                }
+                AotStmt::Assign {
+                    target: AotExpr::Var { name, .. },
+                    ..
+                }
+                | AotStmt::CompoundAssign {
+                    target: AotExpr::Var { name, .. },
+                    ..
+                } => {
+                    modified.insert(name.clone());
+                }
+                AotStmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    modified.extend(Self::collect_modified_vars(then_branch));
+                    if let Some(else_branch) = else_branch {
+                        modified.extend(Self::collect_modified_vars(else_branch));
+                    }
+                }
+                AotStmt::While { body, .. }
+                | AotStmt::ForRange { body, .. }
+                | AotStmt::ForEach { body, .. } => {
+                    modified.extend(Self::collect_modified_vars(body));
+                }
+                AotStmt::Assign { .. }
+                | AotStmt::CompoundAssign { .. }
+                | AotStmt::Expr(_)
+                | AotStmt::Return(_)
+                | AotStmt::Break
+                | AotStmt::Continue => {}
+            }
+        }
+
+        modified
+    }
+
     /// Generate a canonical string form of an expression for comparison
     /// Returns None if the expression cannot be CSE'd (has side effects or uses modified vars)
     fn expr_canonical_form(
@@ -283,16 +372,11 @@ impl AotCSE {
             | AotExpr::LitBool(_)
             | AotExpr::LitStr(_)
             | AotExpr::LitChar(_)
-            | AotExpr::LitNothing => None,
+            | AotExpr::LitNothing
+            | AotExpr::LitMissing => None,
 
             // Variables - not worth CSE'ing alone
-            AotExpr::Var { name, .. } => {
-                if modified_vars.contains(name) {
-                    None
-                } else {
-                    None // Variables alone don't need CSE
-                }
-            }
+            AotExpr::Var { .. } => None, // Variables alone don't need CSE
 
             // Binary operations - good CSE candidates
             AotExpr::BinOpStatic {
@@ -327,6 +411,7 @@ impl AotCSE {
                 function,
                 args,
                 return_ty: _,
+                inline_policy: _,
             } => {
                 if !self.pure_builtins.contains(function) {
                     return None;
@@ -379,6 +464,7 @@ impl AotCSE {
             AotExpr::LitStr(v) => Some(format!("str:{}", v)),
             AotExpr::LitChar(v) => Some(format!("char:{}", v)),
             AotExpr::LitNothing => Some("nothing".to_string()),
+            AotExpr::LitMissing => Some("missing".to_string()),
             AotExpr::Var { name, .. } => {
                 if modified_vars.contains(name) {
                     None
@@ -408,6 +494,7 @@ impl AotCSE {
                 | AotBuiltinOp::Min
                 | AotBuiltinOp::Max
                 | AotBuiltinOp::Length
+                | AotBuiltinOp::In
         )
     }
 

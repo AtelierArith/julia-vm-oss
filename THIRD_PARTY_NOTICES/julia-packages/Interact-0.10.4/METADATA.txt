@@ -1,0 +1,7 @@
+package: Interact
+version: 0.10.4
+local_uuid: c601a237-2ae4-5e1e-952c-7a85b0c7eef1
+registry_uuid: c601a237-2ae4-5e1e-952c-7a85b0c7eef1
+repository: https://github.com/JuliaGizmos/Interact.jl
+license: MIT
+license_source: LICENSE.md at ref v0.10.4

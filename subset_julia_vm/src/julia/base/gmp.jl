@@ -114,12 +114,21 @@ end
 # sign for BigInt - returns -1, 0, or 1
 function sign(x::BigInt)
     if x < big(0)
-        return -1
+        return big(-1)
     elseif x > big(0)
-        return 1
+        return big(1)
     else
-        return 0
+        return big(0)
     end
+end
+
+# inv for BigInt - multiplicative inverse as a BigFloat (Issue #7309)
+# Upstream: inv(x::Integer) = float(one(x)) / float(x) (julia/base/int.jl:94);
+# float(::BigInt) is a BigFloat, so inv(big(2)) == 0.5 :: BigFloat rather than
+# the integer division (1 ÷ 2 == 0) that the generic inv(x::Number) = one(x)/x
+# fallback produced for BigInt.
+function inv(x::BigInt)
+    return inv(BigFloat(x))
 end
 
 # =============================================================================

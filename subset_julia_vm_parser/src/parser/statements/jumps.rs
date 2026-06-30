@@ -37,6 +37,19 @@ impl<'a> Parser<'a> {
                 let mut elements = vec![first];
                 while self.check(&Token::Comma) {
                     self.advance(); // consume comma
+                    while self.check(&Token::Newline) {
+                        self.advance();
+                    }
+                    if self.check(&Token::Semicolon)
+                        || self.is_at_end()
+                        || self.check(&Token::KwEnd)
+                        || self.check(&Token::KwElse)
+                        || self.check(&Token::KwElseif)
+                        || self.check(&Token::KwCatch)
+                        || self.check(&Token::KwFinally)
+                    {
+                        break;
+                    }
                     elements.push(self.parse_expression()?);
                 }
                 let tuple_end = elements.last().map(|e| e.span.end).unwrap_or(tuple_start);

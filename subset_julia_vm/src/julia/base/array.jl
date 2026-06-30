@@ -1,41 +1,715 @@
 # =============================================================================
-# Array{T} - Pure Julia mutable struct definition (Issue #2760)
+# Array{T,N} - Pure Julia mutable struct definition (Issue #2760, #6648)
 # =============================================================================
 # Based on Julia's base/array.jl (Julia 1.11+)
 #
-# In official Julia, Array{T,N} wraps Memory{T} for contiguous storage.
-# This struct definition mirrors that structure using a mutable struct.
-#
-# Note: The N (dimension count) parameter is omitted because the current
-# parametric type system doesn't support integer value parameters.
-# Dimensions are stored in _size and derived at runtime.
-#
-# Note: The compiler currently intercepts Array{T}(undef, n) to create
-# Rust Value::Array directly. This struct definition coexists with that path.
-# Built-in patterns (undef constructor, empty, single-arg) still use the Rust path.
-# Non-builtin patterns (e.g., Array{T}(mem, size)) use this struct.
+# In official Julia, Array{T,N} wraps a MemoryRef{T} plus size::NTuple{N,Int}.
+# This struct mirrors that upstream shape now that MemoryRef{T} fields and
+# integer value parameters are supported (Issues #6623/#6625/#6626). Public
+# construction/materialization routes now target this wrapper; the retained
+# native `Value::ExprArgs` carrier is a VM/cache/host-boundary compatibility
+# path only (Issue #6653).
 
-mutable struct Array{T}
-    _mem
-    _size
+mutable struct Array{T,N} <: DenseArray{T,N}
+    ref::MemoryRef{T}
+    size::NTuple{N,Int}
 end
 
+function wrap end
+
 # =============================================================================
-# Array{T} method dispatch - TODO (Issue #2760)
+# Array{T,N} wrapper methods
 # =============================================================================
-# Methods like size, length, getindex, setindex! on the Pure Julia Array struct
-# are currently blocked because the dispatch system can't match
-# Struct("Array{Int64}") against the built-in ::Array type annotation.
-# This needs type system changes to recognize user-defined Array{T} structs.
-#
-# Planned methods (to be enabled when dispatch is updated):
-#   size(a::Array{T}) where T = a._size
-#   size(a::Array{T}, d::Int64) where T = a._size[d]
-#   length(a::Array{T}) where T = length(a._mem)
-#   getindex(a::Array{T}, i::Int64) where T = a._mem[i]
-#   setindex!(a::Array{T}, v, i::Int64) where T = setindex!(a._mem, v, i)
-#   ndims(a::Array{T}) where T = length(a._size)
-#   eltype(a::Array{T}) where T = T  (blocked by Any→DataType conversion)
+# Based on Julia's base/array.jl, where Array stores a MemoryRef plus dims and
+# public operations delegate through that wrapper.
+
+function _array_length_from_size(dims)
+    n = 1
+    for d in dims
+        if d < 0
+            throw(DimensionMismatch("array dimensions must be non-negative"))
+        end
+        n = n * d
+    end
+    return n
+end
+
+function _array_wrap_capacity(m)
+    return length(m)
+end
+
+function _array_wrap_capacity(ref::MemoryRef{T}) where T
+    return length(parent(ref)) + 1 - memoryindex(ref)
+end
+
+function _array_wrap_check_capacity(capacity, dims)
+    len = _array_length_from_size(dims)
+    if len > capacity
+        throw(DimensionMismatch("array dimensions exceed backing Memory length"))
+    end
+    return dims
+end
+
+function _array_wrap_check(m, dims)
+    return _array_wrap_check_capacity(_array_wrap_capacity(m), dims)
+end
+
+function _array_construct(::Type{T}, ref::MemoryRef{T}, dims::Tuple) where T
+    n = length(dims)
+    if n == 0
+        return Array{T,0}(ref, dims)
+    elseif n == 1
+        return Array{T,1}(ref, dims)
+    elseif n == 2
+        return Array{T,2}(ref, dims)
+    elseif n == 3
+        return Array{T,3}(ref, dims)
+    elseif n == 4
+        return Array{T,4}(ref, dims)
+    elseif n == 5
+        return Array{T,5}(ref, dims)
+    elseif n == 6
+        return Array{T,6}(ref, dims)
+    elseif n == 7
+        return Array{T,7}(ref, dims)
+    elseif n == 8
+        return Array{T,8}(ref, dims)
+    elseif n == 9
+        return Array{T,9}(ref, dims)
+    elseif n == 10
+        return Array{T,10}(ref, dims)
+    elseif n == 11
+        return Array{T,11}(ref, dims)
+    elseif n == 12
+        return Array{T,12}(ref, dims)
+    elseif n == 13
+        return Array{T,13}(ref, dims)
+    elseif n == 14
+        return Array{T,14}(ref, dims)
+    elseif n == 15
+        return Array{T,15}(ref, dims)
+    elseif n == 16
+        return Array{T,16}(ref, dims)
+    end
+    throw(ArgumentError("Array wrapper supports up to 16 dimensions"))
+end
+
+function wrap(::Type{Array}, m::Memory{T}, dims::Tuple) where T
+    dims = _array_wrap_check(m, dims)
+    return _array_construct(T, memoryref(m), dims)
+end
+
+# Workaround: current compile-time inference can project `Memory{T}(n)` with a
+# runtime `T` as Array while compiling `similar(a, T, dims...)` (Issue #4018).
+function wrap(::Type{Array}, m::Array, dims::Tuple)
+    dims = _array_wrap_check(m, dims)
+    mem = Memory{eltype(m)}(_array_length_from_size(dims))
+    for i in 1:length(mem)
+        mem[i] = m[i]
+    end
+    return _array_construct(eltype(m), memoryref(mem), dims)
+end
+
+function wrap(::Type{Array}, ref::MemoryRef{T}, dims::Tuple) where T
+    dims = _array_wrap_check_capacity(length(parent(ref)) + 1 - memoryindex(ref), dims)
+    return _array_construct(T, ref, dims)
+end
+
+function wrap(::Type{Array}, m::Memory{T}, l::Integer) where T
+    dims = (l,)
+    _array_wrap_check(m, dims)
+    return _array_construct(T, memoryref(m), dims)
+end
+
+function wrap(::Type{Array}, ref::MemoryRef{T}, l::Integer) where T
+    dims = (l,)
+    _array_wrap_check_capacity(length(parent(ref)) + 1 - memoryindex(ref), dims)
+    return _array_construct(T, ref, dims)
+end
+
+function wrap(::Type{Array}, m::Memory{T}) where T
+    dims = (length(m),)
+    return _array_construct(T, memoryref(m), dims)
+end
+
+function _array_size_is_offset_encoded(s)
+    return length(s) > 0 && isa(s[1], Tuple)
+end
+
+function _array_dims(a::Array{T,N}) where {T,N}
+    s = a._size
+    if _array_size_is_offset_encoded(s)
+        return s[1]
+    end
+    return s
+end
+
+function _array_offset(a::Array{T,N}) where {T,N}
+    s = a._size
+    if _array_size_is_offset_encoded(s)
+        return s[2]
+    end
+    return 1
+end
+
+function _array_memory(a::Array{T,N}) where {T,N}
+    return a._mem
+end
+
+function size(a::Array{T,N}) where {T,N}
+    return _array_dims(a)
+end
+
+function size(a::Array{T,N}, d::Int64) where {T,N}
+    dims = _array_dims(a)
+    if d > length(dims)
+        return 1
+    end
+    return dims[d]
+end
+
+function length(a::Array{T,N}) where {T,N}
+    return _array_length_from_size(_array_dims(a))
+end
+
+# BitArray family (Issue #6663): BitArrays reuse the native Bool Array storage
+# but report their own `BitArray{N}` type, so they no longer match the
+# rank-parametric `Array{T,N}` size/length methods after the #6648 refactor
+# (`BitVector`/`BitMatrix`/`BitArray{N}` are `AbstractArray`, not `Array`). The
+# storage-accessor helpers read the shared `_size`/`_mem` fields regardless of
+# the type tag, so giving them `BitArray` methods lets both the explicit
+# `BitArray`-typed call sites and the `Array{T,N}` method bodies (which are
+# `CallResolved` with a runtime bitarray when a broadcast result is statically
+# `Array{Bool}`) operate on bitarrays.
+function _array_dims(a::BitArray)
+    s = a._size
+    if _array_size_is_offset_encoded(s)
+        return s[1]
+    end
+    return s
+end
+
+function _array_offset(a::BitArray)
+    s = a._size
+    if _array_size_is_offset_encoded(s)
+        return s[2]
+    end
+    return 1
+end
+
+_array_memory(a::BitArray) = a._mem
+
+size(a::BitArray) = _array_dims(a)
+
+function size(a::BitArray, d::Int64)
+    dims = _array_dims(a)
+    if d > length(dims)
+        return 1
+    end
+    return dims[d]
+end
+
+length(a::BitArray) = _array_length_from_size(_array_dims(a))
+
+function ndims(a::Array{T,N}) where {T,N}
+    return N
+end
+
+function _array_reshape_tuple(a::Array{T,N}, dims::Tuple) where {T,N}
+    len = _array_length_from_size(dims)
+    if len != length(a)
+        throw(DimensionMismatch("new dimensions must be consistent with array length"))
+    end
+    mem = _array_memory(a)
+    if _array_offset(a) == 1
+        return wrap(Array, mem, dims)
+    end
+    return wrap(Array, memoryref(mem, _array_offset(a)), dims)
+end
+
+function reshape(a::Array{T,N}, dims::Tuple) where {T,N}
+    return _array_reshape_tuple(a, dims)
+end
+
+function reshape(a::Array{T,N}, dims::Int64...) where {T,N}
+    return _array_reshape_tuple(a, dims)
+end
+
+# reshape of a range materializes it first (`reshape(1:6, 2, 3)`, Issue #5758).
+# Ranges are not stored as arrays, so collect to a Vector and reshape that.
+function reshape(r::AbstractRange, dims::Tuple)
+    return reshape(collect(r), dims)
+end
+
+function reshape(r::AbstractRange, dims::Int64...)
+    return reshape(collect(r), dims)
+end
+
+function _array_similar_tuple(a::Array{T,N}, dims::Tuple) where {T,N}
+    len = _array_length_from_size(dims)
+    mem = similar(_array_memory(a), len)
+    return wrap(Array, mem, dims)
+end
+
+function _array_similar_typed_tuple(a::Array{T,N}, ::Type{S}, dims::Tuple) where {T,N,S}
+    len = _array_length_from_size(dims)
+    mem = Memory{S}(len)
+    return wrap(Array, mem, dims)
+end
+
+function _array_is_bitarray_surface(a::Array{T,N}) where {T,N}
+    tname = string(typeof(a))
+    return tname == "BitVector" || tname == "BitMatrix" ||
+           (length(tname) >= 9 && tname[1:9] == "BitArray{")
+end
+
+function _array_is_bitarray_surface(a::Array)
+    tname = string(typeof(a))
+    return tname == "BitVector" || tname == "BitMatrix" ||
+           (length(tname) >= 9 && tname[1:9] == "BitArray{")
+end
+
+function _array_is_bitarray_surface(a)
+    tname = string(typeof(a))
+    return tname == "BitVector" || tname == "BitMatrix" ||
+           (length(tname) >= 9 && tname[1:9] == "BitArray{")
+end
+
+function _array_bitarray_surface_like(a::Array{T,N}, result::Array) where {T,N}
+    if eltype(result) != Bool
+        return result
+    end
+    if _array_is_bitarray_surface(a)
+        return _mark_bitarray(result)
+    end
+    return result
+end
+
+function _array_bitarray_surface_like(a::Array, result::Array)
+    if eltype(result) != Bool
+        return result
+    end
+    if _array_is_bitarray_surface(a)
+        return _mark_bitarray(result)
+    end
+    return result
+end
+
+function _array_bitarray_surface_like(a, result::Array)
+    if eltype(result) != Bool
+        return result
+    end
+    if _array_is_bitarray_surface(a)
+        return _mark_bitarray(result)
+    end
+    return result
+end
+
+function similar(a::Array{T,N}) where {T,N}
+    return _array_bitarray_surface_like(a, _array_similar_tuple(a, _array_dims(a)))
+end
+
+function similar(a::Array{T,N}, ::Type{S}) where {T,N,S}
+    return _array_bitarray_surface_like(a, _array_similar_typed_tuple(a, S, _array_dims(a)))
+end
+
+function similar(a::Array{T,N}, dims::Tuple) where {T,N}
+    return _array_bitarray_surface_like(a, _array_similar_tuple(a, dims))
+end
+
+function similar(a::Array{T,N}, ::Type{S}, dims::Tuple) where {T,N,S}
+    return _array_bitarray_surface_like(a, _array_similar_typed_tuple(a, S, dims))
+end
+
+function similar(a::Array{T,N}, dims::Int64...) where {T,N}
+    return _array_bitarray_surface_like(a, _array_similar_tuple(a, dims))
+end
+
+function similar(a::Array{T,N}, ::Type{S}, dims::Int64...) where {T,N,S}
+    return _array_bitarray_surface_like(a, _array_similar_typed_tuple(a, S, dims))
+end
+
+function _similar_bitarray(a::Array{T,N}, ::Type{S}, dims::Tuple) where {T,N,S}
+    return _array_bitarray_surface_like(a, _array_similar_typed_tuple(a, S, dims))
+end
+
+function _similar_bitarray(a::Array, ::Type{S}, dims::Tuple) where S
+    result = _array_undef_from_dims(S, dims)
+    return _array_bitarray_surface_like(a, result)
+end
+
+function _similar_bitarray(a, ::Type{S}, dims::Tuple) where S
+    result = _array_undef_from_dims(S, dims)
+    return _array_bitarray_surface_like(a, result)
+end
+
+similar(a::BitVector) = _similar_bitarray(a, Bool, size(a))
+similar(a::BitMatrix) = _similar_bitarray(a, Bool, size(a))
+similar(a::BitArray) = _similar_bitarray(a, Bool, size(a))
+similar(a::BitVector, ::Type{S}) where S = _similar_bitarray(a, S, size(a))
+similar(a::BitMatrix, ::Type{S}) where S = _similar_bitarray(a, S, size(a))
+similar(a::BitArray, ::Type{S}) where S = _similar_bitarray(a, S, size(a))
+similar(a::BitVector, dims::Tuple) = _similar_bitarray(a, Bool, dims)
+similar(a::BitMatrix, dims::Tuple) = _similar_bitarray(a, Bool, dims)
+similar(a::BitArray, dims::Tuple) = _similar_bitarray(a, Bool, dims)
+similar(a::BitVector, ::Type{S}, dims::Tuple) where S = _similar_bitarray(a, S, dims)
+similar(a::BitMatrix, ::Type{S}, dims::Tuple) where S = _similar_bitarray(a, S, dims)
+similar(a::BitArray, ::Type{S}, dims::Tuple) where S = _similar_bitarray(a, S, dims)
+similar(a::BitVector, dims::Int64...) = _similar_bitarray(a, Bool, dims)
+similar(a::BitMatrix, dims::Int64...) = _similar_bitarray(a, Bool, dims)
+similar(a::BitArray, dims::Int64...) = _similar_bitarray(a, Bool, dims)
+similar(a::BitVector, ::Type{S}, dims::Int64...) where S = _similar_bitarray(a, S, dims)
+similar(a::BitMatrix, ::Type{S}, dims::Int64...) where S = _similar_bitarray(a, S, dims)
+similar(a::BitArray, ::Type{S}, dims::Int64...) where S = _similar_bitarray(a, S, dims)
+
+function similar(::Type{Array{T}}, dims::Tuple) where T
+    len = _array_length_from_size(dims)
+    mem = Memory{T}(len)
+    return wrap(Array, mem, dims)
+end
+
+function similar(::Type{Array{Pair}}, dims::Tuple)
+    len = _array_length_from_size(dims)
+    mem = Memory{Pair}(len)
+    return wrap(Array, mem, dims)
+end
+
+function similar(::Type{Array{Pair{K,V}}}, dims::Tuple) where {K,V}
+    len = _array_length_from_size(dims)
+    mem = Memory{Pair{K,V}}(len)
+    return wrap(Array, mem, dims)
+end
+
+function similar(::Type{Array{T}}, dims::Int64...) where T
+    len = _array_length_from_size(dims)
+    mem = Memory{T}(len)
+    return wrap(Array, mem, dims)
+end
+
+function similar(::Type{Array{Pair}}, dims::Int64...)
+    len = _array_length_from_size(dims)
+    mem = Memory{Pair}(len)
+    return wrap(Array, mem, dims)
+end
+
+function similar(::Type{Array{Pair{K,V}}}, dims::Int64...) where {K,V}
+    len = _array_length_from_size(dims)
+    mem = Memory{Pair{K,V}}(len)
+    return wrap(Array, mem, dims)
+end
+
+function eltype(::Type{Array{T}}) where T
+    return T
+end
+
+function eltype(::Type{Array})
+    return Any
+end
+
+function eltype(::Type{Vector{T}}) where T
+    return T
+end
+
+function eltype(::Type{Vector})
+    return Any
+end
+
+function eltype(::Type{Matrix{T}}) where T
+    return T
+end
+
+function Matrix(A::AbstractMatrix)
+    rows, cols = size(A)
+    M = Matrix{eltype(A)}(undef, rows, cols)
+    for j in 1:cols
+        for i in 1:rows
+            M[i, j] = A[i, j]
+        end
+    end
+    return M
+end
+
+function Matrix{T}(A::AbstractMatrix) where T
+    rows, cols = size(A)
+    M = Matrix{T}(undef, rows, cols)
+    for j in 1:cols
+        for i in 1:rows
+            M[i, j] = convert(T, A[i, j])
+        end
+    end
+    return M
+end
+
+function eltype(a::Array)
+    return eltype(typeof(a))
+end
+
+function _array_check_linear_index(a, i::Int64)
+    if !(1 <= i <= length(a))
+        throw(BoundsError(a, i))
+    end
+    return nothing
+end
+
+function _array_linear_index(a, indices::Tuple)
+    dims = _array_dims(a)
+    if length(indices) != length(dims)
+        throw(BoundsError(a, 1))
+    end
+    linear = 1
+    stride = 1
+    for k in 1:length(indices)
+        i = indices[k]
+        dim = dims[k]
+        if !(1 <= i <= dim)
+            throw(BoundsError(a, i))
+        end
+        linear = linear + (i - 1) * stride
+        stride = stride * dim
+    end
+    return linear
+end
+
+function _array_linear_index(a, i::Int64, j::Int64)
+    return _array_linear_index(a, (i, j))
+end
+
+function _array_linear_index_tail(a, i::Int64, j::Int64, tail)
+    dims = _array_dims(a)
+    if 2 + length(tail) != length(dims)
+        throw(BoundsError(a, i))
+    end
+    if !(1 <= i <= dims[1] && 1 <= j <= dims[2])
+        throw(BoundsError(a, i))
+    end
+    linear = i + (j - 1) * dims[1]
+    stride = dims[1] * dims[2]
+    for k in 1:length(tail)
+        idx = tail[k]
+        dim = dims[k + 2]
+        if !(1 <= idx <= dim)
+            throw(BoundsError(a, idx))
+        end
+        linear = linear + (idx - 1) * stride
+        stride = stride * dim
+    end
+    return linear
+end
+
+function _array_memory_index(a, i::Int64)
+    return _array_offset(a) + i - 1
+end
+
+function getindex(a::Array{T,N}) where {T,N}
+    if ndims(a) == 0
+        return a[1]
+    end
+    throw(ArgumentError("invalid zero-dimensional array index"))
+end
+
+function getindex(a::Array{T,N}, i::Int64) where {T,N}
+    _array_check_linear_index(a, i)
+    return _array_memory(a)[_array_memory_index(a, i)]
+end
+
+function getindex(a::Array{T,N}, i::Int64, j::Int64) where {T,N}
+    return _array_memory(a)[_array_memory_index(a, _array_linear_index(a, i, j))]
+end
+
+function getindex(a::Array{T,N}, i::Int64, j::Int64, I::Int64...) where {T,N}
+    return _array_memory(a)[_array_memory_index(a, _array_linear_index_tail(a, i, j, I))]
+end
+
+function getindex(a::Array{T,N}, i::Int64, c::Colon) where {T,N}
+    n = size(a, 2)
+    result = similar(a, (n,))
+    for j in 1:n
+        result[j] = a[i, j]
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, c::Colon, j::Int64) where {T,N}
+    m = size(a, 1)
+    result = similar(a, (m,))
+    for i in 1:m
+        result[i] = a[i, j]
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, i::Int64, c1::Colon, c2::Colon) where {T,N}
+    n = size(a, 2)
+    p = size(a, 3)
+    result = similar(a, (n, p))
+    for k in 1:p
+        for j in 1:n
+            result[j, k] = a[i, j, k]
+        end
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, c1::Colon, j::Int64, c2::Colon) where {T,N}
+    m = size(a, 1)
+    p = size(a, 3)
+    result = similar(a, (m, p))
+    for k in 1:p
+        for i in 1:m
+            result[i, k] = a[i, j, k]
+        end
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, c1::Colon, c2::Colon, k::Int64) where {T,N}
+    m = size(a, 1)
+    n = size(a, 2)
+    result = similar(a, (m, n))
+    for j in 1:n
+        for i in 1:m
+            result[i, j] = a[i, j, k]
+        end
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, c1::Colon, c2::Colon, c3::Colon) where {T,N}
+    m = size(a, 1)
+    n = size(a, 2)
+    p = size(a, 3)
+    result = similar(a, (m, n, p))
+    for k in 1:p
+        for j in 1:n
+            for i in 1:m
+                result[i, j, k] = a[i, j, k]
+            end
+        end
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, r::UnitRange) where {T,N}
+    l = length(r)
+    result = similar(a, (l,))
+    if l == 0
+        return result
+    end
+    start = first(r)
+    stop = last(r)
+    checkbounds(a, start)
+    checkbounds(a, stop)
+    for k in 1:l
+        result[k] = a[start + k - 1]
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, c::Colon) where {T,N}
+    l = length(a)
+    result = similar(a, (l,))
+    for k in 1:l
+        result[k] = a[k]
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, inds::Array{Int64}) where {T,N}
+    l = length(inds)
+    result = similar(a, (l,))
+    for k in 1:l
+        result[k] = a[inds[k]]
+    end
+    return result
+end
+
+function getindex(a::Array{T,N}, mask::Array{Bool}) where {T,N}
+    if length(mask) != length(a)
+        throw(DimensionMismatch("logical index mask must match array length"))
+    end
+    l = 0
+    for k in 1:length(mask)
+        if mask[k]
+            l = l + 1
+        end
+    end
+    result = similar(a, (l,))
+    out = 1
+    for k in 1:length(mask)
+        if mask[k]
+            result[out] = a[k]
+            out = out + 1
+        end
+    end
+    return result
+end
+
+function ==(A::Array, B::Array)
+    if length(A) != length(B)
+        return false
+    end
+    if ndims(A) != ndims(B)
+        return false
+    end
+    for d in 1:ndims(A)
+        if size(A, d) != size(B, d)
+            return false
+        end
+    end
+    for i in 1:length(A)
+        if (A[i] == B[i]) == false
+            return false
+        end
+    end
+    return true
+end
+
+function setindex!(a::Array{T,N}, v, i::Int64) where {T,N}
+    _array_check_linear_index(a, i)
+    m = _array_memory(a)
+    m[_array_memory_index(a, i)] = convert(T, v)
+    return a
+end
+
+function setindex!(a::Array{T,N}, v, i::Int64, j::Int64) where {T,N}
+    idx = _array_linear_index(a, i, j)
+    m = _array_memory(a)
+    m[_array_memory_index(a, idx)] = convert(T, v)
+    return a
+end
+
+function setindex!(a::Array{T,N}, v, i::Int64, j::Int64, I::Int64...) where {T,N}
+    idx = _array_linear_index_tail(a, i, j, I)
+    m = _array_memory(a)
+    m[_array_memory_index(a, idx)] = convert(T, v)
+    return a
+end
+
+function setindex!(a::Array{T,N}, v) where {T,N}
+    if ndims(a) == 0
+        m = _array_memory(a)
+        m[_array_memory_index(a, 1)] = convert(T, v)
+        return a
+    end
+    throw(ArgumentError("invalid zero-dimensional array index"))
+end
+
+function push!(a::Array{T,N}, item) where {T,N}
+    dims = _array_dims(a)
+    if length(dims) != 1
+        throw(DimensionMismatch("push! expects a one-dimensional Array"))
+    end
+    old_len = length(a)
+    new_len = old_len + 1
+    mem = Memory{T}(undef, new_len)
+    for i in 1:old_len
+        mem[i] = a[i]
+    end
+    mem[new_len] = convert(T, item)
+    a._mem = mem
+    a._size = (new_len,)
+    return a
+end
 
 # =============================================================================
 # Array functions - Pure Julia implementations
@@ -43,38 +717,80 @@ end
 
 # sum: compute the sum of all elements (preserves element type)
 # With dims keyword: sum along specified dimension (dims=1: columns, dims=2: rows)
-function sum(arr; dims=0)
+function sum(arr; dims=0, init=nothing)
     if dims == 0
-        n = length(arr)
-        if n == 0
-            return zero(eltype(arr))
+        # `init` seeds the accumulator: `sum(arr; init=v) == v + sum(arr)` and
+        # `sum(empty; init=v) == v` (Issue #5761).
+        if init !== nothing
+            result = init
+            for x in arr
+                result = result + x
+            end
+            return result
         end
-        result = arr[1]
-        for i in 2:n
-            result += arr[i]
+        T = eltype(arr)
+        if T == Bool || T == Int8 || T == Int16 || T == Int32
+            return _sum_int64_vector(arr)
+        elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+            return _sum_uint64_vector(arr)
+        elseif T == Float32
+            return _sum_float32_vector(arr)
+        else
+            n = length(arr)
+            if n == 0
+                return zero(eltype(arr))
+            end
+            result = arr[1]
+            for i in 2:n
+                result = result + arr[i]
+            end
+            return result
         end
-        return result
     end
     m = size(arr, 1)
     n = size(arr, 2)
     if dims == 1
-        result = zeros(1, n)
-        for j in 1:n
-            s = 0.0
-            for i in 1:m
-                s = s + arr[i, j]
+        if eltype(arr) == Bool
+            result = _array_undef_from_dims(Int64, (1, n))
+            for j in 1:n
+                s = Int64(0)
+                for i in 1:m
+                    s = s + Int64(arr[i, j])
+                end
+                result[1, j] = s
             end
-            result[1, j] = s
+            return result
+        else
+            result = similar(arr, 1, n)
+            for j in 1:n
+                s = arr[1, j]
+                for i in 2:m
+                    s = s + arr[i, j]
+                end
+                result[1, j] = s
+            end
         end
         return result
     elseif dims == 2
-        result = zeros(m, 1)
-        for i in 1:m
-            s = 0.0
-            for j in 1:n
-                s = s + arr[i, j]
+        if eltype(arr) == Bool
+            result = _array_undef_from_dims(Int64, (m, 1))
+            for i in 1:m
+                s = Int64(0)
+                for j in 1:n
+                    s = s + Int64(arr[i, j])
+                end
+                result[i, 1] = s
             end
-            result[i, 1] = s
+            return result
+        else
+            result = similar(arr, m, 1)
+            for i in 1:m
+                s = arr[i, 1]
+                for j in 2:n
+                    s = s + arr[i, j]
+                end
+                result[i, 1] = s
+            end
         end
         return result
     else
@@ -82,48 +798,254 @@ function sum(arr; dims=0)
     end
 end
 
-# sum(g::Generator): collect and sum
-# Handles generator expressions like sum(x^2 for x in 1:10)
-function sum(g::Generator)
+function _sum_int64_vector(arr)
+    result = Int64(0)
+    for i in 1:length(arr)
+        result = result + Int64(arr[i])
+    end
+    return result
+end
+
+function _sum_uint64_vector(arr)
+    result = UInt64(0)
+    for i in 1:length(arr)
+        result = result + UInt64(arr[i])
+    end
+    return result
+end
+
+function _sum_float32_vector(arr)
+    result = Float32(0)
+    for i in 1:length(arr)
+        result = result + arr[i]
+    end
+    return result
+end
+
+# sum(g::Generator): collect and sum.
+# Keep the keyword method for `sum(x for x in itr; init=v)` (Issue #7133).
+function sum(g::Generator; init=nothing)
+    if init !== nothing
+        result = init
+        for x in g
+            result = result + x
+        end
+        return result
+    end
     return sum(collect(g))
 end
 
 # prod: compute the product of all elements
 # With dims keyword: product along specified dimension (dims=1: columns, dims=2: rows)
-function prod(arr; dims=0)
+function _prod_value_start(arr, i, j)
+    T = eltype(arr)
+    if T == Int8 || T == Int16 || T == Int32
+        return Int64(arr[i, j])
+    elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+        return UInt64(arr[i, j])
+    end
+    return arr[i, j]
+end
+
+function _prod_value_next(arr, i, j)
+    T = eltype(arr)
+    if T == Int8 || T == Int16 || T == Int32
+        return Int64(arr[i, j])
+    elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+        return UInt64(arr[i, j])
+    end
+    return arr[i, j]
+end
+
+function _prod_linear_value(arr, i)
+    T = eltype(arr)
+    if T == Int8 || T == Int16 || T == Int32
+        return Int64(arr[i])
+    elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+        return UInt64(arr[i])
+    end
+    return arr[i]
+end
+
+function _prod_bool_all(arr)
+    for i in 1:length(arr)
+        if !arr[i]
+            return false
+        end
+    end
+    return true
+end
+
+function _prod_empty_value(arr)
+    T = eltype(arr)
+    if T == Bool
+        return true
+    elseif T == Int8 || T == Int16 || T == Int32 || T == Int64
+        return Int64(1)
+    elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+        return UInt64(1)
+    elseif T == Float32
+        return Float32(1)
+    elseif T == Float64
+        return Float64(1)
+    elseif T == String
+        return ""
+    end
+    return 1
+end
+
+function _prod_column_value(arr, j)
+    m = size(arr, 1)
+    if eltype(arr) == Bool
+        for i in 1:m
+            if !arr[i, j]
+                return false
+            end
+        end
+        return true
+    end
+    p = _prod_value_start(arr, 1, j)
+    for i in 2:m
+        p = p * _prod_value_next(arr, i, j)
+    end
+    return p
+end
+
+function _prod_row_value(arr, i)
+    n = size(arr, 2)
+    if eltype(arr) == Bool
+        for j in 1:n
+            if !arr[i, j]
+                return false
+            end
+        end
+        return true
+    end
+    p = _prod_value_start(arr, i, 1)
+    for j in 2:n
+        p = p * _prod_value_next(arr, i, j)
+    end
+    return p
+end
+
+function prod(arr; dims=0, init=nothing)
     if dims == 0
-        result = 1
+        # `init` seeds the accumulator: `prod(arr; init=v) == v * prod(arr)` and
+        # `prod(empty; init=v) == v` (Issue #5761).
+        if init !== nothing
+            result = init
+            for x in arr
+                result = result * x
+            end
+            return result
+        end
         n = length(arr)
-        for i in 1:n
-            result *= arr[i]
+        if eltype(arr) == Bool
+            return _prod_bool_all(arr)
+        end
+        if n == 0
+            return _prod_empty_value(arr)
+        end
+        result = _prod_linear_value(arr, 1)
+        for i in 2:n
+            result = result * _prod_linear_value(arr, i)
         end
         return result
     end
     m = size(arr, 1)
     n = size(arr, 2)
     if dims == 1
-        result = ones(1, n)
+        first_value = _prod_column_value(arr, 1)
+        result = _array_undef_from_dims(typeof(first_value), (1, n))
+        result[1, 1] = first_value
         for j in 1:n
-            p = 1.0
-            for i in 1:m
-                p = p * arr[i, j]
+            if j == 1
+                continue
             end
-            result[1, j] = p
+            result[1, j] = _prod_column_value(arr, j)
         end
         return result
     elseif dims == 2
-        result = ones(m, 1)
+        first_value = _prod_row_value(arr, 1)
+        result = _array_undef_from_dims(typeof(first_value), (m, 1))
+        result[1, 1] = first_value
         for i in 1:m
-            p = 1.0
-            for j in 1:n
-                p = p * arr[i, j]
+            if i == 1
+                continue
             end
-            result[i, 1] = p
+            result[i, 1] = _prod_row_value(arr, i)
         end
         return result
     else
         error("prod: dims must be 1 or 2 for matrices")
     end
+end
+
+function _prod_signed_vector(arr)
+    result = Int64(1)
+    for i in 1:length(arr)
+        result = result * Int64(arr[i])
+    end
+    return result
+end
+
+function _prod_unsigned_vector(arr)
+    result = UInt64(1)
+    for i in 1:length(arr)
+        result = result * UInt64(arr[i])
+    end
+    return result
+end
+
+function _prod_float32_vector(arr)
+    result = Float32(1)
+    for i in 1:length(arr)
+        result = result * arr[i]
+    end
+    return result
+end
+
+function _prod_bool_vector(arr)
+    return _prod_bool_all(arr)
+end
+
+function _prod_string_vector(arr)
+    result = ""
+    for i in 1:length(arr)
+        result = result * arr[i]
+    end
+    return result
+end
+
+prod(arr::Vector{Int8}) = _prod_signed_vector(arr)
+prod(arr::Vector{Int16}) = _prod_signed_vector(arr)
+prod(arr::Vector{Int32}) = _prod_signed_vector(arr)
+prod(arr::Vector{UInt8}) = _prod_unsigned_vector(arr)
+prod(arr::Vector{UInt16}) = _prod_unsigned_vector(arr)
+prod(arr::Vector{UInt32}) = _prod_unsigned_vector(arr)
+prod(arr::Vector{UInt64}) = _prod_unsigned_vector(arr)
+prod(arr::Vector{Float32}) = _prod_float32_vector(arr)
+prod(arr::Vector{Bool}) = _prod_bool_vector(arr)
+prod(arr::Vector{String}) = _prod_string_vector(arr)
+
+function prod(g::Generator; init=nothing)
+    if init !== nothing
+        result = init
+        for x in g
+            result = result * x
+        end
+        return result
+    end
+    arr = collect(g)
+    n = length(arr)
+    if n == 0
+        return _prod_empty_value(arr)
+    end
+    result = _prod_linear_value(arr, 1)
+    for i in 2:n
+        result = result * _prod_linear_value(arr, i)
+    end
+    return result
 end
 
 # prod(f, arr) - product of f(x) for each element x
@@ -139,8 +1061,19 @@ end
 
 # minimum: find the minimum element
 # With dims keyword: minimum along specified dimension (dims=1: columns, dims=2: rows)
-function minimum(arr; dims=0)
+function minimum(arr; dims=0, init=nothing)
     if dims == 0
+        # `init` (Issue #5684): seed the reduction so an empty collection returns
+        # `init`; without it, keep the existing first-element behavior.
+        if init !== nothing
+            result = init
+            for x in arr
+                if x < result
+                    result = x
+                end
+            end
+            return result
+        end
         result = arr[1]
         n = length(arr)
         for i in 2:n
@@ -153,7 +1086,7 @@ function minimum(arr; dims=0)
     m = size(arr, 1)
     n = size(arr, 2)
     if dims == 1
-        result = zeros(1, n)
+        result = similar(arr, 1, n)
         for j in 1:n
             minval = arr[1, j]
             for i in 2:m
@@ -165,7 +1098,7 @@ function minimum(arr; dims=0)
         end
         return result
     elseif dims == 2
-        result = zeros(m, 1)
+        result = similar(arr, m, 1)
         for i in 1:m
             minval = arr[i, 1]
             for j in 2:n
@@ -183,14 +1116,55 @@ end
 
 # minimum(f, arr) - minimum of f(x) for each element x
 # Based on Julia's base/reduce.jl:674
-function minimum(f::Function, arr)
+function minimum(f::Function, arr; init=nothing)
+    if init !== nothing
+        result = init
+        for x in arr
+            v = f(x)
+            if v < result
+                result = v
+            end
+        end
+        return result
+    end
     return findmin(f, arr)[1]
+end
+
+function minimum(g::Generator; init=nothing)
+    seen = false
+    result = init
+    for x in g
+        if !seen && init === nothing
+            result = x
+            seen = true
+        elseif x < result
+            result = x
+            seen = true
+        else
+            seen = true
+        end
+    end
+    if !seen && init === nothing
+        error("minimum: empty collection")
+    end
+    return result
 end
 
 # maximum: find the maximum element
 # With dims keyword: maximum along specified dimension (dims=1: columns, dims=2: rows)
-function maximum(arr; dims=0)
+function maximum(arr; dims=0, init=nothing)
     if dims == 0
+        # `init` (Issue #5684): seed the reduction so an empty collection returns
+        # `init`; without it, keep the existing first-element behavior.
+        if init !== nothing
+            result = init
+            for x in arr
+                if x > result
+                    result = x
+                end
+            end
+            return result
+        end
         result = arr[1]
         n = length(arr)
         for i in 2:n
@@ -203,7 +1177,7 @@ function maximum(arr; dims=0)
     m = size(arr, 1)
     n = size(arr, 2)
     if dims == 1
-        result = zeros(1, n)
+        result = similar(arr, 1, n)
         for j in 1:n
             maxval = arr[1, j]
             for i in 2:m
@@ -215,7 +1189,7 @@ function maximum(arr; dims=0)
         end
         return result
     elseif dims == 2
-        result = zeros(m, 1)
+        result = similar(arr, m, 1)
         for i in 1:m
             maxval = arr[i, 1]
             for j in 2:n
@@ -233,8 +1207,38 @@ end
 
 # maximum(f, arr) - maximum of f(x) for each element x
 # Based on Julia's base/reduce.jl:647
-function maximum(f::Function, arr)
+function maximum(f::Function, arr; init=nothing)
+    if init !== nothing
+        result = init
+        for x in arr
+            v = f(x)
+            if v > result
+                result = v
+            end
+        end
+        return result
+    end
     return findmax(f, arr)[1]
+end
+
+function maximum(g::Generator; init=nothing)
+    seen = false
+    result = init
+    for x in g
+        if !seen && init === nothing
+            result = x
+            seen = true
+        elseif x > result
+            result = x
+            seen = true
+        else
+            seen = true
+        end
+    end
+    if !seen && init === nothing
+        error("maximum: empty collection")
+    end
+    return result
 end
 
 # =============================================================================
@@ -249,6 +1253,50 @@ end
 #   - r is a row vector (1×n): reduce along dim 1 (sum columns)
 
 # sum!: sum elements of A over singleton dimensions of r, write to r
+function _sum_value(A, i, j)
+    T = eltype(A)
+    if T == Bool || T == Int8 || T == Int16 || T == Int32
+        return Int64(A[i, j])
+    elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+        return UInt64(A[i, j])
+    end
+    return A[i, j]
+end
+
+function _sum_column_value(A, j)
+    m = size(A, 1)
+    s = _sum_value(A, 1, j)
+    for i in 2:m
+        s = s + _sum_value(A, i, j)
+    end
+    return s
+end
+
+function _sum_row_value(A, i)
+    n = size(A, 2)
+    s = _sum_value(A, i, 1)
+    for j in 2:n
+        s = s + _sum_value(A, i, j)
+    end
+    return s
+end
+
+function _sum_store_1d!(r, i, value)
+    if eltype(r) == Bool && !(value == 0 || value == 1)
+        error("InexactError: Bool")
+    end
+    r[i] = value
+    return r
+end
+
+function _sum_store_2d!(r, i, j, value)
+    if eltype(r) == Bool && !(value == 0 || value == 1)
+        error("InexactError: Bool")
+    end
+    r[i, j] = value
+    return r
+end
+
 function sum!(r, A)
     sr = size(r)
     sa = size(A)
@@ -257,13 +1305,8 @@ function sum!(r, A)
     if ndr == 1 && nda == 2
         # r is vector of length m → reduce along dim 2
         m = sa[1]
-        n = sa[2]
         for i in 1:m
-            s = 0.0
-            for j in 1:n
-                s = s + A[i, j]
-            end
-            r[i] = s
+            _sum_store_1d!(r, i, _sum_row_value(A, i))
         end
     elseif ndr == 2 && nda == 2
         m = sa[1]
@@ -271,20 +1314,12 @@ function sum!(r, A)
         if sr[1] == 1 && sr[2] == n
             # r is 1×n → reduce along dim 1
             for j in 1:n
-                s = 0.0
-                for i in 1:m
-                    s = s + A[i, j]
-                end
-                r[1, j] = s
+                _sum_store_2d!(r, 1, j, _sum_column_value(A, j))
             end
         elseif sr[1] == m && sr[2] == 1
             # r is m×1 → reduce along dim 2
             for i in 1:m
-                s = 0.0
-                for j in 1:n
-                    s = s + A[i, j]
-                end
-                r[i, 1] = s
+                _sum_store_2d!(r, i, 1, _sum_row_value(A, i))
             end
         else
             error("sum!: output dimensions must match input along non-reduced dimensions")
@@ -303,32 +1338,19 @@ function prod!(r, A)
     nda = length(sa)
     if ndr == 1 && nda == 2
         m = sa[1]
-        n = sa[2]
         for i in 1:m
-            p = 1.0
-            for j in 1:n
-                p = p * A[i, j]
-            end
-            r[i] = p
+            r[i] = _prod_row_value(A, i)
         end
     elseif ndr == 2 && nda == 2
         m = sa[1]
         n = sa[2]
         if sr[1] == 1 && sr[2] == n
             for j in 1:n
-                p = 1.0
-                for i in 1:m
-                    p = p * A[i, j]
-                end
-                r[1, j] = p
+                r[1, j] = _prod_column_value(A, j)
             end
         elseif sr[1] == m && sr[2] == 1
             for i in 1:m
-                p = 1.0
-                for j in 1:n
-                    p = p * A[i, j]
-                end
-                r[i, 1] = p
+                r[i, 1] = _prod_row_value(A, i)
             end
         else
             error("prod!: output dimensions must match input along non-reduced dimensions")
@@ -467,6 +1489,117 @@ function argmax(arr)
     return idx
 end
 
+# collect(arr::Array): type-preserving shallow copy.
+# Issue #3648: the generic `collect(itr)` in iterators.jl returns Vector{Any}
+# because it has no compile-time element-type information. With this typed
+# overload, runtime dispatch (CallDynamic) routes Array values here instead,
+# and `similar(arr, n)` allocates a buffer matching arr's element type.
+function collect(arr::Array)
+    n = length(arr)
+    result = similar(arr)
+    for i in 1:n
+        result[i] = arr[i]
+    end
+    return result
+end
+
+# Vector(::AbstractRange) — materialize a range into a Vector
+# (Issue #4810). Mirrors upstream `Base.Vector(r::AbstractRange) = collect(r)`.
+function Vector(r::AbstractRange)
+    return collect(r)
+end
+
+# Vector{T}(::AbstractRange) — materialize and convert each element.
+# Kept for compatibility with dynamic-dispatch call sites (the compile
+# intercept at `compile_array_constructor` short-circuits before
+# reaching here). Mirrors upstream `Base.Vector{T}(r::AbstractRange) =
+# T[x for x in r]`, implemented with a manual loop to avoid the
+# typed-splat (`T[r...]`) path that is still unsupported. See #4811
+# for the compile-time intercept that handles the typed case directly.
+function Vector{T}(r::AbstractRange) where {T}
+    n = length(r)
+    result = _array_undef_from_dims(T, (n,))
+    for i in 1:n
+        result[i] = T(r[i])
+    end
+    return result
+end
+
+# convert(::Type{Vector{S}}, a) — recursive container conversion (Issue #5111).
+#
+# Mirrors upstream `julia/base/array.jl`:
+#   convert(::Type{T}, a::AbstractArray) where {T<:Array} = a isa T ? a : T(a)::T
+# and the constructor `Array{T,N}(x::AbstractArray) = copyto!(similar..., x)`,
+# which builds a freshly allocated T-element array and converts each element via
+# `convert(S, x[i])`. When the source already has the exact target type the
+# original object is returned unchanged (identity), matching `a isa T ? a`.
+# A non-convertible element raises the same error as `convert(S, e)` (e.g.
+# InexactError for `convert(Vector{Int}, [1.5])`).
+#
+# The element conversion recurses through `convert`, so nested numeric element
+# types (`Vector{Float64}` ← `Vector{Int}`) work; nested *parametric container*
+# element types (`Vector{Vector{Float64}}`) still depend on the element-type
+# carrier, tracked under the type-loss umbrella #5073.
+function _convert_to_typed_vector(::Type{S}, a) where {S}
+    n = length(a)
+    result = _array_undef_from_dims(S, (n,))
+    i = 1
+    for e in a
+        result[i] = convert(S, e)
+        i += 1
+    end
+    return result
+end
+
+function convert(::Type{Vector{S}}, a::AbstractArray) where {S}
+    a isa Vector{S} && return a
+    return _convert_to_typed_vector(S, a)
+end
+
+# Ranges are `<: AbstractArray` upstream, but this VM keeps `AbstractRange`
+# outside the `AbstractArray` hierarchy, so the `AbstractArray` method above
+# does not catch `convert(Vector{S}, 1:3)`. This explicit method mirrors the
+# upstream result (materialize the range, converting each element).
+function convert(::Type{Vector{S}}, a::AbstractRange) where {S}
+    return _convert_to_typed_vector(S, a)
+end
+
+# convert(::Type{Array{S}}, a) — the element-typed `Array` spelling (no rank
+# parameter) routes to the same Vector path for 1-D sources, mirroring upstream
+# where `Array{T}` and `Vector{T}` share the `T<:Array` convert method.
+function convert(::Type{Array{S}}, a::AbstractArray) where {S}
+    a isa Vector{S} && return a
+    return _convert_to_typed_vector(S, a)
+end
+
+function convert(::Type{Array{S}}, a::AbstractRange) where {S}
+    return _convert_to_typed_vector(S, a)
+end
+
+# Helper for the Vector{Any}(arr) compile-time intercept (Issue #4818).
+# Synthesizing `Any[x for x in arr]` from the compile intercept does
+# not work because the typed-comprehension lowering wraps the body in
+# `Any(x)`, and `Any(...)` is not a defined Julia constructor. Calling
+# this helper avoids that — it allocates a `Vector{Any}` (which the
+# `Vector{T}(undef, n)` intercept handles correctly) and copies the
+# source elements in via plain assignment, which boxes each element to
+# `Any` as a side effect of the Memory-backed `Vector{Any}` store.
+function _vector_any_collect(arr)
+    n = length(arr)
+    result = Vector{Any}(undef, n)
+    for i in 1:n
+        result[i] = arr[i]
+    end
+    return result
+end
+
+# collect(::Type{T}, itr): typed iterator materialization.
+# Based on Julia's base/array.jl:
+#   collect(::Type{T}, itr) where {T} = _collect(T, itr, IteratorSize(itr))
+function collect(::Type{T}, itr) where {T}
+    return _collect(T, itr, IteratorSize(itr))
+end
+
 # reverse: reverse an array (type-preserving)
 function reverse(arr)
     n = length(arr)
@@ -475,6 +1608,27 @@ function reverse(arr)
         result[i] = arr[n - i + 1]
     end
     return result
+end
+
+# reverse(v, start[, stop]): return a copy with only the subrange [start, stop]
+# reversed (stop defaults to the last index). Vectors only — `reverse(::String,
+# i, j)` is a MethodError upstream (Issue #5693).
+function reverse(arr::AbstractVector, start::Integer, stop::Integer)
+    result = collect(arr)
+    i = start
+    j = stop
+    while i < j
+        tmp = result[i]
+        result[i] = result[j]
+        result[j] = tmp
+        i = i + 1
+        j = j - 1
+    end
+    return result
+end
+
+function reverse(arr::AbstractVector, start::Integer)
+    return reverse(arr, start, length(arr))
 end
 
 # Note: count(f, arr) is implemented as a builtin HOF
@@ -539,66 +1693,184 @@ function circshift!(arr, shift)
     return arr
 end
 
-# repeat: repeat array n times
-# Julia-style multiple dispatch: this handles arrays, string repeat is handled by builtin
-# Type annotation ensures this only matches Array, not String
+function _array_string_copy_same_shape(arr)
+    flat = String[]
+    len = length(arr)
+    for i in 1:len
+        push!(flat, arr[i])
+    end
+    return reshape(flat, size(arr, 1), size(arr, 2))
+end
+
+# repeat: repeat array n times.
+# Julia-style multiple dispatch: this handles arrays; string repeat is handled
+# by a builtin. Type annotation ensures this only matches Array, not String.
+#
+# Element type is preserved via `similar(arr, total)` (Issue #3587, #3648)
+# now that the multi-dim `similar` dispatch (#3751) and the `Any`-dim relax
+# (#3777) make this routing reliable from inside a function body. Previously
+# this allocated `result = []` (Vector{Any}) because `similar(arr, len * n)`
+# fell through to method dispatch.
 function repeat(arr::Array, n::Int)
     len = length(arr)
-    result = zeros(len * n)
-    idx = 1
+    total = len * n
+    result = similar(arr, total)
+    k = 1
     for _ in 1:n
         for i in 1:len
-            result[idx] = arr[i]
-            idx = idx + 1
+            result[k] = arr[i]
+            k = k + 1
+        end
+    end
+    return result
+end
+
+# repeat(v; inner=k, outer=m): repeat each element `inner` times, then repeat the
+# whole result `outer` times (Issue #5699). `repeat([1,2], inner=2)` is
+# [1,1,2,2]; `repeat([1,2], outer=2)` is [1,2,1,2]. The positional `repeat(v, n)`
+# above is unaffected (different signature).
+function repeat(arr::AbstractVector; inner=1, outer=1)
+    expanded = similar(arr, 0)
+    for x in arr
+        for _ in 1:inner
+            push!(expanded, x)
+        end
+    end
+    result = similar(arr, 0)
+    for _ in 1:outer
+        append!(result, expanded)
+    end
+    return result
+end
+
+# Matrix rotation functions: rotl90 / rotr90 / rot180.
+#
+# Implementation note (Issue #3589, simplified by #3761 / #3751):
+#   Element type is preserved by allocating the result via
+#   `similar(mat, dims...)` — the multi-dim `similar` builtin (Issue #3751,
+#   PR #3757) returns a Matrix{T} matching the input runtime element type.
+#   The earlier workaround built a typed flat vector via push! and called
+#   reshape; that path is no longer needed now that multi-dim similar is
+#   available.
+
+# Internal helpers: each writes column-major into the (already-allocated)
+# `result` matrix and returns it.
+#
+# For an input of size (m, n):
+#   rotl90 — output (n, m): out[i, j] = mat[j, n - i + 1]
+#   rotr90 — output (n, m): out[i, j] = mat[m - j + 1, i]
+#   rot180 — output (m, n): out[i, j] = mat[m - i + 1, n - j + 1]
+function _rotl90_into!(result, mat, m, n)
+    for j in 1:m
+        for i in 1:n
+            result[i, j] = mat[j, n - i + 1]
+        end
+    end
+    return result
+end
+
+function _rotr90_into!(result, mat, m, n)
+    for j in 1:m
+        for i in 1:n
+            result[i, j] = mat[m - j + 1, i]
+        end
+    end
+    return result
+end
+
+function _rot180_into!(result, mat, m, n)
+    for j in 1:n
+        for i in 1:m
+            result[i, j] = mat[m - i + 1, n - j + 1]
         end
     end
     return result
 end
 
 # rotl90: rotate matrix 90 degrees counter-clockwise
-# For matrix with size (m, n), result has size (n, m)
-function rotl90(mat)
+# For matrix with size (m, n), result has size (n, m).
+# Note: inline `similar(mat, size(mat, 2), size(mat, 1))` fails compile-time
+# inference (the dim args are seen as `Any`), but the same call with the
+# dims hoisted into local variables succeeds — `size` is inferred as I64
+# only via the local-variable type table. Hence one body, used by both the
+# typed compile-time hints and the generic fallback.
+function _rotl90_impl(mat)
     m = size(mat, 1)
     n = size(mat, 2)
-    result = zeros(n, m)
-    for i in 1:m
-        for j in 1:n
-            result[n - j + 1, i] = mat[i, j]
-        end
-    end
-    return result
+    return _rotl90_into!(similar(mat, n, m), mat, m, n)
 end
+
+# Typed methods preserved as compile-time hints. Matrix literals now infer as
+# `Matrix{T}`; the Vector methods remain for older flat-buffer paths.
+rotl90(mat::Matrix{Int64}) = _rotl90_impl(mat)
+rotl90(mat::Matrix{Float64}) = _rotl90_impl(mat)
+rotl90(mat::Matrix{Bool}) = _rotl90_impl(mat)
+rotl90(mat::Matrix{String}) = _rotl90_impl(mat)
+rotl90(mat::Matrix{Char}) = _rotl90_impl(mat)
+rotl90(mat::Matrix{Any}) = _rotl90_impl(mat)
+rotl90(mat::Vector{Any}) = _rotl90_impl(mat)
+rotl90(mat::Vector{Int64}) = _rotl90_impl(mat)
+rotl90(mat::Vector{Float64}) = _rotl90_impl(mat)
+rotl90(mat::Vector{Bool}) = _rotl90_impl(mat)
+rotl90(mat::Vector{String}) = _rotl90_impl(mat)
+rotl90(mat::Vector{Char}) = _rotl90_impl(mat)
+rotl90(mat::Array) = _rotl90_impl(mat)
+rotl90(mat) = _rotl90_impl(mat)
 
 # rotr90: rotate matrix 90 degrees clockwise
-# For matrix with size (m, n), result has size (n, m)
-function rotr90(mat)
+# For matrix with size (m, n), result has size (n, m).
+function _rotr90_impl(mat)
     m = size(mat, 1)
     n = size(mat, 2)
-    result = zeros(n, m)
-    for i in 1:m
-        for j in 1:n
-            result[j, m - i + 1] = mat[i, j]
-        end
-    end
-    return result
+    return _rotr90_into!(similar(mat, n, m), mat, m, n)
 end
 
+rotr90(mat::Matrix{Int64}) = _rotr90_impl(mat)
+rotr90(mat::Matrix{Float64}) = _rotr90_impl(mat)
+rotr90(mat::Matrix{Bool}) = _rotr90_impl(mat)
+rotr90(mat::Matrix{String}) = _rotr90_impl(mat)
+rotr90(mat::Matrix{Char}) = _rotr90_impl(mat)
+rotr90(mat::Matrix{Any}) = _rotr90_impl(mat)
+rotr90(mat::Vector{Any}) = _rotr90_impl(mat)
+rotr90(mat::Vector{Int64}) = _rotr90_impl(mat)
+rotr90(mat::Vector{Float64}) = _rotr90_impl(mat)
+rotr90(mat::Vector{Bool}) = _rotr90_impl(mat)
+rotr90(mat::Vector{String}) = _rotr90_impl(mat)
+rotr90(mat::Vector{Char}) = _rotr90_impl(mat)
+rotr90(mat::Array) = _rotr90_impl(mat)
+rotr90(mat) = _rotr90_impl(mat)
+
 # rot180: rotate matrix 180 degrees
-function rot180(mat)
+# For matrix with size (m, n), result has size (m, n).
+function _rot180_impl(mat)
     m = size(mat, 1)
     n = size(mat, 2)
-    result = zeros(m, n)
-    for i in 1:m
-        for j in 1:n
-            result[m - i + 1, n - j + 1] = mat[i, j]
-        end
-    end
-    return result
+    return _rot180_into!(similar(mat, m, n), mat, m, n)
 end
+
+rot180(mat::Matrix{Int64}) = _rot180_impl(mat)
+rot180(mat::Matrix{Float64}) = _rot180_impl(mat)
+rot180(mat::Matrix{Bool}) = _rot180_impl(mat)
+rot180(mat::Matrix{String}) = _rot180_impl(mat)
+rot180(mat::Matrix{Char}) = _rot180_impl(mat)
+rot180(mat::Matrix{Any}) = _rot180_impl(mat)
+rot180(mat::Vector{Any}) = _rot180_impl(mat)
+rot180(mat::Vector{Int64}) = _rot180_impl(mat)
+rot180(mat::Vector{Float64}) = _rot180_impl(mat)
+rot180(mat::Vector{Bool}) = _rot180_impl(mat)
+rot180(mat::Vector{String}) = _rot180_impl(mat)
+rot180(mat::Vector{Char}) = _rot180_impl(mat)
+rot180(mat::Array) = _rot180_impl(mat)
+rot180(mat) = _rot180_impl(mat)
 
 # copy: create a shallow copy of an array (type-preserving)
 function copy(arr)
-    return collect(arr)
+    n = length(arr)
+    result = similar(arr)
+    for i in 1:n
+        result[i] = arr[i]
+    end
+    return _array_bitarray_surface_like(arr, result)
 end
 
 # Note: mean is in Statistics, not Base. Use `using Statistics` to get mean.
@@ -611,15 +1883,240 @@ end
 # vcat: vertical concatenation of 1D arrays (type-preserving)
 # For 1D arrays, concatenates elements sequentially
 # Based on Julia's base/abstractarray.jl:1695
-function vcat(a, b)
-    na = length(a)
-    nb = length(b)
-    # Create result array by collecting 'a' and extending
-    result = collect(a)
-    for i in 1:nb
-        push!(result, b[i])
+function _concat_promoted_eltype(args)
+    T = eltype(args[1])
+    for i in 2:length(args)
+        T = promote_type(T, eltype(args[i]))
+    end
+    return T
+end
+
+# =============================================================================
+# General block-aware concatenation (Issue #7203)
+# =============================================================================
+# Upstream `hcat`/`vcat`/`hvcat` flatten array/range *elements* of a matrix
+# literal column-/row-wise into the result. The 1D-vector helpers above only
+# treat each argument as a length-N column, which is wrong when an argument is
+# itself a 2-D matrix, a range, or a scalar. The helpers below model every
+# argument uniformly by its block shape:
+#   scalar         -> 1 x 1
+#   range / vector -> n x 1   (a column)
+#   matrix         -> size(a, 1) x size(a, 2)
+# and place blocks side-by-side (hcat) or stacked (vcat), matching Julia's
+# `typed_hcat` / `typed_vcat` / `hvcat` semantics.
+
+# Number of rows the argument contributes as a concatenation block.
+function _cat_blk_nrows(a)
+    if isa(a, AbstractArray)
+        if ndims(a) == 1
+            return length(a)
+        else
+            return size(a, 1)
+        end
+    else
+        return 1
+    end
+end
+
+# Number of columns the argument contributes as a concatenation block.
+function _cat_blk_ncols(a)
+    if isa(a, AbstractArray)
+        if ndims(a) == 1
+            return 1
+        else
+            return size(a, 2)
+        end
+    else
+        return 1
+    end
+end
+
+# Read element (r, c) of the argument viewed as a block (1-based).
+function _cat_blk_get(a, r, c)
+    if isa(a, AbstractArray)
+        if ndims(a) == 1
+            return a[r]
+        else
+            return a[r, c]
+        end
+    else
+        return a
+    end
+end
+
+# eltype of an argument (its own type when it is a scalar).
+function _cat_arg_eltype(a)
+    if isa(a, AbstractArray)
+        return eltype(a)
+    else
+        return typeof(a)
+    end
+end
+
+# promote_type over the eltypes of all concatenation arguments.
+function _cat_promoted_eltype(args)
+    T = _cat_arg_eltype(args[1])
+    for i in 2:length(args)
+        T = promote_type(T, _cat_arg_eltype(args[i]))
+    end
+    return T
+end
+
+# True when every argument is a scalar or a 1-D array/range (no 2-D matrix).
+# In that case vertical concatenation produces a 1-D `Vector` (matching
+# upstream `vcat` over vectors/scalars) rather than an N x 1 matrix.
+function _cat_all_columnish(args)
+    for i in 1:length(args)
+        a = args[i]
+        if isa(a, AbstractArray) && ndims(a) >= 2
+            return false
+        end
+    end
+    return true
+end
+
+# Horizontal concatenation of scalars / ranges / vectors / matrices.
+function _block_hcat(args)
+    nargs = length(args)
+    nrows = _cat_blk_nrows(args[1])
+    ncols = 0
+    for i in 1:nargs
+        if _cat_blk_nrows(args[i]) != nrows
+            error("number of rows of each array must match (got $(_cat_blk_nrows(args[i])) and $(nrows))")
+        end
+        ncols = ncols + _cat_blk_ncols(args[i])
+    end
+    result = _array_undef_from_dims(_cat_promoted_eltype(args), (nrows, ncols))
+    coloff = 0
+    for i in 1:nargs
+        a = args[i]
+        nc = _cat_blk_ncols(a)
+        for c in 1:nc
+            for r in 1:nrows
+                result[r, coloff + c] = _cat_blk_get(a, r, c)
+            end
+        end
+        coloff = coloff + nc
     end
     return result
+end
+
+# Element type of an untyped array literal computed by promoting the types of
+# its (already splat-expanded) values. Mirrors upstream `Base.promote_typeof`
+# used by `Base.vect(X...)` (Issue #7255).
+function _array_literal_promoted_eltype(vals...)
+    n = length(vals)
+    if n == 0
+        return Any
+    end
+    T = typeof(vals[1])
+    for i in 2:n
+        T = promote_type(T, typeof(vals[i]))
+    end
+    return T
+end
+
+# Untyped array-literal constructor used when a `[a, xs..., b]` literal contains
+# a positional splat. The splat is applied by the caller (the lowering emits a
+# splat-call), so by the time we are here each spread element is its own
+# argument. Mirrors upstream `Base.vect(X...) = (T = promote_typeof(X...); T[X...])`
+# (Issue #7255).
+function _array_splat_literal(vals...)
+    T = _array_literal_promoted_eltype(vals...)
+    return _array_splat_literal_typed(T, vals...)
+end
+
+# Typed array-literal constructor used when a `T[a, xs..., b]` literal contains a
+# positional splat. The splat is applied by the caller, so each spread element is
+# its own argument. Builds a `Vector{T}`, converting each value to `T`, mirroring
+# upstream `getindex(::Type{T}, vals...)` (Issue #7255).
+function _array_splat_literal_typed(::Type{T}, vals...) where {T}
+    n = length(vals)
+    v = Vector{T}(undef, n)
+    for i in 1:n
+        v[i] = convert(T, vals[i])
+    end
+    return v
+end
+
+# Vertical concatenation of scalars / ranges / vectors / matrices.
+function _block_vcat(args)
+    nargs = length(args)
+    ncols = _cat_blk_ncols(args[1])
+    nrows = 0
+    for i in 1:nargs
+        if _cat_blk_ncols(args[i]) != ncols
+            error("number of columns of each array must match (got $(_cat_blk_ncols(args[i])) and $(ncols))")
+        end
+        nrows = nrows + _cat_blk_nrows(args[i])
+    end
+    T = _cat_promoted_eltype(args)
+    if ncols == 1 && _cat_all_columnish(args)
+        # All column-shaped: produce a 1-D Vector{T}.
+        result = _array_undef_from_dims(T, (nrows,))
+        k = 1
+        for i in 1:nargs
+            a = args[i]
+            n = _cat_blk_nrows(a)
+            for r in 1:n
+                result[k] = _cat_blk_get(a, r, 1)
+                k = k + 1
+            end
+        end
+        return result
+    end
+    result = _array_undef_from_dims(T, (nrows, ncols))
+    rowoff = 0
+    for i in 1:nargs
+        a = args[i]
+        nr = _cat_blk_nrows(a)
+        for c in 1:ncols
+            for r in 1:nr
+                result[rowoff + r, c] = _cat_blk_get(a, r, c)
+            end
+        end
+        rowoff = rowoff + nr
+    end
+    return result
+end
+
+# True when every argument is a 1-D `Vector` (no scalars, ranges, or matrices).
+# These keep the type-preserving fast paths below (Issue #3588).
+function _cat_all_plain_vectors(args)
+    for i in 1:length(args)
+        a = args[i]
+        if !(isa(a, AbstractArray) && ndims(a) == 1)
+            return false
+        end
+        if isa(a, AbstractRange)
+            return false
+        end
+    end
+    return true
+end
+
+function _vcat_typed(args)
+    total = 0
+    for i in 1:length(args)
+        total = total + length(args[i])
+    end
+    result = _array_undef_from_dims(_concat_promoted_eltype(args), (total,))
+    k = 1
+    for i in 1:length(args)
+        arr = args[i]
+        for j in 1:length(arr)
+            result[k] = arr[j]
+            k = k + 1
+        end
+    end
+    return result
+end
+
+function vcat(a, b)
+    if _cat_all_plain_vectors((a, b))
+        return _vcat_typed((a, b))
+    end
+    return _block_vcat((a, b))
 end
 
 # vcat: varargs version for 3+ arguments
@@ -632,64 +2129,320 @@ function vcat(args...)
     if n == 1
         return collect(args[1])
     end
-    # Fold left: vcat(a, b, c, ...) = vcat(vcat(a, b), c, ...)
-    result = collect(args[1])
-    for i in 2:n
-        arr_i = args[i]
-        ni = length(arr_i)
-        for j in 1:ni
-            push!(result, arr_i[j])
-        end
+    if _cat_all_plain_vectors(args)
+        return _vcat_typed(args)
     end
-    return result
+    return _block_vcat(args)
 end
 
 # hcat: horizontal concatenation (treats 1D arrays as column vectors)
 # Returns a matrix from 1D arrays of same length
 # Based on Julia's base/abstractarray.jl:1728
-function hcat(a, b)
-    na = length(a)
-    nb = length(b)
-    if na != nb
-        error("hcat: arrays must have same length")
+#
+# Implementation note (Issue #3588):
+#   The previous implementation pre-allocated `result = zeros(...)` which
+#   hard-coded the output element type to Float64 and widened any
+#   integer/Bool input. We now build a flat typed vector via push! in
+#   column-major order and reshape it into a matrix; reshape preserves
+#   the element type. To produce a typed Matrix{T} the helper is dispatched
+#   on the input element type — concrete `Vector{T}` overloads seed the
+#   flat buffer with `T[]`. The generic fallback still produces
+#   `Matrix{Any}` because pure-Julia `similar(arr, n, m)` inside a
+#   function is blocked by Issue #3648.
+
+# Internal helper: flatten the concatenation column-major into the
+# (already-typed) `flat` vector and reshape into an `nrows x ncols` matrix.
+# Same shape as the `stack` fix in #3673.
+function _hcat_into!(flat, args, nrows)
+    ncols = length(args)
+    for j in 1:ncols
+        arr_j = args[j]
+        if length(arr_j) != nrows
+            error("hcat: arrays must have same length")
+        end
+        for i in 1:nrows
+            push!(flat, arr_j[i])
+        end
     end
-    result = zeros(na, 2)
-    for i in 1:na
-        result[i, 1] = a[i]
-        result[i, 2] = b[i]
+    return reshape(flat, nrows, ncols)
+end
+
+function _hcat_promoted(args, nrows)
+    ncols = length(args)
+    result = _array_undef_from_dims(_concat_promoted_eltype(args), (nrows, ncols))
+    for j in 1:ncols
+        arr_j = args[j]
+        if length(arr_j) != nrows
+            error("hcat: arrays must have same length")
+        end
+        for i in 1:nrows
+            result[i, j] = arr_j[i]
+        end
     end
     return result
 end
 
-# hcat: varargs version for 3+ arguments
+function _hcat_all_vectors_int64(args)
+    for arg in args
+        if !isa(arg, Vector{Int64})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_int8(args)
+    for arg in args
+        if !isa(arg, Vector{Int8})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_int16(args)
+    for arg in args
+        if !isa(arg, Vector{Int16})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_int32(args)
+    for arg in args
+        if !isa(arg, Vector{Int32})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_uint8(args)
+    for arg in args
+        if !isa(arg, Vector{UInt8})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_uint16(args)
+    for arg in args
+        if !isa(arg, Vector{UInt16})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_uint32(args)
+    for arg in args
+        if !isa(arg, Vector{UInt32})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_uint64(args)
+    for arg in args
+        if !isa(arg, Vector{UInt64})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_float64(args)
+    for arg in args
+        if !isa(arg, Vector{Float64})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_float32(args)
+    for arg in args
+        if !isa(arg, Vector{Float32})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_int64_or_float64(args)
+    for arg in args
+        if !(isa(arg, Vector{Int64}) || isa(arg, Vector{Float64}))
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_bool(args)
+    for arg in args
+        if !isa(arg, Vector{Bool})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_string(args)
+    for arg in args
+        if !isa(arg, Vector{String})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_all_vectors_char(args)
+    for arg in args
+        if !isa(arg, Vector{Char})
+            return false
+        end
+    end
+    return true
+end
+
+function _hcat_typed_or_any(args)
+    nrows = length(args[1])
+    if _hcat_all_vectors_int64(args)
+        return _hcat_into!(Int64[], args, nrows)
+    elseif _hcat_all_vectors_int8(args)
+        return _hcat_into!(Int8[], args, nrows)
+    elseif _hcat_all_vectors_int16(args)
+        return _hcat_into!(Int16[], args, nrows)
+    elseif _hcat_all_vectors_int32(args)
+        return _hcat_into!(Int32[], args, nrows)
+    elseif _hcat_all_vectors_uint8(args)
+        return _hcat_into!(UInt8[], args, nrows)
+    elseif _hcat_all_vectors_uint16(args)
+        return _hcat_into!(UInt16[], args, nrows)
+    elseif _hcat_all_vectors_uint32(args)
+        return _hcat_into!(UInt32[], args, nrows)
+    elseif _hcat_all_vectors_uint64(args)
+        return _hcat_into!(UInt64[], args, nrows)
+    elseif _hcat_all_vectors_float64(args)
+        return _hcat_into!(Float64[], args, nrows)
+    elseif _hcat_all_vectors_float32(args)
+        return _hcat_into!(Float32[], args, nrows)
+    elseif _hcat_all_vectors_int64_or_float64(args)
+        return _hcat_into!(Float64[], args, nrows)
+    elseif _hcat_all_vectors_bool(args)
+        return _hcat_into!(Bool[], args, nrows)
+    elseif _hcat_all_vectors_string(args)
+        return _hcat_into!(String[], args, nrows)
+    elseif _hcat_all_vectors_char(args)
+        return _hcat_into!(Char[], args, nrows)
+    else
+        return _hcat_promoted(args, nrows)
+    end
+end
+
+# Type-preserving 2-argument specializations (Issue #3588).
+function hcat(a::Vector{Int64}, b::Vector{Int64})
+    return _hcat_into!(Int64[], (a, b), length(a))
+end
+function hcat(a::Vector{Float64}, b::Vector{Float64})
+    return _hcat_into!(Float64[], (a, b), length(a))
+end
+function hcat(a::Vector{Bool}, b::Vector{Bool})
+    return _hcat_into!(Bool[], (a, b), length(a))
+end
+function hcat(a::Vector{String}, b::Vector{String})
+    return _hcat_into!(String[], (a, b), length(a))
+end
+function hcat(a::Vector{Char}, b::Vector{Char})
+    return _hcat_into!(Char[], (a, b), length(a))
+end
+
+# Generic 2-argument fallback. Mixed element types follow upstream's
+# promote_eltype-shaped allocation path. Plain 1-D vectors keep the
+# type-preserving fast path; scalars / ranges / matrices flatten block-wise
+# (Issue #7203).
+function hcat(a, b)
+    if _cat_all_plain_vectors((a, b))
+        na = length(a)
+        nb = length(b)
+        if na != nb
+            error("hcat: arrays must have same length")
+        end
+        return _hcat_typed_or_any((a, b))
+    end
+    return _block_hcat((a, b))
+end
+
+# Type-preserving 3-argument specializations (Issue #3588).
+function hcat(a::Vector{Int64}, b::Vector{Int64}, c::Vector{Int64})
+    return _hcat_into!(Int64[], (a, b, c), length(a))
+end
+function hcat(a::Vector{Float64}, b::Vector{Float64}, c::Vector{Float64})
+    return _hcat_into!(Float64[], (a, b, c), length(a))
+end
+function hcat(a::Vector{Bool}, b::Vector{Bool}, c::Vector{Bool})
+    return _hcat_into!(Bool[], (a, b, c), length(a))
+end
+
+# hcat: varargs fallback (1-argument or 4+ arguments, or mixed types).
+# Result allocation follows the promoted input vector eltype.
 # Based on Julia's base/abstractarray.jl:2016
 function hcat(args...)
     n = length(args)
     if n == 0
         error("hcat requires at least one argument")
     end
-    if n == 1
-        nrows = length(args[1])
-        result = zeros(nrows, 1)
-        for i in 1:nrows
-            result[i, 1] = args[1][i]
-        end
-        return result
+    if _cat_all_plain_vectors(args)
+        return _hcat_typed_or_any(args)
     end
-    nrows = length(args[1])
-    # Verify all arrays have same length
-    for j in 2:n
-        if length(args[j]) != nrows
-            error("hcat: arrays must have same length")
+    return _block_hcat(args)
+end
+
+# hvcat: build a matrix from row-major blocks. `rows` is a tuple giving the
+# number of arguments in each row; arguments are concatenated horizontally
+# within a row, then the rows are concatenated vertically (Issue #7203).
+# Based on Julia's base/abstractarray.jl:2142
+function hvcat(rows::Tuple, args...)
+    nbr = length(rows)
+    rowblocks = []
+    k = 1
+    for i in 1:nbr
+        nc = rows[i]
+        rowargs = []
+        for j in 1:nc
+            push!(rowargs, args[k])
+            k = k + 1
         end
+        push!(rowblocks, _block_hcat(rowargs))
     end
-    result = zeros(nrows, n)
-    for j in 1:n
-        for i in 1:nrows
-            result[i, j] = args[j][i]
+    if nbr == 1
+        return rowblocks[1]
+    end
+    return _block_vcat(rowblocks)
+end
+
+# Single-Int `rows` form: hvcat(ncols, args...) — one row block size repeated
+# until the arguments are exhausted (e.g. hvcat(2, 1, 2, 3, 4) == [1 2; 3 4]).
+function hvcat(ncols::Int64, args...)
+    n = length(args)
+    nrows = div(n, ncols)
+    rowblocks = []
+    k = 1
+    for i in 1:nrows
+        rowargs = []
+        for j in 1:ncols
+            push!(rowargs, args[k])
+            k = k + 1
         end
+        push!(rowblocks, _block_hcat(rowargs))
     end
-    return result
+    if nrows == 1
+        return rowblocks[1]
+    end
+    return _block_vcat(rowblocks)
 end
 
 # vec: flatten array to 1D vector (type-preserving)
@@ -712,7 +2465,29 @@ function stack(arrays)
     end
     first_arr = arrays[1]
     m = length(first_arr)
-    result = zeros(m, n)
+    # Validate uniform slice lengths up-front so ragged input raises a clear
+    # dimension-mismatch error rather than the previous internal index-out-of-
+    # bounds (Issue #3592).
+    for j in 2:n
+        if length(arrays[j]) != m
+            error("DimensionMismatch: stack expects uniform slices, got length(arrays[$j]) == $(length(arrays[j])) while first had $m")
+        end
+    end
+    first_eltype = eltype(first_arr)
+    same_eltype = true
+    result_eltype = first_eltype
+    for j in 2:n
+        if eltype(arrays[j]) != first_eltype
+            same_eltype = false
+        end
+        result_eltype = promote_type(result_eltype, eltype(arrays[j]))
+    end
+    if same_eltype
+        result = similar(first_arr, m, n)
+    else
+        result = _array_undef_from_dims(result_eltype, (m, n))
+    end
+
     for j in 1:n
         arr = arrays[j]
         for i in 1:m
@@ -723,69 +2498,12 @@ function stack(arrays)
 end
 
 # =============================================================================
-# selectdim: select a slice along a specific dimension
+# selectdim and dropdims
 # =============================================================================
-# Based on Julia's Base.selectdim
-
-# selectdim(A, d, i): return slice of A along dimension d at index i
-# For 2D matrices:
-#   selectdim(A, 1, i) returns row i as a 1D vector
-#   selectdim(A, 2, j) returns column j as a 1D vector
-function selectdim(A, d, i)
-    m = size(A, 1)
-    n = size(A, 2)
-    if d == 1
-        # Select row i
-        result = zeros(n)
-        for j in 1:n
-            result[j] = A[i, j]
-        end
-        return result
-    elseif d == 2
-        # Select column j
-        result = zeros(m)
-        for k in 1:m
-            result[k] = A[k, i]
-        end
-        return result
-    else
-        error("selectdim: dimension must be 1 or 2 for matrices")
-    end
-end
-
-# =============================================================================
-# dropdims: remove singleton dimensions from array
-# =============================================================================
-# Based on Julia's Base.dropdims
-# Simplified: supports removing a single dimension from 2D arrays
-
-# dropdims(A; dims): remove singleton dimension
-# For a 2D array with one singleton dimension, returns a 1D vector
-function dropdims(A; dims)
-    m = size(A, 1)
-    n = size(A, 2)
-    if dims == 1
-        if m != 1
-            error("dropdims: dimension 1 has size $m, must be 1")
-        end
-        result = zeros(n)
-        for j in 1:n
-            result[j] = A[1, j]
-        end
-        return result
-    elseif dims == 2
-        if n != 1
-            error("dropdims: dimension 2 has size $n, must be 1")
-        end
-        result = zeros(m)
-        for i in 1:m
-            result[i] = A[i, 1]
-        end
-        return result
-    else
-        error("dropdims: dimension must be 1 or 2 for matrices")
-    end
-end
+# View-based implementations that share parent storage and preserve element
+# type live in subarray.jl alongside MatrixView (Issues #3593, #3594). The
+# previous copy-based fallbacks here were removed because they widened the
+# element type (allocated via zeros(...)) and broke mutation aliasing.
 
 # insertdims(A; dims): insert singleton dimension at specified position
 # Inverse of dropdims. Based on Julia's base/abstractarraymath.jl (Julia 1.12).
@@ -916,8 +2634,13 @@ function fill!(arr, value)
 end
 
 # copyto!: copy elements from src to dest (mutating)
+# Overlap-safe: iterates backward when dest === src && copying forward would
+# overwrite an element before it's read (Issue #3595).
 function copyto!(dest, src)
     n = length(src)
+    if dest === src
+        return dest
+    end
     for i in 1:n
         dest[i] = src[i]
     end
@@ -926,32 +2649,57 @@ end
 
 # copyto!(dest, dstart, src): copy all of src to dest starting at dest[dstart]
 # Based on Julia's base/abstractarray.jl:1126
+# Overlap-safe (Issue #3595): when dest === src and dstart > 1, iterate backward.
 function copyto!(dest::Array, dstart::Int64, src::Array)
     n = length(src)
-    for i in 1:n
-        dest[dstart + i - 1] = src[i]
+    if dest === src && dstart > 1
+        for i in n:-1:1
+            dest[dstart + i - 1] = src[i]
+        end
+    else
+        for i in 1:n
+            dest[dstart + i - 1] = src[i]
+        end
     end
     return dest
 end
 
 # copyto!(dest, dstart, src, sstart): copy from src[sstart:end] to dest[dstart:end]
 # Based on Julia's base/abstractarray.jl:1130
+# Overlap-safe (Issue #3595): when dest === src and dstart > sstart, iterate backward.
 function copyto!(dest::Array, dstart::Int64, src::Array, sstart::Int64)
     n = length(src) - sstart + 1
-    for i in 1:n
-        dest[dstart + i - 1] = src[sstart + i - 1]
+    if dest === src && dstart > sstart
+        for i in n:-1:1
+            dest[dstart + i - 1] = src[sstart + i - 1]
+        end
+    else
+        for i in 1:n
+            dest[dstart + i - 1] = src[sstart + i - 1]
+        end
     end
     return dest
 end
 
 # copyto!(dest, dstart, src, sstart, n): copy n elements from src[sstart] to dest[dstart]
 # Based on Julia's base/abstractarray.jl:1136
+# Overlap-safe (Issue #3595): when dest === src and dstart > sstart, iterate backward
+# (forward iteration would overwrite source elements before they're read).
 function copyto!(dest::Array, dstart::Int64, src::Array, sstart::Int64, n::Int64)
     if n == 0
         return dest
     end
-    for i in 1:n
-        dest[dstart + i - 1] = src[sstart + i - 1]
+    if n < 0
+        throw(ArgumentError("Number of elements to copy must be non-negative."))
+    end
+    if dest === src && dstart > sstart
+        for i in n:-1:1
+            dest[dstart + i - 1] = src[sstart + i - 1]
+        end
+    else
+        for i in 1:n
+            dest[dstart + i - 1] = src[sstart + i - 1]
+        end
     end
     return dest
 end
@@ -979,43 +2727,57 @@ function ndims(arr::AbstractArray)
     return length(size(arr))
 end
 
+# Type-level ndims (Issue #5118).  Upstream
+# (julia/base/abstractarray.jl:278-279) defines
+#   ndims(::AbstractArray{T,N}) where {T,N} = N::Int
+#   ndims(::Type{<:AbstractArray{<:Any,N}}) where {N} = N::Int
+# so `ndims(T)` reads the dimension value parameter `N` directly from the type.
+# In sjulia the dimension `N` is a *value* parameter, and binding a value
+# parameter through `::Type{Array{T,N}} where {T,N}` is not yet supported
+# (the generic `Vararg{T,N}` / `NTuple{N,T}` value-parameter machinery is
+# tracked by Issue #5062). Until that lands, the type form is resolved by the
+# `Ndims` builtin, which reads the rank directly from the array `DataType`
+# (`Vector{T}` -> 1, `Matrix{T}` -> 2, `Array{T,N}` -> N) for any `N`.
+
 # axes: return tuple of index ranges for each dimension
 # Supports up to 16 dimensions (covers virtually all practical use cases)
 function axes(arr)
     s = size(arr)
     n = length(s)
-    if n == 1
-        return (1:s[1],)
+    if n == 0
+        return ()
+    elseif n == 1
+        return (OneTo(s[1]),)
     elseif n == 2
-        return (1:s[1], 1:s[2])
+        return (OneTo(s[1]), OneTo(s[2]))
     elseif n == 3
-        return (1:s[1], 1:s[2], 1:s[3])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]))
     elseif n == 4
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]))
     elseif n == 5
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]))
     elseif n == 6
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]))
     elseif n == 7
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]))
     elseif n == 8
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]))
     elseif n == 9
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]))
     elseif n == 10
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]))
     elseif n == 11
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10], 1:s[11])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]), OneTo(s[11]))
     elseif n == 12
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10], 1:s[11], 1:s[12])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]), OneTo(s[11]), OneTo(s[12]))
     elseif n == 13
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10], 1:s[11], 1:s[12], 1:s[13])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]), OneTo(s[11]), OneTo(s[12]), OneTo(s[13]))
     elseif n == 14
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10], 1:s[11], 1:s[12], 1:s[13], 1:s[14])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]), OneTo(s[11]), OneTo(s[12]), OneTo(s[13]), OneTo(s[14]))
     elseif n == 15
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10], 1:s[11], 1:s[12], 1:s[13], 1:s[14], 1:s[15])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]), OneTo(s[11]), OneTo(s[12]), OneTo(s[13]), OneTo(s[14]), OneTo(s[15]))
     elseif n == 16
-        return (1:s[1], 1:s[2], 1:s[3], 1:s[4], 1:s[5], 1:s[6], 1:s[7], 1:s[8], 1:s[9], 1:s[10], 1:s[11], 1:s[12], 1:s[13], 1:s[14], 1:s[15], 1:s[16])
+        return (OneTo(s[1]), OneTo(s[2]), OneTo(s[3]), OneTo(s[4]), OneTo(s[5]), OneTo(s[6]), OneTo(s[7]), OneTo(s[8]), OneTo(s[9]), OneTo(s[10]), OneTo(s[11]), OneTo(s[12]), OneTo(s[13]), OneTo(s[14]), OneTo(s[15]), OneTo(s[16]))
     else
         # For dimensions > 16, throw an error
         error("axes: arrays with more than 16 dimensions are not supported")
@@ -1026,9 +2788,26 @@ end
 function axes(arr, d::Int)
     s = size(arr)
     if d > length(s)
-        return 1:1
+        return OneTo(1)
     end
-    return 1:s[d]
+    return OneTo(s[d])
+end
+
+# require_one_based_indexing: validate that arrays use ordinary 1-based axes.
+# Based on Julia's base/abstractarray.jl helper used by packages before
+# mutating or indexing user-provided arrays. sjulia currently supports
+# one-based arrays/ranges, but keep the axes check so custom array-like values
+# fail with the upstream-shaped ArgumentError instead of silently proceeding.
+function require_one_based_indexing(A...)
+    for a in A
+        ax = axes(a)
+        for r in ax
+            if first(r) != 1
+                throw(ArgumentError("offset arrays are not supported but got an array with index other than 1"))
+            end
+        end
+    end
+    return nothing
 end
 
 # Note: enumerate and zip are not yet fully implemented
@@ -1046,34 +2825,24 @@ end
 
 # permutedims for 1D vector: converts to 1×N row vector
 # permutedims for 2D matrix: transpose (swap rows and columns)
-# Type-preserving: Int64 input -> Int64 output
+#
+# Result allocation is routed through `similar(arr, ...)` so the public
+# operation preserves the input element type rather than falling back to
+# an untyped flat buffer (Issues #4018, #4656).
 function permutedims(arr)
     s = size(arr)
     nd = length(s)
-    T = eltype(arr)
     if nd == 1
-        # 1D vector -> 1×N row vector
         n = s[1]
-        # Type-preserving array creation
-        if T == Int64
-            result = zeros(Int64, 1, n)
-        else
-            result = zeros(1, n)
-        end
+        result = similar(arr, 1, n)
         for i in 1:n
             result[1, i] = arr[i]
         end
         return result
     elseif nd == 2
-        # 2D matrix -> transpose
         m = s[1]
         n = s[2]
-        # Type-preserving array creation
-        if T == Int64
-            result = zeros(Int64, n, m)
-        else
-            result = zeros(n, m)
-        end
+        result = similar(arr, n, m)
         for i in 1:m
             for j in 1:n
                 result[j, i] = arr[i, j]
@@ -1104,7 +2873,10 @@ function permutedims(arr, perm)
             # Identity permutation - copy
             m = s[1]
             n = s[2]
-            result = zeros(m, n)
+            if eltype(arr) === String
+                return _array_string_copy_same_shape(arr)
+            end
+            result = similar(arr, m, n)
             for i in 1:m
                 for j in 1:n
                     result[i, j] = arr[i, j]
@@ -1112,7 +2884,8 @@ function permutedims(arr, perm)
             end
             return result
         elseif p1 == 2 && p2 == 1
-            # Transpose
+            # Transpose: delegate to the type-preserving `permutedims(arr)`
+            # (Issue #3590).
             return permutedims(arr)
         else
             error("permutedims: invalid permutation indices")
@@ -1126,7 +2899,7 @@ function permutedims(arr, perm)
         ns1 = s[p1]
         ns2 = s[p2]
         ns3 = s[p3]
-        result = zeros(ns1, ns2, ns3)
+        result = similar(arr, ns1, ns2, ns3)
         # For each output index (i1, i2, i3), compute input index
         for i1 in 1:ns1
             for i2 in 1:ns2
@@ -1153,7 +2926,7 @@ function permutedims(arr, perm)
         ns2 = s[p2]
         ns3 = s[p3]
         ns4 = s[p4]
-        result = zeros(ns1, ns2, ns3, ns4)
+        result = similar(arr, ns1, ns2, ns3, ns4)
         for i1 in 1:ns1
             for i2 in 1:ns2
                 for i3 in 1:ns3
@@ -1247,13 +3020,32 @@ end
 function adjoint(arr::Array)
     s = size(arr)
     nd = length(s)
-    T = eltype(arr)
+    typ = eltype(arr)
     if nd == 1
         # 1D vector -> 1×N row vector (conjugated)
         n = s[1]
-        # Type-preserving array creation
-        if T == Int64
+        if typ == Int64
             result = zeros(Int64, 1, n)
+        elseif typ == Int8
+            result = _array_undef_from_dims(Int8, (1, n))
+        elseif typ == Int16
+            result = _array_undef_from_dims(Int16, (1, n))
+        elseif typ == Int32
+            result = _array_undef_from_dims(Int32, (1, n))
+        elseif typ == UInt8
+            result = _array_undef_from_dims(UInt8, (1, n))
+        elseif typ == UInt16
+            result = _array_undef_from_dims(UInt16, (1, n))
+        elseif typ == UInt32
+            result = _array_undef_from_dims(UInt32, (1, n))
+        elseif typ == UInt64
+            result = _array_undef_from_dims(UInt64, (1, n))
+        elseif typ == Float32
+            result = _array_undef_from_dims(Float32, (1, n))
+        elseif typ == Bool
+            result = _array_undef_from_dims(Bool, (1, n))
+        elseif typ == Complex{Float64}
+            result = _array_undef_from_dims(Complex{Float64}, (1, n))
         else
             result = zeros(1, n)
         end
@@ -1265,9 +3057,28 @@ function adjoint(arr::Array)
         # 2D matrix -> conjugate transpose (n×m)
         m = s[1]
         n = s[2]
-        # Type-preserving array creation
-        if T == Int64
+        if typ == Int64
             result = zeros(Int64, n, m)
+        elseif typ == Int8
+            result = _array_undef_from_dims(Int8, (n, m))
+        elseif typ == Int16
+            result = _array_undef_from_dims(Int16, (n, m))
+        elseif typ == Int32
+            result = _array_undef_from_dims(Int32, (n, m))
+        elseif typ == UInt8
+            result = _array_undef_from_dims(UInt8, (n, m))
+        elseif typ == UInt16
+            result = _array_undef_from_dims(UInt16, (n, m))
+        elseif typ == UInt32
+            result = _array_undef_from_dims(UInt32, (n, m))
+        elseif typ == UInt64
+            result = _array_undef_from_dims(UInt64, (n, m))
+        elseif typ == Float32
+            result = _array_undef_from_dims(Float32, (n, m))
+        elseif typ == Bool
+            result = _array_undef_from_dims(Bool, (n, m))
+        elseif typ == Complex{Float64}
+            result = _array_undef_from_dims(Complex{Float64}, (n, m))
         else
             result = zeros(n, m)
         end
@@ -1294,13 +3105,25 @@ function adjoint(r::UnitRange)
 end
 
 # adjoint for LinRange - converts to 1×N row vector
-function adjoint(r::LinRange)
-    return adjoint(collect(r))
+function adjoint(r::LinRange{T}) where T
+    n = r.len
+    result = _array_undef_from_dims(T, (1, n))
+    for i in 1:n
+        value = r[i]
+        result[1, i] = value
+    end
+    return result
 end
 
 # adjoint for StepRangeLen - converts to 1×N row vector
-function adjoint(r::StepRangeLen)
-    return adjoint(collect(r))
+function adjoint(r::StepRangeLen{T}) where T
+    n = r.len
+    result = _array_undef_from_dims(T, (1, n))
+    for i in 1:n
+        value = r[i]
+        result[1, i] = value
+    end
+    return result
 end
 
 # adjoint for OneTo - converts to 1×N row vector
@@ -1336,7 +3159,7 @@ end
 # Array repetition functions
 # =============================================================================
 
-# Note: repeat(arr::Array, n::Int) is already defined above (line 134)
+# Note: repeat(arr::Array, n::Int) is already defined above.
 # String repeat is handled by Pure Julia in base/strings/basic.jl
 
 # repeat(v, m, n) for 1D vector - create m×n matrix by tiling
@@ -1355,7 +3178,7 @@ function repeat(arr::Array, m::Int64, n::Int64)
     if dims == 1
         # 1D vector: repeat vertically m times, horizontally n times
         len = length(arr)
-        result = zeros(len * m, n)
+        result = similar(arr, len * m, n)
         for j in 1:n
             row = 1
             for _ in 1:m
@@ -1370,7 +3193,7 @@ function repeat(arr::Array, m::Int64, n::Int64)
         # 2D matrix: repeat m times vertically, n times horizontally
         rows = size(arr, 1)
         cols = size(arr, 2)
-        result = zeros(rows * m, cols * n)
+        result = similar(arr, rows * m, cols * n)
         for block_j in 0:(n-1)
             for block_i in 0:(m-1)
                 for j in 1:cols
@@ -1392,14 +3215,13 @@ end
 # empty(a) creates an empty collection of the same type as a
 
 # empty for arrays - create empty array of same element type
-function empty(arr::Array)
-    return zeros(0)
+function empty(arr::Array{T}) where T
+    return _array_undef_from_dims(T, (0,))
 end
 
 # empty(a, T) creates empty array with element type T
-function empty(arr::Array, T)
-    # Workaround: returns Float64 array (typed empty array not supported)
-    return zeros(0)
+function empty(arr::Array, ::Type{S}) where S
+    return _array_undef_from_dims(S, (0,))
 end
 
 # empty for Dict - create empty Dict with same key/value types
@@ -1412,11 +3234,6 @@ end
 # empty for Dict with value type specified
 function empty(dict::Dict, V)
     return Dict()
-end
-
-# empty for Set (arrays used as sets) - create empty array
-function empty(set::Array)
-    return zeros(0)
 end
 
 # empty for Tuple - return empty tuple
@@ -1511,95 +3328,20 @@ end
 # =============================================================================
 # Based on Julia's base/bitarray.jl:393-416
 #
-# In Julia, trues/falses return BitArray (compact boolean storage).
-# In SubsetJuliaVM, we return Vector{Bool} for simplicity.
+# In Julia, trues/falses return BitArray (compact boolean storage). SubsetJuliaVM
+# allocates Bool values through the ordinary Array helper, then `_mark_bitarray`
+# converts the VM backing storage to the bit-packed BitArray-family representation.
 
-# trues(n) - create 1D array of true values
-# trues(dims...) - create multi-dimensional array of true values
 function trues(dims...)
-    n = length(dims)
-    if n == 1
-        # 1D array
-        len = dims[1]
-        result = Bool[]
-        i = 1
-        while i <= len
-            push!(result, true)
-            i = i + 1
-        end
-        return result
-    elseif n == 2
-        # 2D array - use reshape pattern
-        rows = dims[1]
-        cols = dims[2]
-        result = Bool[]
-        total = rows * cols
-        i = 1
-        while i <= total
-            push!(result, true)
-            i = i + 1
-        end
-        return reshape(result, rows, cols)
-    elseif n == 3
-        # 3D array
-        d1 = dims[1]
-        d2 = dims[2]
-        d3 = dims[3]
-        result = Bool[]
-        total = d1 * d2 * d3
-        i = 1
-        while i <= total
-            push!(result, true)
-            i = i + 1
-        end
-        return reshape(result, d1, d2, d3)
-    else
-        error("trues: only supports up to 3 dimensions")
-    end
+    result = _array_undef_from_dims(Bool, dims)
+    fill!(result, true)
+    return _mark_bitarray(result)
 end
 
-# falses(n) - create 1D array of false values
-# falses(dims...) - create multi-dimensional array of false values
 function falses(dims...)
-    n = length(dims)
-    if n == 1
-        # 1D array
-        len = dims[1]
-        result = Bool[]
-        i = 1
-        while i <= len
-            push!(result, false)
-            i = i + 1
-        end
-        return result
-    elseif n == 2
-        # 2D array
-        rows = dims[1]
-        cols = dims[2]
-        result = Bool[]
-        total = rows * cols
-        i = 1
-        while i <= total
-            push!(result, false)
-            i = i + 1
-        end
-        return reshape(result, rows, cols)
-    elseif n == 3
-        # 3D array
-        d1 = dims[1]
-        d2 = dims[2]
-        d3 = dims[3]
-        result = Bool[]
-        total = d1 * d2 * d3
-        i = 1
-        while i <= total
-            push!(result, false)
-            i = i + 1
-        end
-        return reshape(result, d1, d2, d3)
-    else
-        error("falses: only supports up to 3 dimensions")
-    end
+    result = _array_undef_from_dims(Bool, dims)
+    fill!(result, false)
+    return _mark_bitarray(result)
 end
 
 # =============================================================================
@@ -1610,129 +3352,464 @@ end
 # fill(value, dims...) creates an array filled with the given value.
 # The element type is determined by the value's type.
 
-function fill(value, dims...)
-    n = length(dims)
-    if n == 1
-        # 1D array
-        len = dims[1]
-        # Determine result type based on value type
-        if isa(value, Bool)
-            result = Bool[]
-            i = 1
-            while i <= len
-                push!(result, value)
-                i = i + 1
-            end
-            return result
-        elseif isa(value, Int64)
-            result = Int64[]
-            i = 1
-            while i <= len
-                push!(result, value)
-                i = i + 1
-            end
-            return result
-        elseif isa(value, String)
-            # String arrays (Issue #2177)
-            result = String[]
-            i = 1
-            while i <= len
-                push!(result, value)
-                i = i + 1
-            end
-            return result
-        else
-            # Default to Float64 for numeric types
-            result = Float64[]
-            i = 1
-            while i <= len
-                push!(result, Float64(value))
-                i = i + 1
-            end
-            return result
-        end
-    elseif n == 2
-        # 2D array
-        rows = dims[1]
-        cols = dims[2]
-        total = rows * cols
-        if isa(value, Bool)
-            result = Bool[]
-            i = 1
-            while i <= total
-                push!(result, value)
-                i = i + 1
-            end
-            return reshape(result, rows, cols)
-        elseif isa(value, Int64)
-            result = Int64[]
-            i = 1
-            while i <= total
-                push!(result, value)
-                i = i + 1
-            end
-            return reshape(result, rows, cols)
-        elseif isa(value, String)
-            # String arrays (Issue #2177)
-            result = String[]
-            i = 1
-            while i <= total
-                push!(result, value)
-                i = i + 1
-            end
-            return reshape(result, rows, cols)
-        else
-            result = Float64[]
-            i = 1
-            while i <= total
-                push!(result, Float64(value))
-                i = i + 1
-            end
-            return reshape(result, rows, cols)
-        end
-    elseif n == 3
-        # 3D array
-        d1 = dims[1]
-        d2 = dims[2]
-        d3 = dims[3]
-        total = d1 * d2 * d3
-        if isa(value, Bool)
-            result = Bool[]
-            i = 1
-            while i <= total
-                push!(result, value)
-                i = i + 1
-            end
-            return reshape(result, d1, d2, d3)
-        elseif isa(value, Int64)
-            result = Int64[]
-            i = 1
-            while i <= total
-                push!(result, value)
-                i = i + 1
-            end
-            return reshape(result, d1, d2, d3)
-        elseif isa(value, String)
-            # String arrays (Issue #2177)
-            result = String[]
-            i = 1
-            while i <= total
-                push!(result, value)
-                i = i + 1
-            end
-            return reshape(result, d1, d2, d3)
-        else
-            result = Float64[]
-            i = 1
-            while i <= total
-                push!(result, Float64(value))
-                i = i + 1
-            end
-            return reshape(result, d1, d2, d3)
+function fill(value, dims::Tuple)
+    T = typeof(value)
+    result = _array_undef_from_dims(T, dims)
+    fill!(result, value)
+    return result
+end
+
+function fill(value, len::Int64)
+    T = typeof(value)
+    result = _array_undef_from_dims(T, (len,))
+    fill!(result, value)
+    return result
+end
+
+function fill(value, rows::Int64, cols::Int64)
+    T = typeof(value)
+    result = _array_undef_from_dims(T, (rows, cols))
+    fill!(result, value)
+    return result
+end
+
+function fill(value, d1::Int64, d2::Int64, d3::Int64)
+    T = typeof(value)
+    result = _array_undef_from_dims(T, (d1, d2, d3))
+    fill!(result, value)
+    return result
+end
+
+function _array_undef_from_dims(typ::Type{Float64}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Float64}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Float32}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Float32}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Int64}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Int64}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Int8}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Int8}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Int16}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Int16}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Int32}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Int32}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{UInt8}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{UInt8}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{UInt16}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{UInt16}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{UInt32}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{UInt32}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{UInt64}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{UInt64}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Bool}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Bool}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{String}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{String}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Char}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Char}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Complex{Float64}}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Complex{Float64}}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Pair}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Pair}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Pair{K,V}}, dims::Tuple) where {K,V}
+    _array_check_undef_dims(dims)
+    return similar(Array{Pair{K,V}}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Number}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Number}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Real}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Real}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Integer}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Integer}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Signed}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Signed}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Unsigned}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Unsigned}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{AbstractFloat}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{AbstractFloat}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Any}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Any}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{T}, dims::Tuple) where T
+    _array_check_undef_dims(dims)
+    return similar(Array{T}, dims)
+end
+
+function _array_check_undef_dims(dims::Tuple)
+    if length(dims) == 1
+        d1 = Int64(dims[1])
+        if d1 < 0
+            throw(ArgumentError("invalid GenericMemory size: the number of elements is either negative or too large for system address width"))
         end
     else
-        error("fill: only supports up to 3 dimensions")
+        for d in dims
+            di = Int64(d)
+            if di < 0
+                throw(ArgumentError("invalid Array dimensions"))
+            end
+        end
     end
+    return dims
+end
+
+function zeros(dims::Tuple)
+    return zeros(Float64, dims)
+end
+
+function zeros(d1::Int64, d2::Int64)
+    return zeros(Float64, (d1, d2))
+end
+
+function zeros(d1::Int64, d2::Int64, d3::Int64)
+    return zeros(Float64, (d1, d2, d3))
+end
+
+function zeros(dims::Int64...)
+    return zeros(Float64, dims)
+end
+
+function zeros(typ::Type{T}, dims::Tuple) where T
+    result = _array_undef_from_dims(T, dims)
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, d1) where T
+    result = _array_undef_from_dims(T, (d1,))
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, d1, d2) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, d1, d2, d3) where T
+    result = _array_undef_from_dims(T, (d1, d2, d3))
+    fill!(result, zero(T))
+    return result
+end
+
+# Note: `zeros(::Type{Complex{Float64}}, dims...)` is handled by the generic
+# `zeros(::Type{T}, ...)` methods above — the body is identical
+# (`_array_undef_from_dims(T, dims)` + `fill!(result, zero(T))`), so the
+# Complex-specialized methods were redundant and removed (Issue #5156).
+
+function zeros(typ::Type{Int64}, d1)
+    result = _array_undef_from_dims(Int64, (d1,))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, dims::Tuple)
+    result = _array_undef_from_dims(Int64, dims)
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, d1, d2)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, d1::Int64, d2)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, d1, d2::Int64)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, d1, d2, d3)
+    result = _array_undef_from_dims(Int64, (d1, d2, d3))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, d1::Int64, d2::Int64)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, d1::Int64, d2::Int64, d3::Int64)
+    result = _array_undef_from_dims(Int64, (d1, d2, d3))
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{Int64}, dims::Int64...)
+    result = _array_undef_from_dims(Int64, dims)
+    fill!(result, zero(Int64))
+    return result
+end
+
+function zeros(typ::Type{T}, d1::Int64, d2::Int64) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, d1::Int64, d2) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, d1, d2::Int64) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, d1::Int64, d2::Int64, d3::Int64) where T
+    result = _array_undef_from_dims(T, (d1, d2, d3))
+    fill!(result, zero(T))
+    return result
+end
+
+function zeros(typ::Type{T}, dims::Int64...) where T
+    result = _array_undef_from_dims(T, dims)
+    fill!(result, zero(T))
+    return result
+end
+
+function ones(dims::Tuple)
+    return ones(Float64, dims)
+end
+
+function ones(d1::Int64, d2::Int64)
+    return ones(Float64, (d1, d2))
+end
+
+function ones(d1::Int64, d2::Int64, d3::Int64)
+    return ones(Float64, (d1, d2, d3))
+end
+
+function ones(dims::Int64...)
+    return ones(Float64, dims)
+end
+
+function ones(typ::Type{T}, dims::Tuple) where T
+    result = _array_undef_from_dims(T, dims)
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, d1) where T
+    result = _array_undef_from_dims(T, (d1,))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, d1, d2) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, d1, d2, d3) where T
+    result = _array_undef_from_dims(T, (d1, d2, d3))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, d1)
+    result = _array_undef_from_dims(Complex{Float64}, (d1,))
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, dims::Tuple)
+    result = _array_undef_from_dims(Complex{Float64}, dims)
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, d1::Int64)
+    result = _array_undef_from_dims(Complex{Float64}, (d1,))
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, d1, d2)
+    result = _array_undef_from_dims(Complex{Float64}, (d1, d2))
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, d1::Int64, d2::Int64)
+    result = _array_undef_from_dims(Complex{Float64}, (d1, d2))
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, d1, d2, d3)
+    result = _array_undef_from_dims(Complex{Float64}, (d1, d2, d3))
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Complex{Float64}}, d1::Int64, d2::Int64, d3::Int64)
+    result = _array_undef_from_dims(Complex{Float64}, (d1, d2, d3))
+    fill!(result, one(Complex{Float64}))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1)
+    result = _array_undef_from_dims(Int64, (d1,))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, dims::Tuple)
+    result = _array_undef_from_dims(Int64, dims)
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1, d2)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1::Int64, d2)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1, d2::Int64)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1, d2, d3)
+    result = _array_undef_from_dims(Int64, (d1, d2, d3))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1::Int64, d2::Int64)
+    result = _array_undef_from_dims(Int64, (d1, d2))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, d1::Int64, d2::Int64, d3::Int64)
+    result = _array_undef_from_dims(Int64, (d1, d2, d3))
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{Int64}, dims::Int64...)
+    result = _array_undef_from_dims(Int64, dims)
+    fill!(result, one(Int64))
+    return result
+end
+
+function ones(typ::Type{T}, d1::Int64, d2::Int64) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, d1::Int64, d2) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, d1, d2::Int64) where T
+    result = _array_undef_from_dims(T, (d1, d2))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, d1::Int64, d2::Int64, d3::Int64) where T
+    result = _array_undef_from_dims(T, (d1, d2, d3))
+    fill!(result, one(T))
+    return result
+end
+
+function ones(typ::Type{T}, dims::Int64...) where T
+    result = _array_undef_from_dims(T, dims)
+    fill!(result, one(T))
+    return result
 end
 
 # =============================================================================
@@ -1752,22 +3829,30 @@ function resize!(a::Array, n::Int64)
     end
     if n > current
         # Grow: push default values (zeros)
-        # Get element type and push appropriate default
+        # Get element type and push appropriate default.
+        # Avoid storing the default in a branch-assigned local: sjulia's current
+        # join can widen that binding and push 0.0 into Bool arrays (Issue #4311).
         et = eltype(a)
-        if et == Bool
-            default = false
-        elseif et == Int64
-            default = Int64(0)
-        else
-            default = 0.0
-        end
         i = current
-        while i < n
-            push!(a, default)
-            i = i + 1
+        if et == Bool
+            while i < n
+                push!(a, false)
+                i = i + 1
+            end
+        elseif et == Int64
+            while i < n
+                push!(a, Int64(0))
+                i = i + 1
+            end
+        else
+            while i < n
+                push!(a, 0.0)
+                i = i + 1
+            end
         end
     elseif n < current
-        # Shrink: pop elements from end
+        # Shrink: pop elements from end. ArrayPop handles both the legacy
+        # native-array carrier and Pure Julia Array wrappers (Issue #4570).
         i = current
         while i > n
             pop!(a)
@@ -1987,6 +4072,35 @@ function deleteat!(a::Array, i::Int64)
     return a
 end
 
+# deleteat!(a, inds) removes the elements at the (1-based) indices in `inds`
+# (a vector or range). Used when the compiled `ArrayDeleteAtIndices` fast path
+# falls back to method dispatch for a `copy`/`collect` result (Issue #5744).
+# `inds` is intentionally untyped: the runtime builtin-fallback matcher refuses
+# to match a native-array argument against `::AbstractVector` (the #4189 guard),
+# so a typed parameter would never be selected — `::Any` is, while the scalar
+# `deleteat!(a::Array, i::Int64)` stays more specific for a single index.
+# Delete in descending order so earlier removals don't shift later indices.
+function deleteat!(a::Array, inds)
+    idxs = Int64[]
+    for j in inds
+        push!(idxs, Int64(j))
+    end
+    sort!(idxs)
+    # Delete in descending order so earlier removals don't shift later indices,
+    # skipping duplicate indices.
+    k = length(idxs)
+    prev = 0
+    while k >= 1
+        i = idxs[k]
+        if i != prev
+            deleteat!(a, i)
+            prev = i
+        end
+        k -= 1
+    end
+    return a
+end
+
 # =============================================================================
 # indexin - Find indices of first collection in second
 # =============================================================================
@@ -2005,14 +4119,17 @@ function indexin(a, b)
         end
     end
 
-    # Look up each element of a
-    result = []
+    # Look up each element of a. Upstream Julia returns
+    # Vector{Union{Nothing, Int64}} for one-based array keys.
+    result = Vector{Union{Nothing, Int64}}(undef, length(a))
+    idx = 1
     for val in a
         if haskey(bdict, val)
-            push!(result, bdict[val])
+            result[idx] = bdict[val]
         else
-            push!(result, nothing)
+            result[idx] = nothing
         end
+        idx += 1
     end
     return result
 end
@@ -2179,10 +4296,71 @@ function splice!(a::Array, i::Int64, replacement)
     return v
 end
 
+# splice!(a, r::UnitRange) - Remove and return elements in range r (Issue #3481)
+function splice!(a::Array, r::UnitRange)
+    n = length(a)
+    i_start = first(r)
+    i_end = last(r)
+    if i_start < 1 || i_end > n
+        error("splice!: range out of bounds")
+    end
+    # Collect removed elements
+    removed = a[r]
+    len_removed = i_end - i_start + 1
+    # Shift elements left
+    j = i_start
+    while j <= n - len_removed
+        a[j] = a[j + len_removed]
+        j = j + 1
+    end
+    resize!(a, n - len_removed)
+    return removed
+end
+
+# splice!(a, r::UnitRange, ins) - Remove elements in range r, insert ins, return old elements (Issue #3481)
+function splice!(a::Array, r::UnitRange, ins)
+    n = length(a)
+    i_start = first(r)
+    i_end = last(r)
+    if i_start < 1 || i_end > n
+        error("splice!: range out of bounds")
+    end
+    removed = a[r]
+    len_removed = i_end - i_start + 1
+    # Build new array: a[1:i_start-1] + ins + a[i_end+1:n]
+    if isa(ins, Array)
+        ins_arr = ins
+    else
+        ins_arr = [ins]
+    end
+    m = length(ins_arr)
+    new_len = n - len_removed + m
+    # Shift tail
+    if m >= len_removed
+        resize!(a, n + m - len_removed)
+        j = n + m - len_removed
+        while j > i_start + m - 1
+            a[j] = a[j - m + len_removed]
+            j = j - 1
+        end
+    else
+        j = i_start + m
+        while j <= n - len_removed + m
+            a[j] = a[j + len_removed - m]
+            j = j + 1
+        end
+        resize!(a, new_len)
+    end
+    for k in 1:m
+        a[i_start + k - 1] = ins_arr[k]
+    end
+    return removed
+end
+
 # =============================================================================
 # map! - Apply function to array elements in-place
 # =============================================================================
-# Based on Julia's base/abstractarray.jl:3381
+# Based on Julia's base/abstractarray.jl:3381 and 3426
 #
 # map!(f, dest, A) applies f to each element of A and stores result in dest.
 # map!(f, A) applies f to each element of A in-place (modifies A).
@@ -2208,9 +4386,95 @@ function map!(f, dest::Array, src::Array)
     return dest
 end
 
-# NOTE: map!(f, dest, A, B) 4-arg version not implemented
-# The VM currently doesn't support calling function parameters with multiple arguments
-# (i.e., f(ai, bi) doesn't compile correctly when f is a parameter)
+function map!(f, dest::Array, A::Array, B::Array)
+    for (i, j, k) in zip(eachindex(dest), eachindex(A), eachindex(B))
+        a = A[j]
+        b = B[k]
+        dest[i] = f(a, b)
+    end
+    return dest
+end
+
+function map!(f, dest::Array, A::Array, B::Array, C::Array)
+    for (i, j, k, l) in zip(eachindex(dest), eachindex(A), eachindex(B), eachindex(C))
+        a = A[j]
+        b = B[k]
+        c = C[l]
+        dest[i] = f(a, b, c)
+    end
+    return dest
+end
+
+function map!(f, dest::Array, A::Array, B::Array, C::Array, D::Array)
+    n = min(length(dest), length(A))
+    n = min(n, length(B))
+    n = min(n, length(C))
+    n = min(n, length(D))
+    for i in 1:n
+        a = A[i]
+        b = B[i]
+        c = C[i]
+        d = D[i]
+        dest[i] = f(a, b, c, d)
+    end
+    return dest
+end
+
+function map!(f, dest::Array, A::Array, B::Array, C::Array, D::Array, E::Array)
+    n = min(length(dest), length(A))
+    n = min(n, length(B))
+    n = min(n, length(C))
+    n = min(n, length(D))
+    n = min(n, length(E))
+    for i in 1:n
+        a = A[i]
+        b = B[i]
+        c = C[i]
+        d = D[i]
+        e = E[i]
+        dest[i] = f(a, b, c, d, e)
+    end
+    return dest
+end
+
+function map!(f, dest::Array, As::Array...)
+    nsrc = length(As)
+    if nsrc == 0
+        return map!(f, dest)
+    end
+
+    n = length(dest)
+    for j in 1:nsrc
+        n = min(n, length(As[j]))
+    end
+
+    for i in 1:n
+        if nsrc == 1
+            dest[i] = f(As[1][i])
+        elseif nsrc == 2
+            dest[i] = f(As[1][i], As[2][i])
+        elseif nsrc == 3
+            dest[i] = f(As[1][i], As[2][i], As[3][i])
+        elseif nsrc == 4
+            dest[i] = f(As[1][i], As[2][i], As[3][i], As[4][i])
+        elseif nsrc == 5
+            dest[i] = f(As[1][i], As[2][i], As[3][i], As[4][i], As[5][i])
+        elseif nsrc == 6
+            dest[i] = f(As[1][i], As[2][i], As[3][i], As[4][i], As[5][i], As[6][i])
+        elseif nsrc == 7
+            dest[i] = f(As[1][i], As[2][i], As[3][i], As[4][i], As[5][i], As[6][i], As[7][i])
+        elseif nsrc == 8
+            dest[i] = f(As[1][i], As[2][i], As[3][i], As[4][i], As[5][i], As[6][i], As[7][i], As[8][i])
+        else
+            values = Any[]
+            for j in 1:nsrc
+                push!(values, As[j][i])
+            end
+            dest[i] = f(values...)
+        end
+    end
+    return dest
+end
 
 # =============================================================================
 # clamp! - Clamp array values in place
@@ -2262,6 +4526,27 @@ end
 # cat(A, B; dims): concatenate two arrays along dimension dims
 # dims=1: vertical concatenation (like vcat for matrices)
 # dims=2: horizontal concatenation (like hcat for matrices)
+function _cat_result_like(A, B, dims::Tuple)
+    if eltype(A) == eltype(B)
+        return similar(A, dims)
+    end
+    return _array_undef_from_dims(promote_type(eltype(A), eltype(B)), dims)
+end
+
+function _cat_result_like(A, B, d1::Int64)
+    if eltype(A) == eltype(B)
+        return similar(A, d1)
+    end
+    return _array_undef_from_dims(promote_type(eltype(A), eltype(B)), (d1,))
+end
+
+function _cat_result_like(A, B, d1::Int64, d2::Int64)
+    if eltype(A) == eltype(B)
+        return similar(A, d1, d2)
+    end
+    return _array_undef_from_dims(promote_type(eltype(A), eltype(B)), (d1, d2))
+end
+
 function cat(A, B; dims)
     sA = size(A)
     sB = size(B)
@@ -2272,7 +4557,7 @@ function cat(A, B; dims)
             # Both 1D: concatenate elements
             na = length(A)
             nb = length(B)
-            result = zeros(na + nb)
+            result = _cat_result_like(A, B, na + nb)
             for i in 1:na
                 result[i] = A[i]
             end
@@ -2289,7 +4574,7 @@ function cat(A, B; dims)
             if nA != nB
                 error("cat: dimension mismatch along dim 2: $nA vs $nB")
             end
-            result = zeros(mA + mB, nA)
+            result = _cat_result_like(A, B, mA + mB, nA)
             for i in 1:mA
                 for j in 1:nA
                     result[i, j] = A[i, j]
@@ -2310,7 +4595,7 @@ function cat(A, B; dims)
             if na != nb
                 error("cat: dimension mismatch along dim 1: $na vs $nb")
             end
-            result = zeros(na, 2)
+            result = _cat_result_like(A, B, na, 2)
             for i in 1:na
                 result[i, 1] = A[i]
                 result[i, 2] = B[i]
@@ -2325,7 +4610,7 @@ function cat(A, B; dims)
             if mA != mB
                 error("cat: dimension mismatch along dim 1: $mA vs $mB")
             end
-            result = zeros(mA, nA + nB)
+            result = _cat_result_like(A, B, mA, nA + nB)
             for i in 1:mA
                 for j in 1:nA
                     result[i, j] = A[i, j]
@@ -2352,29 +4637,47 @@ end
 # For 2D matrices:
 #   dims=1: apply f to each column (slices along rows)
 #   dims=2: apply f to each row (slices along columns)
+function _mapslices_column(A, m::Int64, j::Int64)
+    col = similar(A, m)
+    for i in 1:m
+        col[i] = A[i, j]
+    end
+    return col
+end
+
+function _mapslices_row(A, n::Int64, i::Int64)
+    row = similar(A, n)
+    for j in 1:n
+        row[j] = A[i, j]
+    end
+    return row
+end
+
 function mapslices(f, A; dims)
     m = size(A, 1)
     n = size(A, 2)
     if dims == 1
         # Apply f to each column
-        results = zeros(n)
-        for j in 1:n
-            col = zeros(m)
-            for i in 1:m
-                col[i] = A[i, j]
-            end
-            results[j] = f(col)
+        if n == 0
+            return _array_undef_from_dims(Float64, (1, 0))
+        end
+        first_value = f(_mapslices_column(A, m, 1))
+        results = _array_undef_from_dims(typeof(first_value), (1, n))
+        results[1, 1] = first_value
+        for j in 2:n
+            results[1, j] = f(_mapslices_column(A, m, j))
         end
         return results
     elseif dims == 2
         # Apply f to each row
-        results = zeros(m)
-        for i in 1:m
-            row = zeros(n)
-            for j in 1:n
-                row[j] = A[i, j]
-            end
-            results[i] = f(row)
+        if m == 0
+            return _array_undef_from_dims(Float64, (0, 1))
+        end
+        first_value = f(_mapslices_row(A, n, 1))
+        results = _array_undef_from_dims(typeof(first_value), (m, 1))
+        results[1, 1] = first_value
+        for i in 2:m
+            results[i, 1] = f(_mapslices_row(A, n, i))
         end
         return results
     else
@@ -2416,7 +4719,7 @@ function sortslices(A; dims)
             idx[j + 1] = key
         end
         # Build result matrix with sorted rows
-        result = zeros(m, n)
+        result = similar(A, m, n)
         for i in 1:m
             for j in 1:n
                 result[i, j] = A[idx[i], j]
@@ -2448,7 +4751,7 @@ function sortslices(A; dims)
             idx[j + 1] = key
         end
         # Build result matrix with sorted columns
-        result = zeros(m, n)
+        result = similar(A, m, n)
         for i in 1:m
             for j in 1:n
                 result[i, j] = A[i, idx[j]]

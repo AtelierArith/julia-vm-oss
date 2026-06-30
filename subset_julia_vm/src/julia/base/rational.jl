@@ -25,6 +25,162 @@ struct Rational{T<:Integer} <: Real
 end
 
 # =============================================================================
+# Raw terminal constructor (Issue #5132)
+# =============================================================================
+# Mirror of Base.unsafe_rational: an unexported, no-normalization terminal.
+# It reaches the raw inner constructor via the `where T` (type-variable)
+# constructor path, which the compiler routes through bare-name dispatch and so
+# never intercepts as an explicit `Rational{IntN}(...)` call. The explicit-typed
+# public constructors below delegate here for the final allocation, so they never
+# recurse into themselves.
+function unsafe_rational(::Type{T}, num::T, den::T) where {T<:Integer}
+    return Rational{T}(num, den)
+end
+
+# =============================================================================
+# Explicit type-parameter constructors (Issue #5132)
+# =============================================================================
+# `Rational{T}(num, den)` must coerce both fields to the requested element type
+# `T` and normalize (gcd reduction + positive denominator), matching upstream
+# `julia/base/rational.jl`. Without these, `Rational{Int8}(6, 4)` would call the
+# raw inner constructor, infer T from the Int64 arguments, and skip reduction
+# (yielding `Rational{Int64}` `6//4` instead of `Rational{Int8}` `3//2`).
+#
+# A den == 0 input is left raw to preserve the Inf/NaN sentinels (e.g. 1//0,
+# 0//0) that the rest of this file relies on, mirroring the existing
+# `Rational(IntN, IntN)` outer constructors.
+
+# Int64
+function Rational{Int64}(num::Integer, den::Integer)
+    n = Int64(num)
+    d = Int64(den)
+    if d == Int64(0)
+        return unsafe_rational(Int64, n, d)
+    end
+    if d < Int64(0)
+        n = Int64(0) - n
+        d = Int64(0) - d
+    end
+    g = gcd(n, d)
+    if g > Int64(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(Int64, n, d)
+end
+
+# Int32
+function Rational{Int32}(num::Integer, den::Integer)
+    n = Int32(num)
+    d = Int32(den)
+    if d == Int32(0)
+        return unsafe_rational(Int32, n, d)
+    end
+    if d < Int32(0)
+        n = Int32(0) - n
+        d = Int32(0) - d
+    end
+    g = gcd(n, d)
+    if g > Int32(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(Int32, n, d)
+end
+
+# Int16
+function Rational{Int16}(num::Integer, den::Integer)
+    n = Int16(num)
+    d = Int16(den)
+    if d == Int16(0)
+        return unsafe_rational(Int16, n, d)
+    end
+    if d < Int16(0)
+        n = Int16(0) - n
+        d = Int16(0) - d
+    end
+    g = gcd(n, d)
+    if g > Int16(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(Int16, n, d)
+end
+
+# Int8
+function Rational{Int8}(num::Integer, den::Integer)
+    n = Int8(num)
+    d = Int8(den)
+    if d == Int8(0)
+        return unsafe_rational(Int8, n, d)
+    end
+    if d < Int8(0)
+        n = Int8(0) - n
+        d = Int8(0) - d
+    end
+    g = gcd(n, d)
+    if g > Int8(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(Int8, n, d)
+end
+
+# BigInt
+function Rational{BigInt}(num::Integer, den::Integer)
+    n = big(num)
+    d = big(den)
+    if d == big(0)
+        return unsafe_rational(BigInt, n, d)
+    end
+    if d < big(0)
+        n = big(0) - n
+        d = big(0) - d
+    end
+    g = gcd(n, d)
+    if g > big(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(BigInt, n, d)
+end
+
+# Single-argument form: Rational{T}(x) == Rational{T}(x, 1)
+function Rational{Int64}(x::Integer)
+    return unsafe_rational(Int64, Int64(x), Int64(1))
+end
+function Rational{Int32}(x::Integer)
+    return unsafe_rational(Int32, Int32(x), Int32(1))
+end
+function Rational{Int16}(x::Integer)
+    return unsafe_rational(Int16, Int16(x), Int16(1))
+end
+function Rational{Int8}(x::Integer)
+    return unsafe_rational(Int8, Int8(x), Int8(1))
+end
+function Rational{BigInt}(x::Integer)
+    return unsafe_rational(BigInt, big(x), big(1))
+end
+
+# Rational-from-Rational conversion: Rational{T}(r) re-types num/den to T.
+# r is already normalized, so no further reduction is required.
+function Rational{Int64}(x::Rational)
+    return unsafe_rational(Int64, Int64(x.num), Int64(x.den))
+end
+function Rational{Int32}(x::Rational)
+    return unsafe_rational(Int32, Int32(x.num), Int32(x.den))
+end
+function Rational{Int16}(x::Rational)
+    return unsafe_rational(Int16, Int16(x.num), Int16(x.den))
+end
+function Rational{Int8}(x::Rational)
+    return unsafe_rational(Int8, Int8(x.num), Int8(x.den))
+end
+function Rational{BigInt}(x::Rational)
+    return unsafe_rational(BigInt, big(x.num), big(x.den))
+end
+
+# =============================================================================
 # Outer constructors with GCD normalization (concrete types)
 # =============================================================================
 # Each concrete type has its own constructor to avoid Issue #2384
@@ -169,6 +325,17 @@ function //(n::Integer, d::Integer)
     return Rational(n, d)
 end
 
+# Rational-over-rational exact division. Upstream defines this in
+# base/rational.jl and specializes Rational{BigInt} in base/gmp.jl; sjulia's
+# existing Rational `/` path already normalizes through Rational(num, den).
+function //(x::Rational, y::Rational)
+    return x / y
+end
+
+function //(x::Rational{BigInt}, y::Rational{BigInt})
+    return x / y
+end
+
 # =============================================================================
 # Accessor functions (Julia standard)
 # =============================================================================
@@ -237,7 +404,40 @@ function inv(x::Rational)
     return Rational(x.den, x.num)
 end
 
-# Rational{BigInt} unary specializations (Issue #2497)
+# Rational non-Int64 unary specializations (Issue #2497)
+function Base.:-(x::Rational{Int32})
+    return Rational{Int32}(Int32(0) - x.num, x.den)
+end
+
+function inv(x::Rational{Int32})
+    if x.num == Int32(0)
+        return Rational{Int32}(Int32(1), Int32(0))
+    end
+    return Rational{Int32}(x.den, x.num)
+end
+
+function Base.:-(x::Rational{Int16})
+    return Rational{Int16}(Int16(0) - x.num, x.den)
+end
+
+function inv(x::Rational{Int16})
+    if x.num == Int16(0)
+        return Rational{Int16}(Int16(1), Int16(0))
+    end
+    return Rational{Int16}(x.den, x.num)
+end
+
+function Base.:-(x::Rational{Int8})
+    return Rational{Int8}(Int8(0) - x.num, x.den)
+end
+
+function inv(x::Rational{Int8})
+    if x.num == Int8(0)
+        return Rational{Int8}(Int8(1), Int8(0))
+    end
+    return Rational{Int8}(x.den, x.num)
+end
+
 function Base.:-(x::Rational{BigInt})
     return Rational(big(0) - x.num, x.den)
 end
@@ -281,12 +481,210 @@ function Base.:/(x::Rational, y::Rational)
     return Rational(num, den)
 end
 
+# Mixed Rational/Integer arithmetic mirrors Julia's base/rational.jl direct
+# methods, keeping these operations out of the broad Number promotion fallback.
+function Base.:+(x::Rational, y::BigInt)
+    return convert(Rational{BigInt}, x) + Rational{BigInt}(y, big(1))
+end
+
+function Base.:+(y::BigInt, x::Rational)
+    return Rational{BigInt}(y, big(1)) + convert(Rational{BigInt}, x)
+end
+
+function Base.:+(x::Rational, y::Integer)
+    return Rational(x.num + x.den * y, x.den)
+end
+
+function Base.:+(y::Integer, x::Rational)
+    return Rational(y * x.den + x.num, x.den)
+end
+
+function Base.:-(x::Rational, y::BigInt)
+    return convert(Rational{BigInt}, x) - Rational{BigInt}(y, big(1))
+end
+
+function Base.:-(y::BigInt, x::Rational)
+    return Rational{BigInt}(y, big(1)) - convert(Rational{BigInt}, x)
+end
+
+function Base.:-(x::Rational, y::Integer)
+    return Rational(x.num - x.den * y, x.den)
+end
+
+function Base.:-(y::Integer, x::Rational)
+    return Rational(y * x.den - x.num, x.den)
+end
+
+function Base.:*(x::Rational, y::BigInt)
+    return convert(Rational{BigInt}, x) * Rational{BigInt}(y, big(1))
+end
+
+function Base.:*(y::BigInt, x::Rational)
+    return Rational{BigInt}(y, big(1)) * convert(Rational{BigInt}, x)
+end
+
+function Base.:*(x::Rational, y::Integer)
+    return Rational(x.num * y, x.den)
+end
+
+function Base.:*(y::Integer, x::Rational)
+    return Rational(y * x.num, x.den)
+end
+
+function Base.:/(x::Rational, y::BigInt)
+    return convert(Rational{BigInt}, x) / Rational{BigInt}(y, big(1))
+end
+
+function Base.:/(y::BigInt, x::Rational)
+    return Rational{BigInt}(y, big(1)) / convert(Rational{BigInt}, x)
+end
+
+function Base.:/(x::Rational, y::Integer)
+    return Rational(x.num, x.den * y)
+end
+
+function Base.:/(y::Integer, x::Rational)
+    return Rational(y * x.den, x.num)
+end
+
 # =============================================================================
-# Rational{BigInt} arithmetic specializations (Issue #2497)
+# Rational non-Int64 arithmetic specializations (Issue #2497)
 # =============================================================================
 # Generic Rational methods are compiled with I64 field type assumptions
-# (from the Rational{Int64} struct definition). Rational{BigInt} fields
-# contain BigInt values, so we need explicit specializations.
+# (from the Rational{Int64} struct definition). Non-Int64 fields must use
+# explicit specializations to preserve their concrete element type.
+
+function Base.:+(x::Rational{Int32}, y::Rational{Int32})
+    num = x.num * y.den + y.num * x.den
+    den = x.den * y.den
+    return Rational{Int32}(Int32(num), Int32(den))
+end
+
+function Base.:-(x::Rational{Int32}, y::Rational{Int32})
+    num = x.num * y.den - y.num * x.den
+    den = x.den * y.den
+    return Rational{Int32}(Int32(num), Int32(den))
+end
+
+function Base.:*(x::Rational{Int32}, y::Rational{Int32})
+    num = x.num * y.num
+    den = x.den * y.den
+    return Rational{Int32}(Int32(num), Int32(den))
+end
+
+function Base.:/(x::Rational{Int32}, y::Rational{Int32})
+    num = x.num * y.den
+    den = x.den * y.num
+    return Rational{Int32}(Int32(num), Int32(den))
+end
+
+function div(x::Rational{Int32}, y::Rational{Int32})
+    return div(Int32(x.num * y.den), Int32(x.den * y.num))
+end
+
+function fld(x::Rational{Int32}, y::Rational{Int32})
+    return Int32(fld(Int32(x.num * y.den), Int32(x.den * y.num)))
+end
+
+function cld(x::Rational{Int32}, y::Rational{Int32})
+    return Int32(cld(Int32(x.num * y.den), Int32(x.den * y.num)))
+end
+
+function rem(x::Rational{Int32}, y::Rational{Int32})
+    return x - div(x, y) * y
+end
+
+function mod(x::Rational{Int32}, y::Rational{Int32})
+    return x - fld(x, y) * y
+end
+
+function Base.:+(x::Rational{Int16}, y::Rational{Int16})
+    num = x.num * y.den + y.num * x.den
+    den = x.den * y.den
+    return Rational{Int16}(Int16(num), Int16(den))
+end
+
+function Base.:-(x::Rational{Int16}, y::Rational{Int16})
+    num = x.num * y.den - y.num * x.den
+    den = x.den * y.den
+    return Rational{Int16}(Int16(num), Int16(den))
+end
+
+function Base.:*(x::Rational{Int16}, y::Rational{Int16})
+    num = x.num * y.num
+    den = x.den * y.den
+    return Rational{Int16}(Int16(num), Int16(den))
+end
+
+function Base.:/(x::Rational{Int16}, y::Rational{Int16})
+    num = x.num * y.den
+    den = x.den * y.num
+    return Rational{Int16}(Int16(num), Int16(den))
+end
+
+function div(x::Rational{Int16}, y::Rational{Int16})
+    return div(Int16(x.num * y.den), Int16(x.den * y.num))
+end
+
+function fld(x::Rational{Int16}, y::Rational{Int16})
+    return Int16(fld(Int16(x.num * y.den), Int16(x.den * y.num)))
+end
+
+function cld(x::Rational{Int16}, y::Rational{Int16})
+    return Int16(cld(Int16(x.num * y.den), Int16(x.den * y.num)))
+end
+
+function rem(x::Rational{Int16}, y::Rational{Int16})
+    return x - div(x, y) * y
+end
+
+function mod(x::Rational{Int16}, y::Rational{Int16})
+    return x - fld(x, y) * y
+end
+
+function Base.:+(x::Rational{Int8}, y::Rational{Int8})
+    num = x.num * y.den + y.num * x.den
+    den = x.den * y.den
+    return Rational{Int8}(Int8(num), Int8(den))
+end
+
+function Base.:-(x::Rational{Int8}, y::Rational{Int8})
+    num = x.num * y.den - y.num * x.den
+    den = x.den * y.den
+    return Rational{Int8}(Int8(num), Int8(den))
+end
+
+function Base.:*(x::Rational{Int8}, y::Rational{Int8})
+    num = x.num * y.num
+    den = x.den * y.den
+    return Rational{Int8}(Int8(num), Int8(den))
+end
+
+function Base.:/(x::Rational{Int8}, y::Rational{Int8})
+    num = x.num * y.den
+    den = x.den * y.num
+    return Rational{Int8}(Int8(num), Int8(den))
+end
+
+function div(x::Rational{Int8}, y::Rational{Int8})
+    return div(Int8(x.num * y.den), Int8(x.den * y.num))
+end
+
+function fld(x::Rational{Int8}, y::Rational{Int8})
+    return Int8(fld(Int8(x.num * y.den), Int8(x.den * y.num)))
+end
+
+function cld(x::Rational{Int8}, y::Rational{Int8})
+    return Int8(cld(Int8(x.num * y.den), Int8(x.den * y.num)))
+end
+
+function rem(x::Rational{Int8}, y::Rational{Int8})
+    return x - div(x, y) * y
+end
+
+function mod(x::Rational{Int8}, y::Rational{Int8})
+    return x - fld(x, y) * y
+end
 
 function Base.:+(x::Rational{BigInt}, y::Rational{BigInt})
     num = x.num * y.den + y.num * x.den
@@ -334,6 +732,71 @@ end
 
 function Base.:>=(x::Rational, y::Rational)
     return x.num * y.den >= y.num * x.den
+end
+
+function Base.:(==)(x::Rational, y::Integer)
+    return x.den == 1 && x.num == y
+end
+
+function Base.:(==)(x::Integer, y::Rational)
+    return y == x
+end
+
+# Mixed Rational/Real `!=` (Issue #5975). Upstream relies on the generic
+# `!=(x, y) = !(x == y)` (operators.jl); in this VM that fallback does not reach
+# the `Rational × Integer` / `Rational × AbstractFloat` pairs, so they raised a
+# MethodError even though the matching `==` works. Mirror the `==` methods with
+# explicit `!=` that delegate to `!(x == y)` — recursion-safe (the `==` above
+# terminates). Signatures are narrow (`Integer` / `AbstractFloat`, disjoint from
+# `Complex`), so they do not introduce ambiguity with the `Complex` mixed `!=`,
+# and `Rational × Rational` / `Rational × Complex` (which already work) are left
+# untouched.
+function Base.:(!=)(x::Rational, y::Integer)
+    return !(x == y)
+end
+
+function Base.:(!=)(x::Integer, y::Rational)
+    return !(x == y)
+end
+
+function Base.:(!=)(x::Rational, y::AbstractFloat)
+    return !(x == y)
+end
+
+function Base.:(!=)(x::AbstractFloat, y::Rational)
+    return !(x == y)
+end
+
+function Base.:<(x::Rational, y::Integer)
+    return x.num < x.den * y
+end
+
+function Base.:<(x::Integer, y::Rational)
+    return x * y.den < y.num
+end
+
+function Base.:<=(x::Rational, y::Integer)
+    return x.num <= x.den * y
+end
+
+function Base.:<=(x::Integer, y::Rational)
+    return x * y.den <= y.num
+end
+
+function Base.:>(x::Rational, y::Integer)
+    return x.num > x.den * y
+end
+
+function Base.:>(x::Integer, y::Rational)
+    return x * y.den > y.num
+end
+
+function Base.:>=(x::Rational, y::Integer)
+    return x.num >= x.den * y
+end
+
+function Base.:>=(x::Integer, y::Rational)
+    return x * y.den >= y.num
 end
 
 # Rational{BigInt} comparison specializations (Issue #2497)
@@ -432,21 +895,69 @@ function sign(x::Rational)
     end
 end
 
+# floor/ceil/trunc/round on a Rational return a Rational (matching upstream
+# Julia), not a Float64 (Issue #6775). Upstream builds these on
+# `round(::Type{T}, x::Rational, r::RoundingMode) = convert(T, div(num, den, r))`;
+# here we route through sjulia's integer `div(x, y, r::RoundingMode)` (Issue
+# #5691) so the quotient is computed with exact integer division:
+#   floor  -> RoundDown   (fld)
+#   ceil   -> RoundUp     (cld)
+#   trunc  -> RoundToZero (div)
+#   round  -> RoundNearest (half-to-even)
+# The bare forms wrap the integer quotient back in a Rational (preserving the
+# element type via `Rational(::Integer)`); the typed `f(::Type{T}, x::Rational)`
+# forms return the integer type `T`.
+# `div(x.num, x.den, r)` may widen narrow integers (Int32/Int16/Int8) to Float64
+# through the generic `fld`/`cld` fallback, so coerce the quotient back to the
+# element type before wrapping in a Rational. This preserves `Rational{Int32}`
+# etc. (upstream does `convert(T, div(numerator(x), denominator(x), r))`).
 function floor(x::Rational)
-    return floor(x.num / x.den)
+    return Rational(typeof(x.num)(div(x.num, x.den, RoundDown)))
 end
 
 function ceil(x::Rational)
-    return ceil(x.num / x.den)
+    return Rational(typeof(x.num)(div(x.num, x.den, RoundUp)))
+end
+
+function trunc(x::Rational)
+    return Rational(typeof(x.num)(div(x.num, x.den, RoundToZero)))
 end
 
 function round(x::Rational)
-    return round(x.num / x.den)
+    return Rational(typeof(x.num)(div(x.num, x.den, RoundNearest)))
+end
+
+# Typed forms: floor(Int, 7//2) === 3, etc. (return the integer type T).
+function floor(::Type{T}, x::Rational) where {T<:Integer}
+    return T(div(x.num, x.den, RoundDown))
+end
+
+function ceil(::Type{T}, x::Rational) where {T<:Integer}
+    return T(div(x.num, x.den, RoundUp))
+end
+
+function trunc(::Type{T}, x::Rational) where {T<:Integer}
+    return T(div(x.num, x.den, RoundToZero))
+end
+
+function round(::Type{T}, x::Rational) where {T<:Integer}
+    return T(div(x.num, x.den, RoundNearest))
 end
 
 # =============================================================================
 # Power operator (Julia standard)
 # =============================================================================
+
+function Base.:^(x::Rational{T}, n::Int64) where {T<:Integer}
+    if n == 0
+        return Rational{T}(one(x.num), one(x.den))
+    end
+    if n < 0
+        x = inv(x)
+        n = -n
+    end
+    return Rational{T}(x.num ^ n, x.den ^ n)
+end
 
 function Base.:^(x::Rational, n::Int64)
     if n == 0
@@ -658,3 +1169,10 @@ function mod(y::Integer, x::Rational)
     return y - fld(y, x) * x
 end
 
+function rem(y::Int64, x::Rational{Int64})
+    return y - div(y, x) * x
+end
+
+function mod(y::Int64, x::Rational{Int64})
+    return y - fld(y, x) * x
+end

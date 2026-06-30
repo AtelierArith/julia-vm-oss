@@ -1,42 +1,50 @@
-// SubsetJuliaVM Playground - Main Application (Monaco Editor version)
-// Uses run_from_source() for native parity - pure Rust parser, no tree-sitter dependency
-import { samplesIR } from './samples_ir.js?v=24';
-import { registerJuliaLanguage, setWasmModule } from './julia-language.js?v=4';
+// SubsetJuliaVM Playground - Mobile-first web playground
+import { samplesIR } from './samples_ir.js?v=2';
+import { registerJuliaLanguage, setWasmModule } from './julia-language.js?v=1';
 
-// Elements
+// DOM Elements
 const sampleSelect = document.getElementById('sample-select');
+const tabs = document.querySelectorAll('.tab');
+const panes = document.querySelectorAll('.pane');
+const monacoContainer = document.getElementById('monaco-container');
 const runBtn = document.getElementById('run-btn');
 const shareBtn = document.getElementById('share-btn');
 const copySourceBtn = document.getElementById('copy-source-btn');
 const output = document.getElementById('output');
 const result = document.getElementById('result');
 const errorDiv = document.getElementById('error');
+const unsupportedNotice = document.getElementById('unsupported-notice');
 const versionSpan = document.getElementById('version');
 const copyBtn = document.getElementById('copy-btn');
 const clearOutputBtn = document.getElementById('clear-output-btn');
+const plotOutput = document.getElementById('plot-output');
+
+// State
+let wasm = null;
+let editor = null;
+let currentSampleIndex = -1;
+let warmupPromise = null;
+let warmupHandle = null;
+let warmupHandleType = null;
+let warmupScheduled = false;
+
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const runShortcut = isMac ? '⌘+Enter' : 'Ctrl+Enter';
+const runButtonText = `Run (${runShortcut})`;
 
 // ============================================================
-// URL Sharing Functions
+// URL Sharing
 // ============================================================
 
-/**
- * Get code from URL hash
- * @returns {string | null} Decoded code or null if not present/invalid
- */
 function getCodeFromHash() {
     const hash = window.location.hash;
     if (!hash || hash.length < 3) return null;
-
-    // Parse hash parameters (e.g., #c=encoded_code)
     const params = new URLSearchParams(hash.substring(1));
     const encoded = params.get('c');
     if (!encoded) return null;
-
     try {
         const decoded = LZString.decompressFromEncodedURIComponent(encoded);
-        if (!decoded) {
-            throw new Error('Decompression returned null');
-        }
+        if (!decoded) throw new Error('Decompression returned null');
         return decoded;
     } catch (e) {
         console.error('Failed to decode code from URL:', e);
@@ -44,36 +52,21 @@ function getCodeFromHash() {
     }
 }
 
-/**
- * Set code to URL hash using history.replaceState (doesn't pollute history)
- * @param {string} code - Code to encode into URL
- * @returns {string} The full shareable URL
- */
 function setCodeToHash(code) {
     const encoded = LZString.compressToEncodedURIComponent(code);
     const newHash = `#c=${encoded}`;
-
-    // Use replaceState to avoid polluting browser history
     const newUrl = `${window.location.origin}${window.location.pathname}${newHash}`;
     history.replaceState(null, '', newUrl);
-
     return newUrl;
 }
 
-/**
- * Copy shareable URL to clipboard
- * @param {string} code - Code to share
- * @returns {Promise<string>} The generated URL
- */
 async function copyShareUrl(code) {
     const url = setCodeToHash(code);
-
     try {
         await navigator.clipboard.writeText(url);
         return url;
     } catch (e) {
         console.error('Clipboard API failed:', e);
-        // Fallback for older browsers or when clipboard API is not available
         const textArea = document.createElement('textarea');
         textArea.value = url;
         textArea.style.position = 'fixed';
@@ -84,238 +77,145 @@ async function copyShareUrl(code) {
             document.execCommand('copy');
         } catch (e2) {
             console.error('Fallback copy failed:', e2);
-            // If all copy methods fail, show the URL so user can copy manually
             throw new Error(`Could not copy automatically. URL: ${url}`);
         } finally {
             document.body.removeChild(textArea);
-        }
+        };
         return url;
     }
 }
 
-/**
- * Restore code from URL hash if present
- * @returns {boolean} True if code was restored from hash
- */
-function restoreCodeFromHash() {
-    const code = getCodeFromHash();
-    if (code !== null && editor) {
+// ============================================================
+// Editor helpers
+// ============================================================
+
+function setCode(code) {
+    if (editor) {
         editor.setValue(code);
-        sampleSelect.value = ''; // Clear sample selection
-        return true;
     }
-    return false;
 }
 
-// State
-let wasm = null;
-let editor = null;
-let currentSampleIndex = 0;
+function getCode() {
+    return editor ? editor.getValue() : '';
+}
 
-// Detect macOS
-const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-const runShortcut = isMac ? '⌘+Enter' : 'Ctrl+Enter';
-const runButtonText = `Run (${runShortcut})`;
+// ============================================================
+// Tabs (mobile)
+// ============================================================
 
-// Initialize Split.js for resizable panels
-function initSplit() {
-    const isNarrow = window.innerWidth <= 900;
-    const direction = isNarrow ? 'vertical' : 'horizontal';
-
-    // Destroy existing split if any
-    if (window.splitInstance) {
-        window.splitInstance.destroy();
+function switchTab(name) {
+    tabs.forEach((tab) => {
+        const active = tab.dataset.tab === name;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+    });
+    panes.forEach((pane) => {
+        pane.classList.toggle('active', pane.id === `${name}-pane`);
+    });
+    // Monaco needs a layout refresh when its container becomes visible
+    if (name === 'edit' && editor) {
+        setTimeout(() => editor.layout(), 0);
     }
+}
 
-    const minSize = isNarrow ? [100, 100] : [200, 150];
-
-    window.splitInstance = Split(['.editor-container', '.output-container'], {
-        sizes: [50, 50],
-        minSize: minSize,
-        gutterSize: 8,
-        direction: direction,
-        cursor: direction === 'horizontal' ? 'col-resize' : 'row-resize',
-        onDragEnd: function() {
-            // Trigger Monaco editor resize
-            if (editor) {
-                editor.layout();
-            }
-        }
+function setupTabs() {
+    tabs.forEach((tab) => {
+        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
 }
 
-// Initialize the application
-async function init() {
-    // Set button text with platform-appropriate shortcut
-    runBtn.textContent = runButtonText;
+// ============================================================
+// Sample dropdown
+// ============================================================
 
-    // Initialize Split.js
-    initSplit();
+// Populate the <select> with one <option> per sample, grouped by category so the
+// 29-entry list stays scannable. The option value is the sample's index in
+// samplesIR; "custom" marks code restored from a shared URL.
+function populateSampleSelect() {
+    sampleSelect.innerHTML = '';
 
-    // Re-initialize on window resize to switch direction
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            initSplit();
-            if (editor) {
-                editor.layout();
-            }
-        }, 100);
-    });
-
-    // Populate sample selector
-    populateSamples();
-
-    // Set up event listeners
-    setupEventListeners();
-
-    // Load WASM module and Monaco in parallel
-    await Promise.all([loadWasm(), loadMonaco()]);
-
-    // Set WASM module for Unicode completion provider
-    if (wasm) {
-        setWasmModule(wasm);
-    }
-
-    // Display version
-    if (wasm) {
-        versionSpan.textContent = `SubsetJuliaVM v${wasm.get_version()}`;
-    }
-
-    // Try to restore code from URL hash first
-    const hash = window.location.hash;
-    let restoredFromHash = false;
-
-    if (hash && hash.includes('c=')) {
-        const code = getCodeFromHash();
-        if (code !== null && editor) {
-            editor.setValue(code);
-            sampleSelect.value = ''; // Clear sample selection
-            restoredFromHash = true;
-        } else if (hash.includes('c=')) {
-            // Hash exists but decoding failed - show error
-            showError('Failed to decode shared code from URL. The link may be corrupted.');
-        }
-    }
-
-    // Load first sample only if not restored from hash
-    if (!restoredFromHash && samplesIR.length > 0 && editor) {
-        editor.setValue(samplesIR[0].code);
-        currentSampleIndex = 0;
-    }
-}
-
-async function loadMonaco() {
-    return new Promise((resolve) => {
-        require.config({
-            paths: {
-                'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'
-            }
-        });
-
-        require(['vs/editor/editor.main'], function(monaco) {
-            // Register Julia language
-            registerJuliaLanguage(monaco);
-
-            // Create editor instance
-            editor = monaco.editor.create(document.getElementById('monaco-container'), {
-                value: 'println("Hello, World!")',
-                language: 'julia',
-                theme: 'julia-monokai',
-                fontSize: 14,
-                fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
-                fontLigatures: true,
-                lineNumbers: 'on',
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 4,
-                insertSpaces: true,
-                wordWrap: 'off',
-                renderWhitespace: 'none',
-                cursorBlinking: 'smooth',
-                cursorSmoothCaretAnimation: 'on',
-                smoothScrolling: true,
-                padding: { top: 10, bottom: 10 },
-                lineHeight: 21,
-                renderLineHighlight: 'line',
-                scrollbar: {
-                    vertical: 'auto',
-                    horizontal: 'auto',
-                    useShadows: false,
-                    verticalScrollbarSize: 10,
-                    horizontalScrollbarSize: 10
-                },
-                // Enable code completion
-                quickSuggestions: true,
-                suggestOnTriggerCharacters: true,
-                acceptSuggestionOnEnter: 'on',
-                wordBasedSuggestions: 'off',
-                suggest: {
-                    snippetsPreventQuickSuggestions: false,
-                    showKeywords: true,
-                    showFunctions: true,
-                    showVariables: true,
-                    showConstants: true
-                }
-            });
-
-            // Add keyboard shortcut for running code
-            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function() {
-                run();
-            });
-
-            resolve();
-        });
-    });
-}
-
-function populateSamples() {
+    const groups = new Map();
     samplesIR.forEach((sample, idx) => {
-        const option = document.createElement('option');
-        option.value = idx;
-        option.textContent = sample.name;
-        sampleSelect.appendChild(option);
+        if (!groups.has(sample.category)) {
+            groups.set(sample.category, []);
+        }
+        groups.get(sample.category).push(idx);
+    });
+
+    for (const [category, indices] of groups) {
+        const group = document.createElement('optgroup');
+        group.label = category;
+        indices.forEach((idx) => {
+            const sample = samplesIR[idx];
+            const opt = document.createElement('option');
+            opt.value = String(idx);
+            opt.textContent = sample.webUnsupported ? `${sample.name} (web unsupported)` : sample.name;
+            group.appendChild(opt);
+        });
+        sampleSelect.appendChild(group);
+    }
+}
+
+// Show a transient "Custom code" entry when the editor holds shared/edited code
+// that doesn't correspond to a sample.
+function selectCustomOption() {
+    let opt = sampleSelect.querySelector('option[value="custom"]');
+    if (!opt) {
+        opt = document.createElement('option');
+        opt.value = 'custom';
+        opt.textContent = 'Custom code';
+        sampleSelect.insertBefore(opt, sampleSelect.firstChild);
+    }
+    sampleSelect.value = 'custom';
+}
+
+function setupSampleSelect() {
+    populateSampleSelect();
+    sampleSelect.addEventListener('change', () => {
+        const idx = parseInt(sampleSelect.value, 10);
+        if (Number.isNaN(idx)) return;
+        loadSample(idx);
+        if (window.innerWidth < 768) {
+            switchTab('edit');
+        }
     });
 }
+
+// ============================================================
+// Sample loading
+// ============================================================
+
+function loadSample(idx) {
+    const sample = samplesIR[idx];
+    if (!sample) return;
+
+    setCode(sample.code);
+    currentSampleIndex = idx;
+    sampleSelect.value = String(idx);
+    hideError();
+    hideUnsupported();
+    result.textContent = '';
+    output.textContent = '';
+    output.classList.remove('hidden');
+    plotOutput.innerHTML = '';
+    plotOutput.classList.add('hidden');
+}
+
+// ============================================================
+// Event listeners
+// ============================================================
 
 function setupEventListeners() {
-    // Sample selection
-    sampleSelect.addEventListener('change', (e) => {
-        const idx = parseInt(e.target.value);
-        if (!isNaN(idx) && samplesIR[idx] && editor) {
-            editor.setValue(samplesIR[idx].code);
-            currentSampleIndex = idx;
-            hideError();
-        }
-    });
-
-    // Run button
     runBtn.addEventListener('click', run);
-
-    // Share URL button
     shareBtn.addEventListener('click', shareCode);
-
-    // Copy source button
     copySourceBtn.addEventListener('click', copySource);
-
-    // Copy button
     copyBtn.addEventListener('click', copyOutput);
-
-    // Clear output button
-    clearOutputBtn.addEventListener('click', () => {
-        output.textContent = '';
-        result.textContent = '';
-        hideError();
-    });
+    clearOutputBtn.addEventListener('click', clearOutput);
 }
 
 async function copySource() {
-    if (!editor) return;
-    const text = editor.getValue();
+    const text = getCode();
     if (!text) return;
-
     try {
         await navigator.clipboard.writeText(text);
         copySourceBtn.textContent = 'Copied!';
@@ -330,36 +230,29 @@ async function copySource() {
 }
 
 async function shareCode() {
-    if (!editor) return;
-    const code = editor.getValue();
+    const code = getCode();
     if (!code) {
         showError('No code to share.');
         return;
     }
-
     try {
         await copyShareUrl(code);
         shareBtn.textContent = 'Copied!';
         shareBtn.classList.add('copied');
         setTimeout(() => {
-            shareBtn.textContent = 'Share URL';
+            shareBtn.textContent = 'Share';
             shareBtn.classList.remove('copied');
         }, 1500);
     } catch (e) {
-        // Show error message with URL if clipboard failed
         showError(e.message);
     }
 }
 
 async function copyOutput() {
     const text = output.textContent;
-    if (!text) {
-        return;
-    }
-
+    if (!text) return;
     try {
         await navigator.clipboard.writeText(text);
-        // Show visual feedback
         copyBtn.textContent = 'Copied!';
         copyBtn.classList.add('copied');
         setTimeout(() => {
@@ -368,7 +261,6 @@ async function copyOutput() {
         }, 1500);
     } catch (e) {
         console.error('Failed to copy:', e);
-        // Fallback for older browsers
         const textArea = document.createElement('textarea');
         textArea.value = text;
         textArea.style.position = 'fixed';
@@ -390,9 +282,25 @@ async function copyOutput() {
     }
 }
 
+function clearOutput() {
+    output.textContent = '';
+    output.classList.remove('hidden');
+    if (typeof Plotly !== 'undefined') {
+        try { Plotly.purge(plotOutput); } catch (_) {}
+    }
+    plotOutput.innerHTML = '';
+    plotOutput.classList.add('hidden');
+    result.textContent = '';
+    hideError();
+    hideUnsupported();
+}
+
+// ============================================================
+// WASM loading
+// ============================================================
+
 async function loadWasm() {
     try {
-        // Try to load the WASM module
         const module = await import('./pkg/subset_julia_vm_web.js');
         await module.default();
         wasm = module;
@@ -406,63 +314,377 @@ async function loadWasm() {
     }
 }
 
+async function loadMonaco() {
+    return new Promise((resolve) => {
+        require.config({
+            paths: {
+                'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'
+            }
+        });
+
+        require(['vs/editor/editor.main'], function(monaco) {
+            registerJuliaLanguage(monaco);
+
+            editor = monaco.editor.create(monacoContainer, {
+                value: 'println("Hello, World!")',
+                language: 'julia',
+                theme: 'julia-monokai',
+                fontSize: 14,
+                fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
+                fontLigatures: true,
+                lineNumbers: 'on',
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 4,
+                insertSpaces: true,
+                wordWrap: 'on',
+                renderWhitespace: 'none',
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                smoothScrolling: true,
+                padding: { top: 10, bottom: 10 },
+                lineHeight: 21,
+                renderLineHighlight: 'line',
+                scrollbar: {
+                    vertical: 'auto',
+                    horizontal: 'auto',
+                    useShadows: false,
+                    verticalScrollbarSize: 10,
+                    horizontalScrollbarSize: 10
+                },
+                quickSuggestions: true,
+                suggestOnTriggerCharacters: true,
+                acceptSuggestionOnEnter: 'on',
+                wordBasedSuggestions: 'off',
+                suggest: {
+                    snippetsPreventQuickSuggestions: false,
+                    showKeywords: true,
+                    showFunctions: true,
+                    showVariables: true,
+                    showConstants: true
+                }
+            });
+
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function() {
+                run();
+            });
+
+            // Re-layout when the window is resized (automaticLayout covers most,
+            // but this helps on orientation changes and tab switches).
+            window.addEventListener('resize', () => {
+                if (editor) editor.layout();
+            });
+
+            resolve();
+        });
+    });
+}
+
+// ============================================================
+// Run and display results
+// ============================================================
+
+// Workaround: some iOS samples depend on packages/JS renderers not shipped in the
+// static web build; show a friendly fallback instead of executing. (Issue #7286)
+function showUnsupported(sample) {
+    unsupportedNotice.textContent = `“${sample.name}” is not supported in the web build (${sample.description}). Try it in the iOS app.`;
+    unsupportedNotice.classList.remove('hidden');
+}
+
+function hideUnsupported() {
+    unsupportedNotice.classList.add('hidden');
+}
+
 async function run() {
     if (!wasm) {
         showError('WASM module not loaded. Build it first with wasm-pack.');
         return;
     }
 
-    if (!editor) {
-        showError('Editor not loaded yet.');
+    const code = getCode();
+    const sample = samplesIR[currentSampleIndex];
+    const seed = 42;
+
+    cancelScheduledWarmup();
+    setCodeToHash(code);
+    hideError();
+    hideUnsupported();
+    result.textContent = '';
+
+    if (sample && sample.webUnsupported) {
+        showUnsupported(sample);
+        // Switch to output tab on mobile so the notice is visible
+        if (window.innerWidth < 768) {
+            switchTab('output');
+        }
         return;
     }
 
-    const code = editor.getValue();
-    const seed = 42;
-
-    // Update URL hash with current code for reproducibility
-    setCodeToHash(code);
-
-    // Hide previous errors (but keep output for accumulation)
-    hideError();
-    result.textContent = '';
-
-    // Disable run button while executing
     runBtn.disabled = true;
     runBtn.textContent = 'Running...';
 
     try {
-        // Use run_from_source for all code (native parity - uses pure Rust parser)
-        console.log('Executing with run_from_source (native parity)...');
+        console.log('Executing with run_from_source...');
         const execResult = wasm.run_from_source(code, BigInt(seed));
-        displayResult(execResult);
+        await displayResult(execResult);
     } catch (e) {
         showError(e.message || 'Execution failed');
     } finally {
         runBtn.disabled = false;
         runBtn.textContent = runButtonText;
+        scheduleWarmup();
     }
 }
 
-function displayResult(execResult) {
+async function displayResult(execResult) {
+    plotOutput.innerHTML = '';
+    plotOutput.classList.add('hidden');
+    output.textContent = '';
+    output.classList.remove('hidden');
+
     if (execResult.success) {
-        // Accumulate output (like iOS app)
-        if (execResult.output) {
-            output.textContent += execResult.output;
-        }
-        if (execResult.value !== 0 && !isNaN(execResult.value)) {
-            result.textContent = `Result: ${execResult.value}`;
-        } else if (!execResult.output) {
-            result.textContent = 'Completed';
+        const mime = execResult.artifact_mime;
+        const data = execResult.artifact_data;
+        if (mime === 'application/vnd.plotly+json' && data) {
+            plotOutput.classList.remove('hidden');
+            plotOutput.style.height = '450px';
+            try {
+                const parsed = JSON.parse(data);
+                if (typeof Plotly !== 'undefined') {
+                    const traces = parsed.traces || [];
+                    const layout = themedPlotlyLayout(parsed.layout || {});
+                    if (parsed.frames && parsed.frames.length) {
+                        const dur = (parsed.layout && parsed.layout._frameDuration) || 50;
+                        await Plotly.newPlot(plotOutput, {
+                            data: traces,
+                            layout: layout,
+                            frames: parsed.frames,
+                            config: { responsive: true }
+                        });
+                        Plotly.Plots.resize(plotOutput);
+                        Plotly.animate(plotOutput, null, {
+                            frame: { duration: dur, redraw: true },
+                            transition: { duration: 0 },
+                            fromcurrent: true,
+                            mode: 'immediate'
+                        });
+                        result.textContent = 'Rendered animation';
+                        if (execResult.output) {
+                            output.textContent = execResult.output;
+                        } else {
+                            output.classList.add('hidden');
+                        }
+                        return;
+                    }
+                    await Plotly.newPlot(plotOutput, traces, layout, { responsive: true });
+                    Plotly.Plots.resize(plotOutput);
+                    if (plotOutput.children.length === 0) {
+                        plotOutput.textContent = '[Plotly rendered no visible output]';
+                    } else {
+                        result.textContent = 'Rendered plot';
+                    }
+                } else {
+                    plotOutput.textContent = '[Plotly.js not loaded - cannot render plot]';
+                }
+            } catch (e) {
+                plotOutput.textContent = `[Plotly render error: ${e.message}]`;
+            }
+            if (execResult.output) {
+                output.textContent = execResult.output;
+            } else {
+                output.classList.add('hidden');
+            }
+        } else if (mime === 'application/vnd.jsxgraph+json' && data) {
+            plotOutput.classList.remove('hidden');
+            plotOutput.style.height = '450px';
+            renderJsxgraph(data);
+            if (execResult.output) {
+                output.textContent = execResult.output;
+            } else {
+                output.classList.add('hidden');
+            }
+        } else {
+            if (execResult.output) {
+                output.textContent += execResult.output;
+            }
+            if (execResult.value !== 0 && !isNaN(execResult.value)) {
+                result.textContent = `Result: ${execResult.value}`;
+            } else if (!execResult.output) {
+                result.textContent = 'Completed';
+            }
         }
     } else {
-        // Show partial output even on error
         if (execResult.output) {
             output.textContent += execResult.output;
         }
         showError(execResult.error_message || 'Execution failed');
     }
+
+    // Auto-switch to output tab on mobile after running
+    if (window.innerWidth < 768) {
+        switchTab('output');
+    }
 }
+
+// Render a JSXGraph board spec (`{"options": {...}, "elements": [...]}`) into the
+// plot pane. Mirrors the iOS JSXGraphView renderer (Issue #6357 / #7286): each
+// element is created via board.create(type, parents, attrs); parents reference
+// earlier elements as {ref: id}. Requires the global JXG from jsxgraph.min.js.
+function renderJsxgraph(data) {
+    const box = document.createElement('div');
+    box.id = 'jxgbox';
+    box.style.width = '100%';
+    box.style.height = '100%';
+    box.style.aspectRatio = '1 / 1';
+    plotOutput.appendChild(box);
+
+    if (typeof JXG === 'undefined' || !JXG.JSXGraph) {
+        box.textContent = '[JSXGraph.js not loaded — cannot render board]';
+        return;
+    }
+
+    try {
+        const spec = JSON.parse(data);
+        const options = spec.options || { boundingbox: [-5, 5, 5, -5], axis: true };
+        const board = JXG.JSXGraph.initBoard('jxgbox', options);
+        const created = {};
+
+        const resolveSpecValue = (p) => {
+            if (p !== null && typeof p === 'object' && p.ref !== undefined) {
+                return created[p.ref];
+            }
+            if (p !== null && typeof p === 'object' && p.jsfunc !== undefined) {
+                const argv = Array.isArray(p.vars) ? p.vars : [p.var || 't'];
+                return new Function(...argv, `return (${p.jsfunc});`);
+            }
+            if (Array.isArray(p)) {
+                return p.map(resolveSpecValue);
+            }
+            return p;
+        };
+
+        const createElements = (container, elements) => {
+            for (const el of elements || []) {
+                const attrs = { ...(el.attrs || {}) };
+                // Make the internal id available to JSXGraph and to ref resolution.
+                attrs.id = String(el.id);
+                const parents = Array.isArray(el.parents) ? el.parents.map(resolveSpecValue) : [];
+                const createdElement = container.create(el.type, parents, attrs);
+                created[el.id] = createdElement;
+                if (el.type === 'view3d') {
+                    createElements(createdElement, el.elements || []);
+                }
+            }
+        };
+
+        createElements(board, spec.elements || []);
+        result.textContent = 'Rendered board';
+    } catch (e) {
+        box.textContent = `[JSXGraph render error: ${e.message}]`;
+    }
+}
+
+function themedPlotlyLayout(layout) {
+    const themed = {
+        ...layout,
+        paper_bgcolor: layout.paper_bgcolor || '#1e1f1c',
+        plot_bgcolor: layout.plot_bgcolor || '#272822',
+        font: { color: '#f8f8f2', ...(layout.font || {}) },
+        margin: { l: 48, r: 20, t: 24, b: 48, ...(layout.margin || {}) }
+    };
+
+    themed.xaxis = themedAxis(layout.xaxis);
+    themed.yaxis = themedAxis(layout.yaxis);
+    if (layout.scene) {
+        themed.scene = {
+            ...layout.scene,
+            xaxis: themedAxis(layout.scene.xaxis),
+            yaxis: themedAxis(layout.scene.yaxis),
+            zaxis: themedAxis(layout.scene.zaxis)
+        };
+    }
+    return themed;
+}
+
+function themedAxis(axis = {}) {
+    return {
+        ...axis,
+        color: axis.color || '#f8f8f2',
+        gridcolor: axis.gridcolor || '#4a4a40',
+        zerolinecolor: axis.zerolinecolor || '#75715e',
+        linecolor: axis.linecolor || '#75715e'
+    };
+}
+
+// ============================================================
+// WASM warmup
+// ============================================================
+
+function warmupWasm() {
+    if (!wasm) {
+        return Promise.resolve();
+    }
+    if (warmupPromise) {
+        return warmupPromise;
+    }
+    warmupPromise = new Promise((resolve) => {
+        try {
+            wasm.run_from_source('using Plots\nplot(sin)\n', BigInt(42));
+            console.log('WASM plot warmup completed');
+        } catch (e) {
+            console.warn('WASM plot warmup failed:', e);
+        } finally {
+            resolve();
+        }
+    });
+    return warmupPromise;
+}
+
+function scheduleWarmup() {
+    if (!wasm || warmupPromise || warmupScheduled) {
+        return;
+    }
+
+    warmupScheduled = true;
+    const startWarmup = () => {
+        warmupHandle = null;
+        warmupHandleType = null;
+        warmupScheduled = false;
+        warmupWasm();
+    };
+
+    warmupHandle = window.setTimeout(() => {
+        warmupHandle = null;
+        warmupHandleType = null;
+        if ('requestIdleCallback' in window) {
+            warmupHandle = window.requestIdleCallback(startWarmup, { timeout: 3000 });
+            warmupHandleType = 'idle';
+        } else {
+            startWarmup();
+        }
+    }, 2000);
+    warmupHandleType = 'timeout';
+}
+
+function cancelScheduledWarmup() {
+    if (!warmupScheduled || warmupHandle === null) {
+        return;
+    }
+
+    if (warmupHandleType === 'idle' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(warmupHandle);
+    } else {
+        window.clearTimeout(warmupHandle);
+    }
+    warmupHandle = null;
+    warmupHandleType = null;
+    warmupScheduled = false;
+}
+
+// ============================================================
+// Error helpers
+// ============================================================
 
 function showError(message) {
     errorDiv.textContent = message;
@@ -473,10 +695,47 @@ function hideError() {
     errorDiv.classList.add('hidden');
 }
 
-// Start the application
+// ============================================================
+// Initialization
+// ============================================================
+
+async function init() {
+    runBtn.disabled = true;
+    runBtn.textContent = 'Loading...';
+
+    setupTabs();
+    setupSampleSelect();
+    setupEventListeners();
+
+    await Promise.all([loadWasm(), loadMonaco()]);
+
+    if (wasm) {
+        setWasmModule(wasm);
+        versionSpan.textContent = `SubsetJuliaVM v${wasm.get_version()}`;
+    }
+
+    // Restore code from URL hash if present
+    const hashCode = getCodeFromHash();
+    if (hashCode !== null) {
+        setCode(hashCode);
+        currentSampleIndex = -1;
+        selectCustomOption();
+    } else if (samplesIR.length > 0) {
+        loadSample(0);
+    }
+
+    if (wasm) {
+        runBtn.textContent = 'Warming...';
+        await warmupWasm();
+    }
+
+    runBtn.disabled = false;
+    runBtn.textContent = runButtonText;
+}
+
 init();
 
-// Debug function exposed to window for console debugging
+// Debug helper
 window.debugRun = function(code) {
     if (!wasm) {
         console.error('WASM not loaded');

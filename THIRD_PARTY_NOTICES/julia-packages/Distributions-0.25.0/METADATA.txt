@@ -1,0 +1,7 @@
+package: Distributions
+version: 0.25.0
+local_uuid: 31c24e10-a181-5473-b8eb-7969acd0382f
+registry_uuid: 31c24e10-a181-5473-b8eb-7969acd0382f
+repository: https://github.com/JuliaStats/Distributions.jl
+license: MIT
+license_source: LICENSE.md at ref v0.25.0

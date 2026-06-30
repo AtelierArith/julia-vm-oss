@@ -8,6 +8,9 @@
 #   - implies (not in Julia)
 
 # isnothing: check if value is nothing
+# INTENTIONAL_NOOP (Issue #4703): upstream `isnothing(x) = x === nothing`
+# (julia/base/some.jl:67) is exactly this identity comparison, so the
+# trivial `return x === nothing` body is correct, not an unfinished stub.
 function isnothing(x)
     return x === nothing
 end
@@ -25,6 +28,25 @@ end
 function xor(x::Int64, y::Int64)
     return xor_int(x, y)
 end
+
+# ~: bitwise NOT for Bool (Issue #7305)
+# Based on Julia's base/bool.jl:13 -- (~)(x::Bool) = !x
+function Base.:(~)(x::Bool)
+    return !x
+end
+
+# NOTE (Issue #8197): the Bool bitwise operators `&` / `|` / `xor` / `⊻`
+# (upstream base/bool.jl:14-15,49) are intentionally defined in base/int.jl,
+# AFTER the `Int64` methods, rather than here. Reason: a mixed-type bitwise call
+# with no exact same-type method (e.g. `0x05 & 5`, or any `&`/`|` inside a
+# generic function where the operands are statically `Any`) is dispatched at
+# runtime via `CallTypedDispatch`, whose no-match fallback is the FIRST method
+# registered for that operator. The `Int64` method (`and_int`/`or_int`, which
+# widens both operands to `Int64`) is a type-safe fallback that matches upstream
+# (`0x05 & 5 === 5`); a `Bool` method registered first would instead make a
+# `Bool`-typed result slot receive a widened `Int64` at runtime → `LoadSlotBool`.
+# Defining the Bool methods after the Int64 methods keeps `Int64` as the
+# fallback. See base/int.jl for the actual definitions.
 
 # nand: not and
 function nand(x, y)
@@ -125,6 +147,11 @@ Base.:(-)(x::Bool, y::Bool) = Int(x) - Int(y)
 *(x::Bool, y::Bool) = x && y
 # Note: Using || instead of | for Bool to avoid unsupported bitwise operators
 ^(x::Bool, y::Bool) = x || !y
+
+# Preserve Bool division result type, matching Julia's base/bool.jl.
+function div(x::Bool, y::Bool)
+    return y ? x : throw(DivideError())
+end
 
 # Power with integer base
 # Based on Julia's base/bool.jl:22

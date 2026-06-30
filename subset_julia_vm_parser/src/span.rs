@@ -3,6 +3,7 @@
 //! Provides precise source location tracking for error reporting and IDE integration.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Represents a span in the source code
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -91,6 +92,20 @@ impl Span {
     /// Check if a byte offset is within this span
     pub fn contains(&self, offset: usize) -> bool {
         offset >= self.start && offset < self.end
+    }
+}
+
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.start_line == self.end_line && self.start_column == self.end_column {
+            write!(f, "{}:{}", self.start_line, self.start_column)
+        } else {
+            write!(
+                f,
+                "{}:{}..{}:{}",
+                self.start_line, self.start_column, self.end_line, self.end_column
+            )
+        }
     }
 }
 

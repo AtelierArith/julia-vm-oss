@@ -73,6 +73,9 @@ using Test
     copyto!(d9, 2, s9, 3, 2)  # Copy [3.3, 4.4] to d9[2:3]
     check9 = d9[2] == 3.3 && d9[3] == 4.4
 
+    # Negative count matches Julia's checked copy boundary
+    @test_throws ArgumentError copyto!(d9, 1, s9, 1, -1)
+
     # =============================================================================
     # Final check
     # =============================================================================

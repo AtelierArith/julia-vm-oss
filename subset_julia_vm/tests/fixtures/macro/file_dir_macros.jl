@@ -17,6 +17,10 @@ using Test
     # Both should be strings
     @test isa(file, String)
     @test isa(dir, String)
+
+    # Issue #7494: @__DIR__ must parse and lower when used directly as a call argument.
+    joined = joinpath(@__DIR__, "file_dir_macros.jl")
+    @test isfile(joined)
 end
 
 true

@@ -35,3 +35,15 @@ name = "filesystem_countlines_readline"
 file = "countlines_readline.jl"
 expected = true
 description = "Test countlines and readline functions (Issue #482)"
+
+[[tests]]
+name = "filesystem_eachline_filename_7593"
+file = "eachline_filename_7593.jl"
+expected = true
+description = "eachline(filename) returns iterable lines for package initialization patterns such as collect/map over MacroTools animals.txt (Issue #7593)"
+
+[[tests]]
+name = "filesystem_eachline_7593"
+file = "eachline_7593.jl"
+expected = true
+description = "Base.eachline(filename) returns an iterable line source usable by collect and map, covering package data-file initialization such as MacroTools animals (Issue #7593)"

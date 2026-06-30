@@ -1,6 +1,24 @@
 # Test manifest for memory category
 
 [[tests]]
+name = "pure_julia_array_over_memory_6627"
+file = "pure_julia_array_over_memory_6627.jl"
+expected = true
+description = "Faithful pure-Julia Array{T,N} over Memory{T} round-trips end-to-end on the #6623/#6625/#6626 foundations (Issue #6627/#6624)"
+
+[[tests]]
+name = "memory_ref_struct_field_6626"
+file = "memory_ref_struct_field_6626.jl"
+expected = true
+description = "MemoryRef{T} as a struct field + ::MemoryRef dispatch + Memory/MemoryRef as first-class type values (Issue #6626)"
+
+[[tests]]
+name = "memory_parametric_struct_field_6623"
+file = "memory_parametric_struct_field_6623.jl"
+expected = true
+description = "Memory{K}/Memory{V} as parametric struct fields compile and bind type params (Issue #6623)"
+
+[[tests]]
 name = "memory_basic"
 file = "test_memory_basic.jl"
 expected = true
@@ -41,3 +59,129 @@ name = "memory_large"
 file = "test_memory_large.jl"
 expected = true
 description = "Test Memory{T} with 100+ elements: iteration, sum, copy independence"
+
+[[tests]]
+name = "memory_type_identity"
+file = "test_memory_type_identity.jl"
+expected = true
+description = "Test Memory{T} preserves runtime type identity through construction, indexing, mutation, and reflection (Issues #3894/#3978)"
+
+[[tests]]
+name = "memory_primitive_boundary"
+file = "test_memory_primitive_boundary.jl"
+expected = true
+description = "Memory{T} primitive boundary: direct buffer equality, reflection, membership, and negative dynamic allocation guard (Issues #3902/#3976)"
+
+[[tests]]
+name = "memory_dynamic_arithmetic"
+file = "test_memory_dynamic_arithmetic.jl"
+expected = true
+description = "Memory{T} dynamic arithmetic without Memory-to-Array input normalization (Issue #3980)"
+
+[[tests]]
+name = "memory_dynamic_any_binary"
+file = "test_memory_dynamic_any_binary.jl"
+expected = true
+description = "Memory{T} CallDynamicBinaryBoth fallback without Memory-to-Array input normalization (Issue #3982)"
+
+[[tests]]
+name = "memory_equality_hash"
+file = "test_memory_equality_hash.jl"
+expected = true
+description = "Memory{T} equality and hash without Memory-to-Array input normalization (Issue #3984)"
+
+[[tests]]
+name = "memory_keys_values_pairs"
+file = "test_memory_keys_values_pairs.jl"
+expected = true
+description = "Memory{T} keys, values, and pairs without Memory-to-Array input normalization (Issue #3986)"
+
+[[tests]]
+name = "memory_string_from_chars"
+file = "test_memory_string_from_chars.jl"
+expected = true
+description = "String(::Memory{Char}) without Memory-to-Array input normalization (Issue #3990)"
+
+[[tests]]
+name = "memory_struct_field_compare"
+file = "test_memory_struct_field_compare.jl"
+expected = true
+description = "Struct field comparison with Memory{T} without Memory-to-Array input normalization (Issue #3992)"
+
+[[tests]]
+name = "memory_count_predicate"
+file = "test_memory_count_predicate.jl"
+expected = true
+description = "count(f, ::Memory{T}) without Memory-to-Array input normalization (Issue #3995)"
+
+[[tests]]
+name = "memory_ref_runtime"
+file = "test_memory_ref_runtime.jl"
+expected = true
+description = "MemoryRef runtime offset, parent, get, and set operations (Issue #3925)"
+
+[[tests]]
+name = "memory_type_parameter_constructor"
+file = "test_memory_type_parameter_constructor.jl"
+expected = true
+description = "Memory{T} allocation from Type{T} where bindings and GenericMemory typed similar (Issue #3937)"
+
+[[tests]]
+name = "memory_abstract_numeric_constructor_4239"
+file = "abstract_numeric_constructor_4239.jl"
+expected = true
+description = "Memory{Real}/Integer/AbstractFloat constructors preserve abstract element tags and boxed numeric values (Issue #4239)"
+
+[[tests]]
+name = "memory_copyto"
+file = "copyto_memory.jl"
+expected = true
+description = "Memory copyto! offset, overlap, zero-count, and negative-count behavior (Issue #3947)"
+
+[[tests]]
+name = "memory_eltype_copied_memory"
+file = "eltype_copied_memory.jl"
+expected = true
+description = "Copied Memory{T} values preserve eltype through runtime type parameters (Issue #4032)"
+
+[[tests]]
+name = "memory_collect_traits"
+file = "collect_memory_traits.jl"
+expected = true
+description = "Memory{T} collect follows Julia Base iterator traits and returns Vector{T} (Issue #4052)"
+
+[[tests]]
+name = "memory_collect_similar_container_allocation"
+file = "collect_similar_memory_container_4018_3954.jl"
+expected = true
+description = "collect_similar with Memory container allocates through Memory/Pure Julia Array wrapper similar (Issues #3954/#4018)"
+
+[[tests]]
+name = "memory_map_collect_similar"
+file = "map_memory_collect_similar_4052_4018.jl"
+expected = true
+description = "map(f, ::Memory) allocates through collect_similar like upstream AbstractArray map (Issues #4052/#4018)"
+
+[[tests]]
+name = "memory_similar_vararg_dims_4018"
+file = "similar_memory_vararg_dims_4018.jl"
+expected = true
+description = "similar(::Memory, dims...) and similar(::Memory, ::Type, dims...) allocate through Pure Julia vararg dispatch (Issue #4018)"
+
+[[tests]]
+name = "memory_symbol_setindex"
+file = "symbol_setindex.jl"
+expected = true
+description = "Memory{Symbol} setindex! and fill! preserve boxed Symbol values (Issue #4034)"
+
+[[tests]]
+name = "memory_undef_tuple_dims_6688"
+file = "undef_tuple_dims_6688.jl"
+expected = true
+description = "Memory{T}(undef, dims::Tuple) accepts a 1-tuple of dimensions (literal and dynamic), matching upstream genericmemory.jl, in addition to the scalar form (Issue #6688)"
+
+[[tests]]
+name = "memory_compact_show_repr_6697"
+file = "compact_show_repr_6697.jl"
+expected = true
+description = "Memory{T} compact print/string/repr/2-arg show renders as [a, b, c] / T[] (with typeinfo prefix for Bool/Any), matching upstream show(io, ::GenericMemory), instead of the verbose form or empty Memory{T}() (Issue #6697)"

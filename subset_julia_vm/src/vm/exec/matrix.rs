@@ -9,56 +9,93 @@
 use super::super::matmul::{is_complex_array, matmul, matmul_complex};
 use super::super::*;
 use super::stack_ops::StackOps;
+use super::DispatchAction;
 use crate::rng::RngLike;
-
-/// Result type for matrix operations
-pub(super) enum MatrixResult {
-    /// Instruction was not handled by this module
-    NotHandled,
-    /// Instruction was handled successfully
-    Handled,
-    /// Instruction handled, but need to continue (e.g., after raise)
-    Continue,
-}
+use crate::vm::builtins_linalg::linalg_value_to_array_value;
 
 impl<R: RngLike> Vm<R> {
     /// Execute matrix operation instructions.
     ///
-    /// Returns `MatrixResult::NotHandled` if the instruction is not a matrix operation.
+    /// Returns an `unhandled` error if the instruction is not a matrix operation.
     #[inline]
-    pub(super) fn execute_matrix(&mut self, instr: &Instr) -> Result<MatrixResult, VmError> {
+    pub(super) fn execute_matrix(&mut self, instr: &Instr) -> Result<DispatchAction, VmError> {
         match instr {
             Instr::MatMul => {
-                let b_result = self.stack.pop_array();
+                let b_value = self.stack.pop_value()?;
+                let a_value = self.stack.pop_value()?;
+                // Issue #7964 Phase 2+3: Rust-level StaticArray matvec / matmat.
+                // Inline variant is zero-allocation (pure stack copy).
+                {
+                    use crate::vm::value::{static_matmat, static_matvec};
+                    let handled = match (&a_value, &b_value) {
+                        (Value::StaticArrayInline(a), Value::StaticArrayInline(b))
+                            if !a.is_vector() =>
+                        {
+                            if b.is_vector() {
+                                a.inline_matvec(b)
+                            } else {
+                                a.inline_matmat(b)
+                            }
+                        }
+                        (Value::StaticArray(a), Value::StaticArray(b)) if !a.is_vector() => {
+                            if b.is_vector() {
+                                static_matvec(a, b)
+                            } else {
+                                static_matmat(a, b)
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(result) = handled {
+                        self.stack.push(result);
+                        return Ok(DispatchAction::Continue);
+                    }
+                }
+                if let Some(result) =
+                    super::binary_both::try_matrix_diagonal_mul(self, &a_value, &b_value)?
+                {
+                    self.stack.push(result);
+                    return Ok(DispatchAction::Continue);
+                }
+                self.stack.push(a_value);
+                self.stack.push(b_value);
+
+                let b_result = linalg_value_to_array_value(
+                    self.stack.pop_value()?,
+                    &self.struct_heap,
+                    "*",
+                    Some("right operand"),
+                );
                 let b = match self.try_or_handle(b_result)? {
                     Some(arr) => arr,
-                    None => return Ok(MatrixResult::Continue),
+                    None => return Ok(DispatchAction::Continue),
                 };
-                let a_result = self.stack.pop_array();
+                let a_result = linalg_value_to_array_value(
+                    self.stack.pop_value()?,
+                    &self.struct_heap,
+                    "*",
+                    Some("left operand"),
+                );
                 let a = match self.try_or_handle(a_result)? {
                     Some(arr) => arr,
-                    None => return Ok(MatrixResult::Continue),
+                    None => return Ok(DispatchAction::Continue),
                 };
 
                 // Check if either array contains complex numbers
-                let a_borrowed = a.borrow();
-                let b_borrowed = b.borrow();
-                let a_is_complex = is_complex_array(&a_borrowed);
-                let b_is_complex = is_complex_array(&b_borrowed);
+                let a_is_complex = is_complex_array(&a);
+                let b_is_complex = is_complex_array(&b);
 
                 let mul_result = if a_is_complex || b_is_complex {
                     // Use complex-aware matmul with access to struct_heap
-                    matmul_complex(&a_borrowed, &b_borrowed, &self.struct_heap)
+                    matmul_complex(&a, &b, &self.struct_heap)
                 } else {
                     // Use standard real matmul
-                    matmul(&a_borrowed, &b_borrowed)
+                    matmul(&a, &b)
                 };
-                drop(a_borrowed);
-                drop(b_borrowed);
 
                 let mut result = match self.try_or_handle(mul_result)? {
                     Some(result) => result,
-                    None => return Ok(MatrixResult::Continue),
+                    None => return Ok(DispatchAction::Continue),
                 };
                 // Store correct Complex type_id for complex array results (Issue #1804)
                 if result
@@ -68,8 +105,8 @@ impl<R: RngLike> Vm<R> {
                 {
                     result.struct_type_id = Some(self.get_complex_type_id());
                 }
-                self.stack.push(Value::Array(new_array_ref(result)));
-                Ok(MatrixResult::Handled)
+                self.push_array_value_as_wrapper(result)?;
+                Ok(DispatchAction::Continue)
             }
 
             // Note: Instr::Adjoint and Instr::Transpose have been removed
@@ -77,7 +114,7 @@ impl<R: RngLike> Vm<R> {
             // - subset_julia_vm/src/julia/base/array.jl (for arrays)
             // - subset_julia_vm/src/julia/base/number.jl (for scalars)
             // - subset_julia_vm/src/julia/base/complex.jl (for Complex numbers)
-            _ => Ok(MatrixResult::NotHandled),
+            _ => Err(super::unhandled(instr)),
         }
     }
 }

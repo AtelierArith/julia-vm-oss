@@ -11,12 +11,19 @@
 //! # Module structure
 //!
 //! - `types`: Core lattice type definitions (`LatticeType`, `ConcreteType`)
-//! - `ops`: Lattice operations (join, meet, subtype, subtract)
+//! - `abstract_lattice`: The `AbstractLattice` trait — the unified home for
+//!   the meet/join/widen algebra (Issue #6605), mirroring upstream Julia's
+//!   `AbstractLattice` abstraction
+//! - `ops`: Lattice operation bodies (join, meet, subtype, subtract, widen)
 //! - `widening`: Constants controlling type widening behavior
 
+pub mod abstract_lattice;
 pub mod ops;
 pub mod types;
 pub mod widening;
 
+pub use abstract_lattice::AbstractLattice;
 pub use types::{ConcreteType, LatticeType};
-pub use widening::{MAX_INFERENCE_ITERATIONS, MAX_UNION_COMPLEXITY, MAX_UNION_LENGTH};
+pub use widening::{
+    limit_type_size, MAX_INFERENCE_ITERATIONS, MAX_UNION_COMPLEXITY, MAX_UNION_LENGTH,
+};

@@ -15,7 +15,27 @@ impl<'a> Parser<'a> {
             None => return Ok(None),
         };
 
+        // In space-separated macro-argument context, a space before `(` or `[`
+        // separates arguments instead of fusing into a call/index. So `@m foo (bar)`
+        // is two arguments, while `@m foo(bar)` is one call argument (Issue #5494).
+        // This mirrors upstream Julia's whitespace sensitivity but is intentionally
+        // scoped to the macro argument's own top-level postfix chain (the flag is
+        // cleared inside any grouping), so sjulia's lenient `f (x)` call parsing at
+        // ordinary expression position is preserved.
+        if self.macro_arg_space_sensitive
+            && matches!(token.token, Token::LParen | Token::LBracket)
+            && left.span.end != token.span.start
+        {
+            return Ok(None);
+        }
+
         match &token.token {
+            // Numeric coefficient followed by parentheses: `2(x + 1)` means
+            // `2 * (x + 1)` in Julia, not a call with integer callee.
+            Token::LParen if self.is_juxtaposition_context(left, token) => {
+                Ok(Some(self.parse_parenthesized_juxtaposition(left.clone())?))
+            }
+
             // Function call: expr(args)
             Token::LParen => Ok(Some(self.parse_call_expression(left.clone())?)),
 
@@ -57,7 +77,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if we're in a juxtaposition context (number followed by identifier without whitespace)
-    fn is_juxtaposition_context(&self, left: &CstNode, token: &crate::lexer::SpannedToken<'a>) -> bool {
+    fn is_juxtaposition_context(
+        &self,
+        left: &CstNode,
+        token: &crate::lexer::SpannedToken<'a>,
+    ) -> bool {
         // Left must be a numeric literal
         let is_numeric = matches!(left.kind, NodeKind::IntegerLiteral | NodeKind::FloatLiteral);
         if !is_numeric {
@@ -68,19 +92,43 @@ impl<'a> Parser<'a> {
         left.span.end == token.span.start
     }
 
-    /// Parse juxtaposition expression: 3.0im, 2x, 2f(x)
+    /// Parse juxtaposition expression: 3.0im, 2x, 2f(x), 4n^2
     /// In Julia, `2f(x)` means `2 * f(x)`, so we need to parse the full
-    /// postfix expression (including function calls) on the right side.
+    /// postfix expression (including function calls) on the right side. Numeric
+    /// literal coefficients bind looser than exponentiation, so `4n^2` is
+    /// `4 * (n^2)`, not `(4n)^2` (Issue #8363).
     fn parse_juxtaposition(&mut self, left: CstNode) -> ParseResult<CstNode> {
         let start = left.span.start;
-        let mut right = self.parse_identifier()?;
+        let right = self.parse_expression_with_precedence(crate::token::Precedence::Power)?;
 
-        // Check for postfix operations on the identifier (e.g., function calls)
-        // This handles cases like 2f(x) which should be 2 * f(x)
-        while let Some(postfix) = self.try_parse_postfix(&right)? {
-            right = postfix;
+        let span = self.source_map.span(start, right.span.end);
+        Ok(CstNode::with_children(
+            NodeKind::JuxtapositionExpression,
+            span,
+            vec![left, right],
+        ))
+    }
+
+    fn parse_parenthesized_juxtaposition(&mut self, left: CstNode) -> ParseResult<CstNode> {
+        let start = left.span.start;
+        let mut right = self.parse_parenthesized_or_tuple()?;
+        if self
+            .current
+            .as_ref()
+            .and_then(|token| token.token.binary_precedence())
+            .is_some_and(|(prec, _)| prec == crate::token::Precedence::Power)
+        {
+            let op_token = self.advance().unwrap();
+            let exponent =
+                self.parse_expression_with_precedence(crate::token::Precedence::Power)?;
+            let span = self.source_map.span(right.span.start, exponent.span.end);
+            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+            right = CstNode::with_children(
+                NodeKind::BinaryExpression,
+                span,
+                vec![right, op_node, exponent],
+            );
         }
-
         let span = self.source_map.span(start, right.span.end);
         Ok(CstNode::with_children(
             NodeKind::JuxtapositionExpression,
@@ -99,11 +147,30 @@ impl<'a> Parser<'a> {
         // Parse the string literal
         let string = self.parse_string_literal()?;
 
-        let span = self.source_map.span(start, string.span.end);
+        let mut end = string.span.end;
+        let mut children = vec![prefix, string];
+
+        // A regex literal may carry flag characters (`i`, `m`, `s`, `x`) immediately
+        // after the closing quote with no whitespace: `r"abc"i`, `r"x"ims`
+        // (Issue #5709). Capture them as a third `Identifier` child so lowering can
+        // pass them to the `Regex` constructor. Restricted to the `r` prefix so other
+        // prefixed literals (`raw"..."`, `big"..."`, ...) keep their two-child shape.
+        let is_regex_prefix = &self.source[children[0].span.start..children[0].span.end] == "r";
+        let adjacent_ident = self
+            .current
+            .as_ref()
+            .is_some_and(|tok| matches!(tok.token, Token::Identifier) && tok.span.start == end);
+        if is_regex_prefix && adjacent_ident {
+            let flags = self.parse_identifier()?;
+            end = flags.span.end;
+            children.push(flags);
+        }
+
+        let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::PrefixedStringLiteral,
             span,
-            vec![prefix, string],
+            children,
         ))
     }
 }

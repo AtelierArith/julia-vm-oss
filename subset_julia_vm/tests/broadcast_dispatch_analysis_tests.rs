@@ -3,9 +3,13 @@ use subset_julia_vm::compile::compile_core_program;
 use subset_julia_vm::ir::core::Program;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
+#[cfg(feature = "profiling")]
 use subset_julia_vm::rng::StableRng;
+#[cfg(feature = "profiling")]
+use subset_julia_vm::vm::profiler;
+#[cfg(feature = "profiling")]
+use subset_julia_vm::vm::Vm;
 use subset_julia_vm::vm::{CompiledProgram, FunctionInfo, Instr};
-use subset_julia_vm::vm::{profiler, Vm};
 
 fn compile_source_with_base(source: &str) -> CompiledProgram {
     let prelude_src = base::get_base();
@@ -63,6 +67,11 @@ fn is_call_like(instr: &Instr) -> bool {
             | Instr::CallFunctionVariable(_)
             | Instr::CallFunctionVariableWithSplat(_, _)
             | Instr::CallSpecialize(_, _)
+            | Instr::CallSpecializeI64Slots(_)
+            | Instr::CallSpecializeInboundsI64Slots(_)
+            // Resolved direct-call family (CallResolved added in PR #5411, Issue #5418).
+            | Instr::CallResolved(_, _)
+            | Instr::CallInbounds(_, _)
     )
 }
 
@@ -77,7 +86,20 @@ fn direct_call_target_names(compiled: &CompiledProgram, f: &FunctionInfo) -> Vec
     compiled.code[f.code_start..f.code_end]
         .iter()
         .filter_map(|instr| match instr {
-            Instr::Call(func_index, _) => compiled.functions.get(*func_index).map(|fi| fi.name.clone()),
+            // Resolved direct-call family — CallResolved/CallInbounds added in
+            // PR #5411 (Issue #5418) must be recognized alongside Call/CallSpecialize.
+            Instr::Call(func_index, _)
+            | Instr::CallSpecialize(func_index, _)
+            | Instr::CallResolved(func_index, _)
+            | Instr::CallInbounds(func_index, _) => compiled
+                .functions
+                .get(*func_index)
+                .map(|fi| fi.name.clone()),
+            Instr::CallSpecializeI64Slots(operands)
+            | Instr::CallSpecializeInboundsI64Slots(operands) => compiled
+                .specializable_functions
+                .get(operands.spec_func_index)
+                .map(|fi| fi.name.clone()),
             _ => None,
         })
         .collect()
@@ -101,7 +123,7 @@ fn single_candidate_typed_dispatches(
         .iter()
         .filter_map(|instr| match instr {
             Instr::CallTypedDispatch(name, _, fallback, candidates)
-                if candidates.len() == 1 && candidates[0].0 == *fallback =>
+                if candidates.len() == 1 && candidates[0] == *fallback =>
             {
                 Some((name.clone(), *fallback))
             }
@@ -121,6 +143,10 @@ fn find_largest_function_by_name<'a>(
         .max_by_key(|f| f.code_end - f.code_start)
 }
 
+// Runtime profiling helpers (and the test below) require the `profiling`
+// feature, which arms the VM instruction profiler (Issue #5090). In the default
+// build the profiler is a compiled-out no-op, so these are gated off.
+#[cfg(feature = "profiling")]
 fn run_with_profile(source: &str) -> std::collections::HashMap<String, u64> {
     let compiled = compile_source_with_base(source);
     let rng = StableRng::new(0);
@@ -134,6 +160,7 @@ fn run_with_profile(source: &str) -> std::collections::HashMap<String, u64> {
     profiler::get_results().into_iter().collect()
 }
 
+#[cfg(feature = "profiling")]
 fn total_call_like_exec_counts(counts: &std::collections::HashMap<String, u64>) -> u64 {
     let call_like_names = [
         "Call",
@@ -204,7 +231,12 @@ bcast_add!(out, a, b)
     assert!(
         compiled.code[bcast_add.code_start..bcast_add.code_end]
             .iter()
-            .any(|i| matches!(i, Instr::CallSpecialize(_, _))),
+            .any(|i| matches!(
+                i,
+                Instr::CallSpecialize(_, _)
+                    | Instr::CallSpecializeI64Slots(_)
+                    | Instr::CallSpecializeInboundsI64Slots(_)
+            )),
         "bcast_add! should enter specialized broadcast path via CallSpecialize"
     );
 
@@ -228,15 +260,23 @@ bcast_add!(out, a, b)
         copyto_call_count > 0,
         "copyto! still contains direct call sites (not fully inlined/static)"
     );
+    let helper_names = copyto_targets
+        .iter()
+        .chain(copyto_typed_targets.iter())
+        .collect::<Vec<_>>();
     assert!(
-        copyto_typed_targets
-            .iter()
-            .any(|name| name == "_broadcast_getindex" || name == "_broadcast_getindex_2d"),
-        "expected copyto! to call broadcast helper(s) through typed dispatch, got {:?}",
+        helper_names.iter().any(|name| {
+            *name == "_broadcast_getindex"
+                || *name == "_broadcast_getindex_2d"
+                || name.starts_with("_copyto_fastpath")
+        }),
+        "expected copyto! to call broadcast helper(s), got direct/specialized {:?}, typed {:?}",
+        copyto_targets,
         copyto_typed_targets
     );
 }
 
+#[cfg(feature = "profiling")]
 #[test]
 fn test_runtime_profile_broadcast_executes_more_call_like_instructions() {
     let src_for = r#"

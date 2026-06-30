@@ -53,3 +53,45 @@ name = "where_runtime_dispatch_type_params"
 file = "runtime_dispatch_type_params.jl"
 expected = true
 description = "Runtime dispatch binds where T type parameters (Issue #2468)"
+
+[[tests]]
+name = "where_double_bounded"
+file = "double_bounded.jl"
+expected = true
+description = "Lower bound (T>:Lower) and double bound (Lower<:T<:Upper) parse and dispatch (Issue #5051)"
+
+[[tests]]
+name = "where_long_form_bound_respected_5374"
+file = "long_form_bound_respected_5374.jl"
+expected = true
+description = "Long-form `function ... where {T<:Bound} ... end` keeps its bound (read the type name from the BinaryExpression's last child, not the bare `<:` operator at children[1]); eltype(UserStruct{T}) of a non-Number type is Any (Issue #5374)"
+
+[[tests]]
+name = "where_bounded_user_abstract_value_dispatch_5383"
+file = "bounded_user_abstract_value_dispatch_5383.jl"
+expected = true
+description = "Value-position bounded typevar with a USER abstract bound (`f(x::T) where {T<:Animal}`) matches a struct argument via its declared (transitive) supertype chain; previously NoMethodFound because `Named <: Named` was hardcoded false (Issue #5383 sub-case 1)"
+
+[[tests]]
+name = "where_parametric_typevar_bound_value_dispatch_5383"
+file = "parametric_typevar_bound_value_dispatch_5383.jl"
+expected = true
+description = "Value-position typevar whose bound is parametric and mentions another where var (`f(x::T) where {S<:Number, T<:Vector{S}}`) matches Vector{<:Number} and rejects Vector{String}; previously fell through to the untyped fallback (Issue #5383 sub-case 2)"
+
+[[tests]]
+name = "where_equivalent_bounded_signature_redefinition_5383"
+file = "equivalent_bounded_signature_redefinition_5383.jl"
+expected = true
+description = "`h(x::T) where {T<:Number}` and `h(x::Number)` are the same signature, so the later definition redefines the earlier (last-def-wins) instead of being kept as a tie resolved by registration order (Issue #5383 sub-case 3)"
+
+[[tests]]
+name = "where_specialized_direct_call_6868"
+file = "specialized_direct_call_6868.jl"
+expected = true
+description = "A direct call to a `where`-parametric method (`f(x::T) where T<:Real`) now specializes its body for the concrete runtime argument types on the direct-call path (`execute_direct_call_with_func_args` was jumping to the unspecialized generic body, binding every param to `Any` and dynamically dispatching the inner operators — slower than both the untyped-generic and the concrete-typed forms). Guards behavior: specialized results match upstream values/types, the `T<:Real` bound still rejects a String with a MethodError, and bodies referencing the type variable (`zero(T)`, `one(T)`, `Vector{T}`) keep `T` bound to the concrete argument type (Issue #6868)."
+
+[[tests]]
+name = "where_global_collision_7847"
+file = "global_collision_7847.jl"
+expected = true
+description = "A method `where T` type parameter referenced inside a parametric type (`Tuple{T, Int64}`) shadows a same-named top-level binding (`T = Int64`, registered as a non-parametric type alias). Before the fix the global froze the `x::T` parameter annotation to `Int64` at lowering, so the where parameter was never bound and `Tuple{T, Int64}` raised `UndefVarError: Unbound type parameter: T`. Covers long-form/short-form, an unbounded and a `S<:Real`-bounded parameter, and confirms a same-named global used as a plain annotation still resolves as an alias (Issue #7840 preserved). (Issue #7847)"

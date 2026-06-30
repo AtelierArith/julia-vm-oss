@@ -5,22 +5,31 @@
 //!   sjulia                          # Start interactive REPL
 //!   sjulia file.jl                  # Execute Julia file
 //!   sjulia -e "code"                # Execute code string
-//!   sjulia --compile file.jl -o out # Compile to bytecode file (.sjbc)
+//!   sjulia --compile file.jl -o out # Compile to Core IR file (.sjir)
+//!   sjulia --run-ir file.sjir # Execute Core IR file
+//!   sjulia --compile-vm file.jl -o out # Compile to VM bytecode file (.sjvmbc)
+//!   sjulia --run-vm-bytecode file.sjvmbc # Execute VM bytecode file
+//!   sjulia --dump-bytecode file.jl  # Dump compiled VM bytecode
 
 use std::env;
 use std::fs;
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use subset_julia_vm::base;
-use subset_julia_vm::bytecode;
 use subset_julia_vm::compile::compile_core_program;
 use subset_julia_vm::loader;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
+use subset_julia_vm::repl::completions::{
+    complete as complete_repl, CompletionContext, CompletionItem,
+};
 use subset_julia_vm::repl::REPLSession;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{Value, Vm};
+use subset_julia_vm::vm::{CompiledProgram, FunctionInfo, Instr, Value, VarTypeTag, Vm};
+use subset_julia_vm::{core_ir_file, vm_bytecode_file};
 
 // Import REPL dependencies
 use rustyline::completion::{Completer, Pair};
@@ -31,14 +40,24 @@ use rustyline::history::DefaultHistory;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Config, Context, Editor, Helper};
 use std::borrow::Cow;
-use subset_julia_vm::unicode::{completions_for_prefix, latex_to_unicode};
+use std::rc::Rc;
 
 #[path = "sjulia/runners.rs"]
 mod runners;
 
-use runners::{run_code, run_file, run_repl};
+use runners::{run_code, run_file, run_ir_file, run_repl, run_vm_bytecode_file};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const DEFAULT_MAIN_BYTECODE_TAIL: usize = 40;
+
+fn get_method_signature(func: &subset_julia_vm::ir::core::Function) -> String {
+    let param_types: Vec<String> = func
+        .params
+        .iter()
+        .map(|p| p.effective_type().to_string())
+        .collect();
+    format!("{}({})", func.name, param_types.join(", "))
+}
 
 // ANSI color codes for Monokai theme
 mod colors {
@@ -53,6 +72,7 @@ mod colors {
     pub const OPERATOR: &str = "\x1b[38;2;249;38;114m"; // #F92672 (pink)
     pub const BOOL: &str = "\x1b[38;2;174;129;255m"; // #AE81FF (purple)
     pub const PROMPT: &str = "\x1b[32m"; // Green
+    pub const HINT: &str = "\x1b[90m"; // Light black / gray (matches Julia upstream :light_black)
 }
 
 const KEYWORDS: &[&str] = &[
@@ -272,10 +292,7 @@ impl JuliaHighlighter {
                 result.push(chars[i]);
                 if i + 1 < len {
                     let next = chars[i + 1];
-                    if (chars[i] == '=' && next == '=')
-                        || (chars[i] == '!' && next == '=')
-                        || (chars[i] == '<' && next == '=')
-                        || (chars[i] == '>' && next == '=')
+                    if (next == '=' && matches!(chars[i], '=' | '!' | '<' | '>'))
                         || (chars[i] == '&' && next == '&')
                         || (chars[i] == '|' && next == '|')
                         || (chars[i] == '-' && next == '>')
@@ -318,17 +335,38 @@ impl Highlighter for JuliaHighlighter {
     fn highlight_char(&self, _line: &str, _pos: usize, _kind: CmdKind) -> bool {
         true
     }
+
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Cow::Owned(format!("{}{}{}", colors::HINT, hint, colors::RESET))
+    }
 }
 
 struct JuliaHelper {
     highlighter: JuliaHighlighter,
+    session: Rc<RefCell<REPLSession>>,
 }
 
 impl JuliaHelper {
-    fn new() -> Self {
+    fn new(session: Rc<RefCell<REPLSession>>) -> Self {
         Self {
             highlighter: JuliaHighlighter,
+            session,
         }
+    }
+
+    fn completion_items(&self, line: &str, pos: usize) -> (usize, Vec<CompletionItem>) {
+        let session = self.session.borrow();
+        let variable_names = session.variable_names();
+        let function_names = session.function_names();
+        let imported_module_names = session.imported_module_names();
+        let field_names_by_object = session.field_names_by_object();
+        let completion_ctx = CompletionContext {
+            variable_names: &variable_names,
+            function_names: &function_names,
+            imported_module_names: &imported_module_names,
+            field_names_by_object: &field_names_by_object,
+        };
+        complete_repl(line, pos, &completion_ctx)
     }
 }
 
@@ -343,39 +381,16 @@ impl Completer for JuliaHelper {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        let before_cursor = &line[..pos];
-
-        if let Some(backslash_pos) = before_cursor.rfind('\\') {
-            let latex_prefix = &before_cursor[backslash_pos..];
-
-            let is_valid_latex = latex_prefix.len() > 1
-                && latex_prefix[1..]
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || c == '_' || c == '^');
-
-            if is_valid_latex {
-                if let Some(unicode) = latex_to_unicode(latex_prefix) {
-                    return Ok((
-                        backslash_pos,
-                        vec![Pair {
-                            display: format!("{} → {}", latex_prefix, unicode),
-                            replacement: unicode.to_string(),
-                        }],
-                    ));
-                }
-
-                let completions = completions_for_prefix(latex_prefix);
-                if !completions.is_empty() {
-                    let pairs: Vec<Pair> = completions
-                        .into_iter()
-                        .map(|(latex, unicode)| Pair {
-                            display: format!("{} → {}", latex, unicode),
-                            replacement: unicode.to_string(),
-                        })
-                        .collect();
-                    return Ok((backslash_pos, pairs));
-                }
-            }
+        let (start, completions) = self.completion_items(line, pos);
+        if !completions.is_empty() {
+            let pairs = completions
+                .into_iter()
+                .map(|item| Pair {
+                    display: item.display,
+                    replacement: item.text,
+                })
+                .collect();
+            return Ok((start, pairs));
         }
 
         Ok((
@@ -390,6 +405,24 @@ impl Completer for JuliaHelper {
 
 impl Hinter for JuliaHelper {
     type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
+        if pos != line.len() {
+            return None;
+        }
+
+        let (start, completions) = self.completion_items(line, pos);
+        let [item] = completions.as_slice() else {
+            return None;
+        };
+        let prefix = line.get(start..pos)?;
+        let suffix = item.text.strip_prefix(prefix)?;
+        if suffix.is_empty() {
+            None
+        } else {
+            Some(suffix.to_string())
+        }
+    }
 }
 
 impl Validator for JuliaHelper {
@@ -424,14 +457,32 @@ impl Highlighter for JuliaHelper {
     fn highlight_char(&self, line: &str, pos: usize, kind: CmdKind) -> bool {
         self.highlighter.highlight_char(line, pos, kind)
     }
+
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        self.highlighter.highlight_hint(hint)
+    }
 }
 
 fn main() {
+    // Overlap the Base-cache deserialize and Base IR clones with the
+    // prelude-load/merge window on the main thread (Issue #6348). Harmless
+    // for non-run subcommands: unconsumed prefetch results are dropped.
+    subset_julia_vm::compile::cache::begin_warm_start_prefetch();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 {
-        // No arguments - start REPL
-        run_repl();
+        // No arguments. Match official Julia behavior: when stdin is a TTY,
+        // start the interactive REPL; when stdin is piped/redirected (not a
+        // TTY), read the entire stdin as a script and execute it. (Issue #3560)
+        if std::io::stdin().is_terminal() {
+            run_repl();
+        } else {
+            run_stdin_script();
+        }
+    } else if args[1] == "-" {
+        // Explicit `-` argument: always read script from stdin (Julia parity).
+        run_stdin_script();
     } else if args[1] == "-e" {
         // -e option: execute code string
         if args.len() < 3 {
@@ -441,7 +492,7 @@ fn main() {
         let code = &args[2];
         run_code(code);
     } else if args[1] == "--compile" || args[1] == "-c" {
-        // --compile option: compile to bytecode file
+        // --compile option: compile to Core IR file
         if args.len() < 3 {
             eprintln!("Error: --compile requires an input file");
             std::process::exit(1);
@@ -452,13 +503,41 @@ fn main() {
         let output_file = if args.len() >= 5 && (args[3] == "-o" || args[3] == "--output") {
             args[4].clone()
         } else {
-            // Default output: input stem + .sjbc
+            // Default output: input stem + .sjir
             let path = Path::new(input_file);
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            format!("{}.sjbc", stem)
+            format!("{}.sjir", stem)
         };
 
-        compile_to_bytecode(input_file, &output_file);
+        compile_to_ir(input_file, &output_file);
+    } else if args[1] == "--compile-vm" {
+        if args.len() < 3 {
+            eprintln!("Error: --compile-vm requires an input file");
+            std::process::exit(1);
+        }
+        let input_file = &args[2];
+
+        let output_file = if args.len() >= 5 && (args[3] == "-o" || args[3] == "--output") {
+            args[4].clone()
+        } else {
+            let path = Path::new(input_file);
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            format!("{}.sjvmbc", stem)
+        };
+
+        compile_to_vm_bytecode(input_file, &output_file);
+    } else if args[1] == "--run-ir" {
+        if args.len() < 3 {
+            eprintln!("Error: --run-ir requires a Core IR file");
+            std::process::exit(1);
+        }
+        run_ir_file(&args[2]);
+    } else if args[1] == "--run-vm-bytecode" {
+        if args.len() < 3 {
+            eprintln!("Error: --run-vm-bytecode requires a VM bytecode file");
+            std::process::exit(1);
+        }
+        run_vm_bytecode_file(&args[2]);
     } else if args[1] == "--type-stability" || args[1] == "-t" {
         // --type-stability option: analyze type stability
         // Check for additional flags
@@ -481,6 +560,38 @@ fn main() {
         };
 
         run_type_stability_analysis(&input_file, strict_mode, json_output);
+    } else if args[1] == "--dump-bytecode" {
+        // --dump-bytecode option: compile and print final VM bytecode
+        // Supports: --dump-bytecode [--all] <file.jl>
+        //           --dump-bytecode [--all] -e <code>
+        //           --dump-bytecode [--all] -
+        let include_all = args.iter().any(|a| a == "--all");
+        let args_filtered: Vec<&String> = args
+            .iter()
+            .filter(|a| *a != "--dump-bytecode" && *a != "--all")
+            .collect();
+
+        if args_filtered.len() < 2 {
+            eprintln!("Error: --dump-bytecode requires an input file, '-' or -e 'code'");
+            std::process::exit(1);
+        }
+
+        if args_filtered[1] == "-e" {
+            if args_filtered.len() < 3 {
+                eprintln!("Error: -e requires a code argument");
+                std::process::exit(1);
+            }
+            dump_bytecode_for_code(args_filtered[2], include_all);
+        } else if args_filtered[1] == "-" {
+            let mut source = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut source) {
+                eprintln!("Error reading stdin: {}", e);
+                std::process::exit(1);
+            }
+            dump_bytecode_for_code(&source, include_all);
+        } else {
+            dump_bytecode_for_file(args_filtered[1], include_all);
+        }
     } else if args[1] == "--dump-ast" {
         // --dump-ast option: show AST structure for debugging parser tests
         // Supports: --dump-ast [--json] <file.jl>
@@ -514,13 +625,41 @@ fn main() {
             std::process::exit(1);
         }
         precompile_base(&args[2]);
+    } else if args[1] == "--precompile-prelude" {
+        // --precompile-prelude: generate parsed/lowered prelude Program cache for embedding
+        if args.len() < 3 {
+            eprintln!("Error: --precompile-prelude requires an output file path");
+            std::process::exit(1);
+        }
+        precompile_prelude(&args[2]);
     } else if args[1] == "-h" || args[1] == "--help" {
         print_usage();
     } else {
         // File path provided - execute file
         let file_path = &args[1];
-        run_file(file_path);
+        match Path::new(file_path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+        {
+            Some("sjir") => run_ir_file(file_path),
+            Some("sjvmbc") => run_vm_bytecode_file(file_path),
+            _ => run_file(file_path),
+        }
     }
+}
+
+/// Read the entire stdin as a script source and execute it via `run_code`.
+///
+/// Mirrors official `julia` behavior: when stdin is not a TTY (e.g. a pipe or
+/// redirected file) and no script argument is given, treat the piped content
+/// as the program to run instead of starting an interactive REPL. See Issue #3560.
+fn run_stdin_script() {
+    let mut source = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut source) {
+        eprintln!("Error reading stdin: {}", e);
+        std::process::exit(1);
+    }
+    run_code(&source);
 }
 
 fn print_usage() {
@@ -528,36 +667,79 @@ fn print_usage() {
         r#"SubsetJuliaVM - Julia Subset Runtime
 
 USAGE:
-    sjulia                              Start interactive REPL
+    sjulia                              Start interactive REPL (or execute piped stdin)
+    sjulia -                            Read and execute script from stdin
     sjulia <file.jl>                    Execute Julia file
+    sjulia <file.sjir>                  Execute Core IR file
+    sjulia <file.sjvmbc>                Execute VM bytecode file
     sjulia -e <code>                    Execute code string
-    sjulia --compile <file.jl> -o <out> Compile to bytecode file (.sjbc)
+    sjulia --compile <file.jl> -o <out> Compile to Core IR file (.sjir)
+    sjulia --run-ir <file.sjir>         Execute Core IR file
+    sjulia --compile-vm <file.jl> -o <out> Compile to VM bytecode file (.sjvmbc)
+    sjulia --run-vm-bytecode <file.sjvmbc> Execute VM bytecode file
     sjulia --type-stability <file.jl>   Analyze type stability
+    sjulia --dump-bytecode <file.jl>    Dump compiled VM bytecode
     sjulia --dump-ast <file.jl>         Dump AST structure for debugging
     sjulia --dump-ast -e <code>         Dump AST for code string
+    sjulia --dump-bytecode -e <code>    Dump bytecode for code string
     sjulia --dump-ast --json <file.jl>  Dump AST in JSON format
     sjulia --precompile-base <out.bin> Generate Base cache for embedding
+    sjulia --precompile-prelude <out.bin> Generate prelude Program cache for embedding
 
 OPTIONS:
     -e <code>             Execute code string
-    -c, --compile <file>  Compile source to bytecode file
-    -o, --output <file>   Output file for --compile (default: <input>.sjbc)
+    -c, --compile <file>  Compile source to Core IR file
+        --run-ir          Execute a Core IR file produced by --compile
+        --compile-vm      Compile source to VM bytecode file
+        --run-vm-bytecode Execute a VM bytecode file produced by --compile-vm
+    -o, --output <file>   Output file for --compile or --compile-vm
     -t, --type-stability  Analyze type stability of functions
         --strict          Strict mode (exit code 1 if unstable functions found)
         --json            Output in JSON format (for --type-stability and --dump-ast)
         --dump-ast        Dump AST structure (useful for debugging parser tests)
+        --dump-bytecode   Dump compiled VM bytecode (user functions + main by default)
+        --all             Include Base/prelude functions in --dump-bytecode output
         --precompile-base Generate Base bytecode cache for build-time embedding
+        --precompile-prelude
+                          Generate parsed/lowered prelude Program cache for build-time embedding
     -h, --help            Show this help message
 
 EXAMPLES:
     sjulia hello.jl
     sjulia -e "println(1 + 2)"
-    sjulia --compile program.jl -o program.sjbc
+    sjulia --compile program.jl -o program.sjir
+    sjulia --run-ir program.sjir
+    sjulia --compile-vm program.jl -o program.sjvmbc
+    sjulia --run-vm-bytecode program.sjvmbc
     sjulia --type-stability program.jl
     sjulia --type-stability --strict --json program.jl
     sjulia --dump-ast -e "x = 1 + 2"
     sjulia --dump-ast --json -e "x = 1 + 2"
+    sjulia --dump-bytecode -e "f(x)=x+1; f(41)"
 "#
+    );
+}
+
+fn precompile_prelude(output_path: &str) {
+    eprintln!("Precompiling prelude Program...");
+    let start = std::time::Instant::now();
+
+    let bytes = subset_julia_vm::pipeline::generate_prelude_program_cache().unwrap_or_else(|e| {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    });
+
+    std::fs::write(output_path, &bytes).unwrap_or_else(|e| {
+        eprintln!("Error: Failed to write prelude cache file: {}", e);
+        std::process::exit(1);
+    });
+
+    let elapsed = start.elapsed();
+    eprintln!(
+        "Prelude Program cache written to {} ({} bytes, {:.1}ms)",
+        output_path,
+        bytes.len(),
+        elapsed.as_secs_f64() * 1000.0,
     );
 }
 
@@ -582,6 +764,612 @@ fn precompile_base(output_path: &str) {
         bytes.len(),
         elapsed.as_secs_f64() * 1000.0,
     );
+}
+
+fn dump_bytecode_for_file(file_path: &str, include_all: bool) {
+    if !Path::new(file_path).exists() {
+        eprintln!("Error: File '{}' not found", file_path);
+        std::process::exit(1);
+    }
+
+    let source = fs::read_to_string(file_path).unwrap_or_else(|e| {
+        eprintln!("Error reading file '{}': {}", file_path, e);
+        std::process::exit(1);
+    });
+
+    let (compiled, user_function_names) = compile_source_for_bytecode_dump(&source);
+    emit_bytecode_dump(&compiled, include_all, file_path, &user_function_names);
+}
+
+fn dump_bytecode_for_code(source: &str, include_all: bool) {
+    let (compiled, user_function_names) = compile_source_for_bytecode_dump(source);
+    emit_bytecode_dump(&compiled, include_all, "<eval>", &user_function_names);
+}
+
+fn compile_source_for_bytecode_dump(source: &str) -> (CompiledProgram, HashSet<String>) {
+    let mut parser = Parser::new().unwrap_or_else(|e| {
+        eprintln!("Error: failed to create parser: {}", e);
+        std::process::exit(1);
+    });
+
+    let prelude_src = base::get_prelude();
+    let prelude_outcome = parser.parse(&prelude_src).unwrap_or_else(|e| {
+        eprintln!("Error: failed to parse prelude: {:?}", e);
+        std::process::exit(1);
+    });
+    let mut prelude_lowering = Lowering::new(&prelude_src);
+    let prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
+        eprintln!("Prelude lowering error: {:?}", e);
+        std::process::exit(1);
+    });
+
+    let outcome = parser.parse(source).unwrap_or_else(|e| {
+        eprintln!("Error: failed to parse source: {:?}", e);
+        std::process::exit(1);
+    });
+
+    let mut lowering = Lowering::new(source);
+    let mut program = lowering.lower(outcome).unwrap_or_else(|e| {
+        eprintln!("Lowering error: {:?}", e);
+        std::process::exit(1);
+    });
+
+    let user_function_names = collect_dump_user_function_names(&program);
+    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
+    let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
+
+    let mut all_structs: Vec<_> = prelude_program
+        .structs
+        .into_iter()
+        .filter(|s| !user_struct_names.contains(s.name.as_str()))
+        .collect();
+    all_structs.append(&mut program.structs);
+    program.structs = all_structs;
+
+    let user_abstract_names: HashSet<_> = program
+        .abstract_types
+        .iter()
+        .map(|a| a.name.as_str())
+        .collect();
+    let mut all_abstract_types: Vec<_> = prelude_program
+        .abstract_types
+        .into_iter()
+        .filter(|a| !user_abstract_names.contains(a.name.as_str()))
+        .collect();
+    all_abstract_types.append(&mut program.abstract_types);
+    program.abstract_types = all_abstract_types;
+
+    let mut all_functions: Vec<_> = prelude_program
+        .functions
+        .into_iter()
+        .filter(|f| !user_method_sigs.contains(&get_method_signature(f)))
+        .collect();
+    let base_function_count = all_functions.len();
+    all_functions.append(&mut program.functions);
+    program.functions = all_functions;
+    program.base_function_count = base_function_count;
+
+    let mut merged_main_stmts = prelude_program.main.stmts;
+    merged_main_stmts.push(subset_julia_vm::ir::core::Stmt::Meta {
+        annotation: subset_julia_vm::ir::core::MetaAnnotation {
+            name: subset_julia_vm::ir::core::BASE_USER_MAIN_BOUNDARY_META.to_string(),
+            args: Vec::new(),
+        },
+        span: subset_julia_vm::span::Span::new(0, 0, 0, 0, 0, 0),
+    });
+    merged_main_stmts.extend(program.main.stmts);
+    program.main = subset_julia_vm::ir::core::Block {
+        stmts: merged_main_stmts,
+        span: program.main.span,
+    };
+
+    let existing_modules: HashSet<String> =
+        program.modules.iter().map(|m| m.name.clone()).collect();
+    let usings_to_load: Vec<subset_julia_vm::ir::core::UsingImport> = program
+        .usings
+        .iter()
+        .filter(|u| !u.is_relative && !existing_modules.contains(&u.module))
+        .cloned()
+        .collect();
+
+    if !usings_to_load.is_empty() {
+        let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
+        let loaded_modules = package_loader
+            .load_for_usings(&usings_to_load)
+            .unwrap_or_else(|e| {
+                eprintln!("Load error: {}", e);
+                std::process::exit(1);
+            });
+
+        for module in loaded_modules {
+            if !existing_modules.contains(&module.name) {
+                program.modules.push(module);
+            }
+        }
+    }
+
+    let compiled = compile_core_program(&program).unwrap_or_else(|e| {
+        eprintln!("Compilation error: {:?}", e);
+        std::process::exit(1);
+    });
+
+    (compiled, user_function_names)
+}
+
+fn collect_dump_user_function_names(
+    program: &subset_julia_vm::ir::core::Program,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for func in &program.functions {
+        names.insert(func.name.clone());
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            names.insert(func.name.clone());
+            names.insert(format!("{}.{}", module.name, func.name));
+        }
+    }
+    names
+}
+
+fn emit_bytecode_dump(
+    compiled: &CompiledProgram,
+    include_all: bool,
+    source_name: &str,
+    user_function_names: &HashSet<String>,
+) {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    let result = write_bytecode_dump(
+        &mut out,
+        compiled,
+        include_all,
+        source_name,
+        user_function_names,
+    )
+    .and_then(|_| out.flush());
+
+    if let Err(e) = result {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("Error writing bytecode dump: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn write_bytecode_dump<W: Write>(
+    out: &mut W,
+    compiled: &CompiledProgram,
+    include_all: bool,
+    source_name: &str,
+    user_function_names: &HashSet<String>,
+) -> io::Result<()> {
+    writeln!(out, "=== Bytecode Summary ===")?;
+    writeln!(out, "source: {}", source_name)?;
+    writeln!(out, "instructions: {}", compiled.code.len())?;
+    writeln!(out, "entry: {}", compiled.entry)?;
+    let default_function_count = compiled
+        .functions
+        .iter()
+        .filter(|func| should_dump_function(false, func, user_function_names))
+        .count();
+    writeln!(
+        out,
+        "functions: {} (base/prelude: {}, default shown: {})",
+        compiled.functions.len(),
+        compiled.base_function_count,
+        default_function_count
+    )?;
+    writeln!(out, "global slots: {}", compiled.global_slot_count)?;
+    writeln!(
+        out,
+        "specializable functions: {}",
+        compiled.specializable_functions.len()
+    )?;
+    if !include_all && compiled.base_function_count > 0 {
+        writeln!(
+            out,
+            "base/prelude and generated helper functions omitted; pass --all to include them"
+        )?;
+    }
+    writeln!(out)?;
+
+    writeln!(out, "=== Functions ===")?;
+    let mut dumped_functions = 0usize;
+    for (idx, func) in compiled.functions.iter().enumerate() {
+        if !should_dump_function(include_all, func, user_function_names) {
+            continue;
+        }
+        write_function_bytecode(out, compiled, idx, func)?;
+        dumped_functions += 1;
+    }
+    if dumped_functions == 0 {
+        writeln!(out, "(no user-declared functions)")?;
+        writeln!(out)?;
+    }
+
+    writeln!(out, "=== Main Bytecode ===")?;
+    let main_len = compiled.code.len().saturating_sub(compiled.entry);
+    let main_start = if include_all || main_len <= DEFAULT_MAIN_BYTECODE_TAIL {
+        compiled.entry
+    } else {
+        compiled
+            .code
+            .len()
+            .saturating_sub(DEFAULT_MAIN_BYTECODE_TAIL)
+    };
+    if include_all {
+        write_slot_table(
+            out,
+            &compiled.global_slot_names,
+            &compiled.global_slot_types,
+            &[],
+            &[],
+        )?;
+    } else {
+        writeln!(
+            out,
+            "  global slots: omitted (slot comments are shown inline)"
+        )?;
+        if main_start > compiled.entry {
+            writeln!(
+                out,
+                "  showing last {} of {} main instructions; pass --all for full main",
+                compiled.code.len().saturating_sub(main_start),
+                main_len
+            )?;
+        }
+    }
+    write_instruction_range(
+        out,
+        compiled,
+        main_start,
+        compiled.code.len(),
+        &compiled.global_slot_names,
+        &compiled.global_slot_types,
+    )?;
+    Ok(())
+}
+
+fn should_dump_function(
+    include_all: bool,
+    func: &FunctionInfo,
+    user_function_names: &HashSet<String>,
+) -> bool {
+    if include_all {
+        return true;
+    }
+    if user_function_names.contains(&func.name) {
+        return true;
+    }
+    func.name
+        .split_once('#')
+        .is_some_and(|(parent, _)| user_function_names.contains(parent))
+}
+
+fn write_function_bytecode<W: Write>(
+    out: &mut W,
+    compiled: &CompiledProgram,
+    index: usize,
+    func: &FunctionInfo,
+) -> io::Result<()> {
+    let params = func
+        .params
+        .iter()
+        .map(|(name, ty)| format!("{}::{:?}", name, ty))
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(
+        out,
+        "[{}] {}({}) -> {:?} code={}..{} entry={}",
+        index, func.name, params, func.return_type, func.code_start, func.code_end, func.entry
+    )?;
+    write_slot_table(
+        out,
+        &func.slot_names,
+        &func.slot_types,
+        &func.param_slots,
+        &func.kwparams.iter().map(|kw| kw.slot).collect::<Vec<_>>(),
+    )?;
+    write_instruction_range(
+        out,
+        compiled,
+        func.code_start,
+        func.code_end,
+        &func.slot_names,
+        &func.slot_types,
+    )?;
+    writeln!(out)?;
+    Ok(())
+}
+
+fn write_slot_table<W: Write>(
+    out: &mut W,
+    slot_names: &[String],
+    slot_types: &[Option<VarTypeTag>],
+    param_slots: &[usize],
+    kwparam_slots: &[usize],
+) -> io::Result<()> {
+    if slot_names.is_empty() {
+        writeln!(out, "  slots: (none)")?;
+        return Ok(());
+    }
+
+    writeln!(out, "  slots:")?;
+    for (idx, name) in slot_names.iter().enumerate() {
+        let role = if param_slots.contains(&idx) {
+            " param"
+        } else if kwparam_slots.contains(&idx) {
+            " kw"
+        } else {
+            ""
+        };
+        writeln!(
+            out,
+            "    #{:<3} {:<28} :: {}{}",
+            idx,
+            name,
+            slot_tag_label(slot_types.get(idx).copied().flatten()),
+            role
+        )?;
+    }
+    Ok(())
+}
+
+fn write_instruction_range<W: Write>(
+    out: &mut W,
+    compiled: &CompiledProgram,
+    start: usize,
+    end: usize,
+    slot_names: &[String],
+    slot_types: &[Option<VarTypeTag>],
+) -> io::Result<()> {
+    if start >= end || start >= compiled.code.len() {
+        writeln!(out, "  bytecode: (empty)")?;
+        return Ok(());
+    }
+
+    let end = end.min(compiled.code.len());
+    writeln!(out, "  bytecode:")?;
+    for ip in start..end {
+        let instr = &compiled.code[ip];
+        let comment = instr_comment(compiled, instr, slot_names, slot_types)
+            .map(|text| format!(" ; {}", text))
+            .unwrap_or_default();
+        writeln!(out, "    {:>6}: {:?}{}", ip, instr, comment)?;
+    }
+    Ok(())
+}
+
+fn slot_tag_label(tag: Option<VarTypeTag>) -> String {
+    tag.map(|tag| format!("{:?}", tag))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn instr_comment(
+    compiled: &CompiledProgram,
+    instr: &Instr,
+    slot_names: &[String],
+    slot_types: &[Option<VarTypeTag>],
+) -> Option<String> {
+    if let Instr::JumpIfGtI64Slots(lhs_slot, rhs_slot, _) = instr {
+        let lhs = slot_comment(*lhs_slot, slot_names, slot_types);
+        let rhs = slot_comment(*rhs_slot, slot_names, slot_types);
+        return Some(format!("lhs {}, rhs {}", lhs, rhs));
+    }
+    if let Instr::AddConstI64SlotAndJumpIfLe(slot, delta, stop_slot, _) = instr {
+        let slot = slot_comment(*slot, slot_names, slot_types);
+        let stop = slot_comment(*stop_slot, slot_names, slot_types);
+        return Some(format!("slot {}, delta {}, stop {}", slot, delta, stop));
+    }
+
+    if let Some(slot) = instr_slot_operand(instr) {
+        return Some(slot_comment(slot, slot_names, slot_types));
+    }
+
+    if let Instr::CallResolvedI64Slots(operands) | Instr::CallInboundsI64Slots(operands) = instr {
+        let name = compiled
+            .functions
+            .get(operands.func_index)
+            .map(|func| func.name.as_str())
+            .unwrap_or("<missing>");
+        let slots = operands
+            .slots
+            .iter()
+            .map(|slot| slot_comment(*slot, slot_names, slot_types))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Some(format!(
+            "call #{} {} slots=[{}]",
+            operands.func_index, name, slots
+        ));
+    }
+
+    if let Some((func_idx, argc)) = instr_direct_call_operand(instr) {
+        let name = compiled
+            .functions
+            .get(func_idx)
+            .map(|func| func.name.as_str())
+            .unwrap_or("<missing>");
+        return Some(format!("call #{} {} argc={}", func_idx, name, argc));
+    }
+
+    if let Instr::CallSpecializeI64Slots(operands)
+    | Instr::CallSpecializeInboundsI64Slots(operands) = instr
+    {
+        let name = compiled
+            .specializable_functions
+            .get(operands.spec_func_index)
+            .map(|func| func.name.as_str())
+            .unwrap_or("<missing>");
+        let slots = operands
+            .slots
+            .iter()
+            .map(|slot| slot_comment(*slot, slot_names, slot_types))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Some(format!(
+            "specialize #{} {} slots=[{}]",
+            operands.spec_func_index, name, slots
+        ));
+    }
+
+    if let Instr::CallSpecialize(spec_idx, argc) | Instr::CallSpecializeInbounds(spec_idx, argc) =
+        instr
+    {
+        let name = compiled
+            .specializable_functions
+            .get(*spec_idx)
+            .map(|func| func.name.as_str())
+            .unwrap_or("<missing>");
+        return Some(format!("specialize #{} {} argc={}", spec_idx, name, argc));
+    }
+
+    None
+}
+
+fn slot_comment(slot: usize, slot_names: &[String], slot_types: &[Option<VarTypeTag>]) -> String {
+    let name = slot_names
+        .get(slot)
+        .map(String::as_str)
+        .unwrap_or("<missing>");
+    let tag = slot_tag_label(slot_types.get(slot).copied().flatten());
+    format!("slot #{} {}::{}", slot, name, tag)
+}
+
+fn instr_direct_call_operand(instr: &Instr) -> Option<(usize, usize)> {
+    match instr {
+        Instr::Call(func_idx, argc)
+        | Instr::CallInbounds(func_idx, argc)
+        | Instr::CallResolved(func_idx, argc) => Some((*func_idx, *argc)),
+        Instr::CallResolvedI64Slots(operands) | Instr::CallInboundsI64Slots(operands) => {
+            Some((operands.func_index, operands.slots.len()))
+        }
+        Instr::CallWithKwargs(func_idx, argc, _)
+        | Instr::CallWithKwargsSplat(func_idx, argc, _, _)
+        | Instr::CallWithSplat(func_idx, argc, _) => Some((*func_idx, *argc)),
+        _ => None,
+    }
+}
+
+fn instr_slot_operand(instr: &Instr) -> Option<usize> {
+    match instr {
+        Instr::LoadSlot(slot)
+        | Instr::StoreSlot(slot)
+        | Instr::LoadSlotI64(slot)
+        | Instr::LoadSlotI64ToF64(slot)
+        | Instr::StoreSlotI64(slot)
+        | Instr::LoadSlotF64(slot)
+        | Instr::StoreSlotF64(slot)
+        | Instr::LoadSlotBool(slot)
+        | Instr::StoreSlotBool(slot)
+        | Instr::LoadSlotF32(slot)
+        | Instr::StoreSlotF32(slot)
+        | Instr::LoadSlotF16(slot)
+        | Instr::StoreSlotF16(slot)
+        | Instr::LoadSlotStr(slot)
+        | Instr::StoreSlotStr(slot)
+        | Instr::LoadSlotChar(slot)
+        | Instr::StoreSlotChar(slot)
+        | Instr::LoadSlotNarrowInt(slot)
+        | Instr::StoreSlotNarrowInt(slot)
+        | Instr::LoadSlotNothing(slot)
+        | Instr::StoreSlotNothing(slot)
+        | Instr::LoadSlotArray(slot)
+        | Instr::StoreSlotArray(slot)
+        | Instr::LoadSlotTuple(slot)
+        | Instr::StoreSlotTuple(slot)
+        | Instr::LoadSlotNamedTuple(slot)
+        | Instr::StoreSlotNamedTuple(slot)
+        | Instr::LoadSlotDict(slot)
+        | Instr::StoreSlotDict(slot)
+        | Instr::LoadSlotSet(slot)
+        | Instr::StoreSlotSet(slot)
+        | Instr::LoadSlotStruct(slot)
+        | Instr::StoreSlotStruct(slot)
+        | Instr::LoadSlotRange(slot)
+        | Instr::StoreSlotRange(slot)
+        | Instr::LoadSlotRng(slot)
+        | Instr::StoreSlotRng(slot)
+        | Instr::LoadSlotGenerator(slot)
+        | Instr::StoreSlotGenerator(slot)
+        | Instr::LoadSlotSymbol(slot)
+        | Instr::StoreSlotSymbol(slot)
+        | Instr::LoadAddI64Slot(slot)
+        | Instr::LoadSubI64Slot(slot)
+        | Instr::LoadMulI64Slot(slot)
+        | Instr::LoadModI64Slot(slot)
+        | Instr::IncVarI64Slot(slot)
+        | Instr::DecVarI64Slot(slot)
+        | Instr::AddConstI64SlotAndJumpIfLe(slot, _, _, _)
+        | Instr::LoadSquareF64Slot(slot)
+        | Instr::LoadAddF64Slot(slot)
+        | Instr::LoadSubF64Slot(slot)
+        | Instr::LoadMulF64Slot(slot)
+        | Instr::LoadDivF64Slot(slot) => Some(*slot),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod bytecode_dump_tests {
+    use super::*;
+
+    #[test]
+    fn dump_formatter_finds_slot_operands() {
+        assert_eq!(instr_slot_operand(&Instr::LoadSlotF64(3)), Some(3));
+        assert_eq!(instr_slot_operand(&Instr::LoadSlotI64ToF64(3)), Some(3));
+        assert_eq!(instr_slot_operand(&Instr::StoreSlot(4)), Some(4));
+        assert_eq!(instr_slot_operand(&Instr::LoadAddI64Slot(5)), Some(5));
+        assert_eq!(instr_slot_operand(&Instr::IncVarI64Slot(6)), Some(6));
+        assert_eq!(
+            instr_slot_operand(&Instr::AddConstI64SlotAndJumpIfLe(6, 1, 7, 8)),
+            Some(6)
+        );
+        assert_eq!(instr_slot_operand(&Instr::JumpIfGtI64Slots(1, 2, 3)), None);
+        assert_eq!(
+            instr_slot_operand(&Instr::CallSpecializeI64Slots(Box::new(
+                subset_julia_vm::vm::CallSpecializeSlots {
+                    spec_func_index: 1,
+                    slots: vec![2, 3],
+                }
+            ))),
+            None
+        );
+        assert_eq!(
+            instr_slot_operand(&Instr::CallResolvedI64Slots(Box::new(
+                subset_julia_vm::vm::CallDirectSlots {
+                    func_index: 1,
+                    slots: vec![2, 3],
+                }
+            ))),
+            None
+        );
+        assert_eq!(instr_slot_operand(&Instr::PushI64(1)), None);
+    }
+
+    #[test]
+    fn dump_formatter_finds_direct_call_operands() {
+        assert_eq!(
+            instr_direct_call_operand(&Instr::CallResolved(12, 3)),
+            Some((12, 3))
+        );
+        assert_eq!(
+            instr_direct_call_operand(&Instr::CallWithSplat(13, 2, vec![false, true])),
+            Some((13, 2))
+        );
+        assert_eq!(
+            instr_direct_call_operand(&Instr::CallResolvedI64Slots(Box::new(
+                subset_julia_vm::vm::CallDirectSlots {
+                    func_index: 14,
+                    slots: vec![1, 2],
+                }
+            ))),
+            Some((14, 2))
+        );
+        assert_eq!(instr_direct_call_operand(&Instr::PushI64(1)), None);
+    }
 }
 
 fn dump_ast_for_file(file_path: &str, json_output: bool) {
@@ -692,7 +1480,7 @@ fn debug_ast_with_lines(
     }
 }
 
-fn compile_to_bytecode(input_file: &str, output_file: &str) {
+fn compile_to_ir(input_file: &str, output_file: &str) {
     // Check if file exists
     if !Path::new(input_file).exists() {
         eprintln!("Error: File '{}' not found", input_file);
@@ -736,7 +1524,7 @@ fn compile_to_bytecode(input_file: &str, output_file: &str) {
     });
 
     // Merge prelude with user program
-    let user_func_names: HashSet<_> = program.functions.iter().map(|f| f.name.as_str()).collect();
+    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
     let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
 
     // Merge structs (prelude first, skip if user defines same name)
@@ -762,11 +1550,11 @@ fn compile_to_bytecode(input_file: &str, output_file: &str) {
     all_abstract_types.append(&mut program.abstract_types);
     program.abstract_types = all_abstract_types;
 
-    // Merge functions (prelude first, skip if user defines same name)
+    // Merge functions by exact signature so user methods extend Base overload sets.
     let mut all_functions: Vec<_> = prelude_program
         .functions
         .into_iter()
-        .filter(|f| !user_func_names.contains(f.name.as_str()))
+        .filter(|f| !user_method_sigs.contains(&get_method_signature(f)))
         .collect();
     // Track base function count BEFORE adding user functions
     let base_function_count = all_functions.len();
@@ -778,6 +1566,13 @@ fn compile_to_bytecode(input_file: &str, output_file: &str) {
     // then user program main block follows.
     // This ensures prelude const definitions are available to all functions.
     let mut merged_main_stmts = prelude_program.main.stmts;
+    merged_main_stmts.push(subset_julia_vm::ir::core::Stmt::Meta {
+        annotation: subset_julia_vm::ir::core::MetaAnnotation {
+            name: subset_julia_vm::ir::core::BASE_USER_MAIN_BOUNDARY_META.to_string(),
+            args: Vec::new(),
+        },
+        span: subset_julia_vm::span::Span::new(0, 0, 0, 0, 0, 0),
+    });
     merged_main_stmts.extend(program.main.stmts);
     program.main = subset_julia_vm::ir::core::Block {
         stmts: merged_main_stmts,
@@ -810,13 +1605,43 @@ fn compile_to_bytecode(input_file: &str, output_file: &str) {
         }
     }
 
-    // Save to bytecode file
-    if let Err(e) = bytecode::save(&program, output_file) {
-        eprintln!("Error saving bytecode: {}", e);
+    // Save to Core IR file
+    if let Err(e) = core_ir_file::save(&program, output_file) {
+        eprintln!("Error saving Core IR: {}", e);
         std::process::exit(1);
     }
 
     println!("Compiled: {} -> {}", input_file, output_file);
+}
+
+fn compile_to_vm_bytecode(input_file: &str, output_file: &str) {
+    if !Path::new(input_file).exists() {
+        eprintln!("Error: File '{}' not found", input_file);
+        std::process::exit(1);
+    }
+
+    let source = fs::read_to_string(input_file).unwrap_or_else(|e| {
+        eprintln!("Error reading file '{}': {}", input_file, e);
+        std::process::exit(1);
+    });
+
+    let base_dir = Path::new(input_file).parent().map(Path::to_path_buf);
+    let program = subset_julia_vm::pipeline::parse_and_lower_with_base_dir(&source, base_dir)
+        .unwrap_or_else(|e| {
+            eprintln!("Pipeline error: {e}");
+            std::process::exit(1);
+        });
+    let compiled = subset_julia_vm::compile::compile_with_cache(&program).unwrap_or_else(|e| {
+        eprintln!("Compilation error: {e:?}");
+        std::process::exit(1);
+    });
+
+    if let Err(e) = vm_bytecode_file::save(&program, &compiled, output_file) {
+        eprintln!("Error saving VM bytecode: {}", e);
+        std::process::exit(1);
+    }
+
+    println!("Compiled VM bytecode: {} -> {}", input_file, output_file);
 }
 
 fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: bool) {
@@ -867,7 +1692,7 @@ fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: 
     });
 
     // Merge prelude with user program (same as run_file)
-    let user_func_names: HashSet<_> = program.functions.iter().map(|f| f.name.as_str()).collect();
+    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
     let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
 
     let mut all_structs: Vec<_> = prelude_program
@@ -894,7 +1719,7 @@ fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: 
     let mut all_functions: Vec<_> = prelude_program
         .functions
         .into_iter()
-        .filter(|f| !user_func_names.contains(f.name.as_str()))
+        .filter(|f| !user_method_sigs.contains(&get_method_signature(f)))
         .collect();
     let base_function_count = all_functions.len();
     all_functions.append(&mut program.functions);
@@ -909,7 +1734,7 @@ fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: 
     };
 
     let mut analyzer = TypeStabilityAnalyzer::with_config(config);
-    let report = analyzer.analyze_program(&program);
+    let report = analyzer.analyze_program_with_production_inference(&program);
 
     // Output the report
     let format = if json_output {
@@ -1076,10 +1901,15 @@ fn print_result_with_context(
         }
 
         if let Some(ref value) = result.value {
-            println!(
-                "{}",
-                format_value_with_vm(value, Some(session.get_struct_heap()))
-            );
+            // Prefer the result's user-defined `show` rendering (Issue #7168);
+            // fall back to the default struct-field formatter otherwise.
+            match &result.value_display {
+                Some(display) => println!("{}", display),
+                None => println!(
+                    "{}",
+                    format_value_with_vm(value, Some(session.get_struct_heap()))
+                ),
+            }
         }
     } else if let Some(ref error) = result.error {
         eprintln!("{}ERROR:{} {}", colors::KEYWORD, colors::RESET, error);
@@ -1135,12 +1965,27 @@ fn format_f64(v: f64) -> String {
 }
 
 /// Format a Complex struct for REPL display, preserving type-correct formatting.
+///
+/// REPL bare-value display has no live VM at print time, so it cannot dispatch
+/// to the pure-Julia `Base.show(io, ::Complex)`. This Rust fallback is kept
+/// consistent with that method — including the `Complex{Bool}` / imaginary-unit
+/// cases — so REPL output matches upstream Julia (Issue #5155). The numeric
+/// arms additionally wrap the text in the REPL's NUMBER color.
 fn format_complex_repl(
     s: &subset_julia_vm::vm::StructInstance,
     struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
 ) -> String {
     if s.values.len() != 2 {
         return "Complex(?, ?)".to_string();
+    }
+    // Complex{Bool}: `im` for the imaginary unit, `Complex(re,im)` otherwise.
+    if let (Value::Bool(re), Value::Bool(im)) = (&s.values[0], &s.values[1]) {
+        let text = if !*re && *im {
+            "im".to_string()
+        } else {
+            format!("Complex({},{})", re, im)
+        };
+        return format!("{}{}{}", colors::NUMBER, text, colors::RESET);
     }
     let re_str = format_value_with_vm(&s.values[0], struct_heap);
     let im_val = &s.values[1];
@@ -1176,8 +2021,34 @@ fn format_complex_repl(
     }
 }
 
-fn format_value(value: &Value) -> String {
-    format_value_with_vm(value, None)
+/// Format a Rational struct for REPL display as `num//den`, matching the
+/// pure-Julia `Base.show(io, ::Rational)`.
+///
+/// Issue #5160: shared between the inline `Value::Struct` and heap
+/// `Value::StructRef` display paths so a heap-resident Rational no longer
+/// falls through to the generic `Rational(num, den)` rendering — the same
+/// inline/heap display gap that Issue #5155 closed for Complex.
+fn format_rational_repl(
+    s: &subset_julia_vm::vm::StructInstance,
+    struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
+) -> String {
+    let fields: Vec<String> = s
+        .values
+        .iter()
+        .map(|v| format_value_with_vm(v, struct_heap))
+        .collect();
+    if fields.len() == 2 {
+        format!(
+            "{}{}//{}{}",
+            colors::NUMBER,
+            fields[0],
+            fields[1],
+            colors::RESET
+        )
+    } else {
+        // Malformed Rational (not exactly num/den): fall back to generic struct.
+        format!("{}({})", s.struct_name, fields.join(", "))
+    }
 }
 
 /// Format a float value for range display.
@@ -1189,10 +2060,90 @@ fn format_range_float(v: f64) -> String {
     }
 }
 
+/// Format the legacy native-array carrier for REPL display. Extracted from
+/// `format_value_with_vm` so the latter no longer needs a native-array
+/// match arm; routed through the shared `native_array_value_ref` helper
+/// (Issue #3908).
+fn format_native_array_with_vm(
+    arr_ref: &subset_julia_vm::vm::value::ArrayRef,
+    struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
+) -> String {
+    let arr_borrow = arr_ref.borrow();
+    // Calculate total number of elements from shape
+    let total_elements: usize = arr_borrow.shape.iter().product();
+
+    if arr_borrow.shape.len() == 1 {
+        // 1D array: use to_value_vec to handle all element types including Complex
+        let values = arr_borrow.to_value_vec();
+        // Ensure we only format the actual elements (not more than shape indicates)
+        let elements: Vec<String> = values
+            .iter()
+            .take(total_elements)
+            .map(|v| format_value_with_vm(v, struct_heap))
+            .collect();
+        format!("[{}]", elements.join(", "))
+    } else if arr_borrow.shape.len() == 2 {
+        // 2D matrix: special handling for F64, otherwise use to_value_vec
+        match &arr_borrow.data {
+            subset_julia_vm::vm::value::ArrayData::F64(data) => {
+                let rows = arr_borrow.shape[0];
+                let cols = arr_borrow.shape[1];
+                let element_type = arr_borrow.element_type();
+                let type_name = element_type.julia_type_name();
+                let mut lines = Vec::new();
+                for r in 0..rows {
+                    let row: Vec<String> = (0..cols)
+                        .map(|c| format_f64(data[r + c * rows])) // column-major
+                        .collect();
+                    lines.push(format!(" {}", row.join("  ")));
+                }
+                format!(
+                    "{}×{} Matrix{{{}}}:\n{}",
+                    rows,
+                    cols,
+                    type_name,
+                    lines.join("\n")
+                )
+            }
+            _ => {
+                // For non-F64 2D arrays, convert to values and format
+                let values = arr_borrow.to_value_vec();
+                let rows = arr_borrow.shape[0];
+                let cols = arr_borrow.shape[1];
+                let element_type = arr_borrow.element_type();
+                let type_name = element_type.julia_type_name();
+                let mut lines = Vec::new();
+                for r in 0..rows {
+                    let row: Vec<String> = (0..cols)
+                        .map(|c| format_value_with_vm(&values[r + c * rows], struct_heap)) // column-major
+                        .collect();
+                    lines.push(format!(" {}", row.join("  ")));
+                }
+                format!(
+                    "{}×{} Matrix{{{}}}:\n{}",
+                    rows,
+                    cols,
+                    type_name,
+                    lines.join("\n")
+                )
+            }
+        }
+    } else {
+        // Higher-dimensional arrays: use debug format
+        format!("{:?}", arr_borrow)
+    }
+}
+
 fn format_value_with_vm(
     value: &Value,
     struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
 ) -> String {
+    // Route the legacy native-array carrier through the shared
+    // `native_array_value_ref` helper so the match below no longer holds a
+    // native-array arm (Issue #3908).
+    if let Some(arr_ref) = subset_julia_vm::vm::value::native_array_value_ref(value) {
+        return format_native_array_with_vm(arr_ref, struct_heap);
+    }
     match value {
         Value::I64(v) => format!("{}", v),
         Value::F64(v) => format_f64(*v),
@@ -1209,78 +2160,21 @@ fn format_value_with_vm(
         Value::F16(v) => format!("Float16({})", v),
         Value::F32(v) => format!("{}", v),
         Value::Str(s) => format!("{}\"{}\"{}", colors::STRING, s, colors::RESET),
-        Value::Array(arr) => {
-            let arr_borrow = arr.borrow();
-            // Calculate total number of elements from shape
-            let total_elements: usize = arr_borrow.shape.iter().product();
-
-            if arr_borrow.shape.len() == 1 {
-                // 1D array: use to_value_vec to handle all element types including Complex
-                let values = arr_borrow.to_value_vec();
-                // Ensure we only format the actual elements (not more than shape indicates)
-                let elements: Vec<String> = values
-                    .iter()
-                    .take(total_elements)
-                    .map(|v| format_value_with_vm(v, struct_heap))
-                    .collect();
-                format!("[{}]", elements.join(", "))
-            } else if arr_borrow.shape.len() == 2 {
-                // 2D matrix: special handling for F64, otherwise use to_value_vec
-                match &arr_borrow.data {
-                    subset_julia_vm::vm::value::ArrayData::F64(data) => {
-                        let rows = arr_borrow.shape[0];
-                        let cols = arr_borrow.shape[1];
-                        let element_type = arr_borrow.element_type();
-                        let type_name = element_type.julia_type_name();
-                        let mut lines = Vec::new();
-                        for r in 0..rows {
-                            let row: Vec<String> = (0..cols)
-                                .map(|c| format_f64(data[r + c * rows])) // column-major
-                                .collect();
-                            lines.push(format!(" {}", row.join("  ")));
-                        }
-                        format!(
-                            "{}×{} Matrix{{{}}}:\n{}",
-                            rows,
-                            cols,
-                            type_name,
-                            lines.join("\n")
-                        )
-                    }
-                    _ => {
-                        // For non-F64 2D arrays, convert to values and format
-                        let values = arr_borrow.to_value_vec();
-                        let rows = arr_borrow.shape[0];
-                        let cols = arr_borrow.shape[1];
-                        let element_type = arr_borrow.element_type();
-                        let type_name = element_type.julia_type_name();
-                        let mut lines = Vec::new();
-                        for r in 0..rows {
-                            let row: Vec<String> = (0..cols)
-                                .map(|c| format_value_with_vm(&values[r + c * rows], struct_heap)) // column-major
-                                .collect();
-                            lines.push(format!(" {}", row.join("  ")));
-                        }
-                        format!(
-                            "{}×{} Matrix{{{}}}:\n{}",
-                            rows,
-                            cols,
-                            type_name,
-                            lines.join("\n")
-                        )
-                    }
-                }
-            } else {
-                // Higher-dimensional arrays: use debug format
-                format!("{:?}", arr_borrow)
-            }
-        }
         Value::Range(r) => {
             if r.is_float {
                 if r.is_unit_range() {
-                    format!("{}:{}", format_range_float(r.start), format_range_float(r.stop))
+                    format!(
+                        "{}:{}",
+                        format_range_float(r.start),
+                        format_range_float(r.stop)
+                    )
                 } else {
-                    format!("{}:{}:{}", format_range_float(r.start), format_range_float(r.step), format_range_float(r.stop))
+                    format!(
+                        "{}:{}:{}",
+                        format_range_float(r.start),
+                        format_range_float(r.step),
+                        format_range_float(r.stop)
+                    )
                 }
             } else if r.is_unit_range() {
                 format!("{}:{}", r.start as i64, r.stop as i64)
@@ -1305,33 +2199,33 @@ fn format_value_with_vm(
                 .collect();
             format!("({})", pairs.join(", "))
         }
-        Value::Dict(d) => {
-            use subset_julia_vm::vm::DictKey;
-            let pairs: Vec<String> = d
-                .iter()
-                .map(|(k, v)| {
-                    let key_str = match k {
-                        DictKey::Str(s) => format!("\"{}\"", s),
-                        DictKey::I64(i) => format!("{}", i),
-                        DictKey::Symbol(s) => format!(":{}", s),
-                    };
-                    format!("{} => {}", key_str, format_value_with_vm(v, struct_heap))
-                })
-                .collect();
-            format!("Dict({})", pairs.join(", "))
-        }
         Value::Nothing => format!("{}nothing{}", colors::BOOL, colors::RESET),
         Value::Missing => format!("{}missing{}", colors::BOOL, colors::RESET),
         Value::Struct(s) if s.is_complex() => format_complex_repl(s, struct_heap),
-        Value::Struct(s) => {
-            // Special case: Rational - display as num//den like Julia
-            if s.struct_name == "Rational" || s.struct_name.starts_with("Rational{") {
-                if s.values.len() == 2 {
-                    let num = format_value_with_vm(&s.values[0], struct_heap);
-                    let den = format_value_with_vm(&s.values[1], struct_heap);
-                    return format!("{}{}//{}{}", colors::NUMBER, num, den, colors::RESET);
+        Value::Struct(s) if s.is_rational() => format_rational_repl(s, struct_heap),
+        // Inline `Array{T,N}` wrapper (the host-return boundary's output since
+        // #6864): materialize and reuse the native array formatter for the
+        // shape-aware `[…]` display, not the generic `StructName(...)` form.
+        Value::Struct(s) if s.array_wrapper_julia_type().is_some() => {
+            match subset_julia_vm::vm::value::array_wrapper_value_to_array_value(
+                value,
+                struct_heap.unwrap_or(&[]),
+            ) {
+                Ok(Some(arr)) => format_native_array_with_vm(
+                    &subset_julia_vm::vm::value::new_array_ref(arr),
+                    struct_heap,
+                ),
+                _ => {
+                    let fields: Vec<String> = s
+                        .values
+                        .iter()
+                        .map(|v| format_value_with_vm(v, struct_heap))
+                        .collect();
+                    format!("{}({})", s.struct_name, fields.join(", "))
                 }
             }
+        }
+        Value::Struct(s) => {
             // General case: StructName(field1, field2, ...)
             let fields: Vec<String> = s
                 .values
@@ -1344,31 +2238,20 @@ fn format_value_with_vm(
             // Try to resolve StructRef to actual struct if struct_heap is available
             if let Some(heap) = struct_heap {
                 if let Some(struct_instance) = heap.get(*id) {
-                    // Check if it's a complex number
-                    let struct_val = Value::Struct(struct_instance.clone());
-                    if struct_val.is_complex() {
-                        if let Some((re, im)) = struct_val.as_complex_parts() {
-                            if im >= 0.0 {
-                                return format!(
-                                    "{}{} + {}im{}",
-                                    colors::NUMBER,
-                                    re,
-                                    im,
-                                    colors::RESET
-                                );
-                            } else {
-                                return format!(
-                                    "{}{} - {}im{}",
-                                    colors::NUMBER,
-                                    re,
-                                    im.abs(),
-                                    colors::RESET
-                                );
-                            }
-                        }
+                    // Check if it's a complex number. Route through the shared
+                    // `format_complex_repl` so the type-correct field display
+                    // and `Complex{Bool}` / `im` special cases match the
+                    // pure-Julia `Base.show(io, ::Complex)` (Issue #5155),
+                    // rather than the lossy f64-projection used previously.
+                    if struct_instance.is_complex() {
+                        return format_complex_repl(struct_instance, struct_heap);
                     }
-                    // General struct display: StructName(field1, field2, ...)
-                    // (No special treatment for Rational.)
+                    // Issue #5160: heap-resident Rationals display as `num//den`
+                    // via the same shared formatter as the inline path, instead
+                    // of falling through to the generic `Rational(num, den)`.
+                    if struct_instance.is_rational() {
+                        return format_rational_repl(struct_instance, struct_heap);
+                    }
                     // General case: StructName(field1, field2, ...)
                     let fields: Vec<String> = struct_instance
                         .values
@@ -1385,11 +2268,21 @@ fn format_value_with_vm(
         }
         Value::Rng(_) => "Random.default_rng()".to_string(),
         Value::SliceAll => ":".to_string(),
-        Value::Ref(inner) => format!("Ref({})", format_value_with_vm(inner, struct_heap)),
+        Value::Ref(inner) => {
+            // Base.RefValue{T}(value) (Issue #5130) - matches upstream display.
+            let v = inner.borrow();
+            format!(
+                "Base.RefValue{{{}}}({})",
+                v.runtime_type(),
+                format_value_with_vm(&v, struct_heap)
+            )
+        }
         Value::Char(c) => format!("'{}'", c),
         Value::Generator(_) => "<generator>".to_string(),
-        Value::DataType(jt) => jt.to_string(), // DataType displays as type name
-        Value::Module(m) => m.name.clone(),    // Module displays as module name
+        // DataType displays as type name, with Complex{FloatNN} → ComplexFNN alias (Issue #5704).
+        Value::DataType(jt) => subset_julia_vm::vm::apply_complex_float_aliases(&jt.to_string()),
+        Value::RuntimeTypeVar(tv) => format!("TypeVar(:{})", tv.name),
+        Value::Module(m) => m.name.clone(), // Module displays as module name
         Value::Function(f) => format!("{} (generic function)", f.name),
         Value::BigInt(b) => format!("{}", b),
         Value::BigFloat(b) => format!("{}", b),
@@ -1418,19 +2311,6 @@ fn format_value_with_vm(
                 .collect();
             format!("pairs({})", pairs.join(", "))
         }
-        Value::Set(s) => {
-            use subset_julia_vm::vm::DictKey;
-            let elements: Vec<String> = s
-                .elements
-                .iter()
-                .map(|v| match v {
-                    DictKey::Str(s) => format!("\"{}\"", s),
-                    DictKey::I64(i) => format!("{}", i),
-                    DictKey::Symbol(s) => format!(":{}", s),
-                })
-                .collect();
-            format!("Set([{}])", elements.join(", "))
-        }
         Value::Regex(r) => format!("r\"{}\"", r.pattern),
         Value::RegexMatch(m) => format!("RegexMatch(\"{}\")", m.match_str),
         Value::Enum { type_name, value } => format!("{}({})", type_name, value),
@@ -1455,6 +2335,17 @@ fn format_value_with_vm(
                 }
             }
         }
+        Value::MemoryRef(memref) => format!(
+            "{}(index={})",
+            memref.julia_type_name(),
+            memref.memory_index()
+        ),
+        // The legacy native-array carrier is filtered out by the
+        // early-return above (Issue #3908). This wildcard satisfies Rust's
+        // exhaustiveness checking and provides a safe default for any
+        // future `Value` variant: fall back to the value's Debug
+        // representation.
+        _ => format!("{:?}", value),
     }
 }
 
@@ -1471,7 +2362,7 @@ fn print_help() {
   Ctrl-C      Cancel current input
   Ctrl-D      Exit the REPL
   Up/Down     Navigate history
-  Tab         Insert 4 spaces, or complete LaTeX (e.g., \alpha → α)
+  Tab         Complete names/LaTeX, or insert 4 spaces
 
 {}Supported Julia Syntax:{}
   - Arithmetic: +, -, *, /, ^, %

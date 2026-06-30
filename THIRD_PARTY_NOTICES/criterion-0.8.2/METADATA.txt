@@ -1,0 +1,5 @@
+crate: criterion
+version: 0.8.2
+license: Apache-2.0 OR MIT
+source: crates.io package source from Cargo.lock resolution
+repository: https://github.com/criterion-rs/criterion.rs

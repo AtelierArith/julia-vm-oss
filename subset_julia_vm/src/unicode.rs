@@ -3886,7 +3886,7 @@ pub fn expand_latex_in_string(input: &str) -> String {
 
     // Sort by length descending to replace longer matches first
     let mut entries: Vec<_> = LATEX_SYMBOLS.iter().collect();
-    entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
 
     for (&latex, &unicode) in entries {
         result = result.replace(latex, unicode);

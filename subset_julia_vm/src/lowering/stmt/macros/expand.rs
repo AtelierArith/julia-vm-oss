@@ -12,11 +12,40 @@ use crate::lowering::{get_node_macro_type, MacroParamType};
 use crate::parser::cst::{CstWalker, Node};
 use crate::span::Span;
 use crate::stdlib_loader::get_stdlib_macro;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static MACRO_LOCAL_GENSYM_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn macro_local_gensym(base: &str) -> String {
+    let counter = MACRO_LOCAL_GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst);
+    format!("##{}#{}", base, counter)
+}
+
+fn base_macro_preserves_statement_value(macro_name: &str) -> bool {
+    // Runtime-expanded value macros must preserve their top-level statement
+    // result; lowering them as bare blocks drops the tail value (Issue #7764).
+    matches!(
+        macro_name,
+        "show"
+            | "time"
+            | "elapsed"
+            | "timed"
+            | "timev"
+            | "showtime"
+            | "allocated"
+            | "allocations"
+            | "something"
+            | "coalesce"
+            | "evalpoly"
+            | "sprintf"
+            | "printf"
+    )
+}
 
 /// Expand a macro defined in Base (base/macros.jl)
 pub(super) fn expand_base_macro<'a>(
     walker: &CstWalker<'a>,
-    node: Node<'a>,
+    _node: Node<'a>,
     macro_name: &str,
     args_node: Option<Node<'a>>,
     direct_args: &[Node<'a>],
@@ -32,6 +61,15 @@ pub(super) fn expand_base_macro<'a>(
         vec![]
     };
 
+    // Multi-argument @show (Issue #4868): the Pure-Julia macro-substitution
+    // engine cannot iterate over a varargs parameter to emit one statement per
+    // argument, so `@show x y z` is expanded here in Rust. The single-argument
+    // case stays on the Pure-Julia `macro show(ex)` path in base/macros.jl.
+    if macro_name == "show" && args.len() != 1 {
+        let block = build_multiarg_show_block(walker, &args, span, lambda_ctx)?;
+        return Ok(Stmt::Block(block));
+    }
+
     // Get the macro definition from Base registry with arity-based dispatch
     let macro_def = crate::base_loader::get_base_macro_with_arity(macro_name, args.len())
         .ok_or_else(|| {
@@ -42,16 +80,15 @@ pub(super) fn expand_base_macro<'a>(
             ))
         })?;
 
-    // Delegate to the common expansion logic
-    expand_macro_with_def(
-        walker,
-        node,
-        macro_name,
-        args_node,
-        direct_args,
-        span,
-        lambda_ctx,
-        &macro_def,
+    if base_macro_preserves_statement_value(macro_name) {
+        let expr = crate::lowering::macro_runtime::expand_macro_to_expr(
+            walker, macro_name, &macro_def, &args, span, lambda_ctx,
+        )?;
+        return Ok(Stmt::Expr { expr, span });
+    }
+
+    crate::lowering::macro_runtime::expand_macro_to_stmt(
+        walker, macro_name, &macro_def, &args, span, lambda_ctx,
     )
 }
 
@@ -85,6 +122,73 @@ pub(super) fn expand_stdlib_macro<'a>(
         lambda_ctx,
         &macro_def,
     )
+}
+
+/// Expand a bundled-package macro (e.g. Plots' `@animate`/`@gif`) in statement
+/// context.
+///
+/// Like the expression-context variant, bundled-package macros go through the full
+/// `macro_runtime` expander (the same one user-defined macros use), not the
+/// template path used for Base/stdlib macros — so they may construct AST nodes at
+/// expansion time. Issue #6355.
+///
+/// We expand to an *expression* and wrap it in `Stmt::Expr`, rather than calling
+/// `expand_macro_to_stmt`: the latter yields a `begin … end` block, whose value is
+/// not propagated as the program result at top level (a bare trailing block does
+/// not display). `@gif for … end` written as a standalone statement (the issue's
+/// MVP) must still yield its `AnimatedGif` so the REPL/iOS/Web auto-display path
+/// renders it — exactly like a trailing `plot(x, y)` call does.
+pub(super) fn expand_bundled_package_macro<'a>(
+    walker: &CstWalker<'a>,
+    module_name: &str,
+    macro_name: &str,
+    args_node: Option<Node<'a>>,
+    direct_args: &[Node<'a>],
+    span: Span,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Stmt> {
+    let args: Vec<Node<'a>> = if let Some(args_node) = args_node {
+        walker.named_children(&args_node)
+    } else if !direct_args.is_empty() {
+        direct_args.to_vec()
+    } else {
+        vec![]
+    };
+
+    let macro_def = crate::stdlib_loader::get_bundled_package_macro(module_name, macro_name)
+        .ok_or_else(|| {
+            UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(format!(
+                "bundled-package macro @{} not found in {}",
+                macro_name, module_name
+            ))
+        })?;
+
+    let min_args = if macro_def.has_varargs {
+        macro_def.params.len() - 1
+    } else {
+        macro_def.params.len()
+    };
+    if args.len() < min_args {
+        return Err(
+            UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(format!(
+                "macro @{} expects at least {} arguments, got {}",
+                macro_name,
+                min_args,
+                args.len()
+            )),
+        );
+    }
+
+    crate::stdlib_loader::add_bundled_package_macro_context(module_name, lambda_ctx);
+    if module_name == "MacroTools" && macro_name == "capture" {
+        return crate::lowering::macro_runtime::expand_macro_to_stmt(
+            walker, macro_name, &macro_def, &args, span, lambda_ctx,
+        );
+    }
+    let expr = crate::lowering::macro_runtime::expand_macro_to_expr(
+        walker, macro_name, &macro_def, &args, span, lambda_ctx,
+    )?;
+    Ok(Stmt::Expr { expr, span })
 }
 
 /// Common macro expansion logic for both user-defined and Base macros
@@ -325,96 +429,9 @@ pub(super) fn expand_user_defined_macro<'a>(
         );
     }
 
-    // Handle macro body based on number of statements
-    let stmts = &macro_def.body.stmts;
-
-    if stmts.is_empty() {
-        // Empty macro body: return a nothing expression statement
-        return Ok(Stmt::Expr {
-            expr: Expr::Literal(Literal::Nothing, span),
-            span,
-        });
-    }
-
-    if stmts.len() == 1 {
-        // Single statement: check if it's an Expr containing a QuoteLiteral
-        let stmt = &stmts[0];
-        return match stmt {
-            Stmt::Expr { expr, .. } => {
-                // For simple identity macros or macros that return their arguments,
-                // we can expand them directly
-                expand_macro_expr(walker, expr, &macro_def.params, &args, span, lambda_ctx, macro_def.has_varargs)
-            }
-            Stmt::Return { value: Some(expr), .. } => {
-                // Handle explicit return statements
-                expand_macro_expr(walker, expr, &macro_def.params, &args, span, lambda_ctx, macro_def.has_varargs)
-            }
-            _ => Err(UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(
-                "user-defined macro expansion currently only supports macros that return expressions",
-            )),
-        };
-    }
-
-    // Multiple statements: expand each and wrap in a Block statement
-    let mut expanded_stmts = Vec::new();
-    for stmt in stmts {
-        match stmt {
-            Stmt::Expr {
-                expr,
-                span: stmt_span,
-            } => {
-                let expanded = expand_macro_expr(
-                    walker,
-                    expr,
-                    &macro_def.params,
-                    &args,
-                    *stmt_span,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(expanded);
-            }
-            Stmt::Assign {
-                var,
-                value,
-                span: stmt_span,
-            } => {
-                let expanded_value =
-                    substitute_params_in_expr(value, &macro_def.params, &args, walker, lambda_ctx)?;
-                expanded_stmts.push(Stmt::Assign {
-                    var: var.clone(),
-                    value: expanded_value,
-                    span: *stmt_span,
-                });
-            }
-            Stmt::Return {
-                value: Some(expr),
-                span: stmt_span,
-            } => {
-                let expanded = expand_macro_expr(
-                    walker,
-                    expr,
-                    &macro_def.params,
-                    &args,
-                    *stmt_span,
-                    lambda_ctx,
-                    macro_def.has_varargs,
-                )?;
-                expanded_stmts.push(expanded);
-            }
-            _ => {
-                return Err(UnsupportedFeature::new(UnsupportedFeatureKind::MacroCall, span).with_hint(
-                    "user-defined macro expansion currently only supports expression and assignment statements",
-                ));
-            }
-        }
-    }
-
-    // Wrap in a Block statement
-    Ok(Stmt::Block(Block {
-        stmts: expanded_stmts,
-        span,
-    }))
+    crate::lowering::macro_runtime::expand_macro_to_stmt(
+        walker, macro_name, &macro_def, &args, span, lambda_ctx,
+    )
 }
 
 /// Expand a macro expression by substituting parameters with arguments.
@@ -660,6 +677,20 @@ fn substitute_params_in_expr<'a>(
             kwargs_splat_mask,
             span,
         } => {
+            if function == "gensym" && call_args.len() <= 1 && kwargs.is_empty() {
+                let base = match call_args.first() {
+                    Some(Expr::Literal(Literal::Str(base), _)) => base.as_str(),
+                    Some(Expr::Var(base, _)) => base.as_str(),
+                    Some(_) => "gensym",
+                    None => "gensym",
+                };
+                let symbol = macro_local_gensym(base);
+                return Ok(Expr::Builtin {
+                    name: crate::ir::core::BuiltinOp::SymbolNew,
+                    args: vec![Expr::Literal(Literal::Str(symbol), *span)],
+                    span: *span,
+                });
+            }
             // Special case: string(param) where param is a macro parameter
             // This should return the source text of the expression at macro expansion time
             if function == "string" && call_args.len() == 1 {
@@ -718,4 +749,45 @@ fn substitute_params_in_expr<'a>(
         // Literals and other expressions don't need substitution
         _ => Ok(expr.clone()),
     }
+}
+
+/// Build the expanded block for a multi-argument `@show a b c ...` (Issue #4868).
+///
+/// Mirrors upstream Julia's `macro show(exs...)` (julia/base/show.jl): emit one
+/// `_do_show("<source text>", <arg>)` call per argument and let the block
+/// evaluate to the value of the last call (so `(@show a b c) == c`).
+///
+/// `_do_show` is the same Pure-Julia helper used by the single-argument
+/// `macro show(ex)` in base/macros.jl, so the printed form stays identical.
+/// Each argument is lowered with `lower_expr_with_ctx`, which evaluates it in
+/// the macro call site's scope — the Rust equivalent of `esc(ex)`.
+pub(crate) fn build_multiarg_show_block<'a>(
+    walker: &CstWalker<'a>,
+    args: &[Node<'a>],
+    span: Span,
+    lambda_ctx: &LambdaContext,
+) -> LowerResult<Block> {
+    let mut stmts = Vec::with_capacity(args.len().max(1));
+    for arg in args {
+        let expr_str = walker.text(arg).to_string();
+        let value_expr = crate::lowering::expr::lower_expr_with_ctx(walker, *arg, lambda_ctx)?;
+        let call = Expr::Call {
+            function: "_do_show".to_string(),
+            args: vec![Expr::Literal(Literal::Str(expr_str), span), value_expr],
+            kwargs: vec![],
+            splat_mask: vec![false, false],
+            kwargs_splat_mask: vec![],
+            span,
+        };
+        stmts.push(Stmt::Expr { expr: call, span });
+    }
+    // `@show` with zero arguments is valid in upstream Julia and evaluates to
+    // `nothing`; keep the block non-empty so it has a well-defined value.
+    if stmts.is_empty() {
+        stmts.push(Stmt::Expr {
+            expr: Expr::Literal(Literal::Nothing, span),
+            span,
+        });
+    }
+    Ok(Block { stmts, span })
 }

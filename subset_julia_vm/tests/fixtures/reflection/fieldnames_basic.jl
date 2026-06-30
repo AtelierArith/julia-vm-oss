@@ -12,6 +12,11 @@ end
     # fieldnames(Person) should return (:name, :age)
     names = fieldnames(Person)
     @test (length(names)) == 2
+
+    @test fieldnames(LineNumberNode) == (:line, :file)
+    @test fieldnames(Expr) == (:head, :args)
+    @test fieldnames(QuoteNode) == (:value,)
+    @test fieldnames(GlobalRef) == (:mod, :name, :binding)
 end
 
 true  # Test passed
