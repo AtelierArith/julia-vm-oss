@@ -41,12 +41,17 @@ Mandelbrot Set (50x25):
 
 ```
 
+For the full set of AoT options (Cranelift backend, object/library output, C ABI exports, etc.), see [`docs/CLI.md`](docs/CLI.md) or run `juliars --help`.
+
 ## Building the WebAssembly Package
 
 Build the WASM package for the Web Playground as follows.
 
 ```bash
-scripts/wasm_build_with_cache.sh --target web --out-dir ./web/pkg
+$ scripts/wasm_build_with_cache.sh --target web --out-dir ./web/pkg
+$ cd web
+$ python3 server.py
+Serving at http://localhost:8080
 ```
 
 This script generates and embeds the prelude/Base caches, then builds `subset_julia_vm_web` with `wasm-pack`. See [`docs/CLI.md`](docs/CLI.md) for details.
