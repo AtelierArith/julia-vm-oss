@@ -41,6 +41,23 @@ Mandelbrot Set (50x25):
 
 ```
 
+## AoT Compile Mandelbrot
+
+To compile `examples/mandelbrot.jl` ahead of time into a native binary, build
+`juliars` with the AoT feature and use the minimal AoT prelude:
+
+```bash
+$ cargo build --release -p subset_julia_vm --features aot --bin juliars
+$ target/release/juliars --minimal-prelude examples/mandelbrot.jl \
+    --emit-binary target/mandelbrot_aot
+$ target/mandelbrot_aot
+```
+
+`--minimal-prelude` is currently required for this example. The full prelude
+still includes Base paths that reach unsupported AoT `BigInt`/parametric
+constructor code, even though the Mandelbrot program itself can compile through
+the minimal AoT prelude.
+
 For the full set of AoT options (Cranelift backend, object/library output, C ABI exports, etc.), see [`docs/CLI.md`](docs/CLI.md) or run `juliars --help`.
 
 ## Building the WebAssembly Package

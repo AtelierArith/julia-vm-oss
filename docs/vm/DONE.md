@@ -1,12 +1,28 @@
 # 実装済み一覧 (DONE)
 
-**最終更新**: 2026-06-30. 実装済み項目は下の日付別「最新対応」セクションを正とし、先頭メタデータには長い issue 要約を重複させない。
+**最終更新**: 2026-07-01. 実装済み項目は下の日付別「最新対応」セクションを正とし、先頭メタデータには長い issue 要約を重複させない。
 
 > 更新方針 (Issue #3760): 新しい項目は日付ごとの共有 `## ...YYYY-MM-DD...` 見出しの下に、Issue ごとの `### ... (Issue #NNNN)` 小見出しとして追加する。同日の見出しが既にある場合は、その下に小見出しを追加し、先頭に新しい独立セクションを増やさない。
 >
 > 過去分(2026-06-06 以前)は [archive/DONE-2026.md](./archive/DONE-2026.md) にアーカイブ済み (Issue #6341)。年が変わったら前年分を `archive/DONE-<YYYY>.md` へ移す。
 
 ---
+
+## 最新対応 (2026-07-01)
+
+### AoT `@time` assignment non-Copy move fixed ✅ (Issue #8499)
+
+- AoT IR conversion now drops the statement-position `@time` passthrough
+  binding named `result` instead of materializing `result = xs` for non-Copy
+  assigned values.
+- This preserves later uses of the assigned variable in generated Rust and fixes
+  the native binary build for `examples/mandelbrot.jl` when compiled with the
+  minimal AoT prelude.
+- Regression coverage pins the converter behavior for the plain `result`
+  passthrough slot.
+- Verification: focused AoT converter unit test, `juliars --minimal-prelude`
+  native binary smoke for the MWE, and `examples/mandelbrot.jl` native AoT
+  binary build/run.
 
 ## 最新対応 (2026-06-30)
 

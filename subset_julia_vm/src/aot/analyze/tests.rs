@@ -1336,6 +1336,105 @@ fn test_convert_function_flattens_let_block_assign_expr() {
 }
 
 #[test]
+fn statement_letblock_drops_plain_result_alias_issue_8499() {
+    let typed = TypedProgram::new();
+    let program = empty_program();
+    let mut converter = IrConverter::new(&typed, &program);
+
+    let func = Function {
+        name: "timed_plain_result".to_string(),
+        params: vec![],
+        kwparams: vec![],
+        type_params: vec![],
+        return_type: None,
+        body: Block {
+            stmts: vec![
+                Stmt::Expr {
+                    expr: Expr::LetBlock {
+                        bindings: vec![],
+                        body: Block {
+                            stmts: vec![
+                                Stmt::Assign {
+                                    var: "result".to_string(),
+                                    value: Expr::AssignExpr {
+                                        var: "xs".to_string(),
+                                        value: Box::new(Expr::ArrayLiteral {
+                                            elements: vec![
+                                                Expr::Literal(Literal::Int(1), test_span()),
+                                                Expr::Literal(Literal::Int(2), test_span()),
+                                            ],
+                                            shape: vec![2],
+                                            span: test_span(),
+                                        }),
+                                        span: test_span(),
+                                    },
+                                    span: test_span(),
+                                },
+                                Stmt::Expr {
+                                    expr: Expr::Call {
+                                        function: "println".to_string(),
+                                        args: vec![Expr::Literal(
+                                            Literal::Str(" seconds".to_string()),
+                                            test_span(),
+                                        )],
+                                        kwargs: vec![],
+                                        splat_mask: vec![false],
+                                        kwargs_splat_mask: vec![],
+                                        span: test_span(),
+                                    },
+                                    span: test_span(),
+                                },
+                                Stmt::Expr {
+                                    expr: Expr::Var("result".to_string(), test_span()),
+                                    span: test_span(),
+                                },
+                            ],
+                            span: test_span(),
+                        },
+                        span: test_span(),
+                    },
+                    span: test_span(),
+                },
+                Stmt::Expr {
+                    expr: Expr::Call {
+                        function: "println".to_string(),
+                        args: vec![Expr::Index {
+                            array: Box::new(Expr::Var("xs".to_string(), test_span())),
+                            indices: vec![Expr::Literal(Literal::Int(1), test_span())],
+                            span: test_span(),
+                        }],
+                        kwargs: vec![],
+                        splat_mask: vec![false],
+                        kwargs_splat_mask: vec![],
+                        span: test_span(),
+                    },
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        },
+        is_base_extension: false,
+        is_runtime_eval: false,
+        span: test_span(),
+    };
+
+    let result = converter.convert_function(&func).unwrap();
+    assert_eq!(result.body.len(), 3);
+    assert!(
+        !result
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt, AotStmt::Let { name, .. } if name == "result")),
+        "statement-position @time passthrough slot must not move the assigned value: {:?}",
+        result.body
+    );
+    assert!(matches!(
+        &result.body[0],
+        AotStmt::Let { name, .. } if name == "xs"
+    ));
+}
+
+#[test]
 fn test_convert_materialized_broadcast_mul_to_helper_call() {
     let typed = TypedProgram::new();
     let program = empty_program();

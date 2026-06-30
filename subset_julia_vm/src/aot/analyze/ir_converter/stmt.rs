@@ -67,7 +67,7 @@ impl<'a> IrConverter<'a> {
                         };
                         out.push(self.convert_stmt(&synthetic)?);
 
-                        if !var.starts_with('#') {
+                        if !is_statement_let_passthrough_slot(var) {
                             let alias = Stmt::Assign {
                                 var: var.clone(),
                                 value: Expr::Var(inner_var.clone(), *span),
@@ -547,4 +547,8 @@ impl<'a> IrConverter<'a> {
         }
         Ok(stmts)
     }
+}
+
+fn is_statement_let_passthrough_slot(name: &str) -> bool {
+    name.starts_with('#') || name == "result"
 }

@@ -1,6 +1,6 @@
 # 現状分析
 
-**最終更新**: 2026-06-30. 新しい項目は下の日付別「最新対応」セクションを正とし、先頭メタデータには長い issue 要約を重複させない。
+**最終更新**: 2026-07-01. 新しい項目は下の日付別「最新対応」セクションを正とし、先頭メタデータには長い issue 要約を重複させない。
 
 > - 実装済みの機能は [DONE.md](./DONE.md) を参照してください。
 > - 未実装の機能は [UNIMPLEMENTED.md](./UNIMPLEMENTED.md) を参照してください。
@@ -8,6 +8,18 @@
 > - 過去分(2026-06-06 以前)は [archive/STATUS-2026.md](./archive/STATUS-2026.md) にアーカイブ済み (Issue #6341)。年が変わったら前年分を `archive/STATUS-<YYYY>.md` へ移す。
 
 ---
+
+## 最新対応 (2026-07-01)
+
+### AoT `@time` assignment non-Copy move fixed (Issue #8499)
+
+- Statement-position macro-lowered let blocks now treat the plain `result`
+  slot from `@time` as a discarded passthrough binding, matching the existing
+  handling for `#`-prefixed compiler temporaries.
+- `@time xs = [1, 2]; println(xs[1])` no longer emits generated Rust that moves
+  `xs` into the hidden result before later borrowing `xs`.
+- `examples/mandelbrot.jl` now builds and runs as a native AoT binary through
+  the minimal AoT prelude path.
 
 ## 最新対応 (2026-06-30)
 
