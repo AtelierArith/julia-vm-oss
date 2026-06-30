@@ -95,13 +95,13 @@ The version of SubsetJuliaVM currently in use.
 # Examples
 ```julia
 julia> VERSION
-v"0.9.4"
+v"0.9.5"
 
 julia> VERSION.major
 0
 
 julia> string(VERSION)
-"0.9.4"
+"0.9.5"
 ```
 """
-const VERSION = VersionNumber(0, 9, 4)
+const VERSION = VersionNumber(0, 9, 5)

@@ -1,6 +1,6 @@
 [package]
 name = "subset_julia_vm_web"
-version = "0.9.4"
+version = "0.9.5"
 edition = "2021"
 description = "WebAssembly binding for SubsetJuliaVM - Julia subset interpreter"
 license = "MIT OR Apache-2.0"
