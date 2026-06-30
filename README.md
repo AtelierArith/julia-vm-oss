@@ -51,6 +51,33 @@ $ cargo build --release -p subset_julia_vm --features aot --bin juliars
 $ target/release/juliars --minimal-prelude examples/mandelbrot.jl \
     --emit-binary target/mandelbrot_aot
 $ target/mandelbrot_aot
+  9.4e-5 seconds
+Mandelbrot Set (50x25):
+
+                              .
+                              . .
+                              .+
+                             ###+.
+                        .   .####.
+                       .#++#########....
+                      ..##############.
+            .        ..################..
+             ...... .##################.
+            .#######.###################
+          ...##########################.
+#####################################..
+          ...##########################.
+            .#######.###################
+             ...... .##################.
+            .        ..################..
+                      ..##############.
+                       .#++#########....
+                        .   .####.
+                             ###+.
+                              .+
+                              . .
+                              .
+
 ```
 
 `--minimal-prelude` is currently required for this example. The full prelude
