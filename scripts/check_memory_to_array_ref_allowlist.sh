@@ -12,7 +12,18 @@ set -euo pipefail
 MATCHES_FILE="$(mktemp)"
 trap 'rm -f "$MATCHES_FILE"' EXIT
 
-rg -n 'memory_to_array_ref\(' subset_julia_vm/src > "$MATCHES_FILE" || true
+rg -n 'memory_to_array_ref\(' \
+    subset_julia_vm/src \
+    subset_julia_vm_lowering/src \
+    subset_julia_vm_compile/src \
+    subset_julia_vm_vm/src \
+    subset_julia_vm_bytecode/src \
+    subset_julia_vm_types/src \
+    subset_julia_vm_ir/src \
+    subset_julia_vm_ffi/src \
+    subset_julia_vm_parser/src \
+    subset_julia_vm_web/src \
+    > "$MATCHES_FILE" || true
 
 if [[ -s "$MATCHES_FILE" ]]; then
     cat "$MATCHES_FILE"

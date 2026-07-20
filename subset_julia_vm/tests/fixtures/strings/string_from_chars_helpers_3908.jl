@@ -21,8 +21,7 @@ let
     accent = ['é', 'ä', 'ü']
     @assert String(accent) == "éäü"
 
-    # codeunits returns a Vector{UInt8} with the right bytes — exercises the
-    # `array_value(new_array_ref(...))` push site.
+    # codeunits returns a CodeUnits wrapper with the right bytes.
     cu = codeunits("abc")
     @assert eltype(cu) === UInt8
     @assert length(cu) == 3

@@ -92,7 +92,7 @@ end
 **Step 1: Rust VM に機能を実装**
 ```bash
 # 例：行列演算
-vim subset_julia_vm/src/vm/mod.rs
+vim subset_julia_vm_vm/src/vm/mod.rs
 # MatMul 命令を追加
 ```
 

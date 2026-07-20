@@ -645,7 +645,7 @@ println("is_prime(100) = ", is_prime(100))
 count = 0
 for i in 2:50
     if is_prime(i) == 1
-        count += 1
+        global count += 1
     end
 end
 println("Primes up to 50: ", count)

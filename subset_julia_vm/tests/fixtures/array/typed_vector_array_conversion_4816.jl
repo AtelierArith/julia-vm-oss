@@ -4,10 +4,9 @@
 # intercept in compile_array_constructor as #4811, but for an Array
 # argument instead of a Range.
 #
-# Fix: extended #4811's typed-comprehension synthesis to also fire on
-# Array args when the source eltype differs from T (or is unknown).
-# When source eltype matches T, the existing no-op fast path is
-# preserved.
+# Fix: extended #4811's typed-comprehension synthesis to fire on Array
+# args even when the source eltype already matches T, because upstream
+# still allocates a fresh vector (Issue #10085).
 
 using Test
 
@@ -38,18 +37,20 @@ end
     @test v == [1.0, 2.0, 3.0]
 end
 
-@testset "Vector{T}(::Vector{T}) — same eltype no-op fast path (Issue #4816)" begin
+@testset "Vector{T}(::Vector{T}) — same eltype copy path (Issues #4816, #10085)" begin
     src = [10, 20, 30]
     v = Vector{Int64}(src)
     @test typeof(v) === Vector{Int64}
     @test v == [10, 20, 30]
+    @test !(v === src)
 end
 
-@testset "Vector{Float64}(::Vector{Float64}) — same Float eltype (Issue #4816)" begin
+@testset "Vector{Float64}(::Vector{Float64}) — same Float eltype copy (Issues #4816, #10085)" begin
     src = [1.5, 2.5, 3.5]
     v = Vector{Float64}(src)
     @test typeof(v) === Vector{Float64}
     @test v == [1.5, 2.5, 3.5]
+    @test !(v === src)
 end
 
 @testset "Vector{T}() empty regression (Issue #4816)" begin
@@ -60,11 +61,12 @@ end
 end
 
 @testset "Vector(arr) untyped regression (Issue #4816)" begin
-    # No type args: no comprehension synthesis fires.
+    # No type args: direct constructor syntax still copies.
     src = [1, 2, 3]
     v = Vector(src)
     @test typeof(v) === Vector{Int64}
     @test v == [1, 2, 3]
+    @test !(v === src)
 end
 
 true

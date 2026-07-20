@@ -45,7 +45,7 @@ end
     s = "hello world hello"
     @test findnext('o', s, 1) == 5
     @test findnext('o', s, 6) == 8
-    @test findprev('o', s, 17) == 8
+    @test findprev('o', s, 17) == 17
     @test findprev('o', s, 7) == 5
 end
 

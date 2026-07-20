@@ -190,3 +190,33 @@ name = "control_flow_float_hot_loop_recognition_8183"
 file = "float_hot_loop_recognition_8183.jl"
 expected = true
 description = "Dense Float64 while-loops (Aizawa Euler step, Barnsley fern LCG) run on the native typed-loop fast path (DivF64/ModI64/fused I64 loads/NegF64, raised op/slot caps) and stay bit-exact to upstream, both annotated and bare (Issue #8183)"
+
+[[tests]]
+name = "control_flow_block_value_control_flow_tail_9358"
+file = "block_value_control_flow_tail_9358.jl"
+expected = true
+description = "A `try`/`catch` (or `if`) used as the EXPRESSION VALUE of a block yields the branch value, not `nothing` (Issue #9358). A `begin ... end` block in value position and the `x = begin ... end` assignment fast path dropped the value of a trailing control-flow statement, running it for effect and defaulting to `nothing` — the headline symptom was a generator/comprehension body wrapped in `begin ... try ... catch ... end end` collecting `nothing` for every element while side effects fired correctly. Fixed generally (compile_block_value + append_begin_rhs_assignment route a trailing Stmt::If/Stmt::Try through if_stmt_into_value_expr/try_stmt_into_value_expr; the shared block-tail-value rewriter now descends nested `if`/elseif chains). Verified at parity with upstream julia: the #9358 generator MWE + bracket comprehension + if-body generator (value + side-effect order); begin-block-as-value with if/elseif, try/catch, try/else, and finally tails at top level and function tail; a no-match `if` and a loop tail keep the `nothing` value; #7617 non-tail assignment visibility preserved; nested control-flow tails"
+
+[[tests]]
+name = "control_flow_testset_newline_multi_iterator_8866"
+file = "testset_newline_multi_iterator_8866.jl"
+expected = true
+description = "A newline after a comma in `@testset name for T in xs,\\n U in ys` parses and lowers through the Test macro path (Issue #8866)"
+
+[[tests]]
+name = "control_flow_assign_statement_tail_value_10431"
+file = "assign_statement_tail_value_10431.jl"
+expected = true
+description = "General fix (Issue #10431, discovered while closing #10254): assignment statements return their RHS value across indexed, field, dict, and tuple-destructuring shapes in plain function, branch, begin, and try tail positions. Includes a macro same-span negative guard for genuine nested blocks. Independent literals use explicit IR since #10444; flat nonliteral RHS uses explicit IR since the partial #10464 generalization; dependent/nested/rest forms retain the generated-temp fallback."
+
+[[tests]]
+name = "control_flow_nothing_initialized_branch_widen_10819"
+file = "nothing_initialized_branch_widen_10819.jl"
+expected = true
+description = "A local initialized to Nothing retains a physical backing value when only one control-flow branch widens it to Any, including flat destructuring assignment; the non-assigning path returns nothing instead of UndefVarError (Issue #10819)"
+
+[[tests]]
+name = "control_flow_nothing_initialized_trycatch_loop_widen_10820"
+file = "nothing_initialized_trycatch_loop_widen_10820.jl"
+expected = true
+description = "Prevention follow-up to #10819 (Issue #10820): extends the branch-widening matrix to try/catch (assigning try path vs. assigning catch path) and to a loop that may execute zero times, for a local initialized to Nothing and widened to Any on only one path. The non-assigning path still reads back nothing instead of UndefVarError"

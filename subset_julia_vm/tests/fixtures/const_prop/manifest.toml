@@ -1,0 +1,19 @@
+# Test manifest for const_prop category
+
+[[tests]]
+name = "const_prop_interprocedural_8443"
+file = "interprocedural_8443.jl"
+expected = true
+description = "Interprocedural constant propagation parity for add-one, constant tuple return, and typeof literal folding (Issue #8443)"
+
+[[tests]]
+name = "const_prop_flow_sensitive_8443"
+file = "flow_sensitive_8443.jl"
+expected = true
+description = "Flow-sensitive constant branch parity with a const condition and typeof literals (Issue #8443)"
+
+[[tests]]
+name = "const_prop_ssa_phi_fold_8440"
+file = "ssa_phi_fold_8440.jl"
+expected = true
+description = "SSA-shaped Phi fold parity for identical branch assignments (Issue #8440)"

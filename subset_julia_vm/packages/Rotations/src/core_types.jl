@@ -2,9 +2,11 @@
 # extern/Rotations.jl/src/core_types.jl).
 #
 # Adaptations to the sjulia subset:
-#   * `SMatrix` is 3-parameter `{M,N,T}` (no length `L`), so `RotMatrix` is
-#     `{N,T}` and the upstream `@eval` alias loop / `similar_type` machinery is
-#     hand-expanded.
+#   * `RotMatrix` is `{N,T}` wrapping the incompletely-parameterized
+#     `SMatrix{N,N,T}` (Issue #11432: bundled StaticArrays' `SMatrix` now
+#     declares the upstream fourth length parameter `L`, but `RotMatrix`'s own
+#     `{N,T}` still drops it, same as upstream); the upstream `@eval` alias
+#     loop / `similar_type` machinery is hand-expanded.
 #   * #8090: a parametric-struct constructor result must be bound to a local
 #     variable before being passed as an argument; only one
 #     `RotMatrix{N,T}(...) where {N,T}` constructor may exist; non-typed wraps go

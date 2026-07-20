@@ -15,6 +15,16 @@ function promote_type(::Type{T}, ::Type{T}) where {T}
     T
 end
 
+# Bottom is the identity element for promote_type: upstream promotes
+# promote_type(Union{}, T) and promote_type(T, Union{}) to T (Issue #6735).
+function promote_type(::Type{Union{}}, ::Type{S}) where {S}
+    S
+end
+
+function promote_type(::Type{T}, ::Type{Union{}}) where {T}
+    T
+end
+
 # =============================================================================
 # Integer promotion rules (mirrors julia/base/int.jl:775-788 exactly)
 # =============================================================================
@@ -290,24 +300,27 @@ end
 #   promote_rule(::Type{Rational{T}}, ::Type{Rational{S}})  where {T<:Integer,S<:Integer}       = Rational{promote_type(T,S)}
 #   promote_rule(::Type{Rational{T}}, ::Type{S})           where {T<:Integer,S<:AbstractFloat} = promote_type(T,S)
 #
-# The Rational+Rational form dispatches reliably through a variable in the VM
-# (distinguished by the Rational{} constructor on the second arg), so it stays
-# parametric. The Rational+Integer and Rational+AbstractFloat forms share the
-# signature shape (Type{Rational{T}}, Type{S}) and the VM cannot tell their
-# S-bounds apart when promote_type passes the types through variables, so they
-# are enumerated with concrete first args and Union-of-concrete second args
-# (Issue #5070). This makes promotion complete (UInt / Int128 element partners
-# now covered) and fixes the prior bug where Rational{BigInt}+Float promoted to
-# the narrow Float instead of BigFloat.
+# The VM now dispatches bound-discriminated parametric Type rules through
+# variables, so keep the upstream-shaped general rules. The concrete-width
+# methods below remain as compatibility duplicates for cached/static registry
+# consumers, but user Integer/Real subtypes must be covered by these parametric
+# methods too (Issue #9833).
 
 # Rational{T} + Rational{S}  =>  Rational{promote_type(T, S)} (parametric; works via variable)
 function promote_rule(::Type{Rational{T}}, ::Type{Rational{S}}) where {T<:Integer, S<:Integer}
     Rational{promote_type(T, S)}
 end
 
+function promote_rule(::Type{Rational{T}}, ::Type{S}) where {T<:Integer, S<:Integer}
+    Rational{promote_type(T, S)}
+end
+
+function promote_rule(::Type{Rational{T}}, ::Type{S}) where {T<:Integer, S<:AbstractFloat}
+    promote_type(T, S)
+end
+
 # Rational{R} + Integer  =>  Rational{promote_type(R, S)}
-# (concrete first arg + Union of concrete integer types; the VM cannot
-#  dispatch on an abstract S<:Integer bound through a variable, Issue #5070)
+# Concrete-width compatibility methods for registry consumers.
 function promote_rule(::Type{Rational{Int8}}, ::Type{BigInt})
     Rational{BigInt}
 end
@@ -470,8 +483,11 @@ end
 # mpfr.jl:558-560)
 # =============================================================================
 # BigInt + Integer  =>  BigInt ;  BigInt + AbstractFloat  =>  BigFloat
-# (Union of concrete partners; abstract Type{<:Integer} bound does not
-#  dispatch through a variable in the VM, Issue #5070)
+promote_rule(::Type{BigInt}, ::Type{<:Integer}) = BigInt
+promote_rule(::Type{BigInt}, ::Type{<:AbstractFloat}) = BigFloat
+promote_rule(::Type{BigFloat}, ::Type{<:Real}) = BigFloat
+
+# Concrete-width compatibility methods for registry consumers.
 promote_rule(::Type{BigInt}, ::Type{Bool}) = BigInt
 promote_rule(::Type{BigInt}, ::Type{Int8}) = BigInt
 promote_rule(::Type{BigInt}, ::Type{Int16}) = BigInt
@@ -506,11 +522,14 @@ end
 # promote_type(T,S) === promote_type(S,T) for every pair (Issue #5070).
 promote_type() = Union{}
 
+promote_type(::Type{T}) where {T} = T
+
 function promote_type(::Type{T}, ::Type{S}) where {T, S}
     R1 = promote_rule(T, S)
     R2 = promote_rule(S, T)
-    # Check both directions
-    if R1 !== Union{}
+    if R1 !== Union{} && R2 !== Union{}
+        return promote_type(R1, R2)
+    elseif R1 !== Union{}
         return R1
     elseif R2 !== Union{}
         return R2
@@ -530,6 +549,14 @@ end
 # 4-argument version
 function promote_type(::Type{T1}, ::Type{T2}, ::Type{T3}, ::Type{T4}) where {T1, T2, T3, T4}
     promote_type(promote_type(T1, T2), T3, T4)
+end
+
+# 5+-argument version: reduce through the existing 4-argument core. Upstream's
+# vararg method is `promote_type(T, S, U, V...)`; this spelling keeps the
+# existing 3/4-argument methods as the explicit fast paths while covering all
+# longer calls (Issue #9830).
+function promote_type(::Type{T1}, ::Type{T2}, ::Type{T3}, ::Type{T4}, Ts...) where {T1, T2, T3, T4}
+    promote_type(promote_type(T1, T2, T3, T4), Ts...)
 end
 
 # =============================================================================
@@ -597,6 +624,42 @@ end
 # promote - convert values to common type
 # =============================================================================
 
+# `not_sametype` / `sametype_error` guard (Issue #9334).
+#
+# Mirrors upstream `julia/base/promotion.jl`: after `_promote` converts the
+# operands to their common type, `promote` asserts that at least one argument's
+# type actually changed. When promotion CANNOT change either type (no rule and
+# `typejoin` yields a common supertype that `convert` leaves the values in),
+# the promote-fallback operators (`==`/`+`/`<` defined as `op(promote(x,y)...)`)
+# would otherwise re-dispatch on the identical pair forever -> StackOverflow.
+# Upstream stops this immediately with an `ErrorException`; we mirror the exact
+# message so behaviour matches `julia`.
+function sametype_error(input)
+    error("promotion of types ",
+          join(map(x -> string(typeof(x)), input), ", ", " and "),
+          " failed to change any arguments")
+end
+
+_promote_rest_types() = ()
+
+function _promote_rest_types(x, rest...)
+    (typeof(x), _promote_rest_types(rest...)...)
+end
+
+_promote_rest_same_type(::Type{T}) where {T} = true
+
+function _promote_rest_same_type(::Type{T}, x, rest...) where {T}
+    typeof(x) === T && _promote_rest_same_type(T, rest...)
+end
+
+_promote_convert_rest(::Type{T}) where {T} = ((), false)
+
+function _promote_convert_rest(::Type{T}, x, rest...) where {T}
+    cx = convert(T, x)
+    converted_tail, tail_changed = _promote_convert_rest(T, rest...)
+    ((cx, converted_tail...), (typeof(cx) !== typeof(x)) || tail_changed)
+end
+
 # Same-type fast path: no conversion needed when both args have the same type.
 # This prevents unnecessary promote_type/convert calls and, crucially,
 # avoids infinite recursion when Number fallback operators call promote
@@ -649,6 +712,17 @@ function promote(x::BigFloat, y::AbstractIrrational)
     (x, BigFloat(y))
 end
 
+# BigInt partners widen to BigFloat, not Float64 (Issue #9384): upstream
+# promote_type(BigInt, Irrational) === BigFloat. These must be MORE specific
+# than the `::Integer` methods below, which cover only the machine integers.
+function promote(x::AbstractIrrational, y::BigInt)
+    (BigFloat(x), BigFloat(y))
+end
+
+function promote(x::BigInt, y::AbstractIrrational)
+    (BigFloat(x), BigFloat(y))
+end
+
 function promote(x::AbstractIrrational, y::Integer)
     (Float64(x), Float64(y))
 end
@@ -658,39 +732,111 @@ function promote(x::Integer, y::AbstractIrrational)
 end
 
 function promote(x, y)
+    # Same-type case: upstream reaches this through the more-specific
+    # `promote(x::T, y::T)` method above, which returns the pair unchanged. The
+    # VM does not always select that diagonal method for user (non-Base) types,
+    # so the pair can fall through here; mirror the fast path explicitly rather
+    # than mis-firing the not_sametype guard below (Issue #9334).
+    if typeof(x) === typeof(y)
+        return (x, y)
+    end
     target_type = promote_type(typeof(x), typeof(y))
     # Use intermediate variables to work around tuple construction bug
     # when function call results are directly used as tuple elements
     cx = convert(target_type, x)
     cy = convert(target_type, y)
+    # not_sametype guard (Issue #9334): a mixed-type promotion that changed
+    # NEITHER argument's type cannot make progress. Returning the unchanged pair
+    # lets the promote-fallback operators (`==`/`+`/`<` = op(promote(x,y)...))
+    # re-dispatch on the identical pair forever -> StackOverflow. Upstream raises
+    # here instead (`not_sametype`/`sametype_error`); mirror the exact message.
+    if typeof(cx) === typeof(x) && typeof(cy) === typeof(y)
+        sametype_error((x, y))
+    end
     (cx, cy)
 end
 
 # 3-argument version: convert all three to common type
 function promote(x, y, z)
+    # Same-type fast path (see 2-arg promote; Issue #9334).
+    if typeof(x) === typeof(y) && typeof(y) === typeof(z)
+        return (x, y, z)
+    end
     target_type = promote_type(typeof(x), typeof(y), typeof(z))
     # Use intermediate variables to work around tuple construction bug
     cx = convert(target_type, x)
     cy = convert(target_type, y)
     cz = convert(target_type, z)
+    # not_sametype guard (Issue #9334): error when no argument type changed.
+    if typeof(cx) === typeof(x) && typeof(cy) === typeof(y) && typeof(cz) === typeof(z)
+        sametype_error((x, y, z))
+    end
     (cx, cy, cz)
+end
+
+# 4+-argument version: upstream reduces all arguments through promote_type and
+# converts every value to the common target. The same-type fast path mirrors the
+# 2/3-argument methods; the not_sametype guard prevents silent unchanged tuples
+# when promotion cannot make progress (Issue #9831).
+function promote(x, y, z, w, rest...)
+    if typeof(x) === typeof(y) && typeof(y) === typeof(z) &&
+       typeof(z) === typeof(w) && _promote_rest_same_type(typeof(x), rest...)
+        return (x, y, z, w, rest...)
+    end
+
+    target_type = promote_type(typeof(x), typeof(y), typeof(z), typeof(w),
+                               _promote_rest_types(rest...)...)
+    cx = convert(target_type, x)
+    cy = convert(target_type, y)
+    cz = convert(target_type, z)
+    cw = convert(target_type, w)
+    converted_rest, rest_changed = _promote_convert_rest(target_type, rest...)
+
+    changed = (typeof(cx) !== typeof(x)) || (typeof(cy) !== typeof(y)) ||
+              (typeof(cz) !== typeof(z)) || (typeof(cw) !== typeof(w)) ||
+              rest_changed
+    if !changed
+        sametype_error((x, y, z, w, rest...))
+    end
+
+    (cx, cy, cz, cw, converted_rest...)
 end
 
 # =============================================================================
 # convert implementations
 # =============================================================================
 
+Number(x::Number) = x
+Real(x::Real) = x
+
+Integer(x::Integer) = x
+Integer(x::AbstractFloat) = Int64(x)
+
+Signed(x::Signed) = x
+Signed(x::UInt8) = Int8(x)
+Signed(x::UInt16) = Int16(x)
+Signed(x::UInt32) = Int32(x)
+Signed(x::UInt64) = Int64(x)
+Signed(x::UInt128) = Int128(x)
+Signed(x::AbstractFloat) = Int64(x)
+Signed(x::Bool) = Int64(x)
+
+Unsigned(x::Unsigned) = x
+Unsigned(x::Int8) = UInt8(x)
+Unsigned(x::Int16) = UInt16(x)
+Unsigned(x::Int32) = UInt32(x)
+Unsigned(x::Int64) = UInt64(x)
+Unsigned(x::Int128) = UInt128(x)
+Unsigned(x::AbstractFloat) = UInt64(x)
+Unsigned(x::Bool) = UInt64(x)
+
+AbstractFloat(x::AbstractFloat) = x
+AbstractFloat(x::Integer) = Float64(x)
+AbstractFloat(x::Bool) = Float64(x)
+
 # Identity conversion
 function convert(::Type{T}, x::T) where {T}
     x
-end
-
-function convert(::Type{Union{Nothing, Int64}}, x::Int64)
-    x
-end
-
-function convert(::Type{Union{Nothing, Int64}}, x::Nothing)
-    nothing
 end
 
 # Number conversion fallback
@@ -700,312 +846,30 @@ function convert(::Type{T}, x::Number) where {T<:Number}
     T(x)
 end
 
-# Integer conversions
-function convert(::Type{Int64}, x::Bool)
-    x ? Int64(1) : Int64(0)
+# Bool constructors for some numeric targets are still primitive-conversion
+# limited, so route through zero/one generically instead of enumerating widths.
+function convert(::Type{T}, x::Bool) where {T<:Number}
+    x ? one(T) : zero(T)
 end
 
-function convert(::Type{Int64}, x::Int32)
-    Int64(x)
+# Generic Complex target conversions. The plain `T(x)` fallback cannot dispatch
+# a parametric struct constructor through a type variable reliably.
+function convert(::Type{Complex{T}}, x::Real) where {T<:Real}
+    Complex{T}(convert(T, x), zero(T))
 end
 
-function convert(::Type{Int64}, x::Int16)
-    Int64(x)
+function convert(::Type{Complex{T}}, z::Complex) where {T<:Real}
+    Complex{T}(convert(T, real(z)), convert(T, imag(z)))
 end
 
-function convert(::Type{Int64}, x::Int8)
-    Int64(x)
+# Generic Rational target conversions. This replaces the former per-width
+# matrix now that parametric Type dispatch can resolve `Rational{T}` targets.
+function convert(::Type{Rational{T}}, x::Integer) where {T<:Integer}
+    Rational{T}(convert(T, x), one(T))
 end
 
-function convert(::Type{Int32}, x::Bool)
-    x ? Int32(1) : Int32(0)
-end
-
-function convert(::Type{Int32}, x::Int16)
-    Int32(x)
-end
-
-function convert(::Type{Int32}, x::Int8)
-    Int32(x)
-end
-
-# Float conversions
-function convert(::Type{Float64}, x::Int64)
-    Float64(x)
-end
-
-function convert(::Type{Float64}, x::Int32)
-    Float64(x)
-end
-
-function convert(::Type{Float64}, x::Int16)
-    Float64(x)
-end
-
-function convert(::Type{Float64}, x::Int8)
-    Float64(x)
-end
-
-function convert(::Type{Float64}, x::Bool)
-    x ? 1.0 : 0.0
-end
-
-function convert(::Type{Float64}, x::Float32)
-    Float64(x)
-end
-
-function convert(::Type{Float32}, x::Int64)
-    Float32(x)
-end
-
-function convert(::Type{Float32}, x::Bool)
-    x ? Float32(1.0) : Float32(0.0)
-end
-
-function convert(::Type{Int64}, x::Float64)
-    # Mirror upstream `convert(::Type{T}, x::Number) where {T<:Number} = T(x)::T`
-    # (base/number.jl): route through the Int64 constructor so non-integral
-    # floats throw InexactError instead of being silently truncated. A `floor`
-    # here would make convert(Int64, 2.5) == 2, diverging from Julia (Issue #5496).
-    Int64(x)
-end
-
-# Complex conversions - explicit types
-function convert(::Type{Complex{Float64}}, x::Float64)
-    Complex{Float64}(x, 0.0)
-end
-
-function convert(::Type{Complex{Float64}}, x::Int64)
-    Complex{Float64}(Float64(x), 0.0)
-end
-
-function convert(::Type{Complex{Float64}}, x::Bool)
-    Complex{Float64}(Float64(x), 0.0)
-end
-
-function convert(::Type{Complex{Float64}}, x::Float32)
-    Complex{Float64}(Float64(x), 0.0)
-end
-
-function convert(::Type{Complex{Int64}}, x::Int64)
-    Complex{Int64}(x, Int64(0))
-end
-
-function convert(::Type{Complex{Int64}}, x::Bool)
-    Complex{Int64}(Int64(x), Int64(0))
-end
-
-function convert(::Type{Complex{Float32}}, x::Float32)
-    Complex{Float32}(x, Float32(0.0))
-end
-
-function convert(::Type{Complex{Float32}}, x::Int64)
-    Complex{Float32}(Float32(x), Float32(0.0))
-end
-
-function convert(::Type{Complex{Float32}}, x::Bool)
-    Complex{Float32}(Float32(x), Float32(0.0))
-end
-
-function convert(::Type{Complex{Float32}}, x::Float64)
-    Complex{Float32}(Float32(x), Float32(0.0))
-end
-
-function convert(::Type{Complex{Float64}}, z::Complex{Float64})
-    z
-end
-
-function convert(::Type{Complex{Float64}}, z::Complex{Int64})
-    Complex{Float64}(Float64(z.re), Float64(z.im))
-end
-
-function convert(::Type{Complex{Float64}}, z::Complex{Bool})
-    Complex{Float64}(Float64(z.re), Float64(z.im))
-end
-
-function convert(::Type{Complex{Float64}}, z::Complex{Float32})
-    Complex{Float64}(Float64(z.re), Float64(z.im))
-end
-
-function convert(::Type{Complex{Int64}}, z::Complex{Int64})
-    z
-end
-
-function convert(::Type{Complex{Int64}}, z::Complex{Bool})
-    Complex{Int64}(Int64(z.re), Int64(z.im))
-end
-
-function convert(::Type{Complex{Float32}}, z::Complex{Float32})
-    z
-end
-
-function convert(::Type{Complex{Float32}}, z::Complex{Int64})
-    Complex{Float32}(Float32(z.re), Float32(z.im))
-end
-
-function convert(::Type{Complex{Float32}}, z::Complex{Bool})
-    Complex{Float32}(Float32(z.re), Float32(z.im))
-end
-
-# =============================================================================
-# Rational conversions (explicit for each Integer subtype)
-# =============================================================================
-# Based on Julia's base/rational.jl convert methods
-# Note: Generic where {T<:Integer} patterns would cause dispatch ambiguity
-# in the VM, so we use explicit methods for each supported Integer type.
-
-# Identity: Rational{T} → Rational{T}
-function convert(::Type{Rational{Int64}}, x::Rational{Int64})
-    x
-end
-
-function convert(::Type{Rational{Int32}}, x::Rational{Int32})
-    x
-end
-
-function convert(::Type{Rational{Int16}}, x::Rational{Int16})
-    x
-end
-
-function convert(::Type{Rational{Int8}}, x::Rational{Int8})
-    x
-end
-
-# Cross-type Rational conversions
-function convert(::Type{Rational{Int64}}, x::Rational)
-    Rational{Int64}(Int64(x.num), Int64(x.den))
-end
-
-function convert(::Type{Rational{Int32}}, x::Rational)
-    Rational{Int32}(Int32(x.num), Int32(x.den))
-end
-
-function convert(::Type{Rational{Int16}}, x::Rational)
-    Rational{Int16}(Int16(x.num), Int16(x.den))
-end
-
-function convert(::Type{Rational{Int8}}, x::Rational)
-    Rational{Int8}(Int8(x.num), Int8(x.den))
-end
-
-# Integer → Rational{Int64}
-function convert(::Type{Rational{Int64}}, x::Int64)
-    Rational{Int64}(x, Int64(1))
-end
-
-function convert(::Type{Rational{Int64}}, x::Int32)
-    Rational{Int64}(Int64(x), Int64(1))
-end
-
-function convert(::Type{Rational{Int64}}, x::Int16)
-    Rational{Int64}(Int64(x), Int64(1))
-end
-
-function convert(::Type{Rational{Int64}}, x::Int8)
-    Rational{Int64}(Int64(x), Int64(1))
-end
-
-function convert(::Type{Rational{Int64}}, x::Bool)
-    Rational{Int64}(x ? Int64(1) : Int64(0), Int64(1))
-end
-
-# Integer → Rational{Int32}
-function convert(::Type{Rational{Int32}}, x::Int32)
-    Rational{Int32}(x, Int32(1))
-end
-
-function convert(::Type{Rational{Int32}}, x::Int16)
-    Rational{Int32}(Int32(x), Int32(1))
-end
-
-function convert(::Type{Rational{Int32}}, x::Int8)
-    Rational{Int32}(Int32(x), Int32(1))
-end
-
-function convert(::Type{Rational{Int32}}, x::Bool)
-    Rational{Int32}(x ? Int32(1) : Int32(0), Int32(1))
-end
-
-# Integer → Rational{Int16}
-function convert(::Type{Rational{Int16}}, x::Int16)
-    Rational{Int16}(x, Int16(1))
-end
-
-function convert(::Type{Rational{Int16}}, x::Int8)
-    Rational{Int16}(Int16(x), Int16(1))
-end
-
-function convert(::Type{Rational{Int16}}, x::Bool)
-    Rational{Int16}(x ? Int16(1) : Int16(0), Int16(1))
-end
-
-# Integer → Rational{Int8}
-function convert(::Type{Rational{Int8}}, x::Int8)
-    Rational{Int8}(x, Int8(1))
-end
-
-function convert(::Type{Rational{Int8}}, x::Bool)
-    Rational{Int8}(x ? Int8(1) : Int8(0), Int8(1))
-end
-
-# Rational{BigInt} identity and cross-type conversions (Issue #2497)
-function convert(::Type{Rational{BigInt}}, x::Rational{BigInt})
-    x
-end
-
-function convert(::Type{Rational{BigInt}}, x::Rational{Int64})
-    Rational{BigInt}(big(x.num), big(x.den))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Rational{Int32})
-    Rational{BigInt}(big(x.num), big(x.den))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Rational{Int16})
-    Rational{BigInt}(big(x.num), big(x.den))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Rational{Int8})
-    Rational{BigInt}(big(x.num), big(x.den))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Rational)
-    Rational{BigInt}(big(x.num), big(x.den))
-end
-
-# Integer → Rational{BigInt}
-function convert(::Type{Rational{BigInt}}, x::BigInt)
-    Rational{BigInt}(x, big(1))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Int64)
-    Rational{BigInt}(big(x), big(1))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Int32)
-    Rational{BigInt}(big(x), big(1))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Int16)
-    Rational{BigInt}(big(x), big(1))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Int8)
-    Rational{BigInt}(big(x), big(1))
-end
-
-function convert(::Type{Rational{BigInt}}, x::Bool)
-    Rational{BigInt}(big(x ? 1 : 0), big(1))
-end
-
-# Rational → Float64 (any Rational type)
-function convert(::Type{Float64}, x::Rational)
-    Float64(x.num) / Float64(x.den)
-end
-
-# Rational → Float32 (any Rational type)
-function convert(::Type{Float32}, x::Rational)
-    Float32(x.num) / Float32(x.den)
+function convert(::Type{Rational{T}}, x::Rational) where {T<:Integer}
+    Rational{T}(convert(T, x.num), convert(T, x.den))
 end
 
 # =============================================================================
@@ -1016,6 +880,111 @@ end
 
 function zero(::Type{T}) where {T<:Number}
     convert(T, 0)
+end
+
+# =============================================================================
+# Catch-alls to prevent infinite recursion when numeric definitions are missing
+# =============================================================================
+# Based on Julia's base/promotion.jl. The same-type equality anchor stops the
+# generic promote-fallback `==(x::Number, y::Number)` below from re-dispatching
+# forever when a custom Number subtype has no concrete equality method (Issue
+# #9334).
+
+function Base.:(==)(x::T, y::T) where {T<:Number}
+    x === y
+end
+
+function _promote_fallback_builtin_same_type(::Type{Bool})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Int8})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Int16})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Int32})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Int64})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Int128})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{UInt8})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{UInt16})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{UInt32})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{UInt64})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{UInt128})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Float16})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Float32})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Float64})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{BigInt})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{BigFloat})
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Complex{T}}) where {T}
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{Rational{T}}) where {T}
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{T}) where {T<:AbstractIrrational}
+    true
+end
+
+function _promote_fallback_builtin_same_type(::Type{T}) where {T}
+    false
+end
+
+function _promote_fallback_no_progress(x, y, px, py)
+    typeof(px) === typeof(x) &&
+        typeof(py) === typeof(y) &&
+        typeof(x) === typeof(y) &&
+        !_promote_fallback_builtin_same_type(typeof(x))
+end
+
+function _promote_fallback_check_progress(name, x, y, px, py)
+    if _promote_fallback_no_progress(x, y, px, py)
+        error(name, " not defined for ", typeof(x))
+    end
 end
 
 # =============================================================================
@@ -1039,26 +1008,31 @@ end
 # Arithmetic
 function Base.:(+)(x::Number, y::Number)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("+", x, y, px, py)
     px + py
 end
 
 function Base.:(-)(x::Number, y::Number)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("-", x, y, px, py)
     px - py
 end
 
 function Base.:(*)(x::Number, y::Number)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("*", x, y, px, py)
     px * py
 end
 
 function Base.:(/)(x::Number, y::Number)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("/", x, y, px, py)
     px / py
 end
 
 function Base.:(^)(x::Number, y::Number)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("^", x, y, px, py)
     px ^ py
 end
 
@@ -1070,11 +1044,13 @@ end
 
 function Base.:(<)(x::Real, y::Real)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("<", x, y, px, py)
     px < py
 end
 
 function Base.:(<=)(x::Real, y::Real)
     px, py = promote(x, y)
+    _promote_fallback_check_progress("<=", x, y, px, py)
     px <= py
 end
 
@@ -1082,11 +1058,13 @@ end
 # In Julia, >(x, y) = y < x and >=(x, y) = y <= x
 function Base.:(>)(x::Real, y::Real)
     px, py = promote(x, y)
+    _promote_fallback_check_progress(">", x, y, px, py)
     px > py
 end
 
 function Base.:(>=)(x::Real, y::Real)
     px, py = promote(x, y)
+    _promote_fallback_check_progress(">=", x, y, px, py)
     px >= py
 end
 

@@ -61,7 +61,7 @@ end
 ### 現在のアーキテクチャ
 
 ```
-subset_julia_vm/src/vm/value.rs
+subset_julia_vm_vm/src/vm/value.rs
 
 ┌─────────────────────────────────────────────────────────────┐
 │ Value enum                                                  │
@@ -441,7 +441,7 @@ tests/fixtures/arrays/
 ## 参考資料
 
 ### SubsetJuliaVM
-- `subset_julia_vm/src/vm/value.rs` - 現在の実装
+- `subset_julia_vm_vm/src/vm/value.rs` - 現在の実装
 - `docs/vm/STATUS.md` - プロジェクト状況
 
 ### Julia 本家（`julia/` ディレクトリ）

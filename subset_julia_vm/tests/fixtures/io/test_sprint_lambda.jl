@@ -26,6 +26,20 @@ end
     result4 = sprint(io -> print(io, 999))
     @assert length(result4) == 3  # "999" has 3 chars
 
+    # Issue #9774: a temporary IOBuffer used inside sprint must not leak into
+    # the outer sprint buffer before take! reads it.
+    result5 = sprint(io -> begin
+        inner = IOBuffer()
+        print(inner, "inner")
+        print(io, String(take!(inner)))
+    end)
+    @test result5 == "inner"
+
+    # The pure-Julia string(x, y...) implementation uses an IOBuffer internally;
+    # printing a Type exercises the nested `show(io, ::Type)` path.
+    result6 = sprint(io -> print(io, string("a value of type ", Int64)))
+    @test result6 == "a value of type Int64"
+
     @test (true)
 end
 

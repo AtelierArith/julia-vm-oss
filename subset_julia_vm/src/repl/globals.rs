@@ -1,9 +1,16 @@
+// Issue #10906 (Phase 1c of #10869): zero real unwrap_used/expect_used sites
+// in production code — every match is inside a cfg(test) module, which
+// carries an explicit allow (test code may use these freely, per
+// docs/vm/PANIC_FREE.md).
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use std::collections::HashMap;
 
-use crate::rng::RngInstance;
-use crate::vm::{
-    ComposedFunctionValue, ExprValue, FunctionValue, LineNumberNodeValue, NamedTupleValue,
-    RangeValue, SymbolValue, TupleValue, Value,
+use subset_julia_vm_bytecode::rng::RngInstance;
+use subset_julia_vm_bytecode::value::{
+    is_native_array_value, ComposedFunctionValue, ExprValue, FunctionValue, LineNumberNodeValue,
+    NamedTupleValue, RangeValue, SymbolValue, TupleValue, Value,
 };
 
 /// Persistent storage for REPL globals.
@@ -71,7 +78,7 @@ impl REPLGlobals {
             return Some(Value::F64(v));
         }
         if let Some(v) = self.str_vars.get(name) {
-            return Some(Value::Str(v.clone()));
+            return Some(Value::str_new(v.clone()));
         }
         if let Some(v) = self.range_vars.get(name) {
             return Some(Value::Range(v.clone()));
@@ -125,14 +132,14 @@ impl REPLGlobals {
         // a native-array variant in any arm (Issue #3908). The native-array
         // case is persisted via the same `other_vars` catch-all that the
         // multi-variant arm uses.
-        if crate::vm::value::is_native_array_value(&value) {
+        if is_native_array_value(&value) {
             self.other_vars.insert(name.to_string(), value);
             return;
         }
         match value {
             Value::I64(v) => { self.i64_vars.insert(name.to_string(), v); }
             Value::F64(v) => { self.f64_vars.insert(name.to_string(), v); }
-            Value::Str(v) => { self.str_vars.insert(name.to_string(), v); }
+            Value::Str(v) => { self.str_vars.insert(name.to_string(), v.to_string()); }
             Value::Range(v) => { self.range_vars.insert(name.to_string(), v); }
             Value::Tuple(v) => { self.tuple_vars.insert(name.to_string(), v); }
             Value::NamedTuple(v) => { self.named_tuple_vars.insert(name.to_string(), v); }
@@ -259,6 +266,7 @@ impl REPLGlobals {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -312,10 +320,10 @@ mod tests {
 
     #[test]
     fn test_other_vars_global_ref_round_trip() {
-        use crate::vm::GlobalRefValue;
+        use subset_julia_vm_bytecode::value::GlobalRefValue;
         let gref = GlobalRefValue {
             module: "Base".to_string(),
-            name: crate::vm::SymbolValue::new("sqrt"),
+            name: SymbolValue::new("sqrt"),
         };
         let mut globals = REPLGlobals::new();
         globals.set("gref", Value::GlobalRef(gref));
@@ -370,7 +378,7 @@ mod tests {
     // Issue #3283: Closure persistence
     #[test]
     fn test_closure_round_trip() {
-        use crate::vm::ClosureValue;
+        use subset_julia_vm_bytecode::value::ClosureValue;
         let cv = ClosureValue::new("main#anon1", vec![("y".to_string(), Value::I64(5))]);
         let mut globals = REPLGlobals::new();
         globals.set("f", Value::Closure(cv));
@@ -383,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_closure_appears_in_variable_names() {
-        use crate::vm::ClosureValue;
+        use subset_julia_vm_bytecode::value::ClosureValue;
         let cv = ClosureValue::new("main#anon1", vec![]);
         let mut globals = REPLGlobals::new();
         globals.set("f", Value::Closure(cv));
@@ -392,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_closure_removed_by_clear() {
-        use crate::vm::ClosureValue;
+        use subset_julia_vm_bytecode::value::ClosureValue;
         let cv = ClosureValue::new("main#anon1", vec![]);
         let mut globals = REPLGlobals::new();
         globals.set("f", Value::Closure(cv));
@@ -481,10 +489,9 @@ mod tests {
     // that is accidentally not covered by the match arms.
     #[test]
     fn test_repl_globals_set_handles_all_value_variants_without_panic() {
-        use crate::vm::value::RegexValue;
-        use crate::vm::{
+        use subset_julia_vm_bytecode::value::{
             ClosureValue, ComposedFunctionValue, ExprValue, FunctionValue, GlobalRefValue,
-            LineNumberNodeValue, RangeValue, SymbolValue, TupleValue,
+            LineNumberNodeValue, RangeValue, RegexValue, SymbolValue, TupleValue,
         };
 
         let mut globals = REPLGlobals::new();
@@ -492,7 +499,7 @@ mod tests {
         // Typed-map values (stored in dedicated fields)
         globals.set("i64", Value::I64(1));
         globals.set("f64", Value::F64(1.0));
-        globals.set("str", Value::Str("hi".to_string()));
+        globals.set("str", Value::str_new("hi".to_string()));
         globals.set("range", Value::Range(RangeValue::unit_range(1.0, 10.0)));
         globals.set("tuple", Value::Tuple(TupleValue::new(vec![Value::I64(1)])));
         globals.set("structref", Value::StructRef(0));
@@ -577,7 +584,7 @@ mod tests {
     // Issue #3299: Regex persistence
     #[test]
     fn test_regex_round_trip() {
-        use crate::vm::value::RegexValue;
+        use subset_julia_vm_bytecode::value::RegexValue;
         let rv = RegexValue::new("hello", "").unwrap();
         let mut globals = REPLGlobals::new();
         globals.set("re", Value::Regex(Box::new(rv)));
@@ -600,8 +607,8 @@ pub struct REPLResult {
     pub output: String,
     /// Error message (if failed)
     pub error: Option<String>,
-    /// Optional display artifact (e.g., SVG plot image)
-    pub display_artifact: Option<crate::plotting::DisplayArtifact>,
+    /// Display artifacts emitted by `display(x)` or the trailing result value.
+    pub display_artifacts: Vec<crate::plotting::DisplayArtifact>,
     /// Pre-rendered display string for `value`, produced by the value's
     /// user-defined `show` method at eval time. When `Some`, REPL/FFI echo
     /// prefers it over the default struct-field formatter so the result matches
@@ -620,7 +627,7 @@ impl REPLResult {
             value,
             output,
             error: None,
-            display_artifact: None,
+            display_artifacts: Vec::new(),
             value_display: None,
         }
     }
@@ -631,7 +638,7 @@ impl REPLResult {
             value: None,
             output,
             error: Some(message),
-            display_artifact: None,
+            display_artifacts: Vec::new(),
             value_display: None,
         }
     }

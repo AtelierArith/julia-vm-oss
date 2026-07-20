@@ -81,3 +81,43 @@ function isheap(xs::AbstractArray, o::Ordering=Forward)
     end
     return true
 end
+
+struct BinaryMaxHeap{T} <: AbstractHeap{T}
+    valtree::Vector{T}
+
+    function BinaryMaxHeap{T}() where {T}
+        return new{T}(Vector{T}(undef, 0))
+    end
+
+    function BinaryMaxHeap{T}(xs::Vector{T}) where {T}
+        return new{T}(heapify(xs, Reverse))
+    end
+end
+
+BinaryMaxHeap{T}(xs::AbstractVector{T}) where {T} =
+    BinaryMaxHeap{T}(heapify(Vector{T}(xs), Reverse))
+
+function BinaryMaxHeap(xs::AbstractVector{T}) where {T}
+    return BinaryMaxHeap{T}(heapify(Vector{T}(xs), Reverse))
+end
+
+Base.length(h::BinaryMaxHeap) = length(h.valtree)
+Base.isempty(h::BinaryMaxHeap) = isempty(h.valtree)
+Base.first(h::BinaryMaxHeap) = h.valtree[1]
+
+function Base.push!(h::BinaryMaxHeap, v)
+    heappush!(h.valtree, v, Reverse)
+    return h
+end
+
+Base.pop!(h::BinaryMaxHeap) = heappop!(h.valtree, Reverse)
+
+function Base.empty!(h::BinaryMaxHeap)
+    empty!(h.valtree)
+    return h
+end
+
+function Base.sizehint!(h::BinaryMaxHeap, n::Integer)
+    sizehint!(h.valtree, n)
+    return h
+end

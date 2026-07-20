@@ -3,7 +3,7 @@
 # probe extension from PR #4806/#4808.
 #
 # Fix:
-# - subset_julia_vm/src/compile/expr/collection.rs::
+# - subset_julia_vm_compile/src/compile/expr/collection.rs::
 #   compile_array_constructor: for the no-type-args single-arg form
 #   (`Vector(range)`), emit Instr::CallBuiltin(RangeCollect, 1)
 #   instead of returning the range unchanged.
@@ -32,13 +32,13 @@ end
 end
 
 @testset "Vector(::Array) — array copy regression (Issue #4810)" begin
-    # Vector(arr) on an array should still return an Array (the
-    # original `Vector{T}(arr) = arr` placeholder must keep working
-    # for the array case, not just the range case).
+    # Vector(arr) on an array should still return an Array, but upstream
+    # allocates a fresh vector rather than returning arr by identity.
     src = [10, 20, 30]
     v = Vector(src)
     @test typeof(v) === Vector{Int64}
     @test v == [10, 20, 30]
+    @test !(v === src)
 end
 
 true

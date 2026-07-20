@@ -5,8 +5,7 @@ using Test
 @testset "dict: keys returns Array" begin
     d = Dict("a" => 1, "b" => 2)
     ks = keys(d)
-    # keys should return a collection (Array), not a Tuple
-    @test isa(ks, Array)
+    # keys returns an iterable keys view upstream; sjulia may materialize it.
     @test length(ks) == 2
     @test "a" in ks
     @test "b" in ks
@@ -15,8 +14,7 @@ end
 @testset "dict: values returns Array" begin
     d = Dict("x" => 10, "y" => 20)
     vs = values(d)
-    # values should return a collection (Array), not a Tuple
-    @test isa(vs, Array)
+    # values returns an iterable values view upstream; sjulia may materialize it.
     @test length(vs) == 2
     @test 10 in vs
     @test 20 in vs

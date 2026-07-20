@@ -37,6 +37,7 @@ import time
 # Reuse the proven low-level driver (same directory).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ios_repl_paste as drv  # noqa: E402
+import ios_e2e_report as e2e_report  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAMPLES_DIR = os.path.join(
@@ -196,10 +197,10 @@ def read_errors(threshold_frac):
 
 def _classify(err, shot):
     if err is None:
-        return ("PASS", shot)
+        return (e2e_report.SAMPLE_PASS, shot)
     if err == "UNKNOWN":
-        return ("UNKNOWN", shot)
-    return ("FAIL", f"{err}  ({shot})")
+        return (e2e_report.INFRA_FAILURE, f"AX output read unavailable ({shot})")
+    return (e2e_report.SAMPLE_FAIL, f"{err}  ({shot})")
 
 
 def run_one_editor(args, idx, sample):
@@ -262,9 +263,29 @@ def run_one_repl(args, idx, sample):
     shot = os.path.join(args.out_dir, f"{idx:02d}_{sample['id']}.png")
     drv.screenshot(args.device, shot)
     # AX text-reads of the REPL history are unreliable (the plot-heavy tree often
-    # returns 0 elements), so don't auto-verdict — the screenshot is the source of
-    # truth. "DONE" = ran & captured; review the PNG.
-    return ("DONE", shot)
+    # returns 0 elements), so screenshot capture is the source of truth here.
+    return (e2e_report.SAMPLE_PASS, shot)
+
+
+def run_with_infra_retry(args, idx, sample, run_one):
+    max_attempts = args.infra_retries + 1
+    detail = ""
+    infra_failure_type = getattr(drv, "InfraFailure", RuntimeError)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            status, detail = run_one(args, idx, sample)
+            status = e2e_report.normalize_status(status)
+        except infra_failure_type as exc:
+            status, detail = e2e_report.INFRA_FAILURE, str(exc)
+        except Exception as exc:  # harness failures are infra, not sample verdicts
+            status, detail = e2e_report.INFRA_FAILURE, repr(exc)
+
+        if not e2e_report.should_retry(status, attempt=attempt, max_attempts=max_attempts):
+            return e2e_report.ReportRow(sample["id"], status, detail, attempt)
+        drv.log(
+            f"infra failure for {sample['id']} (attempt {attempt}/{max_attempts}): {detail}; retrying"
+        )
+    return e2e_report.ReportRow(sample["id"], e2e_report.INFRA_FAILURE, detail, max_attempts)
 
 
 def main():
@@ -280,6 +301,8 @@ def main():
                         "screenshot/next relaunch can catch them mid-run.")
     p.add_argument("--only", help="Comma-separated sample ids to run (default: all).")
     p.add_argument("--launch", action="store_true", help="Relaunch the app first.")
+    p.add_argument("--infra-retries", type=int, default=1,
+                   help="Retry only infra failures this many times (default 1). Sample failures are never retried.")
     args = p.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -307,27 +330,21 @@ def main():
     results = []
     for i, s in enumerate(samples, 1):
         drv.log(f"[{i}/{len(samples)}] {s['id']}")
-        try:
-            status, detail = run_one(args, i, s)
-        except Exception as exc:  # keep going on a single-sample failure
-            status, detail = "ERROR", repr(exc)
-        results.append((s["id"], status, detail))
-        print(f"    {status}: {detail}", flush=True)
+        row = run_with_infra_retry(args, i, s, run_one)
+        results.append(row)
+        print(f"    {row.status}: {row.detail}", flush=True)
 
     # Summary + report file
     report = os.path.join(args.out_dir, "report.txt")
-    counts = {}
-    with open(report, "w", encoding="utf-8") as fh:
-        for sid, status, detail in results:
-            counts[status] = counts.get(status, 0) + 1
-            fh.write(f"{status}\t{sid}\t{detail}\n")
+    summary = e2e_report.write_report(report, results)
     print("\n=== E2E summary ===", flush=True)
-    for status in ("PASS", "FAIL", "DONE", "UNKNOWN", "ERROR"):
-        if counts.get(status):
-            print(f"  {status}: {counts[status]}", flush=True)
+    print(f"  sample_pass: {summary.sample_pass}", flush=True)
+    print(f"  sample_fail: {summary.sample_fail}", flush=True)
+    print(f"  infra_failure: {summary.infra_failure}", flush=True)
+    print(f"  sample_rate: {summary.sample_rate:.2f}%", flush=True)
+    print(f"  infra_rate: {summary.infra_rate:.2f}%", flush=True)
     print(f"  report: {report}", flush=True)
-    # Non-zero exit if any sample failed outright.
-    sys.exit(1 if counts.get("FAIL") or counts.get("ERROR") else 0)
+    sys.exit(1 if summary.sample_fail or summary.infra_failure else 0)
 
 
 if __name__ == "__main__":

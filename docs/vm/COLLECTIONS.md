@@ -1,8 +1,33 @@
 # Collection Type Dispatch Guide
 
-*Last updated: 2026-06-11*
+*Last updated: 2026-07-02*
 
 This document describes the pattern for implementing generic functions that work with multiple collection types (Array, Dict, Set, Tuple) while preserving type information. It also covers the iterator wrapper types and the Dict{K,V} Pure Julia infrastructure.
+
+## Executable documentation sweep status (Issue #8721)
+
+Initial sweep date: 2026-07-02.
+
+- Reviewed as one of the five major docs named by #8694/#8721.
+- Checked the `CollectFallback:` inventory, iterator-wrapper count/list,
+  `ArrayData` element variants, and Memory migration notes against current
+  source paths.
+- No stale behavior claim was changed in this initial pass.
+- Representative executable collection behavior is now covered by
+  `julia-doctest`; checklist examples and fallback inventories stay as
+  policy/documentation unless they become runnable claims.
+
+```julia-doctest
+arr = [1, 2, 3]
+copy_arr = copy(arr)
+println(copy_arr == arr)
+println(typeof(copy_arr))
+println(collect((1, 2, 3)) == [1, 2, 3])
+# output
+true
+Vector{Int64}
+true
+```
 
 ## Collect Native Fallback Inventory (Issue #4052)
 
@@ -450,7 +475,7 @@ Range types (`UnitRange`, `StepRange`, `LinRange`, `StepRangeLen`, `OneTo`, `Log
 ```bash
 # Check which array-like types implement size/length/axes
 rg -n "function (size|length|axes)" subset_julia_vm/src/julia/base/
-rg -n "BuiltinId::(Size|Length|Axes)" subset_julia_vm/src/vm/
+rg -n "BuiltinId::(Size|Length|Axes)" subset_julia_vm_vm/src/vm/
 ```
 
 ## Array Manipulation Functions (Pure Julia)

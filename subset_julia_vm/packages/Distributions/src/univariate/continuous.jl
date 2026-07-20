@@ -110,6 +110,7 @@ end
 struct Normal{T<:Real} <: Distribution{Univariate, Continuous}
     μ::T
     σ::T
+    Normal{T}(μ::T, σ::T) where {T<:Real} = new{T}(μ, σ)
 end
 
 function Normal(μ::Real, σ::Real)

@@ -1,0 +1,107 @@
+injector	target	anchor_kind	semantic_owner	issue
+inject_callable_singleton_identity_accessor_removed	subset_julia_vm_bytecode/src/value/metadata.rs	literal-owner	FunctionValue singleton identity accessor	#11703
+inject_definition_order_runtime_nominal_row_removed	docs/vm/DEFINITION_ORDER_MERGE_INVENTORY.tsv	semantic-regex	runtime nominal publication policy	#11740
+inject_exception_taxonomy_hardcoded_name	subset_julia_vm_vm/src/vm/exec/error_handling.rs	literal-stable	error fields match	#11146
+inject_exception_taxonomy_catch_all	subset_julia_vm_bytecode/src/error.rs	literal-stable	VmError ParseError arm	#11146
+inject_exception_payload_ad_hoc_field	subset_julia_vm_vm/src/vm/mod.rs	literal-owner	canonical pending exception payload field	#11647
+inject_exception_payload_consume_after_classification	subset_julia_vm_vm/src/vm/exec/error_handling.rs	literal-owner	exception payload consume-before-classify order	#11647
+inject_exception_payload_name_bypass_field	subset_julia_vm_vm/src/vm/mod.rs	literal-owner	canonical pending exception payload field	#11647
+inject_exception_payload_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	exception payload carrier audit registry row	#11647
+inject_type_reparse_cfg_test_trivia_regression	scripts/check_type_representation_string_reparse.sh	literal-state-machine	cfg(test) trivia transition	#11208
+inject_type_reparse_same_count_substitution	subset_julia_vm_vm/src/vm/builtins_types.rs	literal-stable	reviewed type-reparse inventory site	#10460
+inject_type_reparse_below_baseline_drift	subset_julia_vm_vm/src/vm/builtins_types.rs	literal-stable	reviewed type-reparse site removal	#10460
+inject_promote_builtin_tuple_fallback	subset_julia_vm_vm/src/vm/builtins_exec.rs	literal-stable	promote miss path	#9896
+inject_build_preload_packages_explicit	build.sh	literal-config	explicit preload default	#11055
+inject_array_shared_parent_anchor	subset_julia_vm_bytecode/src/value/array_value/access.rs	semantic-regex	ArrayValue linear access trio	#9573
+inject_call_function_variable_dispatch_order	subset_julia_vm_vm/src/vm/exec/call_function_variable.rs	semantic-regex	CallFunctionVariable value selection	#9987
+inject_call_function_variable_fake_shared_comment	subset_julia_vm_vm/src/vm/exec/call_function_variable.rs	semantic-regex	CallFunctionVariable executable shared call	#10461
+inject_call_dynamic_callee_identity_ignored	subset_julia_vm_vm/src/vm/exec/call_dynamic.rs	literal-owner	CallDynamic carried callee identity	#10461
+inject_invoke_declared_signature_runtime_refinement	subset_julia_vm_vm/src/vm/exec/call_function_variable.rs	literal-owner	invoke declared-signature dispatch authority	#11619
+inject_compile_expr_local_shadow_guard	subset_julia_vm_compile/src/compile/expr/mod.rs	semantic-regex	Expr::Var compile arm	#11269
+inject_compile_expr_local_shadow_guard_projection_removed	scripts/check_compile_expr_local_shadow_guard.sh	literal-stable	local-shadow guard grammar projection	#11604
+inject_specializer_callee_guard	subset_julia_vm_vm/src/vm/specialize/expr.rs	semantic-regex	compile_call local guard	#10895
+inject_lambda_context_routing	subset_julia_vm_lowering/src/lowering/stmt/mod.rs	literal-owner	lower_stmt_impl	#10936
+inject_lambda_context_routing_wrapper_shim	subset_julia_vm_lowering/src/lowering/mod.rs	semantic-regex	lower_stmt_with_macro_ctx_if_needed	#11179
+inject_lambda_context_posthoc_struct_new_stamp	subset_julia_vm_lowering/src/lowering/mod.rs	semantic-regex	lower_stmt_with_macro_ctx_if_needed	#11211
+inject_premerge_runner_command_removed	scripts/premerge_gate.sh	literal-config	source-audit runner command	#11065
+inject_test_aot_vm_aot_lane_missing	scripts/test_aot.sh	literal-config	vm_aot lane invocation	#10815
+inject_test_aot_fixed_binary_path	scripts/test_aot.sh	literal-config	Cargo target juliars default	#11598
+inject_aot_vm_fixed_binary_reassignment	scripts/aot_vm_differential.sh	literal-config	direct helper binary export	#11598
+inject_test_aot_late_target_reset	scripts/test_aot.sh	literal-config	AoT binary export	#11598
+inject_aot_vm_bare_fixed_binary_invocation	scripts/aot_vm_differential.sh	literal-config	direct helper juliars invocation	#11598
+inject_test_aot_command_local_target_reset	scripts/test_aot.sh	literal-config	AoT juliars Cargo build	#11598
+inject_aot_vm_target_dir_invocation	scripts/aot_vm_differential.sh	literal-config	direct helper juliars invocation	#11598
+inject_test_aot_shell_hidden_target_reset	scripts/test_aot.sh	literal-config	AoT juliars Cargo build	#11598
+inject_aot_vm_inert_variable_compensation	scripts/aot_vm_differential.sh	literal-config	direct helper juliars invocation	#11598
+inject_nightly_fixture_scope_removed	.github/workflows/nightly-gates.yml	literal-config	nightly fixture parity scope category	#11693
+inject_aot_gate_shared_inference_removed	.github/aot-gate-paths.txt	literal-config	shared inference-core AoT path	#10866
+inject_aot_gate_legacy_entrypoint_removed	.github/aot-gate-paths.txt	literal-config	legacy AoT entry-point path	#10866
+inject_aot_gate_ci_delegation_removed	.github/workflows/ci.yml	literal-config	ci AoT selector delegation	#10866
+inject_aot_gate_pr_consumer_disconnected	.github/workflows/pr-fast.yml	literal-config	pr-fast AoT consumer condition	#10866
+inject_test_aot_clippy_lane_weakened	scripts/test_aot.sh	literal-config	AoT Clippy owner	#11253
+inject_ci_lint_job_not_current_stable	.github/workflows/ci.yml	literal-config	current-stable override	#11253
+inject_registry_boolean_typo	scripts/source_only_audits.tsv	literal-config	fixture category registry row	#11065
+inject_status_done_archive_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	STATUS/DONE archive budget registry row	#11263
+inject_base_cache_schema_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	Base cache schema fingerprint registry row	#10688
+inject_constructor_owner_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	constructor owner audit registry row	#11172
+inject_ci_executable_step_removed	.github/workflows/ci.yml	literal-config	CI fixture-category step	#11065
+inject_constructor_identity_side_boolean	subset_julia_vm_bytecode/src/method_table.rs	literal-owner	MethodSig declaration	#11043
+inject_constructor_identity_disabled_query	subset_julia_vm_bytecode/src/method_table.rs	literal-stable	constructor authority query	#11043
+inject_constructor_identity_disabled_selector	subset_julia_vm_compile/src/compile/expr/call/constructors.rs	literal-structure	constructor selector guard	#11043
+inject_constructor_owner_short_fallback	subset_julia_vm_compile/src/compile/expr/call/constructors.rs	semantic-regex	try_compile_struct_table_constructor_call owner	#11172
+inject_constructor_runtime_callee_probe_removed	subset_julia_vm_compile/src/compile/expr/call/module_call.rs	literal-owner	runtime constructor callee probe	#11713
+inject_constructor_parametric_runtime_probe_removed	subset_julia_vm_compile/src/compile/expr/call/module_call.rs	literal-owner	parametric runtime constructor base probe	#11713
+inject_constructor_dynamic_parametric_runtime_probe_removed	subset_julia_vm_compile/src/compile/expr/call/dynamic.rs	literal-owner	dynamic parametric runtime constructor base probe	#11713
+inject_constructor_runtime_probe_base_origin_guard_removed	subset_julia_vm_compile/src/compile/expr/call/dynamic.rs	literal-owner	runtime constructor Base-origin exclusion	#11716
+inject_constructor_runtime_probe_current_input_guard_removed	subset_julia_vm_compile/src/compile/expr/call/dynamic.rs	literal-owner	runtime constructor current-input exclusion	#11716
+inject_constructor_runtime_lexical_owner_preference_removed	subset_julia_vm_compile/src/compile/expr/call/dynamic.rs	literal-owner	runtime constructor lexical-owner preference	#11733
+inject_constructor_runtime_bare_route_removed	subset_julia_vm_compile/src/compile/expr/call/mod.rs	literal-owner	module-local runtime constructor route	#11733
+inject_constructor_runtime_enum_probe_removed	subset_julia_vm_compile/src/compile/expr/call/mod.rs	literal-owner	runtime enum lexical binding probe	#11733
+inject_constructor_runtime_enum_member_binding_removed	subset_julia_vm_compile/src/compile/collect.rs	literal-owner	module-local runtime enum member binding	#11733
+inject_constructor_static_registry_bare_route_guard_removed	subset_julia_vm_compile/src/compile/expr/call/mod.rs	literal-owner	static registry exclusion from runtime bare route	#11716
+inject_constructor_package_type_provenance_removed	subset_julia_vm/src/loader.rs	literal-owner	package type chronology provenance	#11716
+inject_constructor_base_module_provenance_removed	subset_julia_vm_types/src/ir/core.rs	literal-owner	Base module nominal provenance	#11737
+inject_constructor_current_main_nominal_boundary_removed	subset_julia_vm_compile/src/compile/pipeline_ctx.rs	literal-owner	current-main runtime nominal provenance boundary	#11737
+inject_constructor_inherited_module_nominal_filter_removed	subset_julia_vm_compile/src/compile/collect.rs	literal-owner	inherited-module runtime nominal provenance filter	#11737
+inject_constructor_current_input_type_provenance_removed	subset_julia_vm/src/repl/session.rs	literal-owner	current-input nominal provenance	#11716
+inject_constructor_synthetic_span_guard_removed	subset_julia_vm_compile/src/compile/expr/call/mod.rs	literal-owner	synthetic restoration span exclusion	#11716
+inject_constructor_inner_parametric_runtime_probe_removed	subset_julia_vm_compile/src/compile/expr/call/dynamic.rs	literal-owner	inner parametric runtime constructor base probe	#11713
+inject_constructor_splat_parametric_runtime_probe_removed	subset_julia_vm_compile/src/compile/expr/call/constructors.rs	literal-owner	splat parametric runtime constructor base probe	#11713
+inject_constructor_static_callee_materialization_removed	subset_julia_vm_compile/src/compile/expr/call/module_call.rs	literal-owner	static constructor callee materialization	#11716
+inject_constructor_static_forward_guard_removed	subset_julia_vm_compile/src/compile/expr/call/module_call.rs	literal-owner	static forward constructor guard	#11720
+inject_constructor_runtime_owner_guard_disabled	subset_julia_vm_vm/src/vm/exec/call_function_variable.rs	literal-owner	constructor_type_heads_match owner guard	#11172
+inject_constructor_base_parametric_registry_removed	subset_julia_vm_compile/src/compile/pipeline_ctx.rs	literal-owner	Base parametric registry population	#11369
+inject_constructor_base_collection_owner_erased	subset_julia_vm_compile/src/compile/expr/call/mod.rs	literal-owner	explicit Base collection result owner	#11369
+inject_constructor_base_parametric_lowering_erased	subset_julia_vm_lowering/src/lowering/expr/call.rs	literal-owner	Base parametric call target owner	#11369
+inject_constructor_base_nested_field_owner_erased	subset_julia_vm_compile/src/compile/context.rs	literal-owner	Base nested parametric field owner	#11369
+inject_constructor_base_concrete_identity_qualified	subset_julia_vm_compile/src/compile/context.rs	literal-owner	Base concrete parametric identity reuse	#11369
+inject_constructor_base_type_expr_owner_erased	subset_julia_vm_compile/src/compile/expr/collection.rs	literal-owner	explicit Base type-expression owner	#11369
+inject_constructor_compile_splat_owner_guard_disabled	subset_julia_vm_compile/src/compile/expr/call/mod.rs	literal-owner	compile_call pre-splat constructor owner guard	#11371
+inject_constructor_parametric_callee_capture_disabled	subset_julia_vm_types/src/ir/free_vars.rs	literal-owner	parametric callee free-variable producer	#11373
+inject_constructor_dynamic_parametric_order_reversed	subset_julia_vm_compile/src/compile/expr/call/dynamic.rs	literal-owner	dynamic parametric constructor evaluation order	#11375
+inject_constructor_runtime_splat_default_fallback_removed	subset_julia_vm_vm/src/vm/exec/call_function_variable.rs	literal-owner	kwargs-splat post-dispatch default constructor fallback	#11371
+inject_binding_provenance_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	binding provenance audit registry row	#11317
+inject_binding_provenance_consumer_wildcard	subset_julia_vm_lowering/src/lowering/scope_bindings.rs	literal-owner	ScopeBindingInventory LocalDeclKind arm	#11317
+inject_binding_provenance_aot_consumer_ignored	subset_julia_vm/src/aot/analyze/ir_converter/stmt.rs	literal-owner	AoT convert_stmt_expanded LocalDeclKind arm	#11317
+inject_binding_provenance_unclassified_if_let_consumer	subset_julia_vm_compile/src/compile/constants.rs	literal-owner	unclassified LocalDecl if-let consumer	#11317
+inject_binding_provenance_authority_helper_corrupted	subset_julia_vm_compile/src/compile/core_compiler.rs	literal-owner	declared-global load authority helper	#11317
+inject_binding_provenance_bare_global_key	subset_julia_vm_compile/src/compile/expr/mod.rs	literal-owner	load_local declared-global authority call	#11317
+inject_base_exports_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	Base export audit registry row	#11298
+inject_base_exports_non_upstream	subset_julia_vm/src/julia/base/exports.jl	literal-stable	Base export list	#11298
+inject_source_position_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	source-position chronology audit registry row	#11100
+inject_source_position_api_raw_usize	subset_julia_vm_lowering/src/lowering/type_alias.rs	literal-owner	expand_for_signature typed position API	#11100
+inject_source_position_raw_offset_compare	subset_julia_vm_lowering/src/lowering/type_alias.rs	literal-owner	entry availability authority	#11100
+inject_source_position_raw_offset_cmp	subset_julia_vm_lowering/src/lowering/type_alias.rs	literal-owner	entry availability cmp authority	#11100
+inject_python_audit_eager_union	scripts/check_orphaned_rs_files.py	literal-config	future-annotations import	#11102
+inject_builtin_registry_parser_disconnected	subset_julia_vm_types/src/types/julia_type/parsing.rs	literal-owner	parser registry delegation	#10954
+inject_builtin_registry_compiler_disconnected	subset_julia_vm_compile/src/compile/expr/mod.rs	literal-owner	compiler registry delegation	#10954
+inject_builtin_registry_reflection_disconnected	subset_julia_vm_vm/src/vm/builtins_reflection/mod.rs	literal-owner	reflection registry delegation	#10954
+inject_builtin_registry_entry_deleted	subset_julia_vm_types/src/types/builtin_type_registry.rs	literal-stable	complete registry contract	#10954
+inject_struct_registry_first_match_scan	subset_julia_vm_compile/src/compile/expr/call/constructors.rs	semantic-regex	try_compile_struct_table_constructor_call owner	#11436
+inject_constructor_return_family_first_match	subset_julia_vm_compile/src/compile/context.rs	literal-owner	get_struct_type_id exact lookup	#11436
+inject_constructor_return_registry_row_weakened	scripts/source_only_audits.tsv	literal-config	constructor return identity audit registry row	#11436
+inject_constructor_return_core_family_first_match	subset_julia_vm_compile/src/compile/core_compiler.rs	literal-owner	CoreCompiler exact-or-Any conversion	#11436
+inject_constructor_return_typed_array_family_lookup	subset_julia_vm_compile/src/compile/expr/builtin_array.rs	literal-owner	typed-array exact element lookup	#11436
+inject_constructor_return_instantiated_typevar	subset_julia_vm_compile/src/compile/expr/infer/expr_tfuncs.rs	literal-owner	instantiated constructor completeness guard	#11436
+inject_constructor_return_unresolved_owner_inference	subset_julia_vm_compile/src/compile/expr/infer/mod.rs	literal-owner	resolved-owner constructor inference	#11510
+inject_math_router_fabricates_concrete	subset_julia_vm_compile/src/compile/tfuncs/complex_ops.rs	literal-stable	tfunc_complex_contextual Top body	#11486

@@ -2,16 +2,21 @@
 # essentials.jl - Essential language support functions
 # =============================================================================
 # Based on Julia's base/essentials.jl
+# upstream: julia/base/essentials.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-06-01)
 
 # =============================================================================
 # Bottom - the empty (bottom) type, alias for Union{}
 # =============================================================================
-# Based on Julia's base/essentials.jl: `const Bottom = Union{}`
-#
-# Union{} is the bottom of the type lattice: it is a subtype of every type,
-# the zero element of typeintersect, and the empty-Union normal form. `Bottom`
-# is the canonical name for it (Issue #5065).
-const Bottom = Union{}
+# Upstream's base/essentials.jl defines `const Bottom = Union{}` WITHOUT
+# exporting it, so a bare `Bottom` in Main is UndefVarError while qualified
+# `Base.Bottom` resolves. sjulia's prelude type aliases are registered in a
+# flat, unqualified table with no export filtering, so mirroring the const
+# here leaked the binding into user scope: bare `Bottom` resolved to Union{}
+# (Issue #10304, reverting the Issue #5065 decision). Nothing in sjulia's
+# Julia sources references `Bottom`, so the binding is intentionally NOT
+# defined until export-aware alias visibility exists (Issue #10578);
+# qualified `Base.Bottom` access is tracked by Issue #10579. Use `Union{}`
+# directly.
 
 # =============================================================================
 # ifelse - conditional without short-circuit evaluation
@@ -87,6 +92,9 @@ end
 
 function isvatuple(t)
     t = unwrap_unionall(t)
+    if t === Tuple
+        return true
+    end
     if isa(t, DataType)
         params = t.parameters
         n = length(params)

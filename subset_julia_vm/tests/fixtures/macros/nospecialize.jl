@@ -1,29 +1,56 @@
-# Test @nospecialize macro (Issue #2528)
-# - @nospecialize is a no-op in SubsetJuliaVM (no type specialization)
-# - @nospecialize(x) should pass through its argument unchanged
-# - Used in broadcast.jl to control specialization
+# Test @nospecialize macro (Issues #2528 / #10237 / #10323)
+# @nospecialize is a compiler hint: it must not change runtime semantics in
+# signature or statement position. In value position, upstream
+# `Base.@nospecialize`/`@specialize` always expand to
+# `Expr(:meta, :nospecialize, vars...)` (base/essentials.jl), which evaluates
+# to `nothing` at runtime without evaluating the wrapped argument (Issue
+# #10323).
 
 using Test
 
-@testset "@nospecialize basic" begin
-    # @nospecialize wrapping an expression should return the expression
-    x = @nospecialize(42)
-    @test x == 42
+@testset "@nospecialize in function signature" begin
+    f(@nospecialize(x)) = x
+    @test f(42) == 42
+
+    g(a, @nospecialize(b)) = a + b
+    @test g(1, 2) == 3
 end
 
-@testset "@nospecialize with typed argument" begin
-    # @nospecialize wrapping a typed expression
-    val = @nospecialize(1 + 2)
-    @test val == 3
-end
-
-@testset "@nospecialize in function body" begin
-    # @nospecialize used inside a function
-    function f(x)
-        y = @nospecialize(x)
-        return y * 2
+@testset "@nospecialize statement position" begin
+    function h(x, y)
+        @nospecialize x y
+        x * y
     end
-    @test f(5) == 10
+    @test h(3, 4) == 12
+end
+
+@testset "@nospecialize in long-form function definition" begin
+    function double(@nospecialize(x))
+        return x * 2
+    end
+    @test double(5) == 10
+end
+
+@testset "@nospecialize/@specialize in value position (Issue #10323)" begin
+    x = @nospecialize(42)
+    @test x === nothing
+
+    y = @specialize(7)
+    @test y === nothing
+
+    # No-argument form is also a meta expression that evaluates to nothing.
+    @test @nospecialize() === nothing
+
+    # The wrapped expression is never evaluated -- it is compiler metadata,
+    # not a value to compute (matches upstream: `f()` is not called).
+    calls = Ref(0)
+    function bump()
+        calls[] += 1
+        return 99
+    end
+    z = @nospecialize(bump())
+    @test z === nothing
+    @test calls[] == 0
 end
 
 true

@@ -6,13 +6,38 @@
 extern "C" {
 #endif
 
+// ==================== ABI Version ====================
+//
+// SUBSET_VM_ABI_VERSION is a monotonically-increasing integer that identifies
+// the binary interface contract of this header.  Consumers MUST call
+// subset_julia_vm_abi_version() at startup and compare the returned value
+// against this macro.  If they differ, the loaded library was built from a
+// different header revision — abort rather than risk silent memory corruption.
+//
+// Bump this constant (and update subset_julia_vm_ffi/abi_baseline after bumping)
+// whenever ANY of the following change:
+//   - struct field layout or padding  (CSpan, CError, CExecutionResult, CREPLResult)
+//   - enum discriminant values         (CErrorKind, CValueKind)
+//   - function signatures              (parameter types, return types, calling convention)
+//   - ownership/lifetime contracts     (who allocates, who frees)
+//
+// Do NOT bump for purely additive changes that leave existing consumers unaffected
+// (new functions that do not alter existing signatures or struct layouts).
+// See docs/vm/CHECKLISTS.md §"ABI Change Checklist" for the full bump procedure.
+#define SUBSET_VM_ABI_VERSION 3u
+
+// Return the ABI version baked into the loaded library.
+// Compare against SUBSET_VM_ABI_VERSION at startup; abort on mismatch.
+uint32_t subset_julia_vm_abi_version(void);
+
 // ==================== Ownership Summary ====================
 //
 // - char* returned directly from compile_to_ir, compile_and_run_with_output,
 //   split_expressions, unicode_* and *_json copy accessors is owned by the
 //   caller and must be released with free_string().
-// - CExecutionResult* returned by compile_and_run_detailed and
-//   compile_and_run_streaming is owned by the caller and must be released with
+// - CExecutionResult* returned by compile_and_run_detailed,
+//   compile_and_run_streaming, run_vm_bytecode_detailed, and
+//   run_vm_bytecode_streaming is owned by the caller and must be released with
 //   free_execution_result().
 // - char* fields inside CExecutionResult and CREPLResult are owned by their
 //   parent result. Read them before freeing the result; do not pass them to
@@ -22,6 +47,15 @@ extern "C" {
 //   valid only until free_execution_result().
 // - const char* returned by repl_result_artifact_*() is borrowed from
 //   CREPLResult and remains valid only until free_repl_result().
+//
+// ==================== Threading Summary ====================
+//
+// Opaque VM/session handles are single-threaded runtime objects. Create, call,
+// reset, and free a given handle on the same host thread. Do not call one
+// handle concurrently from multiple threads, and do not use a plain mutex as a
+// substitute for same-thread ownership; marshal work to the handle's owner
+// thread instead. Multiple independent handles may be owned by different host
+// threads. See docs/vm/SINGLE_THREADED_VM.md.
 
 // Run JSON Core IR programs.
 int64_t run_ir_json_f_N_seed(const char* json, int64_t n, uint64_t seed);
@@ -47,6 +81,11 @@ typedef enum {
     CErrorKind_Unsupported = 2,
     CErrorKind_Runtime = 3,
     CErrorKind_Compile = 4,
+    // A persisted .sjvmbc VM bytecode payload failed to load (bad magic,
+    // version/fingerprint mismatch, deserialize error). Treat as a cache miss:
+    // silently fall back to compiling the .jl source; never show to the user
+    // (Issue #10171; docs/vm/CACHE_ARCHITECTURE.md invalidation contract).
+    CErrorKind_StaleBytecode = 5,
 } CErrorKind;
 
 // Stable type tags for CExecutionResult.value_json.
@@ -81,6 +120,12 @@ typedef struct {
     char* hint;     // Owned by parent CExecutionResult, may be NULL
 } CError;
 
+// Display artifact entry. Strings are owned by the parent result.
+typedef struct {
+    char* mime;
+    char* data;
+} CDisplayArtifact;
+
 // Execution result with detailed error information
 typedef struct {
     bool success;
@@ -92,6 +137,8 @@ typedef struct {
     char* artifact_mime; // Owned by this result; MIME string, may be NULL
     char* artifact_data; // Owned by this result; UTF-8 artifact data, may be NULL
     char* value_json;    // Owned by this result; structured typed value JSON
+    CDisplayArtifact* artifacts; // Owned by this result; array of display artifacts
+    uint64_t artifact_count;
 } CExecutionResult;
 
 // Cancel execution of the currently running VM (best-effort).
@@ -140,6 +187,31 @@ CExecutionResult* compile_and_run_streaming(
     OutputCallback output_callback
 );
 
+// ==================== VM Bytecode (.sjvmbc) Execution (Issue #10171) ====================
+//
+// Execute a precompiled .sjvmbc VM bytecode payload (produced by
+// `sjulia --compile-vm`; bundled next to each iOS sample by ./build.sh,
+// Issue #9945) without parsing/lowering/compiling source. `bytes`/`len`
+// describe the full file content (header + payload).
+//
+// ANY load failure (bad magic, unsupported version, fingerprint mismatch,
+// deserialize error) returns success == false with
+// error.kind == CErrorKind_StaleBytecode. Callers MUST treat that as a cache
+// miss and fall back to source compilation.
+// Returns a heap-allocated CExecutionResult that must be freed with
+// free_execution_result.
+CExecutionResult* run_vm_bytecode_detailed(const uint8_t* bytes, uintptr_t len, uint64_t seed);
+
+// Streaming variant: output is delivered through the callback during
+// execution, mirroring compile_and_run_streaming.
+CExecutionResult* run_vm_bytecode_streaming(
+    const uint8_t* bytes,
+    uintptr_t len,
+    uint64_t seed,
+    void* context,
+    OutputCallback output_callback
+);
+
 // Borrow the structured typed value JSON. Do not free the returned pointer.
 const char* execution_result_value_json(const CExecutionResult* result);
 CValueKind execution_result_value_kind(const CExecutionResult* result);
@@ -163,6 +235,9 @@ char* execution_result_dict_value_json(const CExecutionResult* result, uint64_t 
 // Borrow artifact strings. Do not free the returned pointers.
 const char* execution_result_artifact_mime(const CExecutionResult* result);
 const char* execution_result_artifact_data(const CExecutionResult* result);
+uint64_t execution_result_artifact_count(const CExecutionResult* result);
+const char* execution_result_artifact_mime_at(const CExecutionResult* result, uint64_t index);
+const char* execution_result_artifact_data_at(const CExecutionResult* result, uint64_t index);
 
 // Free a CExecutionResult allocated by compile_and_run_detailed or compile_and_run_streaming.
 void free_execution_result(CExecutionResult* result);
@@ -186,6 +261,8 @@ typedef struct {
     char* error;    // Heap-allocated, may be NULL
     char* artifact_mime; // Owned by this result; MIME string, may be NULL
     char* artifact_data; // Owned by this result; UTF-8 artifact data, may be NULL
+    CDisplayArtifact* artifacts; // Owned by this result; array of display artifacts
+    uint64_t artifact_count;
 } CREPLResult;
 
 // Create a new REPL session with the given random seed.
@@ -195,6 +272,26 @@ void* repl_session_new(uint64_t seed);
 // Evaluate Julia code in a REPL session.
 // Returns a heap-allocated CREPLResult that must be freed with free_repl_result.
 CREPLResult* repl_session_eval(void* session, const char* src);
+
+// Optional panic probes for FFI boundary tests. These symbols exist only when
+// the native library is built with the Rust feature `ffi-panic-test`.
+#ifdef SJULIA_FFI_PANIC_TEST
+CExecutionResult* subset_julia_vm_ffi_debug_panic_detailed(void);
+CREPLResult* subset_julia_vm_ffi_debug_panic_repl(void);
+#endif
+
+// Configure the process-wide runtime cache entry caps (Issue #8625).
+// The VM clears a dispatch/specialization cache once it exceeds its entry
+// limit (Issue #8610); this tunes those caps to the device memory budget.
+// Applies to every VM built afterwards (including each repl_session_eval).
+// Pass 0 for either argument to keep the built-in default (4096 per cache).
+// `dispatch` caps the dispatch-family caches; `specialization` caps the
+// specialization-family caches.
+void subset_julia_vm_set_cache_entry_limits(uintptr_t dispatch, uintptr_t specialization);
+
+// Configure the process-wide VM memory budget in bytes (Issue #8703).
+// Applies to every VM built afterwards. Pass 0 to clear the host override.
+void subset_julia_vm_set_memory_budget_bytes(uintptr_t bytes);
 
 // Reset a REPL session (clears all state).
 void repl_session_reset(void* session);
@@ -208,6 +305,9 @@ void free_repl_result(CREPLResult* result);
 // Borrow REPL artifact strings. Do not free the returned pointers.
 const char* repl_result_artifact_mime(const CREPLResult* result);
 const char* repl_result_artifact_data(const CREPLResult* result);
+uint64_t repl_result_artifact_count(const CREPLResult* result);
+const char* repl_result_artifact_mime_at(const CREPLResult* result, uint64_t index);
+const char* repl_result_artifact_data_at(const CREPLResult* result, uint64_t index);
 
 void subset_julia_vm_demo(void);
 

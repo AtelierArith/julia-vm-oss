@@ -308,13 +308,13 @@ awk '/#define JL_BUILTIN_FUNCTIONS/,/[^\\]$/' julia/src/builtin_proto.h \
   | grep -oE 'XX\([a-z_!]+' | wc -l
 
 # sjulia Layer-2 Rust builtin 総行
-wc -l subset_julia_vm/src/builtins.rs subset_julia_vm/src/vm/builtins*.rs | tail -1
+wc -l subset_julia_vm/src/builtins.rs subset_julia_vm_vm/src/vm/builtins*.rs | tail -1
 
 # 撤去済みキャリアが live コードに無いこと (コメントのみのはず)
-grep -rn "Value::Dict\|Value::Set" subset_julia_vm/src/vm | grep -v '//' | grep -v retired
+grep -rn "Value::Dict\|Value::Set" subset_julia_vm_vm/src/vm | grep -v '//' | grep -v retired
 
 # Complex interleaved 特殊化サイトの規模
-grep -rln "interleav\|complex" subset_julia_vm/src/vm | wc -l
+grep -rln "interleav\|complex" subset_julia_vm_vm/src/vm | wc -l
 
 # Pure Julia 側の ccall 境界 (少数のはず)
 grep -rc "ccall" subset_julia_vm/src/julia | grep -v ':0'
@@ -325,7 +325,7 @@ grep -rc "ccall" subset_julia_vm/src/julia | grep -v ':0'
 ## 6. 参照
 
 - 本家境界: `julia/src/builtins.c` (67関数), `julia/src/intrinsics.h` (94命令), `julia/base/` (Pure Julia), `julia/Compiler/` (型推論)
-- sjulia 境界: `subset_julia_vm/src/intrinsics.rs`, `subset_julia_vm/src/vm/builtins_*.rs`, `subset_julia_vm/src/julia/`
+- sjulia 境界: `subset_julia_vm/src/intrinsics.rs`, `subset_julia_vm_vm/src/vm/builtins_*.rs`, `subset_julia_vm/src/julia/`
 - 設計方針: `docs/vm/PURE_JULIA_DESIGN.md`, `docs/vm/RUST_BOUNDARY_JUSTIFICATION.md`, `docs/vm/BUILTIN_REMOVAL.md`
 - 移行 Issue (全 CLOSED): #6726, #6727, #6728, #6729, #6730, #6731, #6732, #6733
 - キャリア撤去: #6731 (Value::Dict), #6732 (Value::Set), #4568/#6807 (Value::Array)

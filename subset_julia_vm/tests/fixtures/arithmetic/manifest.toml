@@ -79,6 +79,12 @@ expected = true
 description = "Bit-shift (<<, >>, >>>) and bitwise (&, |, ⊻, ~) operators (Issue #2618)"
 
 [[tests]]
+name = "arithmetic_bitwise_compound_assignment_9267"
+file = "bitwise_compound_assignment_9267.jl"
+expected = true
+description = "Bitwise compound assignments &=, |=, ⊻=, >>=, <<= lower to the matching bitwise operator for variables, indexed targets, and fields (Issue #9267)"
+
+[[tests]]
 name = "arithmetic_bitwise_unsigned_widths"
 file = "bitwise_unsigned_widths.jl"
 expected = true
@@ -181,6 +187,18 @@ expected = true
 description = "Integer base with literal negative exponent routes through literal_pow (Float64); non-literal exponent still throws DomainError (Issue #7233)"
 
 [[tests]]
+name = "arithmetic_int128_power_preserves_type_9608"
+file = "int128_power_preserves_type_9608.jl"
+expected = true
+description = "Int128 power with fixed-width integer exponents preserves Int128 instead of compiling through the BigInt power intrinsic; UInt128 remains type-preserving on direct paths, with first-class power route guards (Issues #9608/#9656)"
+
+[[tests]]
+name = "arithmetic_bigint_float_power_9653"
+file = "bigint_float_power_9653.jl"
+expected = true
+description = "BigInt power with Float16/Float32/Float64 exponents returns BigFloat through DynamicPow instead of the integer-only PowBigInt intrinsic (Issue #9653)"
+
+[[tests]]
 name = "arithmetic_float_pow_int_compensated_7308"
 file = "float_pow_int_compensated_7308.jl"
 expected = true
@@ -197,3 +215,51 @@ name = "arithmetic_mixed_int_float_promotion_8183"
 file = "mixed_int_float_promotion_8183.jl"
 expected = true
 description = "Mixed Int/Float scalar arithmetic (Int64/Float64 etc.) is specialized to the typed promote-and-op path instead of a dynamic method Call, staying bit-identical to upstream (Issue #8183)"
+
+[[tests]]
+name = "arithmetic_uint64_int128_mixed_8893"
+file = "uint64_int128_mixed_8893.jl"
+expected = true
+description = "UInt64 typemax mixed with Int128 arithmetic produces Int128 without exiting (Issue #8893)"
+
+[[tests]]
+name = "arithmetic_uint128_narrow_float_mixed_8894"
+file = "uint128_narrow_float_mixed_8894.jl"
+expected = true
+description = "UInt128 typemax mixed with Float32/Float64 arithmetic produces Float32/Float64 without exiting (Issue #8894)"
+
+[[tests]]
+name = "arithmetic_float16_float32_repr_inf_nan_8884"
+file = "float16_float32_repr_inf_nan_8884.jl"
+expected = true
+description = "repr/show of Float16/Float32 Inf/NaN prints Inf16/-Inf16/NaN16/Inf32/-Inf32/NaN32 matching upstream Julia (Issue #8884)"
+
+[[tests]]
+name = "arithmetic_numeric_value_repr_residuals_9717"
+file = "numeric_value_repr_residuals_9717.jl"
+expected = true
+description = "Full numeric matrix value-repr residuals: Bool plus primitive negative zero preserves sign, and Float64 div by zero returns NaN while narrow floats keep Inf (Issue #9717)"
+
+[[tests]]
+name = "arithmetic_integer_divfld_cld_type_8883"
+file = "integer_divfld_cld_type_8883.jl"
+expected = true
+description = "div/fld/cld/rem/mod on narrow integer types preserves the result type; Bool+narrow_int pairs promote to the narrow int type instead of widening to Int64 (Issue #8883)"
+
+[[tests]]
+name = "arithmetic_fixed_width_divrem_boundaries_9716"
+file = "fixed_width_divrem_boundaries_9716.jl"
+expected = true
+description = "Fixed-width integer boundary fld/cld/rem/mod preserve upstream status, type, and wrapped typemin negation behavior (Issues #9716/#9838)"
+
+[[tests]]
+name = "arithmetic_srem_rem_mod_semantics_9507"
+file = "srem_rem_mod_semantics_9507.jl"
+expected = true
+description = "Dynamic `%` (SremInt) matches Julia rem (truncated, sign of dividend) for float/mixed/F32/F16 pairs incl. infinite divisor, and Int128 rem/mod near typemax does not overflow or floor (Issues #9507/#9520)"
+
+[[tests]]
+name = "arithmetic_unicode_div_alias_10695"
+file = "unicode_div_alias_10695.jl"
+expected = true
+description = "÷ is a first-class function binding (forwarding method mirroring upstream const ÷ = div): (÷)(7,2), f = ÷ value use, missing operands, and macro-expanded @show 7 ÷ 2 all work (Issue #10695)"

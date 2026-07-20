@@ -1,16 +1,29 @@
-# String interpolation should NOT include `!` as part of identifier
-# In Julia, "$name!" interpolates `name` and `!` is literal text (Issue #2130)
+# String interpolation identifier boundary around `!` (Issues #10322 / #10237)
+# In upstream Julia, `!` IS part of the interpolated identifier: "$name!"
+# interpolates the variable `name!`. The identifier stops before `!=`,
+# which lexes as the operator. A literal bang after an interpolated
+# variable requires the "$(name)!" form.
+# (Issue #2130 previously asserted the opposite; corrected to upstream.)
 
 using Test
 
 @testset "String interpolation with bang" begin
     name = "World"
-    # "$name!" should produce "World!" not look for variable `name!`
-    @test "$name!" == "World!"
+    name! = "Bang"
 
-    # Multiple interpolations with trailing punctuation
+    # "$name!" interpolates `name!`, not `name` followed by literal "!"
+    @test "$name!" == "Bang"
+
+    # Literal "!" after an interpolated variable requires $(name)!
+    @test "$(name)!" == "World!"
+
+    # `!` stops the identifier when followed by `=` (operator boundary)
+    @test "$name!=" == "World!="
+
+    # Multiple interpolations
     greeting = "Hello"
-    @test "$greeting, $name!" == "Hello, World!"
+    @test "$greeting, $(name)!" == "Hello, World!"
+    @test "$greeting, $name!" == "Hello, Bang"
 
     # Bang functions still work as regular identifiers
     arr = [3, 1, 2]

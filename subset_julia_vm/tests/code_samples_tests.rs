@@ -3,8 +3,10 @@
 //! This file contains tests for every sample in the iOS app to ensure
 //! they all compile and run correctly.
 
-use subset_julia_vm::compile::compile_core_program;
-use subset_julia_vm::compile_and_run_str;
+use subset_julia_vm::compile::host_support::compile_core_program;
+// Run the samples under STRICT file-mode soft scope (Issue #9283) — the soft
+// scope the C ABI / WASM editor hosts now apply, matching `julia file.jl`.
+use subset_julia_vm::compile_and_run_str_file_mode as compile_and_run_str;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 
@@ -94,7 +96,7 @@ println("1:2:10 has length ", length(r2))
 # Sum elements in a range
 sum = 0
 for x in 1:100
-    sum += x
+    global sum += x
 end
 println("Sum 1 to 100 = ", sum)
 
@@ -125,7 +127,7 @@ end
 # Sum of squares
 sum = 0.0
 for i in 1:length(squares)
-    sum += squares[i]
+    global sum += squares[i]
 end
 println("Sum of squares: ", sum)
 
@@ -404,7 +406,7 @@ val = 1
 for i in 1:rows
     for j in 1:cols
         m[i, j] = val
-        val += 1
+        global val += 1
     end
 end
 
@@ -1020,7 +1022,7 @@ in_set = 0
 for row in 1:height
     ci = ymax - (row - 1) * (ymax - ymin) / (height - 1)
     iterations = mandelbrot_row(cr_array, ci, maxiter)
-    in_set += sum(iterations .== maxiter)
+    global in_set += sum(iterations .== maxiter)
 end
 
 println(in_set)
@@ -1125,7 +1127,7 @@ m = rand(3, 3)
 sum = 0.0
 for i in 1:3
     for j in 1:3
-        sum += m[i, j]
+        global sum += m[i, j]
     end
 end
 
@@ -1155,7 +1157,7 @@ max_val = mat[1, 1]
 for i in 1:2
     for j in 1:3
         if mat[i, j] > max_val
-            max_val = mat[i, j]
+            global max_val = mat[i, j]
         end
     end
 end
@@ -1210,7 +1212,7 @@ arr = randn(10)
 # Calculate sample mean (should be close to 0)
 sum = 0.0
 for i in 1:length(arr)
-    sum += arr[i]
+    global sum += arr[i]
 end
 mean = sum / length(arr)
 
@@ -1239,8 +1241,8 @@ n = 12
 for i in 1:3
     for j in 1:4
         v = mat[i, j]
-        sum += v
-        sum_sq += v * v
+        global sum += v
+        global sum_sq += v * v
     end
 end
 
@@ -1921,11 +1923,11 @@ try
     # Use integer division to trigger division by zero error
     # Note: Float division (1 / 0) returns Inf per IEEE 754, not an error
     y = div(1, 0)
-    x = 999  # This won't execute
+    global x = 999  # This won't execute
 catch e
     # e contains the error message
     println("Caught error: ", e)
-    x = -1
+    global x = -1
 end
 
 println(x)
@@ -1948,14 +1950,14 @@ result = 0
 cleanup_done = 0
 
 try
-    result = 10 / 2  # Normal operation
+    global result = 10 / 2  # Normal operation
     println("Computed result: ", result)
 catch e
     println("Error: ", e)
-    result = -1
+    global result = -1
 finally
     # This always runs
-    cleanup_done = 1
+    global cleanup_done = 1
     println("Cleanup completed")
 end
 

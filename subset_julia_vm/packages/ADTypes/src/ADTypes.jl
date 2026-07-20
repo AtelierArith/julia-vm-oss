@@ -14,16 +14,24 @@ export AbstractADType, AutoForwardDiff, AutoFiniteDiff, AutoReverseDiff, AutoZyg
 
 abstract type AbstractADType end
 
-struct AutoForwardDiff <: AbstractADType end
-AutoForwardDiff(; kwargs...) = AutoForwardDiff()
+struct AutoForwardDiff <: AbstractADType
+    options
+end
+AutoForwardDiff(; kwargs...) = AutoForwardDiff(kwargs)
 
-struct AutoFiniteDiff <: AbstractADType end
-AutoFiniteDiff(; kwargs...) = AutoFiniteDiff()
+struct AutoFiniteDiff <: AbstractADType
+    options
+end
+AutoFiniteDiff(; kwargs...) = AutoFiniteDiff(kwargs)
 
-struct AutoReverseDiff <: AbstractADType end
-AutoReverseDiff(; kwargs...) = AutoReverseDiff()
+struct AutoReverseDiff <: AbstractADType
+    options
+end
+AutoReverseDiff(; kwargs...) = AutoReverseDiff(kwargs)
 
-struct AutoZygote <: AbstractADType end
-AutoZygote(; kwargs...) = AutoZygote()
+struct AutoZygote <: AbstractADType
+    options
+end
+AutoZygote(; kwargs...) = AutoZygote(kwargs)
 
 end # module ADTypes

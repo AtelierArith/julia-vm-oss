@@ -19,8 +19,11 @@ end
     # count=3: replace first three occurrences
     @test replace("aabaa", "a" => "x", count=3) == "xxbxa"
 
-    # count=0: replace all (same as default)
-    @test replace("aabaa", "a" => "x", count=0) == "xxbxx"
+    # count=0: replace NOTHING (upstream semantics — Issues #10197 / #10237)
+    @test replace("aabaa", "a" => "x", count=0) == "aabaa"
+
+    # negative count: DomainError (upstream semantics — Issue #10197)
+    @test_throws DomainError replace("aabaa", "a" => "x", count=-1)
 
     # No count: replace all
     @test replace("aabaa", "a" => "x") == "xxbxx"
@@ -30,6 +33,16 @@ end
 
     # Multi-char pattern with count
     @test replace("abcabcabc", "abc" => "X", count=2) == "XXabc"
+end
+
+@testset "replace rejects bad operands even at count=0 (Issue #10237)" begin
+    # The count=0 short-circuit must NOT bypass operand validation: a
+    # non-string receiver is a MethodError under upstream at every count,
+    # including 0 (previously sjulia silently returned the receiver).
+    @test_throws MethodError replace(42, "a" => "x", count=0)
+    @test_throws MethodError replace(42, "a" => "x", count=2)
+    # A valid receiver + pair with count=0 still returns it unchanged.
+    @test replace("aabaa", "a" => "x", count=0) == "aabaa"
 end
 
 true

@@ -1,19 +1,19 @@
 using Test
 
 @testset "Memory copyto!" begin
-    src = Memory{Int64}(3)
+    src = Memory{Int64}(undef, 3)
     src[1] = 10
     src[2] = 20
     src[3] = 30
 
-    dest = Memory{Int64}(5)
+    dest = Memory{Int64}(undef, 5)
     result = copyto!(dest, src)
     @test result === dest
     @test dest[1] == 10
     @test dest[2] == 20
     @test dest[3] == 30
 
-    offset_dest = Memory{Int64}(5)
+    offset_dest = Memory{Int64}(undef, 5)
     copyto!(offset_dest, 2, src, 1, 3)
     @test offset_dest[1] == 0
     @test offset_dest[2] == 10
@@ -21,7 +21,7 @@ using Test
     @test offset_dest[4] == 30
     @test offset_dest[5] == 0
 
-    overlap_forward = Memory{Int64}(5)
+    overlap_forward = Memory{Int64}(undef, 5)
     for i in 1:5
         overlap_forward[i] = i
     end
@@ -32,7 +32,7 @@ using Test
     @test overlap_forward[4] == 3
     @test overlap_forward[5] == 5
 
-    overlap_backward = Memory{Int64}(5)
+    overlap_backward = Memory{Int64}(undef, 5)
     for i in 1:5
         overlap_backward[i] = i
     end

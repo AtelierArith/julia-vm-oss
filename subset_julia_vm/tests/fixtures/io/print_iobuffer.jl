@@ -5,52 +5,42 @@ using Test
 
 @testset "print(io, ...) to IOBuffer" begin
     # Test 1: Basic print to IOBuffer
-    @testset "Basic print to IOBuffer" begin
-        io = IOBuffer()
-        io = print(io, "hello")
-        result = take!(io)
-        @test length(result) == 5
-        @test result == "hello"
-    end
+    io = IOBuffer()
+    print(io, "hello")
+    result = String(take!(io))
+    @test length(result) == 5
+    @test result == "hello"
 
     # Test 2: Multiple arguments
-    @testset "Multiple arguments" begin
-        io = IOBuffer()
-        io = print(io, "a", "b", "c")
-        result = take!(io)
-        @test length(result) == 3
-        @test result == "abc"
-    end
+    io = IOBuffer()
+    print(io, "a", "b", "c")
+    result = String(take!(io))
+    @test length(result) == 3
+    @test result == "abc"
 
     # Test 3: Different types
-    @testset "Different types" begin
-        io = IOBuffer()
-        io = print(io, 42)
-        result = take!(io)
-        @test length(result) == 2
-        @test result == "42"
-    end
+    io = IOBuffer()
+    print(io, 42)
+    result = String(take!(io))
+    @test length(result) == 2
+    @test result == "42"
 
     # Test 4: Chained prints
-    @testset "Chained prints" begin
-        io = IOBuffer()
-        io = print(io, "hello")
-        io = print(io, " ")
-        io = print(io, "world")
-        result = take!(io)
-        @test length(result) == 11
-        @test result == "hello world"
-    end
+    io = IOBuffer()
+    print(io, "hello")
+    print(io, " ")
+    print(io, "world")
+    result = String(take!(io))
+    @test length(result) == 11
+    @test result == "hello world"
 
     # Test 5: Mixed with write
-    @testset "Mixed with write" begin
-        io = IOBuffer()
-        io = write(io, "first")
-        io = print(io, "second")
-        result = take!(io)
-        @test length(result) == 11
-        @test result == "firstsecond"
-    end
+    io = IOBuffer()
+    @test write(io, "first") == 5
+    print(io, "second")
+    result = String(take!(io))
+    @test length(result) == 11
+    @test result == "firstsecond"
 end
 
 true

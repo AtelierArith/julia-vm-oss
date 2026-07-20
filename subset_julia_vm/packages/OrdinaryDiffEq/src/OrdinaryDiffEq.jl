@@ -6,7 +6,7 @@ module OrdinaryDiffEq
 # Issue #7363.
 
 import SciMLBase
-# Workaround: re-export the `Tsit5` algorithm type from SciMLBase rather than
+# Workaround: re-export the `Tsit5` algorithm type from SciMLBase rather than defining it here. (Issue #8052)
 # defining it here, and register its `solve` dispatch on `SciMLBase.solve`
 # (in SciMLBase.jl). sjulia cannot extend another module's function from this
 # module — neither `function SciMLBase.solve(...)` (lowering "missing function
@@ -83,7 +83,7 @@ function SciMLBase._tsit5_solve(prob::SciMLBase.ODEProblem, alg::SciMLBase.Tsit5
     # the LIVE `_tsit5_solve` (it overrides `SciMLBase._tsit5_solve` so the
     # `SVector` path compiles in this module; #8104), so the densify must live here.
     u0src = prob.u0 isa SubArray ? collect(prob.u0) : prob.u0
-    # Workaround: SciMLBase._copy_state qualified call does not dispatch to the
+    # Workaround: SciMLBase._copy_state qualified call does not dispatch to the vector method. (Issue #8104)
     # AbstractVector method from OrdinaryDiffEq context (Issue #8104). Use copy(u)
     # directly for mutable arrays; immutable states (SVector, scalars) are safe to alias.
     u = ismutable(u0src) ? copy(u0src) : u0src

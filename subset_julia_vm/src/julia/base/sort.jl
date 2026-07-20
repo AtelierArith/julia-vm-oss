@@ -130,7 +130,10 @@ function sort!(v; lt=nothing, by=nothing, rev=false)
                 j_val = by(v[j])
             end
             if lt === nothing
-                if j_val <= key_val
+                # Default order is `isless` (Julia's `Forward` ordering), a total
+                # order over floats: NaN sorts last and `-0.0 < 0.0` (Issue #9344).
+                # Break when `key_val` should NOT come before `j_val`.
+                if isless(key_val, j_val) == false
                     break
                 end
             else
@@ -241,7 +244,8 @@ function sortperm!(perm, arr; by=nothing, rev=false, lt=nothing)
                 j_val = by(arr[perm[j]])
             end
             if lt === nothing
-                if j_val <= key_val
+                # Default order is `isless` (total order over floats; Issue #9344).
+                if isless(key_val, j_val) == false
                     break
                 end
             else

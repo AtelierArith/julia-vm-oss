@@ -418,4 +418,94 @@ description = "An INLINE typed-array literal T[...] (Int8[1,2], Float64[1.0], An
 name = "io_iobuffer_from_string_5686"
 file = "io_iobuffer_from_string_5686.jl"
 expected = true
-description = "IOBuffer(s::AbstractString) constructs a readable buffer initialized with s (Issue #5686); read(io, String) / String(take!(io)) return the content. Adds the IOBufferFromString builtin and routes read(io::IO, String) to take! (returns buffer content). The empty writable IOBuffer() form and read(filename, String) are unaffected."
+description = "IOBuffer(s::AbstractString) constructs a readable buffer initialized with s (Issue #5686); read(io, String) / String(take!(io)) return the content. Adds the IOBufferFromString builtin and routes read(io::IO, String) through take! plus String conversion. The empty writable IOBuffer() form and read(filename, String) are unaffected."
+
+[[tests]]
+name = "io_iobuffer_take_bytes_10004"
+file = "iobuffer_take_bytes_10004.jl"
+expected = true
+description = "take!(IOBuffer) returns buffered bytes as Vector{UInt8}, clears the buffer, and still supports String(take!(io)) for text round-trips (Issue #10004)"
+
+[[tests]]
+name = "io_abstract_supertype_show_8823"
+file = "abstract_supertype_show_8823.jl"
+expected = true
+description = "show(io::IO, ::AbstractSupertype) dispatches for concrete subtypes across string/print/sprint, and Dict KeySet/ValueIterator displays use the upstream Union{KeySet,ValueIterator} show method while Set still reaches show(io, ::AbstractSet) across repr/string/print (Issue #8823)"
+
+[[tests]]
+name = "io_sprint_show_array_8819"
+file = "sprint_show_array_8819.jl"
+expected = true
+description = "sprint(show, array) preserves compact Array display for statically-Any collect results, including collect(pairs(Dict(:x => 10))) => [:x => 10] (Issue #8819)"
+
+[[tests]]
+name = "io_sprint_explicit_nothing_8842"
+file = "sprint_explicit_nothing_8842.jl"
+expected = true
+description = "sprint(f, x) returns the captured IOBuffer contents even when f prints then returns explicit nothing, including arrays with Pair elements that require nested show pre-rendering (Issue #8842)"
+
+[[tests]]
+name = "io_hof_print_user_show_8878"
+file = "hof_print_user_show_8878.jl"
+expected = true
+description = "print/println used as higher-order function values dispatch through user-defined show(io::IO, ::T), including sprint(print, x), sprint(println, x), and f = print/println with an IOBuffer sink (Issue #8878)"
+
+[[tests]]
+name = "io_user_show_display_paths_9364_9456"
+file = "user_show_display_paths_9364_9456.jl"
+expected = true
+description = "User Base.show reaches string interpolation, one-arg show, and repr (Issue #9364), while a show method for a concrete parametric instantiation stays exact and does not apply to sibling instantiations (Issue #9456)"
+
+[[tests]]
+name = "io_print_show_dispatch_split_9460"
+file = "print_show_dispatch_split_9460.jl"
+expected = true
+description = "Base.print(io::IO, ::T) and Base.show(io::IO, ::T) register as separate display methods, so string/interpolation use print while repr/show use show (Issue #9460)"
+
+[[tests]]
+name = "io_display_registry_method_dispatch_9564"
+file = "display_registry_method_dispatch_9564.jl"
+expected = true
+description = "Display registry lookup runs normal method specificity over overlapping print/show methods instead of collapsing duplicate type-name keys (Issue #9564)"
+
+[[tests]]
+name = "io_unsigned_print_decimal_9585"
+file = "unsigned_print_decimal_9585.jl"
+expected = true
+description = "print/println/string of top-level Unsigned values use decimal print-form while show/repr and container elements keep the hex show-form, matching upstream Julia (Issue #9585)"
+
+[[tests]]
+name = "io_iowrite_numeric_raw_bytes_9578"
+file = "iowrite_numeric_raw_bytes_9578.jl"
+expected = true
+description = "write(io, numeric) writes native little-endian raw bytes and returns byte count instead of decimal print text (Issue #9578)"
+
+[[tests]]
+name = "io_iostream_positioning_8996"
+file = "iostream_positioning_8996.jl"
+expected = true
+description = "File IO streams support seek/position/skip/eof/flush plus read(io, Char), preserving cursor state across reads and returning the identical stream from cursor-moving operations (Issues #8996/#9576)"
+
+[[tests]]
+name = "io_cyclic_struct_display_10893"
+file = "cyclic_struct_display_10893.jl"
+expected = true
+description = "Self- and two-node mutable StructRef cycles terminate with a circular-reference marker instead of overflowing the host stack (Issue #10893)"
+
+[[tests]]
+name = "io_redirect_stdio_pipe_9577"
+file = "redirect_stdio_pipe_9577.jl"
+expected = true
+description = "redirect_stdout/redirect_stderr devnull do-blocks restore stdio and return thunk values, redirect_stdio composes stdout/stderr redirection without dropping do-block kwargs, stderr keyword locals shadow the stdio global, stdio/devnull globals have stable singleton identity, and Pipe() exposes a minimal IO subtype surface (Issues #9577/#10034/#10035/#10053)"
+
+[[tests]]
+name = "io_sprint_sizehint_10364"
+file = "sprint_sizehint_10364.jl"
+expected = true
+description = "sprint(f, args...; sizehint=N) accepts the sizehint preallocation keyword as a no-op on all routes: the print fast-path exclusion, the SprintFunc builtin path, and combined with context (Issue #10364). Non-Float64 context payloads are Issue #11420"
+
+[[tests]]
+name = "io_println_arg_eval_order_10351"
+file = "println_arg_eval_order_10351.jl"
+expected = true
+description = "print/println evaluate every argument (including its output side effects) before writing any of the call's own output, on both the stdout fast path and the io-first split path (Issue #10351); copy(::IOBuffer) probe deferred to Issue #11714"

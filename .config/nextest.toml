@@ -2,5 +2,8 @@
 test-threads = "num-cpus"
 
 [[profile.default.overrides]]
-filter = 'binary(ios_samples_tests) or binary(integration_struct_hof_tests) or binary(integration_string_type_tests) or binary(dispatch_tests) or binary(parser_pure_rust) or binary(integration_compile_sample_tests) or binary(integration_dict_broadcast_tests) or binary(integration_array_tests) or binary(test_if_elseif_else) or binary(type_propagation_call_tests) or (binary(integration_module_base_tests) and (test(chunk_004) or test(chunk_005) or test(chunk_007) or test(chunk_008) or test(chunk_009))) or (binary(fixture_tests) and (test(iteration::chunk_001) or test(promotion::chunk_000) or test(pure_julia::chunk_000) or test(array::chunk_001) or test(strings::chunk_000) or test(strings::chunk_001) or test(strings::chunk_002) or test(tuple::chunk_000) or test(type_inference::chunk_000) or test(type_inference::chunk_001) or test(type_inference::chunk_002) or test(types_tests::chunk_000) or test(types_tests::chunk_001) or test(types_tests::chunk_002)))'
+# Issue #9671 Phase 1: the integration_* binaries were consolidated into
+# integration_tests; test_if_elseif_else → regression_misc_tests;
+# type_propagation_call_tests → regression_dispatch_inference_tests.
+filter = 'binary(ios_samples_tests) or binary(integration_tests) or binary(dispatch_tests) or binary(parser_pure_rust) or (binary(regression_misc_tests) and test(test_if_elseif_else)) or (binary(regression_dispatch_inference_tests) and test(type_propagation_call_tests)) or (binary(fixture_tests) and (test(iteration::chunk_001) or test(promotion::chunk_000) or test(pure_julia::chunk_000) or test(array::chunk_001) or test(strings::chunk_000) or test(strings::chunk_001) or test(strings::chunk_002) or test(tuple::chunk_000) or test(type_inference::chunk_000) or test(type_inference::chunk_001) or test(type_inference::chunk_002) or test(types_tests::chunk_000) or test(types_tests::chunk_001) or test(types_tests::chunk_002)))'
 priority = 100

@@ -3,10 +3,10 @@
 #
 # Verify every bundled Plotly.js registers all trace types the VM emits.
 #
-# The VM's Plotly JSON generator (subset_julia_vm/src/plotting/plotly.rs) emits
-# these trace `type`s: scatter (2D line/scatter), bar, heatmap, scatter3d and
-# surface. Plotly ships *partial* bundles: the `gl3d` build has the 3D traces
-# (scatter3d/surface) but NOT the cartesian `bar`/`heatmap` modules. When Plotly
+# The VM's Plotly JSON generator (subset_julia_vm_vm/src/plotting/plotly.rs) emits
+# these trace `type`s: scatter (2D line/scatter), bar, heatmap, contour,
+# scatter3d and surface. Plotly ships *partial* bundles: the `gl3d` build has the 3D traces
+# (scatter3d/surface) but NOT the cartesian `bar`/`heatmap`/`contour` modules. When Plotly
 # receives an unregistered trace type it silently coerces it to `scatter`, so a
 # `bar` plot renders as a line graph (Issue #6850). The only stock bundle that
 # carries BOTH the 3D and the cartesian traces is the full `plotly.min.js`.
@@ -29,8 +29,8 @@ web/plotly.min.js
 mobile/assets/plotly/plotly.min.js
 "
 
-# Trace types emitted by subset_julia_vm/src/plotting/plotly.rs (render_trace).
-REQUIRED_TRACES="scatter bar heatmap scatter3d surface"
+# Trace types emitted by subset_julia_vm_vm/src/plotting/plotly.rs (render_trace).
+REQUIRED_TRACES="scatter bar heatmap contour scatter3d surface"
 
 failed=0
 

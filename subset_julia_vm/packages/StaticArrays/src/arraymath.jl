@@ -262,19 +262,28 @@ end
 # Conversion (Issue #7460, Phase 4). `convert(SVector{N,T}, x)` coerces each
 # element to `T` (the inner tuple constructor stores its argument verbatim, so
 # the coercion must happen here) and `convert(SMatrix{M,N,T}, x)` does the same
-# while preserving the column-major layout. A same-type convert is the identity.
+# while preserving the column-major layout.
 function Base.convert(::Type{SVector{N,T}}, x::StaticVector) where {N,T}
-    vals = []
-    t = Tuple(x)
-    for i in 1:length(t)
-        push!(vals, convert(T, t[i]))
-    end
-    return SVector{N,T}(vals...)
+    return _svector_from_vector(T, x)
 end
 
-Base.convert(::Type{SVector{N,T}}, x::SVector{N,T}) where {N,T} = x
+function Base.convert(::Type{SVector{N,T}}, x::AbstractVector) where {N,T}
+    return _svector_from_vector(T, x)
+end
 
-function Base.convert(::Type{SMatrix{M,N,T}}, x::StaticMatrix) where {M,N,T}
+Base.similar(::Type{SVector{0,T}}) where {T} = Vector{T}(undef, 0)
+Base.similar(::Type{SVector{1,T}}) where {T} = Vector{T}(undef, 1)
+Base.similar(::Type{SVector{2,T}}) where {T} = Vector{T}(undef, 2)
+Base.similar(::Type{SVector{3,T}}) where {T} = Vector{T}(undef, 3)
+Base.similar(::Type{SVector{4,T}}) where {T} = Vector{T}(undef, 4)
+Base.similar(::Type{SVector{5,T}}) where {T} = Vector{T}(undef, 5)
+Base.similar(::Type{SVector{6,T}}) where {T} = Vector{T}(undef, 6)
+Base.similar(::Type{SVector{7,T}}) where {T} = Vector{T}(undef, 7)
+Base.similar(::Type{SVector{8,T}}) where {T} = Vector{T}(undef, 8)
+Base.similar(::Type{SVector{9,T}}) where {T} = Vector{T}(undef, 9)
+Base.similar(::Type{SVector{10,T}}) where {T} = Vector{T}(undef, 10)
+
+function _smatrix_convert_values(::Type{T}, x::StaticMatrix) where {T}
     # An inline loop (not a `y -> convert(T, y)` closure) because a nested lambda
     # cannot capture the method's `T` type parameter in sjulia.
     vals = []
@@ -285,4 +294,6 @@ function Base.convert(::Type{SMatrix{M,N,T}}, x::StaticMatrix) where {M,N,T}
     return _static_bcast_build(x, vals)
 end
 
-Base.convert(::Type{SMatrix{M,N,T}}, x::SMatrix{M,N,T}) where {M,N,T} = x
+function Base.convert(::Type{SMatrix{M,N,T}}, x::StaticMatrix) where {M,N,T}
+    return _smatrix_convert_values(T, x)
+end

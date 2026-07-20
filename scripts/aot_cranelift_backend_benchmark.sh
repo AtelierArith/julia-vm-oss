@@ -9,7 +9,8 @@
 #
 # Requirements:
 #   - perl with Time::HiRes (available on the supported developer platforms)
-#   - ./target/release/juliars already built with Cranelift support:
+#   - $CARGO_TARGET_DIR/release/juliars already built with Cranelift support
+#     (or JULIARS_BIN set):
 #       cargo build --release -p subset_julia_vm --features cranelift --bin juliars
 #
 # This is intentionally a developer helper, not a `check_*.sh` CI audit script.
@@ -17,6 +18,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo_target_dir.sh"
+cargo_target_dir="$(resolve_cargo_target_dir "$ROOT")"
+export CARGO_TARGET_DIR="$cargo_target_dir"
+JULIARS_BIN="${JULIARS_BIN:-$cargo_target_dir/release/juliars}"
+export JULIARS_BIN
 ITERATIONS="${ITERATIONS:-3}"
 
 if [[ $# -lt 1 ]]; then
@@ -34,14 +40,13 @@ if ! perl -MTime::HiRes=time -e 'print time' >/dev/null 2>&1; then
     exit 2
 fi
 
-juliars_bin="$ROOT/target/release/juliars"
-if [[ ! -x "$juliars_bin" ]]; then
+if [[ ! -x "$JULIARS_BIN" ]]; then
     echo "ERROR: juliars binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features cranelift --bin juliars" >&2
     exit 2
 fi
 
-if ! "$juliars_bin" --help | grep -q -- "--jit-run"; then
+if ! "$JULIARS_BIN" --help | grep -q -- "--jit-run"; then
     echo "ERROR: juliars does not expose --jit-run. Rebuild with current sources and the cranelift feature." >&2
     exit 2
 fi
@@ -117,7 +122,7 @@ for fixture in "$@"; do
             "$fixture_dir/rust-check.times" \
             "$fixture_dir/rust-check.out" \
             "$fixture_dir/rust-check.err" \
-            "$juliars_bin" "$fixture" --backend rust --check
+            "$JULIARS_BIN" "$fixture" --backend rust --check
     )"
 
     generated_rs="$fixture_dir/generated.rs"
@@ -126,7 +131,7 @@ for fixture in "$@"; do
         measure_command \
             "$fixture_dir/rust-emit.out" \
             "$fixture_dir/rust-emit.err" \
-            "$juliars_bin" "$fixture" -o "$generated_rs" --emit-binary "$rust_bin"
+            "$JULIARS_BIN" "$fixture" -o "$generated_rs" --emit-binary "$rust_bin"
     )"
 
     rust_binary_bytes="$(wc -c <"$rust_bin" | tr -d '[:space:]')"
@@ -144,7 +149,7 @@ for fixture in "$@"; do
             "$fixture_dir/cranelift-check.times" \
             "$fixture_dir/cranelift-check.out" \
             "$fixture_dir/cranelift-check.err" \
-            "$juliars_bin" "$fixture" --backend cranelift --check
+            "$JULIARS_BIN" "$fixture" --backend cranelift --check
     )"
 
     cranelift_jit_run_mean="$(
@@ -152,7 +157,7 @@ for fixture in "$@"; do
             "$fixture_dir/cranelift-jit-run.times" \
             "$fixture_dir/cranelift-jit-run.out" \
             "$fixture_dir/cranelift-jit-run.err" \
-            "$juliars_bin" "$fixture" --backend cranelift --jit-run
+            "$JULIARS_BIN" "$fixture" --backend cranelift --jit-run
     )"
 
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \

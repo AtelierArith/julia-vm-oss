@@ -22,19 +22,20 @@ Handlers are called in this order in `builtins_exec.rs`:
 | 2 | `execute_builtin_io` | `builtins_io.rs` |
 | 3 | `execute_builtin_collections` | `builtins_collections.rs` |
 | 4 | `execute_builtin_dicts` | `builtins_dicts.rs` |
-| 5 | `execute_builtin_sets` | `builtins_sets/` |
-| 6 | `execute_builtin_numeric` | `builtins_numeric.rs` |
-| 7 | `execute_builtin_strings` | `builtins_strings.rs` |
-| 8 | `execute_builtin_arrays` | `builtins_arrays.rs` |
-| 9 | `execute_builtin_types` | `builtins_types.rs` |
-| 10 | `execute_builtin_reflection` | `builtins_reflection/` |
-| 11 | `execute_builtin_equality` | `builtins_equality.rs` |
-| 12 | `execute_builtin_macro` | `builtins_macro/` |
-| 13 | `execute_builtin_linalg` | `builtins_linalg.rs` |
+| 5 | `execute_builtin_numeric` | `builtins_numeric.rs` |
+| 6 | `execute_builtin_strings` | `builtins_strings.rs` |
+| 7 | `execute_builtin_arrays` | `builtins_arrays.rs` |
+| 8 | `execute_builtin_types` | `builtins_types.rs` |
+| 9 | `execute_builtin_reflection` | `builtins_reflection/` |
+| 10 | `execute_builtin_equality` | `builtins_equality.rs` |
+| 11 | `execute_builtin_macro` | `builtins_macro/` |
+| 12 | `execute_builtin_linalg` | `builtins_linalg.rs` |
+| 13 | `execute_builtin_stacktrace` | `builtins_stacktrace.rs` |
+| 14 | `execute_builtin_tasks` | `builtins_tasks.rs` |
 
 `execute_builtin_types` delegates first to
 `execute_builtin_types_conversion` in `builtins_types_conversion.rs`; conversion
-builtins are therefore owned by that subhandler while still occupying position 9
+builtins are therefore owned by that subhandler while still occupying position 8
 in the dispatch chain.
 
 ### Fallback Handlers (`builtins_exec.rs`)
@@ -69,7 +70,7 @@ future statistics-related builtins (e.g., `mean`, `std`, `var`).
 `IncludeDependency`, `Precompile`, `Normpath`, `Abspath`, `Homedir`, `Sleep`, `TimeNs`,
 `ReadFile`, `ReadLines`, `Readline`, `Countlines`, `Isfile`, `Isdir`, `Ispath`, `Filesize`,
 `Pwd`, `Readdir`, `Mkdir`, `Mkpath`, `Rm`, `Tempdir`, `Tempname`, `Touch`, `Cd`, `Islink`,
-`Cp`, `Mv`, `Mtime`, `Open`, `Close`, `Eof`, `Isopen`, `ReadlineIo`
+`Cp`, `Mv`, `Mtime`, `Open`, `Close`, `Eof`, `Isopen`, `ReadlineIo`, `EmitDisplayArtifact`
 
 ### `builtins_collections.rs`
 `Length`, `Eltype`, `_Eltype`, `MemoryRefNew`, `MemoryRefGet`, `MemoryRefSet`,
@@ -83,10 +84,6 @@ future statistics-related builtins (e.g., `mean`, `std`, `var`).
 `DictValues`, `DictPairs`, `DictMerge`, `DictNew`, `DictGetBang`, `DictMergeBang`,
 `DictEmpty`, `DictPop`, `_DictGet`, `_DictSet`, `_DictDelete`, `_DictHaskey`,
 `_DictLength`, `_DictEmpty`, `_DictKeys`, `_DictValues`, `_DictPairs`
-
-### `builtins_sets/` (directory module: `mod.rs`, `set_ops.rs`, `intrinsics.rs`, `shared.rs`)
-`SetNew`, `SetPush`, `SetDelete`, `SetIn`, `SetEmpty`, `_SetPush`,
-`_SetDelete`, `_SetIn`, `_SetEmpty`, `_SetLength`
 
 ### `builtins_numeric.rs`
 `BigInt`, `BigFloat`, `BigFloatPrecision`, `BigFloatDefaultPrecision`,
@@ -126,14 +123,14 @@ future statistics-related builtins (e.g., `mean`, `std`, `var`).
 `_TypeVarLowerBound`, `_TypeVarUpperBound`, `_UnionAllVar`, `_UnionAllBody`,
 `_TypeParameters`, `_Allocatedinline`, `_DatatypeAlignment`, `_Fieldoffset`,
 `_MakeTupleType`, `_MethodsByFtype`, `_ReturnTypesByFtype`,
-`IsdefinedModuleBinding`, `ComposeExceptionType`
+`IsdefinedModuleBinding`, `_ModuleName`, `ComposeExceptionType`
 
 ### `builtins_equality.rs`
 `Egal`, `Isequal`, `TupleEquals`, `Hash`, `_Hash`, `Isless`
 
 ### `builtins_macro/` (directory module: `mod.rs`, `eval.rs`, `parse.rs`, `helpers.rs`, `ir_conversion.rs`)
 `SymbolNew`, `ExprNew`, `ExprNewWithSplat`, `Gensym`, `QuoteNodeNew`, `LineNumberNodeNew`,
-`GlobalRefNew`, `Esc`, `Eval`, `GeneratedEval`, `MacroExpand`, `MacroExpandBang`, `IncludeString`, `EvalFile`,
+`GlobalRefNew`, `Esc`, `Eval`, `GeneratedEval`, `EvalDefinedCall`, `MacroExpand`, `MacroExpandBang`, `IncludeString`, `EvalFile`,
 `MetaParse`, `MetaParseAt`, `MetaIsExpr`, `MetaQuot`, `MetaIsIdentifier`, `MetaIsOperator`,
 `MetaIsUnaryOperator`, `MetaIsBinaryOperator`, `MetaIsPostfixOperator`, `MetaLower`,
 `TestRecord`, `TestRecordBroken`, `TestSetBegin`, `TestSetEnd`,
@@ -146,6 +143,15 @@ future statistics-related builtins (e.g., `mean`, `std`, `var`).
 `Rank` is retained as a cache/bootstrap compatibility fallback; public
 `LinearAlgebra.rank` calls route through the stdlib Pure Julia wrapper first
 (Issue #4020).
+
+### `builtins_stacktrace.rs`
+`Backtrace`, `CatchBacktrace`, `Stacktrace`
+
+### `builtins_tasks.rs`
+`TaskRegisterMain`, `TaskSchedule`, `TaskYield`, `TaskPark`, `TaskWake`, `TaskCurrent`
+
+These six Issue #10349 boundaries transfer VM-owned continuation/session state
+(boundary condition 3). Public Task/Channel/Condition semantics stay in Pure Julia.
 
 ## Detecting Duplicate Handlers
 
@@ -166,8 +172,8 @@ The detection script uses grep-based heuristics. Be aware of these limitations:
   intentionally shadowed by specialized handlers. Duplicates between specialized
   files and `builtins_exec.rs` are not flagged.
 - **Directory submodules are not expanded** — the script scans top-level
-  `builtins_*.rs` files. Directory modules such as `builtins_sets/`,
-  `builtins_macro/`, and `builtins_reflection/` are still maintained manually in
+  `builtins_*.rs` files. Directory modules such as `builtins_macro/` and
+  `builtins_reflection/` are still maintained manually in
   this document.
 - **Comment lines are excluded** — lines matching `^\s*//` are filtered before
   pattern extraction. `// BuiltinId::Foo` in a comment will not be detected.

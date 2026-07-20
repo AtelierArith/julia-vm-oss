@@ -28,12 +28,13 @@ function gcd(a::Int64, b::BigInt)
     return gcd(BigInt(a), b)
 end
 
-# div for BigInt - integer division
-# The generic div(x,y)=floor(x/y) returns Float64 for BigInt because floor
-# doesn't handle BigInt properly. We use the / operator which correctly
-# does integer division for BigInt types (Issue #1688).
+# div for BigInt - integer division (truncating, returns BigInt)
+# Issue #8900: BigInt `/` now returns BigFloat (matching upstream Julia).
+# Cannot use `a ÷ b` here because `÷` is lowered to `div(a, b)` at the AST
+# level, which would cause infinite recursion. Use the internal intrinsic
+# `_bigint_idiv` that emits DivBigInt directly.
 function div(a::BigInt, b::BigInt)
-    return a / b  # For BigInt, / performs integer division
+    return _bigint_idiv(a, b)
 end
 
 function div(a::BigInt, b::Int64)
@@ -53,6 +54,22 @@ function lcm(a::Int64, b::Int64)
     end
     # Use ÷ for integer division (consistent with BigInt version)
     return abs((a ÷ g) * b)
+end
+
+# Generic same-type lcm for the remaining integer types (Bool, the Unsigned
+# family, Int8..Int32, Int128/UInt128), mirroring upstream
+# julia/base/intfuncs.jl `lcm(a::T, b::T) where T<:Integer` (Issue #8812).
+# The concrete Int64/BigInt methods below stay more specific and still win.
+# `checked_abs(checked_mul(...))` preserves upstream's OverflowError on
+# results that exceed the operand type instead of silently wrapping.
+function lcm(a::T, b::T) where {T<:Integer}
+    # explicit a==0 test is to handle case of lcm(0, 0) correctly
+    # explicit b==0 test is to handle case of lcm(typemin(T),0) correctly
+    if a == 0 || b == 0
+        return zero(a)
+    else
+        return checked_abs(checked_mul(a, div(b, gcd(b, a))))
+    end
 end
 
 # lcm for BigInt
@@ -87,6 +104,42 @@ end
 function lcm(a::Int64, b::BigInt)
     return lcm(BigInt(a), b)
 end
+
+# Mixed signedness / mixed width pairs, mirroring upstream
+# julia/base/intfuncs.jl (Issue #8812). The Unsigned×Signed pairs take the
+# absolute value of the signed operand BEFORE promoting so the result stays
+# non-negative in the promoted (unsigned-favoring) type. The Real×Real
+# promote fallback is written in the two-variable form (not upstream's
+# splat) per the anti-recursion pattern of Issue #9513, and the same-type
+# `T<:Real` MethodError terminator guarantees the fallback can never
+# re-dispatch onto itself when `promote` does not widen (the recursion trap
+# documented for numeric binary operators, Issue #5966).
+function gcd(a::Unsigned, b::Signed)
+    pa, pb = promote(a, abs(b))
+    return gcd(pa, pb)
+end
+function gcd(a::Signed, b::Unsigned)
+    pa, pb = promote(abs(a), b)
+    return gcd(pa, pb)
+end
+function lcm(a::Unsigned, b::Signed)
+    pa, pb = promote(a, abs(b))
+    return lcm(pa, pb)
+end
+function lcm(a::Signed, b::Unsigned)
+    pa, pb = promote(abs(a), b)
+    return lcm(pa, pb)
+end
+function gcd(a::Real, b::Real)
+    pa, pb = promote(a, b)
+    return gcd(pa, pb)
+end
+function lcm(a::Real, b::Real)
+    pa, pb = promote(a, b)
+    return lcm(pa, pb)
+end
+gcd(a::T, b::T) where {T<:Real} = throw(MethodError(gcd, (a, b)))
+lcm(a::T, b::T) where {T<:Real} = throw(MethodError(lcm, (a, b)))
 
 # gcd/lcm over a collection or 3+ arguments (Issue #5679). Upstream supports
 # `gcd(itr)` / `gcd(a, b, c, ...)` (and the same for lcm); the empty collection
@@ -162,10 +215,16 @@ function rem(x, y, r::RoundingMode)
 end
 
 # factorial: n! = 1 * 2 * ... * n
-# For Int64: may overflow for n > 20
+# Mirrors upstream base/combinatorics.jl `factorial_lookup`: 0..20 fit in Int64,
+# n < 0 throws DomainError, and n > 20 overflows Int64 so it throws OverflowError
+# (matching upstream) instead of silently wrapping to a negative value. Use
+# factorial(big(n)) for larger n. (Issue #9326)
 function factorial(n::Int64)
     if n < 0
-        throw(DomainError(n, "factorial not defined for negative integers"))
+        throw(DomainError(n, "`n` must not be negative."))
+    end
+    if n > 20
+        throw(OverflowError("$n is too large to look up in the table; consider using `factorial(big($n))` instead"))
     end
     result = 1
     for i in 2:n
@@ -341,6 +400,65 @@ function ndigits(n; base=10)
 end
 
 # Removed: count_digits(n) - use ndigits(n) instead (Julia standard)
+
+function _string_base_digit(d)
+    if d < 10
+        return _int_to_char(48 + Int64(d))
+    end
+    return _int_to_char(87 + Int64(d))
+end
+
+function _string_unsigned_base(n::UInt128, base::Integer)
+    if n == UInt128(0)
+        return "0"
+    end
+    b = UInt128(base)
+    result = ""
+    while n != UInt128(0)
+        # Workaround: compute the UInt128 remainder via div/mul/sub. Direct
+        # rem(UInt128, UInt128) still errors for large dividends, while mixed
+        # UInt128/Int rem can enter user-exported promote_rule fallbacks and
+        # recurse. (Issue #9770; Issue #9333)
+        q = div(n, b)
+        d = n - q * b
+        result = string(_string_base_digit(d)) * result
+        n = q
+    end
+    return result
+end
+
+function _string_pad_body(body::String, pad::Integer)
+    p = Int64(pad)
+    while length(body) < p
+        body = "0" * body
+    end
+    return body
+end
+
+function string(n::Integer; base::Integer=10, pad::Integer=1)
+    if base < 2 || base > 36
+        throw(ArgumentError("base must be between 2 and 36"))
+    end
+    if isa(n, Bool)
+        body = _string_unsigned_base(n ? UInt128(1) : UInt128(0), base)
+        return _string_pad_body(body, pad)
+    end
+    if n < 0
+        body = _string_unsigned_base(UInt128(-n), base)
+        return "-" * _string_pad_body(body, pad)
+    end
+    body = _string_unsigned_base(UInt128(n), base)
+    return _string_pad_body(body, pad)
+end
+
+function string(b::Bool; base=nothing, pad=nothing)
+    if base === nothing && pad === nothing
+        return b ? "true" : "false"
+    end
+    base = base === nothing ? 10 : base
+    pad = pad === nothing ? 1 : pad
+    return string(b ? UInt8(1) : UInt8(0); base=base, pad=pad)
+end
 
 # bitstring(x): binary representation of x's bits, MSB first. Pure Julia over
 # reinterpret-to-unsigned (the only Rust boundary). (Issue #6747)
@@ -585,15 +703,13 @@ end
 # =============================================================================
 # Based on Julia's base/intfuncs.jl:1444
 
-# clamp(x, lo, hi): clamp x to be between lo and hi
-function clamp(x, lo, hi)
-    if x > hi
-        return hi
-    elseif x < lo
-        return lo
-    else
-        return x
-    end
+# clamp(x, lo, hi): clamp x to be between lo and hi. Mirrors upstream
+# `clamp(x::X, lo::L, hi::H) where {X,L,H}` (base/intfuncs.jl): the result is
+# promoted to `promote_type(X, L, H)` so mixed-type args widen consistently, e.g.
+# clamp(1, 0.5, 2.5) === 1.0 (Float64), not Int64 1.
+function clamp(x::X, lo::L, hi::H) where {X,L,H}
+    T = promote_type(X, L, H)
+    return (x > hi) ? convert(T, hi) : (x < lo) ? convert(T, lo) : convert(T, x)
 end
 
 # clamp!(a, lo, hi): clamp all elements of array a to be between lo and hi

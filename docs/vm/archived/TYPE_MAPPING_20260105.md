@@ -99,9 +99,9 @@ fn pop_i64(&mut self) -> Result<i64, VmError> {
 
 ## Related Files
 
-- `subset_julia_vm/src/compile/type_helpers.rs` - `julia_type_to_value_type()` function
-- `subset_julia_vm/src/vm/stack_ops.rs` - Stack pop operations with type handling
-- `subset_julia_vm/src/vm/value/` - Runtime Value enum definition
+- `subset_julia_vm_compile/src/compile/type_helpers.rs` - `julia_type_to_value_type()` function
+- `subset_julia_vm_vm/src/vm/stack_ops.rs` - Stack pop operations with type handling
+- `subset_julia_vm_vm/src/vm/value/` - Runtime Value enum definition
 - `subset_julia_vm/src/types/` - JuliaType enum definition
 
 ## Float32 Arithmetic Support
@@ -153,7 +153,7 @@ When implementing custom indexable types (like SubArray), ensure both read and w
    - Define `Base.getindex(collection, indices...)` for reading
    - Define `Base.setindex!(collection, value, indices...)` for writing
 
-2. **VM Side** (`subset_julia_vm/src/vm/exec/array_index.rs`):
+2. **VM Side** (`subset_julia_vm_vm/src/vm/exec/array_index.rs`):
    - Handle type in `IndexLoad` instruction for reading
    - Handle type in `IndexStore` instruction for writing
    - Ensure stack contract: collection must remain on stack after `IndexStore`
@@ -296,9 +296,9 @@ When reviewing PRs that add new numeric types, verify:
 
 | Location | Purpose |
 |----------|---------|
-| `subset_julia_vm/src/vm/dynamic_ops/` | Runtime arithmetic operations |
-| `subset_julia_vm/src/compile/expr/mod.rs` | Compile-time type conversions |
-| `subset_julia_vm/src/vm/value/` | Value enum (if adding new variant) |
+| `subset_julia_vm_vm/src/vm/dynamic_ops/` | Runtime arithmetic operations |
+| `subset_julia_vm_compile/src/compile/expr/mod.rs` | Compile-time type conversions |
+| `subset_julia_vm_vm/src/vm/value/` | Value enum (if adding new variant) |
 | `subset_julia_vm/src/types/` | JuliaType/ValueType (if needed) |
 | `tests/fixtures/promotion/*.jl` | Comprehensive test coverage |
 
@@ -392,6 +392,6 @@ When modifying Float32 arithmetic:
 
 | File | Purpose |
 |------|---------|
-| `subset_julia_vm/src/vm/dynamic_ops/` | Runtime arithmetic dispatch |
+| `subset_julia_vm_vm/src/vm/dynamic_ops/` | Runtime arithmetic dispatch |
 | `subset_julia_vm/src/julia/base/float.jl` | Float32 operator methods |
 | `tests/fixtures/promotion/` | Type promotion tests |

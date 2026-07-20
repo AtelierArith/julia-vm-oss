@@ -1,4 +1,6 @@
 use super::*;
+use crate::ir::core::LocalDeclKind;
+use crate::span::Span;
 
 impl<'a> IrConverter<'a> {
     /// Convert statements that may need flattening into zero or more AoT statements.
@@ -13,12 +15,30 @@ impl<'a> IrConverter<'a> {
     pub(crate) fn convert_stmt_expanded(&mut self, stmt: &Stmt) -> AotResult<Vec<AotStmt>> {
         match stmt {
             Stmt::Meta { .. } => Ok(vec![]),
+            Stmt::LocalDecl { kind, .. } => match kind {
+                LocalDeclKind::Explicit | LocalDeclKind::CompilerEnclosing => Ok(vec![]),
+            },
             Stmt::Timed { body, .. } => self.convert_block(body),
             Stmt::Assign {
                 var,
                 value: Expr::LetBlock { bindings, body, .. },
                 ..
             } => self.convert_let_block_assignment(var, bindings, body),
+            // Preserve the inner store in `outer = (inner = value)`. Macro
+            // expansion can wrap this assignment in a `Stmt::Block` together
+            // with an explicit `LocalDecl` (for example `@time x = 42`), so
+            // handling it only in the direct let-body loop loses `inner` when
+            // the transparent block recurses through this general entry point.
+            Stmt::Assign {
+                var,
+                value:
+                    Expr::AssignExpr {
+                        var: inner_var,
+                        value: inner_value,
+                        ..
+                    },
+                span,
+            } => self.convert_nested_assignment(var, inner_var, inner_value, *span, true),
             Stmt::Expr {
                 expr: Expr::LetBlock { bindings, body, .. },
                 ..
@@ -26,14 +46,185 @@ impl<'a> IrConverter<'a> {
             // In Julia, `begin...end` shares the enclosing scope (Issue #2868).
             // Flatten all statements into the parent block.
             Stmt::Block(block) => self.convert_block(block),
+            Stmt::DestructuringAssign {
+                targets,
+                value,
+                span,
+            } => self.convert_destructuring_assign(targets, value, *span),
             _ => Ok(vec![self.convert_stmt(stmt)?]),
         }
     }
 
+    fn convert_nested_assignment(
+        &mut self,
+        outer_var: &str,
+        inner_var: &crate::ir::core::InternedStr,
+        inner_value: &Expr,
+        span: Span,
+        preserve_outer_store: bool,
+    ) -> AotResult<Vec<AotStmt>> {
+        let inner = Stmt::Assign {
+            var: inner_var.to_string(),
+            value: inner_value.clone(),
+            span,
+        };
+        // Re-enter the expanded-statement path so an arbitrarily deep chain
+        // materializes every store in Julia evaluation order (Issue #11310).
+        let mut out = self.convert_stmt_expanded(&inner)?;
+        if preserve_outer_store {
+            let alias = Stmt::Assign {
+                var: outer_var.to_string(),
+                value: Expr::Var(*inner_var, span),
+                span,
+            };
+            out.push(self.convert_stmt(&alias)?);
+        }
+        Ok(out)
+    }
+
+    fn convert_destructuring_assign(
+        &mut self,
+        targets: &[String],
+        value: &Expr,
+        span: Span,
+    ) -> AotResult<Vec<AotStmt>> {
+        let rhs_ty = self.engine.infer_expr_type(value);
+        match &rhs_ty {
+            StaticType::Tuple(_)
+            | StaticType::NamedTuple(_)
+            | StaticType::Array { .. }
+            | StaticType::Range { .. }
+            | StaticType::Any => {}
+            _ => {
+                return Err(AotError::UnsupportedInstruction(
+                    UnsupportedInstructionDiagnostic::new(format!(
+                        "AoT flat destructuring requires a statically representable iteration \
+                         cursor, got {} (Issue #10464)",
+                        rhs_ty
+                    ))
+                    .with_span(span),
+                ));
+            }
+        }
+
+        let temp = self.fresh_internal_local("destructure_value_aot");
+        let rhs_value = self.convert_expr(value)?;
+        self.declared_locals.insert(temp.clone());
+        self.engine.env.insert(temp.clone(), rhs_ty.clone());
+
+        let is_tuple = matches!(rhs_ty, StaticType::Tuple(_) | StaticType::NamedTuple(_));
+        let is_dynamic_value = matches!(rhs_ty, StaticType::Any);
+        let mut out = Vec::with_capacity(targets.len() + 3);
+        out.push(AotStmt::Let {
+            name: temp.clone(),
+            ty: rhs_ty.clone(),
+            value: rhs_value,
+            is_mutable: false,
+        });
+        let cursor = if is_tuple || is_dynamic_value {
+            None
+        } else {
+            let cursor = self.fresh_internal_local("destructure_cursor_aot");
+            let item = self.fresh_internal_local("destructure_item_aot");
+            let element_ty = self.engine.element_type(&rhs_ty);
+            out.push(AotStmt::Let {
+                name: cursor.clone(),
+                ty: StaticType::Generator {
+                    element: Box::new(element_ty.clone()),
+                },
+                value: AotExpr::Generator {
+                    body: Box::new(AotExpr::Var {
+                        name: item.clone(),
+                        ty: element_ty.clone(),
+                    }),
+                    var: item,
+                    iter: Box::new(AotExpr::Var {
+                        name: temp.clone(),
+                        ty: rhs_ty.clone(),
+                    }),
+                    filter: None,
+                    elem_ty: element_ty,
+                },
+                is_mutable: true,
+            });
+            Some(cursor)
+        };
+        for (index, target) in targets.iter().enumerate() {
+            let element_ty = self.engine.tuple_element_type_at(&rhs_ty, index + 1);
+            let indexed = AotExpr::Index {
+                array: Box::new(AotExpr::Var {
+                    name: cursor.clone().unwrap_or_else(|| temp.clone()),
+                    ty: cursor.as_ref().map_or_else(
+                        || rhs_ty.clone(),
+                        |_| StaticType::Generator {
+                            element: Box::new(element_ty.clone()),
+                        },
+                    ),
+                }),
+                indices: vec![AotExpr::LitI64((index + 1) as i64)],
+                elem_ty: element_ty,
+                is_tuple,
+            };
+            out.push(self.bind_aot_value(target, indexed));
+        }
+        // Structural provenance distinguishes the block value from an ordinary
+        // user expression: tail codegen emits it, statement codegen discards it.
+        out.push(AotStmt::ValueCarrier(AotExpr::Var {
+            name: temp,
+            ty: rhs_ty,
+        }));
+        Ok(out)
+    }
+
+    fn bind_aot_value(&mut self, var: &str, value: AotExpr) -> AotStmt {
+        let value_ty = value.get_type();
+        if self.declared_locals.contains(var) {
+            let slot_ty = self
+                .engine
+                .env
+                .get(var)
+                .cloned()
+                .unwrap_or_else(|| value_ty.clone());
+            AotStmt::Assign {
+                target: AotExpr::Var {
+                    name: var.to_string(),
+                    ty: slot_ty,
+                },
+                value,
+            }
+        } else {
+            self.declared_locals.insert(var.to_string());
+            self.engine.env.insert(var.to_string(), value_ty.clone());
+            AotStmt::Let {
+                name: var.to_string(),
+                ty: value_ty,
+                value,
+                is_mutable: true,
+            }
+        }
+    }
+
     /// Convert a lowered `LetBlock` statement form (e.g. from `@time`) into executable AoT stmts.
+    ///
+    /// The `let` block is a nested lexical scope: variables it binds are
+    /// independent of same-named bindings in sibling scopes, so we enter/exit a
+    /// scope frame around the conversion. This keeps two sibling `let` blocks
+    /// that rebind the same name with different concrete types from being
+    /// unified under the first-seen static type (Issue #10251).
     fn convert_let_block_stmt(
         &mut self,
-        bindings: &[(String, Expr)],
+        bindings: &[(crate::ir::core::InternedStr, Expr)],
+        body: &Block,
+    ) -> AotResult<Vec<AotStmt>> {
+        self.enter_lexical_scope(bindings, body);
+        let result = self.convert_let_block_stmt_inner(bindings, body);
+        self.exit_lexical_scope(None);
+        result
+    }
+
+    fn convert_let_block_stmt_inner(
+        &mut self,
+        bindings: &[(crate::ir::core::InternedStr, Expr)],
         body: &Block,
     ) -> AotResult<Vec<AotStmt>> {
         let mut out = Vec::new();
@@ -43,7 +234,7 @@ impl<'a> IrConverter<'a> {
         // (for example the lowered form of `@time`).
         for (name, value) in bindings {
             let synthetic = Stmt::Assign {
-                var: name.clone(),
+                var: name.to_string(),
                 value: value.clone(),
                 span: value.span(),
             };
@@ -60,21 +251,13 @@ impl<'a> IrConverter<'a> {
                         ..
                     } = value
                     {
-                        let synthetic = Stmt::Assign {
-                            var: inner_var.clone(),
-                            value: (*inner_value.clone()),
-                            span: *span,
-                        };
-                        out.push(self.convert_stmt(&synthetic)?);
-
-                        if !is_statement_let_passthrough_slot(var) {
-                            let alias = Stmt::Assign {
-                                var: var.clone(),
-                                value: Expr::Var(inner_var.clone(), *span),
-                                span: *span,
-                            };
-                            out.push(self.convert_stmt(&alias)?);
-                        }
+                        out.extend(self.convert_nested_assignment(
+                            var,
+                            inner_var,
+                            inner_value,
+                            *span,
+                            !is_statement_let_passthrough_slot(var),
+                        )?);
                         continue;
                     }
 
@@ -105,17 +288,34 @@ impl<'a> IrConverter<'a> {
     /// Convert `target = let ... end` / `target = @elapsed ...` forms by keeping
     /// all let-body side effects and assigning the block's final expression to
     /// the outer target.
+    ///
+    /// The `let` bindings and body form a nested lexical scope, but `target` is
+    /// bound in the *enclosing* scope (it receives the block's value), so it is
+    /// kept alive across the scope exit while the block's own locals are
+    /// forgotten (Issue #10251).
     fn convert_let_block_assignment(
         &mut self,
         target: &str,
-        bindings: &[(String, Expr)],
+        bindings: &[(crate::ir::core::InternedStr, Expr)],
+        body: &Block,
+    ) -> AotResult<Vec<AotStmt>> {
+        self.enter_lexical_scope(bindings, body);
+        let result = self.convert_let_block_assignment_inner(target, bindings, body);
+        self.exit_lexical_scope(Some(target));
+        result
+    }
+
+    fn convert_let_block_assignment_inner(
+        &mut self,
+        target: &str,
+        bindings: &[(crate::ir::core::InternedStr, Expr)],
         body: &Block,
     ) -> AotResult<Vec<AotStmt>> {
         let mut out = Vec::new();
 
         for (name, value) in bindings {
             let synthetic = Stmt::Assign {
-                var: name.clone(),
+                var: name.to_string(),
                 value: value.clone(),
                 span: value.span(),
             };
@@ -141,21 +341,13 @@ impl<'a> IrConverter<'a> {
                         ..
                     } = value
                     {
-                        let synthetic = Stmt::Assign {
-                            var: inner_var.clone(),
-                            value: (*inner_value.clone()),
-                            span: *span,
-                        };
-                        out.push(self.convert_stmt(&synthetic)?);
-
-                        if !var.starts_with('#') {
-                            let alias = Stmt::Assign {
-                                var: var.clone(),
-                                value: Expr::Var(inner_var.clone(), *span),
-                                span: *span,
-                            };
-                            out.push(self.convert_stmt(&alias)?);
-                        }
+                        out.extend(self.convert_nested_assignment(
+                            var,
+                            inner_var,
+                            inner_value,
+                            *span,
+                            !var.starts_with('#'),
+                        )?);
                         continue;
                     }
 
@@ -186,10 +378,19 @@ impl<'a> IrConverter<'a> {
                 out.extend(self.convert_stmt_expanded(last)?);
                 let synthetic = Stmt::Assign {
                     var: target.to_string(),
-                    value: Expr::Var(var.clone(), *span),
+                    value: Expr::Var(var.clone().into(), *span),
                     span: *span,
                 };
                 out.push(self.convert_stmt(&synthetic)?);
+            }
+            Stmt::DestructuringAssign { .. } => {
+                let expanded = self.convert_stmt_expanded(last)?;
+                let Some(AotStmt::ValueCarrier(value)) = expanded.last() else {
+                    unreachable!("destructuring expansion must end in its tuple value");
+                };
+                let value = value.clone();
+                out.extend(expanded);
+                out.push(self.bind_aot_value(target, value));
             }
             _ => {
                 out.extend(self.convert_stmt_expanded(last)?);
@@ -245,6 +446,15 @@ impl<'a> IrConverter<'a> {
                         value: aot_value,
                     })
                 } else {
+                    // Choose the slot type for a freshly-bound local. Inside a
+                    // `let` block the environment has been narrowed to the
+                    // variable's *scope-local* type (Issue #10251): a binding
+                    // that is monomorphic within its own scope keeps its precise
+                    // type (so two same-named bindings in sibling scopes stay
+                    // independent instead of being unified under a cross-scope
+                    // union), while a binding that is genuinely type-unstable
+                    // *within one scope* keeps the widened `Any`/`Union` slot
+                    // and is boxed to a dynamic `Value` (Issue #7075).
                     let slot_ty = match self.engine.env.get(var) {
                         Some(inferred_ty)
                             if matches!(
@@ -526,6 +736,20 @@ impl<'a> IrConverter<'a> {
                 })
             }
 
+            Stmt::DestructuringAssign { .. } => Err(AotError::UnsupportedInstruction(
+                UnsupportedInstructionDiagnostic::new(
+                    "internal: DestructuringAssign requires convert_stmt_expanded (Issue #10464)",
+                )
+                .with_span(stmt.span()),
+            )),
+
+            Stmt::RuntimeNominalDef { .. } => Err(AotError::UnsupportedInstruction(
+                UnsupportedInstructionDiagnostic::new(
+                    "AoT does not support runtime-conditional nominal definitions (Issue #11654)",
+                )
+                .with_span(stmt.span()),
+            )),
+
             // Enum definitions are handled at the program level in convert_program,
             // so inline occurrences are no-ops
             Stmt::EnumDef { .. } => Ok(AotStmt::Expr(AotExpr::LitNothing)),
@@ -550,5 +774,5 @@ impl<'a> IrConverter<'a> {
 }
 
 fn is_statement_let_passthrough_slot(name: &str) -> bool {
-    name.starts_with('#') || name == "result"
+    name.starts_with('#')
 }

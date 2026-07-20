@@ -1,10 +1,28 @@
 # Module syntax tests
 
 [[tests]]
+name = "modules_methodsig_struct_origin_10295"
+file = "methodsig_struct_origin_10295.jl"
+expected = true
+description = "A Base method signature on Base.Partition rejects a same-named module struct and raises a catchable MethodError instead of entering the wrong Base body (Issue #10295)"
+
+[[tests]]
+name = "modules_dispatch_selector_origin_parity_10879"
+file = "dispatch_selector_origin_parity_10879.jl"
+expected = true
+description = "Table-driven selector-parity coverage: the same Base/user same-name struct-ID pair is rejected identically by direct, function-value, Any-boxed dynamic, iterate()-protocol, splat, kwargs, and repeated-call-site (cache replay) dispatch, while a same-ID Base submodule alias and an external Base-abstract-type subtype remain accepted (Issue #10879)"
+
+[[tests]]
 name = "modules_parametric_inner_ctor_using_8313"
 file = "parametric_inner_ctor_using_8313.jl"
 expected = true
 description = "A parametric struct with an inner constructor, exported and brought in via `using .M`, is callable by its bare name even when it collides with a bundled struct of the same name (Base.Order.Perm); resolution prefers the in-scope struct deterministically (Issue #8313)"
+
+[[tests]]
+name = "modules_using_duplicate_dedup_10130"
+file = "modules_using_duplicate_dedup_10130.jl"
+expected = true
+description = "Repeated non-selective `using .M` of the SAME module still resolves every exported name; regression pin for the collect_module_metadata() import-all memoization (Issue #10130)"
 
 [[tests]]
 name = "import_multiple"
@@ -91,6 +109,24 @@ expected = true
 description = "A child module's unqualified call to its own function dispatches to the child method, not a same-named typed method in the parent; explicit cross-module imports still pool dispatch candidates (Issue #7575)"
 
 [[tests]]
+name = "modules_module_bare_call_prefers_local_function_10771"
+file = "module_bare_call_prefers_local_function_10771.jl"
+expected = true
+description = "A bare call inside a module resolves the module's own same-named function before a Main/top-level function binding, matching upstream module scope lookup (Issue #10771)."
+
+[[tests]]
+name = "modules_nested_module_bare_call_prefers_innermost_function_10840"
+file = "nested_module_bare_call_prefers_innermost_function_10840.jl"
+expected = true
+description = "A bare call inside a two-level nested module (A.B) resolves A.B's own same-named function ahead of a same-named function in the parent module A or at top level, extending the #10771 inliner module-scope prevention to nested modules (Issue #10840)."
+
+[[tests]]
+name = "modules_module_const_shadows_base_function_10234"
+file = "module_const_shadows_base_function_10234.jl"
+expected = true
+description = "A module-level const whose name collides with a Base function shadows that Base function for unqualified references inside module method bodies (Issue #10234)."
+
+[[tests]]
 name = "modules_module_if_const_binding_7917"
 file = "module_if_const_binding_7917.jl"
 expected = true
@@ -173,3 +209,333 @@ name = "modules_nested_module_order_binding_8269"
 file = "nested_module_order_binding_8269.jl"
 expected = true
 description = "Nested submodule bindings are available to later parent-module statements, and Base.Order direct access/import resolves ordering constants and helpers after Base preload (Issue #8269)."
+
+[[tests]]
+name = "modules_module_init_basic_8994"
+file = "module_init_basic_8994.jl"
+expected = true
+description = "A module's __init__() is called automatically after the module body finishes evaluating; side effects (push! into a module-level LOG) are visible to code outside the module definition (Issue #8994)."
+
+[[tests]]
+name = "modules_module_init_side_effects_8994"
+file = "module_init_side_effects_8994.jl"
+expected = true
+description = "A module __init__() that performs multiple side effects (push! twice into a module-level LOG array) runs correctly after the module body and before control returns to the top-level script (Issue #8994)."
+
+[[tests]]
+name = "modules_module_init_two_modules_8994"
+file = "module_init_two_modules_8994.jl"
+expected = true
+description = "Two sibling modules A and B each with their own __init__() both have their init called; the LOG arrays reflect independent initialization (Issue #8994)."
+
+[[tests]]
+name = "modules_module_no_init_8994"
+file = "module_no_init_8994.jl"
+expected = true
+description = "A module that does not define __init__() works normally; existing behavior is not regressed by the __init__ dispatch addition (Issue #8994)."
+
+# --- merged from `module` category (Issue #9671 Phase 2) ---
+[[tests]]
+name = "module_with_using_statistics"
+file = "module_with_using_statistics.jl"
+expected = true
+description = "Module with using Statistics statement"
+
+[[tests]]
+name = "module_with_struct"
+file = "module_with_struct.jl"
+expected = true
+description = "Basic struct definition inside module"
+
+[[tests]]
+name = "module_with_parametric_struct"
+file = "module_with_parametric_struct.jl"
+expected = true
+description = "Parametric struct with function inside module"
+
+[[tests]]
+name = "module_struct_with_operator"
+file = "module_struct_with_operator.jl"
+expected = true
+description = "Struct with operator overloading inside module"
+
+[[tests]]
+name = "module_struct_isa"
+file = "module_struct_isa.jl"
+expected = true
+description = "isa and typeof work correctly for structs in modules"
+
+[[tests]]
+name = "module_geometry"
+file = "module_geometry.jl"
+expected = true
+description = "Module with parametric struct, operators, dynamic type parameters (Point{Tnew})"
+
+[[tests]]
+name = "module_qualified_inline_comparison"
+file = "module_qualified_inline_comparison.jl"
+expected = true
+description = "Module qualified function call (MyGeometry.centroid) in inline assert comparison"
+
+[[tests]]
+name = "baremodule_basic"
+file = "baremodule_basic.jl"
+expected = 1.0
+description = "Baremodule syntax without automatic Base import"
+
+[[tests]]
+name = "module_base_show_dispatch_7172"
+file = "module_base_show_dispatch_7172.jl"
+expected = true
+description = "Issue #7172: Base.show defined inside a module is dispatched by print/string"
+
+[[tests]]
+name = "module_qualified_constructor_7172"
+file = "module_qualified_constructor_7172.jl"
+expected = true
+description = "Issue #7172: module-qualified struct constructor M.Point(...) and parametric M.Vec2(...)"
+
+[[tests]]
+name = "module_qualified_inner_constructor_7631"
+file = "module_qualified_inner_constructor_7631.jl"
+expected = true
+description = "Issue #7631: module-qualified struct constructor M.Widget() dispatches to the 0-arg inner constructor"
+
+[[tests]]
+name = "module_qualified_parametric_inner_constructor_7955"
+file = "module_qualified_parametric_inner_constructor_7955.jl"
+expected = true
+description = "PR #7955: module-qualified parametric constructor M.S(args) dispatches to a matching short-name inner constructor instead of default field construction"
+
+[[tests]]
+name = "module_qualified_parametric_inner_field_access_7958"
+file = "module_qualified_parametric_inner_field_access_7958.jl"
+expected = true
+description = "Issue #7958: named field access w.x on a module-qualified parametric inner-constructor instance (Mod.Wrapped(41) -> new{T}(...)) resolves the field table (single/multi param, two same-typed fields) instead of erroring 'has no field x'; getfield(w,1) already worked"
+
+[[tests]]
+name = "module_qualified_function_value_before_type_fallback_7955"
+file = "module_qualified_function_value_before_type_fallback_7955.jl"
+expected = true
+description = "PR #7955: module-qualified function value M.S wins over unrelated bare type fallback with the same short name, and qualified module type objects keep owner-qualified names"
+
+[[tests]]
+name = "module_conditional_export_7959"
+file = "module_conditional_export_7959.jl"
+expected = true
+description = "Issue #7959: module-level conditional export statements update module names and using imports"
+
+[[tests]]
+name = "module_macro_conditional_export_7959"
+file = "module_macro_conditional_export_7959.jl"
+expected = true
+description = "Issue #7959: exports inside a bare macro-expanded quote block (plain or conditional) record into module exports and using imports"
+
+[[tests]]
+name = "module_isdefined_alias_scope_7955"
+file = "module_isdefined_alias_scope_7955.jl"
+expected = true
+description = "PR #7955: module aliases stay scoped to their owner while exported aliases remain visible through using"
+
+[[tests]]
+name = "module_isdefined_macro_bindings_7948"
+file = "module_isdefined_macro_bindings_7948.jl"
+expected = true
+description = "Issue #7948: function-form isdefined(::Module, Symbol(\"@m\")) consults the macro binding table for owned/exported/imported macros"
+
+[[tests]]
+name = "module_selective_using_globals_7955"
+file = "module_selective_using_globals_7955.jl"
+expected = true
+description = "PR #7955: selective using of module globals imports only explicitly selected bindings, including non-exported constants"
+
+[[tests]]
+name = "module_macro_module_literal_export_mirroring_7955"
+file = "module_macro_module_literal_export_mirroring_7955.jl"
+expected = true
+description = "PR #7955: macro-expanded names($__module__) sees real module exports without treating hygiene-only members as exported"
+
+[[tests]]
+name = "module_qualified_outer_constructor_default_7729"
+file = "module_qualified_outer_constructor_default_7729.jl"
+expected = true
+description = "Issue #7729: module-qualified ctor M.Num(s) reaches the field-count default ctor when the struct also has an outer constructor (has_func branch fallback)"
+
+[[tests]]
+name = "module_struct_display_7172"
+file = "module_struct_display_7172.jl"
+expected = true
+description = "Issue #7172: in-scope module struct displays with unqualified type name (Point{Int64})"
+
+[[tests]]
+name = "module_callable_struct_7185"
+file = "module_callable_struct_7185.jl"
+expected = true
+description = "Issue #7185: callable struct (functor) defined inside a module is dispatched (internal/external call, parametric, anonymous self, converting ctor)"
+
+[[tests]]
+name = "module_relative_named_import_parent_7574"
+file = "relative_named_import_parent_7574.jl"
+expected = true
+description = "Issues #7574/#7594/#11132/#11137/#11157/#11158/#11161/#11162/#11164/#11165/#11168/#11419: lexical module/type roots across imports, Main qualification, local shadowing, unknown roots, baremodule Base visibility, and Core/Base builtin type binding authority"
+
+[[tests]]
+name = "module_bare_module_isa_shortname_7963"
+file = "module_bare_module_isa_shortname_7963.jl"
+expected = true
+description = "Issue #7963: bare `Module` isa resolves to Base.Module, not a same-short-name module-local abstract type (Box() isa Module == false)"
+
+[[tests]]
+name = "module_base_sqrt_foreign_shadow_8042"
+file = "module_base_sqrt_foreign_shadow_8042.jl"
+expected = true
+description = "Issue #8042: bare/Base.sqrt on an Any-typed Float64 must hit the builtin, not a foreign module's sqrt(::Any) (e.g. NaNMath.sqrt), which would recurse to a stack overflow"
+
+[[tests]]
+name = "module_short_type_name_value_8100"
+file = "module_short_type_name_value_8100.jl"
+expected = true
+description = "Issue #8100: a module-private type whose name matches the single-letter/letter+digit type-variable spelling (E, T1), referenced as a value, resolves to its DataType (typeof === DataType, === the qualified name), not a TypeVar; genuine where {T} type params still work"
+
+[[tests]]
+name = "module_value_field_access_8113_8114"
+file = "module_value_field_access_8113_8114.jl"
+expected = true
+description = "Issues #8113/#8114: member access through a Module value — nested sub-module (Outer.Inner.T1) and const module alias (const MA = Mod1; MA.S), for type/function/const members, 2+ levels deep incl. alias-rooted nested chains; local param named like a module still shadows it (Issue #7245)"
+
+[[tests]]
+name = "modules_testset_inner_function_9942"
+file = "module_testset_inner_function_9942.jl"
+expected = true
+description = "Function defined inside @testset inside a module resolves (Issue #9942)"
+
+[[tests]]
+name = "modules_struct_bare_name_base_clobber_10078"
+file = "module_struct_bare_name_base_clobber_10078.jl"
+expected = true
+description = "Issue #10078: a module struct's bare-name alias (registered so `Point(...)` works after `using .M`) must not clobber a same-named Base/prelude struct (Base's own `struct Partition` backing `Iterators.partition`) when a full, uncached compile bypasses the frozen Base bytecode cache (triggered here by shadowing the Base kwarg name `retry`); Base's own function bodies still resolve the bare name to themselves, while the module's own struct is still constructible under its bare name after `using`"
+
+[[tests]]
+name = "modules_let_collect_scope_10073"
+file = "module_let_collect_scope_10073.jl"
+expected = true
+description = "Follow-up of #9942 (Issue #10073): a function defined inside a PLAIN (non-@testset) let at module scope is collected and callable, and helpers collected from a module-body let/@testset (including one nested inside another) register at the enclosing module's scope so they can see module-scope globals, not just Main"
+
+[[tests]]
+name = "modules_scope_qualified_keying_10214"
+file = "module_scope_qualified_keying_10214.jl"
+expected = true
+description = "Issue #10214: function_module_paths/module_scope_overrides were keyed by BARE function name, so two different modules declaring a same-named top-level function with a same-named nested closure (function_module_paths, Issue #7180), or a same-named @testset-root helper (module_scope_overrides, Issue #10073), collided — whichever module was processed last silently won for BOTH, resolving the other module's helper against the wrong module's globals. Fixed by keying both mechanisms by a fully-qualified identity (module-qualified parent name / collection index) instead of bare name"
+
+[[tests]]
+name = "modules_let_root_qualified_keying_10236"
+file = "module_let_root_qualified_keying_10236.jl"
+expected = true
+description = "Issue #10236 (follow-up of #10073/#10219/#10214): a statement-position module-body let helper called via an effect (Ref store) is collected and resolves module-scope globals (Gap 1), and a module-body let-root helper no longer collides with an unrelated same-named Main-level let-root helper (Gap 2, same qualified-keying root cause as #10214, plus FunctionInfo::suppress_short_name_alias to keep the module-qualified helper out of the runtime bare-name closure-dispatch index)"
+
+[[tests]]
+name = "modules_struct_bare_name_base_clobber_iteration_10220"
+file = "module_struct_bare_name_base_clobber_iteration_10220.jl"
+expected = true
+description = "Issue #10220, follow-up to #10078/#10257, root cause diagnosed in #10294: unlike the #10078 fixture (which only proves Base compiles without erroring), this actually calls Base's own `Iterators.partition` end-to-end -- construction, `iterate`, `collect`, `length` -- after a same-named module struct's bare-name alias clobbers Base's own `Partition` bare-table slot; `CoreCompiler::visible_using_modules_for_name` (subset_julia_vm_compile/src/compile/core_compiler.rs) ignored `in_base_function_scope` and qualified Base's own bare `Partition(itr, Int64(n))` call against the user's `using`-imported module, corrupting every subsequent `Iterators.partition` call with a `DynamicToI64` runtime error; fixed by gating that method on `in_base_function_scope` so every caller uniformly falls through to the origin-aware bare-name path"
+[[tests]]
+name = "modules_include_mutable_struct_10329"
+file = "include_mutable_struct_10329.jl"
+expected = true
+description = "Issue #10329/#10563: runtime include installs a mutable struct definition in the live VM, constructs it, and evaluates normalized field access instead of rejecting parser-internal Expr heads."
+
+[[tests]]
+name = "modules_sibling_same_named_struct_dispatch_11076"
+file = "sibling_same_named_struct_dispatch_11076.jl"
+expected = true
+description = "Issue #11076: static and dynamic method applicability preserves the owner of fully module-qualified same-named structs. Separate A.Box/B.Box family, fully-applied, and non-parametric methods dispatch only to their own instances across both declaration orders and alternating cache-warming calls; a bare Box annotation inside its defining module still matches that module's qualified runtime type, and an exact M.Box constructor lookup does not suffix-remap to Outer.M.Box."
+
+[[tests]]
+name = "modules_struct_identity_matrix_11021"
+file = "module_struct_identity_matrix_11021.jl"
+expected = true
+description = "Issue #11021 (fixed as part of Issue #10989, StructId Phase 2b): same-named structs in sibling/nested modules, and structs shadowing a Base type name, must not collapse under `==`/`===`/typeof identity even though their bare (module-stripped) names coincide; module-prefix stripping in type_objects_equal/type_objects_identical/JuliaType::type_eq/is_subtype_of_with_lookup is now only applied when at most one side carries an owner prefix (Issue #8100's bare-vs-qualified-same-declaration case stays intact)."
+
+[[tests]]
+name = "modules_struct_dispatch_owner_identity_11076"
+file = "module_struct_dispatch_owner_identity_11076.jl"
+expected = true
+description = "Issue #11076 (dispatch-matching sibling of Issue #11021, both found investigating Issue #10989): a same-named GENERIC struct declared in sibling/nested modules and referenced BARE (no explicit `{...}`) as a method parameter type no longer makes dispatch wrongly ambiguous; the runtime matcher's `Vm::type_matches` (vm/dispatch.rs) now applies the SAME asymmetric owner rule as #11021 (`subset_julia_vm_types::types::struct_owners_compatible`, exposed `pub` and reused, not re-derived) before falling through to the module-stripped fast path or the owner-blind `check_subtype` fallback. A genuine (non-module) ambiguity is still correctly reported. Scope note (see in-file comment): non-generic sibling-module structs, explicitly-parametric annotations (`x::A1x.Box{Int}`), and bare names colliding with the internal builtin-container family list hit a DIFFERENT, deeper bug -- `MethodTable::add_method` silently collapses the second same-family method at REGISTRATION time because `core_signature` (`CoreType`) is module-stripped -- tracked separately as Issue #11094, deferred to Issue #11078."
+
+[[tests]]
+name = "modules_sibling_builtin_family_struct_dispatch_11094"
+file = "sibling_builtin_family_struct_dispatch_11094.jl"
+expected = true
+description = "Builtin-family-named sibling structs and runtime DataType callees preserve exact constructor ownership, outer/default precedence, and evaluation order across positional, splat, keyword, and parametric calls (Issues #11094, #11153, #11367, #11368, #11371, #11373, and #11375)"
+
+[[tests]]
+name = "modules_submodule_alias_first_using_wins_11176"
+file = "submodule_alias_first_using_wins_11176.jl"
+expected = true
+description = "Issue #11176 (found auditing module_aliases for Issue #11032, Phase 2a continuation): when two different `using` imports bring a same-named submodule into scope from different parent modules, the FIRST import wins (matching upstream Julia's warn-and-ignore rule for the conflicting later one) instead of whichever module `imported_submodule_aliases` happened to iterate last under HashSet order. Fixed by rebuilding module_aliases from the already-available source-ordered resolved_usings with first-wins entry semantics. Two scopes pin both orderings of the same conflict so the result is proven to be source-order-driven, not name/hash-order-driven."
+
+[[tests]]
+name = "modules_submodule_import_conflict_11176"
+file = "submodule_import_conflict_11176.jl"
+expected = true
+description = "Issue #11176: module-valued imports preserve upstream provenance and scope semantics across explicit function/type/module conflicts (including repeated aliases in one statement), ambiguous exports, direct calls, local/capture shadows, and unexported submodules"
+
+[[tests]]
+name = "modules_submodule_alias_export_ambiguity_11203"
+file = "submodule_alias_export_ambiguity_11203.jl"
+expected = true
+description = "Source-ordered import activation across function/value/type/module roots; plain `import M` binds no exports; exported conflicts become ambiguous before call arguments; explicit/local/owned aliases preserve precedence; assignment aliases retain runtime Module values (Issues #11132, #11203, #11216, #11228, #11229)"
+
+[[tests]]
+name = "modules_qualified_datatype_kwargs_splat_11242"
+file = "qualified_datatype_kwargs_splat_11242.jl"
+expected = true
+description = "Issue #11242: a qualified DataType reached through a runtime Module value keeps its owner during args/kwargs-splat constructor dispatch instead of falling back to an unrelated same-named facade function and recursing"
+
+[[tests]]
+name = "modules_module_eval_function_def_10874"
+file = "module_eval_function_def_10874.jl"
+expected = true
+description = "Module-body @eval function definitions (short and long form) hoist into the module's function list — module-body calls and qualified M.f calls resolve — while the runtime DefineEvalFunction statement stays in the body, mirroring the top-level Program behavior (Issue #10874)"
+
+[[tests]]
+name = "modules_cross_module_alias_ctor_11068"
+file = "cross_module_alias_ctor_11068.jl"
+expected = true
+description = "A module-local const alias to a parametric type owned by another module resolves as a constructor: const Y = OwnerA.X is extracted as a type alias (qualified FieldExpression RHS) and the parametric base-name canonicalization chases alias chains before the dotted early-return (Issue #11068)"
+
+[[tests]]
+name = "modules_import_conflict_ignored_11426"
+file = "modules_import_conflict_ignored_11426.jl"
+expected = true
+description = "A conflicting import (rename or selective) is ignored with upstream's warning when the name already has a source-earlier module binding: the pre-existing value stays authoritative for value reads and parametric application (A{Int}(1) raises catchable TypeError instead of constructing the imported type), while non-conflicting imports keep static constructor authority (Issue #11426)"
+
+[[tests]]
+name = "modules_eval_current_module_11421"
+file = "modules_eval_current_module_11421.jl"
+expected = true
+description = "Bare eval(expr) evaluates in the module where the call appears (a nested module's eval(:(x = 1)) installs P.C.x, never Main.x), matching upstream's per-module eval(x) = Core.eval(M, x); the explicit Core.eval(m, expr) / Base.eval(m, expr) two-argument forms target the given module, and @eval plus eval inside module functions follow the same authority (Issue #11421)"
+
+[[tests]]
+name = "modules_nameof_module_11171"
+file = "nameof_module_11171.jl"
+expected = true
+description = "nameof(m::Module) returns the module's own unqualified binding name as a Symbol (not the qualified `Owner.Name` path) for a nested module, Main, and Base, and resolves the same way through a bare dynamic-dispatch call g(m) = nameof(m) and a ::Module-annotated argument (Issue #11171)"
+
+[[tests]]
+name = "modules_struct_display_owner_11365"
+file = "module_struct_display_owner_11365.jl"
+expected = true
+description = "Issue #11365: module-owned struct display follows upstream Main-visibility - a using-imported exported type prints bare (Point11365{Int64}(1, 2), also under a qualified constructor and in typeof), while a module-private or never-imported type prints the full path from the top (Main.Geo11365.Hidden11365(7) / Main.Plain11365.B()) for both instance display and typeof."
+
+[[tests]]
+name = "modules_array_shadow_identity_11388"
+file = "module_array_shadow_identity_11388.jl"
+expected = true
+description = "Issue #11388: a user struct named Array in a module is an unrelated nominal type - not isa/<: Base.Array (owner-aware family gate + raw-name isa comparison), while genuine arrays stay isa Base.Array, the module-local bare Base.iterate(::Array) annotation dispatches to the local struct through signature-side owner qualification, splat stays method-first ((99,)), and typeof displays Main.Faux11388.Array."
+
+[[tests]]
+name = "modules_ref_index_assign_10363"
+file = "module_ref_index_assign_10363.jl"
+expected = true
+description = "module-scope global Ref index-assignment (R[] = v) preserves the stored value's type instead of coercing Int64 to Float64, while module-scope unboxed array stores keep upstream setindex! conversion (Issue #10363)"

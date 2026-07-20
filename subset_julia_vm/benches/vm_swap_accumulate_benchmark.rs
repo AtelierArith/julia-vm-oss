@@ -14,11 +14,12 @@
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::hint::black_box;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{CompiledProgram, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::CompiledProgram;
 
 const SWAP_ACCUMULATE_SOURCE: &str = include_str!("../../benchmarks/vm_swap_accumulate.jl");
 const EXPECTED_OUTPUT: &str = "149905498950\n";

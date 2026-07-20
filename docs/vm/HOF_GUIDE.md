@@ -317,6 +317,59 @@ Non-HOF reductions (no function argument):
 | `diff(arr)` | Consecutive differences |
 | `any(arr)` / `all(arr)` | Boolean reduction |
 
+## Curried Predicate Implementation (Issue #5662)
+
+When adding a curried single-argument form of a predicate (`isequal(x)`,
+`startswith(s)`, etc.) that returns a 1-arg function:
+
+1. **Return a closure, not `Base.Fix2`**: define `isequal(x) = y -> isequal(y, x)`
+   in `base/operators.jl`. HOFs (`filter`, `findfirst`, `findall`) handle anonymous
+   closures but mis-handle bare `Fix2` values (Fix2 support across all HOFs is a
+   separate epic). `map` works with either; always test `filter`/`findfirst`/`findall`.
+2. **Gate return-type inference by arity**: `compile/expr/infer/julia_type.rs` has
+   a `"isequal" | ... => JuliaType::Bool` arm that fires regardless of arity. A
+   curried `isequal(2)` (1 arg) would infer as `Bool` → `filter(isequal(2), v)`
+   becomes `filter(Bool, Vector)` → NoMethodFound. Split the name with
+   `"isequal" if args.len() == 2 =>` so the 1-arg form infers as a function.
+3. **Check upstream first**: `isless(x)` has no upstream curried form — don't add it.
+   Only gate per-name for forms upstream actually provides.
+4. **Builtin-shadowing trap** (Issue #2103): if a name is backed ONLY by a Rust builtin
+   via the compile fast-path (e.g. 1-arg `round`), adding ANY pure-Julia method for
+   that name shadows the builtin for ALL arities, breaking prelude compilation. Verify
+   that a pure-Julia method already exists for the arity you are NOT currying.
+
+## String/Array Dual Inference Gate (Issue #5670)
+
+A base function that returns `String` for a string subject but an `Array` for an array
+subject (e.g. `replace`, `repeat`) must have its String return-type inference GATED on
+the first-argument type in **two independent channels**:
+
+- `compile/expr/infer/mod.rs` (~line 715, `ValueType`) → `ValueType::Str`
+- `compile/expr/infer/julia_type.rs` (~line 866, `JuliaType`) → `JuliaType::String`
+
+Without the gate, `replace(arr, ...)` infers as `String`, so an inline
+`replace(arr, ...) == array_literal` compiles a String-vs-Array `==` fast path and
+evaluates to `false`. The bug is invisible when the result is bound to a variable first
+(`r = replace(arr,...); r == lit` works) — only inline use or `@test` expressions reveal
+it. Run `bash scripts/fixture_julia_parity.sh` to catch this class of regression.
+
+## HOF Return-Type Inference: Three Channels (Issue #6672)
+
+HOF return-type inference lives in three duplicate channels that must all agree:
+
+1. `compile/expr/infer/hof.rs` `infer_filter_call_return_type` (ValueType channel)
+2. `compile/expr/infer/julia_type.rs` `infer_julia_type` (JuliaType channel)
+3. `compile/abstract_interp/engine/mod.rs` `infer_filter_return_type` (engine channel)
+
+`collection_mutation_runtime_candidates` early-returns to generic dispatch (no legacy
+boundary) only when **both** `infer_expr_type` and `infer_julia_type` agree on a
+concrete container type. Fixing only the engine channel (#3) does not change compile-side
+routing. When a HOF preserves container type (e.g. `filter` on `Dict` returns `Dict`),
+propagate the receiver type in ALL three channels.
+
+Debug tip: `eprintln!` at the top of `collection_mutation_runtime_candidates` printing
+both inference results shows immediately which channel still returns `Any`.
+
 ## Related Documentation
 
 - `CLAUDE.md` - Top-level contributor guidelines

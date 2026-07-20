@@ -1,0 +1,404 @@
+issue	created_at	state_at_snapshot	class	owner	reason	title
+#9179	2026-07-04T00:18:02Z	closed	10	#10815	title:aot	AoT: #9103 generator-body lift produces expression-position LetBlock that AoT rejects (#7014), breaking test_aot_generator_expression_codegen_7046
+#9182	2026-07-04T01:15:41Z	closed	0	#9182	self-owned/no-structural-match	REPL: トップレベル let ブロックの新規ローカル変数が (単純な即時returnケース以外で) 誤って永続化される (#9157 関連, 別根因)
+#9183	2026-07-04T01:27:19Z	closed	0	#9183	self-owned/no-structural-match	Bug: scalar `Expr == Expr` fails to compile with "Cannot convert Expr to I64"
+#9185	2026-07-04T01:43:21Z	closed	0	#9185	self-owned/no-structural-match	Bug: `@doc`-defined module macros are not exported via `using` (AbstractAlgebra `@req` unavailable)
+#9193	2026-07-04T02:55:32Z	closed	1	#10459	title:shadow	Bug: REPLSession::reset() leaks global_types/global_struct_names, permanently breaking a Base function name shadowed earlier
+#9203	2026-07-04T03:30:25Z	closed	0	#9203	self-owned/no-structural-match	Plots push!(plt,…) re-publishes all 7 current-figure holders every push (O(pushes×7) redundant global writes; ~38× slower than needed)
+#9206	2026-07-04T03:43:20Z	closed	0	#9206	self-owned/no-structural-match	Plots @animate growing-path artifact is O(frames²) / ~61MB JSON — dominates iOS render time (Aizawa/Lorenz samples)
+#9210	2026-07-04T04:20:28Z	closed	0	#9210	self-owned/no-structural-match	Bug: file-mode soft scope not enforced — loop assignment to existing global silently mutates it instead of UndefVarError
+#9218	2026-07-04T05:52:38Z	closed	0	#9218	self-owned/no-structural-match	iOS: 3D growing-path animation (gl3d) OOMs — repeated WebGL redraws never free buffers
+#9224	2026-07-04T06:55:52Z	closed	0	#9224	self-owned/no-structural-match	iOS: render 3D growing-path @animate/gif as a static full-resolution time-colored trace (avoid gl3d redraw OOM)
+#9229	2026-07-04T07:38:48Z	closed	0	#9229	self-owned/no-structural-match	REPL OOM abort (rust_oom) evaluating the Aizawa @animate sample in the iOS app
+#9233	2026-07-04T08:55:46Z	closed	0	#9233	self-owned/no-structural-match	Bug: iOS Editor 画面でソース編集(タイプ)すると固まる — 毎打鍵の全文再ハイライト + keyCommands 再生成
+#9235	2026-07-04T10:18:10Z	closed	4	#10462	title:cache	WASM: embedded Base cache rejected on wasm32 (usize::MAX CallDynamic sentinel) → ~7 s cold start
+#9237	2026-07-04T10:30:20Z	closed	4	#10462	title:serialize	iOS Editor OOMs (~4GB) on Aizawa @animate sample — result-value JSON echo serializes O(frames²) AnimatedGif
+#9250	2026-07-05T00:18:24Z	closed	4	#10462	title:cache	perf: anonymous-function value at top level defeats the Base bytecode cache (~25× compile slowdown; real cause of #9158 Surface)
+#9254	2026-07-05T02:14:59Z	closed	0	#9254	self-owned/no-structural-match	Bug: surface(x, y, f::Function) drops the function-valued z (renders a 2D line) once `using LinearAlgebra` is loaded after `using Plots`
+#9264	2026-07-05T12:07:59Z	closed	0	#9264	self-owned/no-structural-match	Bug: === (object identity) on independently-built Expr returns true, upstream is false
+#9265	2026-07-05T12:09:38Z	closed	0	#9265	self-owned/no-structural-match	Bug: scalar typed rand([rng], ::Type{T}) errors or returns wrong type (rand(rng, UInt32), rand(Int), …)
+#9270	2026-07-05T12:29:12Z	closed	0	#9270	self-owned/no-structural-match	Bug: two same-seed MersenneTwister variables share state (streams not reproducible across independent instances)
+#9271	2026-07-05T12:37:22Z	closed	5	#10463	title:generator	[bug] Filtered generators with a lifted body/predicate in function scope (local, incl. zero-capture) are still eagerly evaluated
+#9280	2026-07-05T13:38:28Z	closed	0	#9280	self-owned/no-structural-match	Bug: nextfloat(::BigFloat) errors with "reinterpret(Int64, BigFloat): size mismatch"
+#9281	2026-07-05T13:38:35Z	closed	0	#9281	self-owned/no-structural-match	Bug: chained BigFloat division `BigFloat / BigFloat / Int` degrades to Float64
+#9284	2026-07-05T13:55:44Z	closed	0	#9284	self-owned/no-structural-match	Bug: top-level `let` hard scope — loop `+=` on a global prints instead of UndefVarError (julia errors)
+#9285	2026-07-05T13:57:29Z	closed	6	#10464	title:lowered	Bug: rand(rng, T) scalar typed draw errors inside a generator/comprehension (captured RNG mislowered to RandArray)
+#9286	2026-07-05T14:25:25Z	closed	0	#9286	self-owned/no-structural-match	Bug: exponent/significand/frexp on BigFloat error with reinterpret size mismatch (same root cause as #9280)
+#9288	2026-07-05T14:28:21Z	closed	0	#9288	self-owned/no-structural-match	Bug: mixed BigFloat–Rational arithmetic errors with "Cannot convert StructRef to BigFloat"
+#9291	2026-07-05T15:00:00Z	closed	7	#10465	title:fixture	Regression: for-head range with Any-inferred computed float step iterates zero times under parse_and_lower (re-breaks #7800 fixture)
+#9292	2026-07-05T15:00:13Z	closed	10	#10815	title:aot	Regression: AoT lift-reversal (#9179) does not handle #9274 filtered/tuple generator lifts — test_aot_generator_expression_codegen_7046 red again
+#9293	2026-07-05T15:13:59Z	closed	0	#9293	self-owned/no-structural-match	Comprehension over inline range with int start and float/Any step errors "expected I64, got Float64" (element type inferred from start only)
+#9300	2026-07-05T17:17:44Z	closed	5	#10463	title:broadcast	Bug: chained broadcast comparison a .<= v .< b returns all-false
+#9301	2026-07-05T17:18:01Z	closed	5	#10463	title:collect	Bug: collect over a Float16-valued generator yields Vector{Any} not Vector{Float16}
+#9304	2026-07-05T17:32:34Z	closed	0	#9304	self-owned/no-structural-match	Bug: inline `big(int)//int + BigFloat` mis-inferred as BigFloat → "expected BigFloat, got StructRef"
+#9312	2026-07-05T18:27:03Z	closed	0	#9312	self-owned/no-structural-match	@testset body is scope-transparent: loop accumulator raises UndefVarError in file/CLI mode (upstream @testset is a hard scope) — bigfloat_power_6790.jl CLI-red on main
+#9313	2026-07-05T18:50:22Z	closed	0	#9313	self-owned/no-structural-match	Hard-scope `let` (and `@testset`) leaks body-local variables into the module global scope
+#9315	2026-07-05T21:15:31Z	closed	0	#9315	self-owned/no-structural-match	Bug: true//true and 0x01//0x03 stack-overflow in Rational construction (julia returns 1//1 / 0x01//0x03)
+#9316	2026-07-05T21:15:32Z	closed	0	#9316	self-owned/no-structural-match	Bug: big(2)^300 // big(3)^100 raises MethodError //(::Float64,::Float64) instead of exact Rational{BigInt}
+#9317	2026-07-05T21:15:34Z	closed	0	#9317	self-owned/no-structural-match	Bug: BigFloat(1) + pi degrades to Float64 (upstream promotes to BigFloat at active precision)
+#9318	2026-07-05T21:15:35Z	closed	0	#9318	self-owned/no-structural-match	Bug: significand/exponent/frexp on inline BigFloat expressions (BigFloat(2)^500 etc.) statically bind the generic Float64 method — inference misses BigFloat result type of ^ and *
+#9319	2026-07-05T21:15:37Z	closed	5	#10463	title:generator	Bug: caught exception inside a filtered-generator FilterMap predicate/map leaves stale BroadcastState — later unrelated return re-invokes the stale callable (crash)
+#9320	2026-07-05T21:15:39Z	closed	5	#10463	title:generator	Bug: length(filtered generator) returns the UNFILTERED base length (julia raises MethodError — SizeUnknown)
+#9321	2026-07-05T21:16:18Z	closed	0	#9321	self-owned/no-structural-match	Bug: integer comprehension range with a runtime-Float bound crashes (h(n)=length([i for i in 1:n]); h(5.5) — julia returns 5)
+#9322	2026-07-05T21:16:20Z	closed	5	#10463	title:eltype	Bug: mixed float-width range 0:0.5f0:6.0 yields eltype Float32 (julia promotes to Float64)
+#9324	2026-07-05T21:16:23Z	closed	0	#9324	self-owned/no-structural-match	Bug: closures capturing a for-loop variable inside a @testset body share one cell (print 30 30; julia prints 10 20) — works in let/function scope
+#9326	2026-07-05T21:16:52Z	closed	0	#9326	self-owned/no-structural-match	Bug: factorial(21) silently wraps to a negative Int64 (julia raises OverflowError) — error/error_overflow_arithmetic.jl CLI-red
+#9327	2026-07-05T21:16:53Z	closed	0	#9327	self-owned/no-structural-match	Bug: string/print of VersionNumber renders VersionNumber(1, 2, 3) instead of 1.2.3 — version/version_comparison.jl CLI-red
+#9328	2026-07-05T21:16:55Z	closed	5	#10463	title:eltype	Bug: rand(rng, Int, dims...) returns a Float64-backed array (julia: Matrix{Int64}) — typed array draw drops the eltype
+#9332	2026-07-05T21:53:25Z	closed	0	#9332	self-owned/no-structural-match	BigFloat arithmetic ignores setprecision context (result carries default 256-bit precision)
+#9333	2026-07-05T21:54:45Z	closed	2	#10460	title:subtyp	Epic: Real/Number subtype 演算・型 promotion の系統的パリティ不全 — 調査台帳と修正計画
+#9334	2026-07-05T21:55:10Z	closed	0	#9334	self-owned/no-structural-match	Bug: promote() silently no-ops when it cannot change types — missing not_sametype guard turns promote-fallback operators into StackOverflow
+#9336	2026-07-05T21:55:13Z	closed	0	#9336	self-owned/no-structural-match	Bug: mixed Signed×Unsigned integer comparisons throw InexactError instead of returning correct Bool
+#9337	2026-07-05T21:55:15Z	closed	0	#9337	self-owned/no-structural-match	Bug: mixed Signed×Unsigned div/fld/cld/rem/mod ignore upstream signedness rules (828 full-matrix cells; mod(true,true)::Int64)
+#9338	2026-07-05T21:55:16Z	closed	0	#9338	self-owned/no-structural-match	Bug: rem/mod between UInt128/Int128 and Float16/32/64 returns NaN
+#9339	2026-07-05T21:55:18Z	closed	0	#9339	self-owned/no-structural-match	Bug: BigFloat comparison with NaN returns true; BigFloat(0.0)+(-0.0) returns -0.0 (matrix regression)
+#9340	2026-07-05T21:55:20Z	closed	0	#9340	self-owned/no-structural-match	Bug: Rational vs Float ==/< compares after lossy Float64 rounding — 1//3 == 0.3333333333333333 is true
+#9341	2026-07-05T21:55:21Z	closed	2	#10460	title:promotion	Bug: Irrational promotion parity — promote_type(Irrational,Float64)=Real; pi+im silently drops imaginary part; pi+big(1)→Float64; sin(pi)≠0.0
+#9342	2026-07-05T21:55:23Z	closed	0	#9342	self-owned/no-structural-match	Bug: sqrt(Complex{Int}) is a fatal compile-time error even when unreachable; abs(::Complex{Float32}) widens to Float64
+#9343	2026-07-05T21:55:24Z	closed	0	#9343	self-owned/no-structural-match	Bug: Bool strong-zero missing (false*Inf=NaN) and Char compares equal to Int ('a'==97 is true)
+#9344	2026-07-05T21:55:26Z	closed	0	#9344	self-owned/no-structural-match	Bug: float special cases — isless(-0.0,0.0)=false; 0.5f0^2::Float64; (-8.0)^(1//3)=NaN instead of DomainError
+#9345	2026-07-05T21:55:27Z	closed	5	#10463	title:eltype	Bug: range/colon operand promotion — 1:Int8(5)::UnitRange{Int8}; eltype of float ranges = Any; range(len)→LinRange; 1:big(3) eltype Int64
+#9346	2026-07-05T21:55:29Z	closed	0	#9346	self-owned/no-structural-match	Bug: promote-consuming Base APIs — clamp(1,0.5,2.5)::Int64; two-arg atan(1,2.0) MethodError
+#9348	2026-07-05T21:58:40Z	closed	5	#10463	title:broadcast	Bug: broadcast .<= / .>= over Float16 array gives wrong result for negative elements
+#9351	2026-07-05T22:04:33Z	closed	10	#10815	title:aot	AoT inference has an independent numeric promotion table — widens Bool/narrow ints to Int64, diverging from VM runtime and upstream
+#9352	2026-07-05T22:08:21Z	closed	0	#9352	self-owned/no-structural-match	Bug: 2^big(3) (Int ^ BigInt) errors 'Cannot compute power of Int64 and BigInt' instead of BigInt 8
+#9353	2026-07-05T22:12:17Z	closed	5	#10463	title:generator	Bug: iterating a filtered generator in a specialized (counted-loop) function fails; upstream returns the correct value
+#9358	2026-07-05T22:18:26Z	closed	5	#10463	title:generator	Bug: a try/catch used as an expression value inside a generator body evaluates to nothing
+#9360	2026-07-05T22:25:52Z	closed	7	#10465	title:fixture	Fixture harness masks @testset failures and silently skips unregistered fixtures (CLI/harness divergence)
+#9362	2026-07-05T22:33:25Z	closed	0	#9362	self-owned/no-structural-match	Bug: float(::Rational{UInt8}) / unsigned & Bool Rational element types mis-dispatches (errors instead of Float64)
+#9363	2026-07-05T22:33:42Z	closed	0	#9363	self-owned/no-structural-match	Bug: Rational(x::Rational) single-arg identity constructor raises InternalError (loose-matched to Rational(::Int64))
+#9364	2026-07-05T22:34:12Z	closed	0	#9364	self-owned/no-structural-match	Bug: string interpolation "$x" and show/repr of a struct ignore user Base.show (field-dump fallback)
+#9371	2026-07-06T00:03:56Z	closed	0	#9371	self-owned/no-structural-match	Bug: show(::VersionNumber) prints 1.2.3 instead of v"1.2.3" (print/string are fixed by #9366; show still diverges)
+#9372	2026-07-06T00:03:58Z	closed	0	#9372	self-owned/no-structural-match	Bug: VersionNumber prerelease is dropped at parse — v"2.0.0-rc1" == v"2.0.0" is true and ordering is wrong (upstream: semver precedence)
+#9373	2026-07-06T00:04:00Z	closed	5	#10463	title:eltype	Bug: eltype of a mixed-float-width range object (0:0.5f0:6.0) is Any (julia: Float64) — collect is fixed by #9322, the lazy range still diverges
+#9374	2026-07-06T00:04:02Z	closed	0	#9374	self-owned/no-structural-match	Bug: Rational{UInt8} displays 1//3 instead of 0x01//0x03 (component show form; value/type are correct after #9315)
+#9375	2026-07-06T00:04:34Z	closed	0	#9375	self-owned/no-structural-match	Bug: scalar chained comparison 0 <= g() < 10 evaluates the interior operand twice (upstream: once) — dotted chains fixed by #9300, scalar path still duplicates
+#9377	2026-07-06T00:04:36Z	closed	0	#9377	self-owned/no-structural-match	Integer-range comprehension/for-head fast path: non-finite / out-of-Int64 runtime Float bound silently coerced instead of raising InexactError (#9321 follow-up)
+#9379	2026-07-06T00:06:17Z	closed	5	#10463	title:iterator	Bug: IteratorSize/size of a generator diverge from upstream (filtered→SizeUnknown/MethodError; unfiltered size→(5,)); trait-layer gap behind #9320
+#9382	2026-07-06T00:22:50Z	closed	5	#10463	title:generator	Bug: inline Float16(i) constructor in a comprehension/generator body produces Float64 values (not Float16)
+#9383	2026-07-06T00:24:59Z	closed	0	#9383	self-owned/no-structural-match	Float64(::BigInt) errors: "Cannot convert BigInt to Float64" (convert_to_f64 missing BigInt arm)
+#9384	2026-07-06T00:25:28Z	closed	0	#9384	self-owned/no-structural-match	big(1) + pi returns Float64, not BigFloat (bundled +(x::Integer, y::AbstractIrrational) lumps BigInt with machine ints)
+#9385	2026-07-06T00:35:05Z	closed	5	#10463	title:eltype	Bug: array comprehension [f() for ...] does not runtime-narrow the container eltype when the body type is not static (Vector{Any}; collect(f() for ...) narrows correctly)
+#9393	2026-07-06T01:33:56Z	closed	5	#10463	title:iterator	Bug: value-level IteratorSize((f(x) for x in vector)) returns HasLength() instead of HasShape{1}() (array-base generator)
+#9399	2026-07-06T04:30:25Z	closed	5	#10463	title:generator	Bug: sum/fold over a generator freezes the body's dynamic dispatch on the first element (sum(g(v) for v in Any[1,2.0,"s"]) = 3, julia: 6; collect dispatches correctly)
+#9400	2026-07-06T04:30:27Z	closed	0	#9400	self-owned/no-structural-match	Bug: top-level method redefinition wins retroactively in script mode — call before the redefinition sees the later method (julia world age: 2 then 101; sjulia: 101, 101)
+#9401	2026-07-06T05:06:07Z	closed	0	#9401	self-owned/no-structural-match	[bug] インライン Base.HasShape{1}() (値パラメータ付きパラメトリック struct のインライン構築) が 'instantiation not found' で compile error
+#9405	2026-07-06T07:05:23Z	open	5	#10463	title:collect	Bug: collect/map/sum over a FILTERED generator used as a nested base fails (Generator callable field not representable)
+#9407	2026-07-06T07:21:59Z	closed	0	#9407	self-owned/no-structural-match	push!(::Vector{Complex{Float64}}, ::Complex{Float64}) into a `Complex{Float64}[]` literal fails: "Cannot push Any to Complex{Float64} array"
+#9409	2026-07-06T07:49:01Z	closed	0	#9409	self-owned/no-structural-match	Bug: statically no-method numeric call raises uncatchable compile-time MethodError (should be catchable runtime MethodError)
+#9412	2026-07-06T07:53:49Z	closed	0	#9412	self-owned/no-structural-match	Bug: Irrational×Rational ordering hits promote-fallback recursion trap (StackOverflowError instead of comparison)
+#9414	2026-07-06T07:55:22Z	closed	0	#9414	self-owned/no-structural-match	float mod loses signed zero: mod(5.0, -2.5) returns 0.0 instead of -0.0
+#9416	2026-07-06T07:58:45Z	closed	0	#9416	self-owned/no-structural-match	Bug: rem/mod between Rational and Float/BigFloat/Int throws MethodError instead of promoting
+#9419	2026-07-06T08:02:02Z	closed	0	#9419	self-owned/no-structural-match	range(start, stop; length=n) returns LinRange instead of StepRangeLen{…,TwicePrecision}
+#9420	2026-07-06T08:02:04Z	closed	5	#10463	title:eltype	eltype(1:big(3)) is Int64 instead of BigInt (no BigInt range storage)
+#9421	2026-07-06T08:02:06Z	closed	5	#10463	title:collect	collect(0:0.1:1) shows non-TwicePrecision rounding (0.30000000000000004)
+#9422	2026-07-06T08:05:29Z	closed	0	#9422	self-owned/no-structural-match	Bug: rem on Rational×typemax(UInt128) aborts with uncatchable OverflowError in multi-cell runs (state-dependent)
+#9424	2026-07-06T08:08:22Z	closed	0	#9424	self-owned/no-structural-match	Rational vs BigFloat ==/</<= compare inexactly (promote rounds to shared precision, not upstream infinite-precision)
+#9427	2026-07-06T08:12:44Z	closed	4	#10462	title:cache	Perf regression: PR #9404 (L2 cache TypeId, #9197 S3) makes closure/Type-arg dispatch skip L2 — packages::chunk_003 6x slower (50s→294s)
+#9429	2026-07-06T08:13:59Z	closed	0	#9429	self-owned/no-structural-match	Bug: rem/mod of typemin(signed) by -1 panics the VM (remainder overflow) instead of returning 0
+#9436	2026-07-06T08:58:58Z	closed	0	#9436	self-owned/no-structural-match	Bug: a global bound to a captured closure poisons ALL subsequent REPL evals (1+1, using X all fail until reset) — severe secondary effect of the value→expr ceiling, structurally fixed by #9199 S3
+#9438	2026-07-06T09:02:38Z	open	5	#10463	title:collect	[bug] collect of a flatten-over-generators infers Vector{Any} instead of Vector{Int64}
+#9439	2026-07-06T09:07:33Z	closed	0	#9439	self-owned/no-structural-match	Pre-existing test failure on main: retired_effect_hints_are_body_provable_over_base_issue_8441 (isless effects weakened by total-order isless #9344)
+#9440	2026-07-06T09:11:28Z	closed	0	#9440	self-owned/no-structural-match	Bug: Rational × Unsigned div/rem/mod result type ignores signedness rule (Rational{UInt64} instead of Rational{Int64}; 6 reduced-matrix cells)
+#9441	2026-07-06T09:15:37Z	closed	0	#9441	self-owned/no-structural-match	Bug: mixed Signed×Unsigned +, -, * return signed result type (Int128(-1)*UInt128 :: Int128 instead of UInt128; 120 full-matrix cells)
+#9442	2026-07-06T09:15:40Z	closed	0	#9442	self-owned/no-structural-match	Bug: mixed Signed×Unsigned true division / throws InexactError instead of returning Float64 (Int16(-1)/UInt16(5))
+#9443	2026-07-06T09:15:42Z	closed	0	#9443	self-owned/no-structural-match	Bug: BigFloat cld/div with Inf and signed zero diverge (cld(Inf,-1.0)=-Inf instead of NaN; ~2000 full-matrix cells)
+#9445	2026-07-06T09:26:19Z	closed	0	#9445	self-owned/no-structural-match	[bug] retired_effect_hints_are_body_provable_over_base_issue_8441 is red on main: isless effect summary regressed to Conditional
+#9450	2026-07-06T10:14:00Z	closed	0	#9450	self-owned/no-structural-match	Bug: BigFloat-result cld/fld/div//mod residuals — signbit(-0.0), BigInt→BigFloat precision, generic-Real infinite dividend (residual of #9443)
+#9456	2026-07-06T11:02:59Z	closed	1	#10459	reviewed:base-name-keyed-registry-identity	Bug: user Base.show for a concrete parametric instantiation (W{Int64}) is applied to ALL instantiations — W{Float64} prints W-int(1.5) (show registry keyed on base name)
+#9457	2026-07-06T11:48:06Z	closed	5	#10463	title:generator	Bug: indexing a Base.Generator (g[i]) returns a value / raw-errors instead of MethodError (upstream: not indexable)
+#9460	2026-07-06T12:22:12Z	closed	0	#9460	self-owned/no-structural-match	Bug: VersionNumber show-form still needs a special-case until print/show dispatch split is upstream-shaped
+#9461	2026-07-06T12:23:53Z	closed	7	#10465	title:audit	Two audit scripts break on macOS bash 3.2 (nested-quote cmd-subst, declare -A); check_audit_scripts_bash3_compat.sh misses both
+#9464	2026-07-06T12:25:07Z	closed	0	#9464	self-owned/no-structural-match	bug: struct names matching /^[A-Z][0-9]*$/ (e.g. S2) collide with the type-variable-name heuristic, breaking same-type Real/Number operator dispatch
+#9468	2026-07-06T12:35:05Z	closed	2	#10460	title:subtyp	Contravariant type parameter {>:T} subtyping is wrong (Circle{Real} <: Shape{>:Int64} returns false)
+#9469	2026-07-06T12:35:07Z	closed	0	#9469	self-owned/no-structural-match	nfields(::Tuple) returns 0 instead of the tuple length
+#9470	2026-07-06T12:35:08Z	closed	0	#9470	self-owned/no-structural-match	Field access by integer index fails: isdefined(x,::Int) InternalError, getfield(::QuoteNode,::Int) TypeError
+#9472	2026-07-06T12:35:12Z	closed	7	#10465	title:ratchet	71 registered fixtures are broken-but-green (masked @testset failures) — grandfathered by the #9360 @testset ratchet
+#9473	2026-07-06T12:37:07Z	closed	0	#9473	self-owned/no-structural-match	precompile-base output non-deterministic again: sjulia_precompile_determinism_tests::precompile_base_is_deterministic_across_processes fails on main (regression of #4438)
+#9480	2026-07-06T13:33:34Z	closed	2	#10460	reviewed:typevar-name-heuristic	Struct named like a TypeVar (`^[A-Z][0-9]+$`, e.g. `V2`) widens array eltype to `Vector{Any}`
+#9492	2026-07-06T15:35:14Z	closed	0	#9492	self-owned/no-structural-match	push!(Complex{Float64}[], z) fails: 'Cannot push Any to Complex{Float64} array'
+#9493	2026-07-06T15:36:53Z	closed	0	#9493	self-owned/no-structural-match	Bug: strict soft-scope pass ignores global declarations inside nested loops (UndefVarError on upstream-valid code)
+#9498	2026-07-06T15:59:01Z	closed	4	#10462	title:cache	Stale base_cache_schema_fingerprint.txt: S4 (#9198) bumped CACHE_VERSION 86→87 without updating the snapshot → audit red on main
+#9505	2026-07-07T00:16:41Z	closed	0	#9505	self-owned/no-structural-match	[bug] 型付き複素内包表記 Complex{Float64}[<complex式> for ...] が Cannot convert StructRef→Float64 で実行時エラー
+#9507	2026-07-07T00:38:49Z	closed	0	#9507	self-owned/no-structural-match	Dynamic float `%` (SremInt) diverges from Julia rem: floor-mod semantics for mixed/Float32/Float16 pairs, NaN for an infinite divisor
+#9510	2026-07-07T00:48:20Z	closed	0	#9510	self-owned/no-structural-match	Float32 colon range length uses widened-Float64 arithmetic: length(0.1f0:0.1f0:0.5f0) == 4 (upstream 5)
+#9511	2026-07-07T00:53:00Z	closed	0	#9511	self-owned/no-structural-match	Array literal with Irrational element stays Vector{Any} (upstream promotes to Vector{Float64})
+#9513	2026-07-07T01:01:58Z	closed	0	#9513	self-owned/no-structural-match	Bug: splatted self-recursive promote call f(promote(x,y)...) re-dispatches to the same method instead of the promoted diagonal method (infinite recursion)
+#9514	2026-07-07T01:06:50Z	closed	0	#9514	self-owned/no-structural-match	Bug: rem/mod with an infinite Rational divisor returns invalid 0//0 instead of upstream ArgumentError
+#9515	2026-07-07T01:07:03Z	closed	0	#9515	self-owned/no-structural-match	BigFloat mixed-operand residuals: signed-zero propagation (BigInt/Bool/Float16 operands), Bool strong-zero, exact-integer mod (280 full-matrix cells, residual of #9450)
+#9516	2026-07-07T01:08:01Z	closed	0	#9516	self-owned/no-structural-match	Dynamic == between an Any-typed Vector{Any} holding BigInt and Vector{Int64} returns false
+#9518	2026-07-07T01:08:35Z	closed	0	#9518	self-owned/no-structural-match	BigInt range endpoints beyond Float64-exact range are silently corrupted (1:big(10)^20)
+#9519	2026-07-07T01:08:40Z	closed	0	#9519	self-owned/no-structural-match	typeof of a typed StepRange renders the step-type parameter as the element type (StepRange{BigInt, BigInt} vs upstream StepRange{BigInt, Int64})
+#9520	2026-07-07T01:08:42Z	closed	0	#9520	self-owned/no-structural-match	Bug: Int128 mod/rem near typemax overflows in the native I128 SremInt arm — mod(Int128(9), typemax(Int128)) returns 7, rem returns a huge negative (panic in dev profiles)
+#9521	2026-07-07T01:13:08Z	closed	0	#9521	self-owned/no-structural-match	Bug: rem(typemin(Int64), -1) still panics (remainder overflow) via the static SremInt path in intrinsics_exec.rs — #9429 follow-up
+#9524	2026-07-07T01:23:10Z	closed	2	#10460	title:type inference	Bug: state-dependent uncatchable abort in + (Rational{Int64}, Float32) — 'Inconsistent type inference for T: Float32 vs Int64' from Rational() after a mixed-type rem/mod sweep
+#9527	2026-07-07T01:25:56Z	closed	0	#9527	self-owned/no-structural-match	Bug: +/- between Rational and Unsigned wrap on overflow instead of upstream's checked OverflowError
+#9528	2026-07-07T01:32:05Z	closed	0	#9528	self-owned/no-structural-match	Inference fixed-fallback Int64 for div/rem/mod coerces float results in nested call contexts (signbit(mod(Int64(5), -2.6)) == false)
+#9529	2026-07-07T01:32:07Z	closed	0	#9529	self-owned/no-structural-match	signbit(Float16(-0.0)) and signbit(Float32(-0.0)) return false (negative-zero sign dropped for narrow floats)
+#9533	2026-07-07T01:45:51Z	closed	5	#10463	title:broadcast	Broadcasting over a Tuple returns a Vector (float.) or MethodError (abs.) instead of a Tuple
+#9540	2026-07-07T02:32:08Z	closed	0	#9540	self-owned/no-structural-match	Prevent tuple reflection field-name parity regressions
+#9546	2026-07-07T02:53:58Z	closed	0	#9546	self-owned/no-structural-match	Prevent struct-like reflection field-index parity regressions
+#9547	2026-07-07T03:04:34Z	closed	5	#10463	title:broadcast	Bug: tuple broadcast over dotted subtype returns BitVector instead of Tuple
+#9557	2026-07-07T04:17:36Z	closed	0	#9557	self-owned/no-structural-match	[bug] push!(expr.args, ::Int) が整数を Float64 に強制変換する(carrier 固有)
+#9573	2026-07-07T05:39:28Z	closed	0	#9573	self-owned/no-structural-match	Three static-grep audits reference moved/removed source paths (silent drift surfaced by #9463 self-tests)
+#9576	2026-07-07T05:58:29Z	closed	0	#9576	self-owned/no-structural-match	Bug: IO stream identity comparison returns false for the same handle
+#9578	2026-07-07T06:06:20Z	closed	0	#9578	self-owned/no-structural-match	Bug: write(io, numeric) prints decimal text instead of raw bytes
+#9579	2026-07-07T06:14:17Z	closed	0	#9579	self-owned/no-structural-match	main build broken: get_base() format! has 66 placeholders for 67 args (CHECKED_JL unpaired after #9536 auto-merge)
+#9582	2026-07-07T06:52:41Z	closed	0	#9582	self-owned/no-structural-match	Prevention: keep reference-like Value variants in identity equality
+#9585	2026-07-07T07:13:52Z	closed	0	#9585	self-owned/no-structural-match	print/println of an Unsigned shows hex (0x02) instead of decimal (2)
+#9586	2026-07-07T07:15:21Z	closed	0	#9586	self-owned/no-structural-match	Test drift: dump-bytecode test #8147 asserts `tmp` but SSA renames the local to `#ssa1`
+#9589	2026-07-07T07:59:59Z	closed	5	#10463	title:collect	Bug: invalid UTF-8 String values lose String semantics in dispatch, collect, and repr
+#9593	2026-07-07T08:33:47Z	closed	0	#9593	self-owned/no-structural-match	Prevention: require semantic-type coverage for new Value payload variants
+#9599	2026-07-07T08:54:54Z	closed	0	#9599	self-owned/no-structural-match	precision(::BigFloat) returns 0 for any zero-valued BigFloat (should be the allocation precision)
+#9603	2026-07-07T09:23:07Z	closed	0	#9603	self-owned/no-structural-match	Mixed BigFloat integer operands are pre-rounded under setprecision
+#9605	2026-07-07T09:28:30Z	closed	0	#9605	self-owned/no-structural-match	Prevention: cover exact integer operands in BigFloat setprecision paths
+#9608	2026-07-07T09:44:47Z	closed	0	#9608	self-owned/no-structural-match	Int128 power widens to BigInt instead of preserving Int128
+#9616	2026-07-07T10:27:22Z	closed	0	#9616	self-owned/no-structural-match	[prevention] Keep Rational zero-denominator sentinels and 0//0 rejection covered across constructor families
+#9619	2026-07-07T10:40:08Z	closed	0	#9619	self-owned/no-structural-match	Bug: macro quote-local variable is not hygienic when escaped loop mutates global
+#9620	2026-07-07T10:46:01Z	closed	0	#9620	self-owned/no-structural-match	[prevention] Keep splatted recursive promote dispatch aligned with value-based runtime dispatch
+#9627	2026-07-07T11:30:02Z	closed	2	#10460	title:typevar	Prevention: preserve lower-bound TypeVar semantics across type representations
+#9628	2026-07-07T11:30:24Z	closed	0	#9628	self-owned/no-structural-match	Fix standalone subset_julia_vm_types test build serde rc feature
+#9632	2026-07-07T11:58:39Z	closed	6	#10464	title:lowering	Prevention: cover chained-comparison single-evaluation lowering across scalar and dotted paths
+#9641	2026-07-07T12:50:47Z	closed	0	#9641	self-owned/no-structural-match	Fix mainline clippy failure in type-core binder rebinding
+#9642	2026-07-07T12:59:40Z	closed	0	#9642	self-owned/no-structural-match	Bug: static dispatch drops Array{T,N} rank for similar-created 3D arrays
+#9644	2026-07-07T13:15:24Z	closed	0	#9644	self-owned/no-structural-match	Prevent mainline clippy regressions during parallel merge windows
+#9646	2026-07-07T13:19:45Z	closed	4	#10462	title:preload	Bug: a user top-level struct silently corrupts preload-cache-spliced package bodies (frozen struct type_ids shift; typeof(lu(A)) => Plots.AnimatedGif)
+#9650	2026-07-07T13:51:42Z	closed	0	#9650	self-owned/no-structural-match	Bug: script call through an earlier-defined function still sees a later callee redefinition retroactively
+#9651	2026-07-07T13:54:44Z	closed	0	#9651	self-owned/no-structural-match	Prevent BigFloat result producers from dropping allocation precision
+#9654	2026-07-07T14:21:42Z	closed	0	#9654	self-owned/no-structural-match	Bug: VM Mandelbrot Complex hot loop is ~120x slower than Julia despite closed #8796/#9198
+#9656	2026-07-07T14:24:29Z	closed	0	#9656	self-owned/no-structural-match	Prevent power shortcuts from bypassing fixed-width integer type preservation
+#9659	2026-07-07T14:29:39Z	closed	5	#10463	title:broadcast	Bug: VM Mandelbrot broadcast checksum differs from Julia by 195 counts at 1700x1360
+#9665	2026-07-07T14:47:37Z	closed	0	#9665	self-owned/no-structural-match	Prevention: guard source-visible method-table dispatch for top-level redefinitions
+#9670	2026-07-07T15:20:40Z	closed	0	#9670	self-owned/no-structural-match	Bug: direct Irrational pi singleton equality folds false
+#9673	2026-07-07T15:29:14Z	closed	0	#9673	self-owned/no-structural-match	Prevent Expr field type drift between compiler emit and inference
+#9677	2026-07-07T16:00:31Z	closed	0	#9677	self-owned/no-structural-match	Prevent unsafe broad numeric promote fallback catch-alls
+#9682	2026-07-07T16:34:13Z	closed	0	#9682	self-owned/no-structural-match	Prevent BigFloat conversion paths from losing signed zero or exact integer operands
+#9694	2026-07-07T18:02:54Z	closed	0	#9694	self-owned/no-structural-match	[bug-prevention] specializer unary math arms emit typed instructions without operand-type guards (SqrtF64 class)
+#9701	2026-07-07T18:30:02Z	closed	0	#9701	self-owned/no-structural-match	REPL: user-defined abstract types do not persist across evals (both eval models)
+#9702	2026-07-07T18:31:23Z	closed	0	#9702	self-owned/no-structural-match	Prevention: guard macro quote hygiene binding boundaries
+#9707	2026-07-07T19:32:05Z	closed	3	#10461	title:callable	Prevention: classify REPL callable globals by capture safety
+#9714	2026-07-07T20:18:57Z	closed	2	#10460	title:unionall	Bug: UnionAll Vector alias equality returns false
+#9716	2026-07-07T20:33:34Z	closed	0	#9716	self-owned/no-structural-match	Bug: fixed-width integer boundary fld/cld/rem/mod still diverge in full numeric matrix
+#9717	2026-07-07T20:33:55Z	closed	0	#9717	self-owned/no-structural-match	Bug: full numeric matrix value-repr residuals for signed zero, NaN/Inf, and boundary values
+#9718	2026-07-07T20:34:15Z	closed	0	#9718	self-owned/no-structural-match	Bug: BigFloat mixed signed-zero residuals remain in full numeric matrix
+#9721	2026-07-07T20:56:40Z	closed	2	#10460	title:typevar	Bug: chained where display duplicates outer upper bound in inner TypeVar
+#9724	2026-07-07T21:35:46Z	closed	2	#10460	title:parametric	Flaky full-suite inference-slot mismatch in numeric_bitinteger_parametric_widths_9381 (LoadSlotI64: got BigInt)
+#9725	2026-07-07T21:46:11Z	closed	7	#10465	title:fixture	Bug: file-mode real scalar times Complex array fixture errors with F32 carrier
+#9727	2026-07-07T21:56:03Z	closed	5	#10463	title:generator	Prevention: keep generator trait fast paths wrapper-aware
+#9729	2026-07-07T22:14:43Z	closed	0	#9729	self-owned/no-structural-match	REPL: if-wrapped module const not persisted across evals (both eval models diverge from upstream)
+#9731	2026-07-07T22:21:40Z	closed	0	#9731	self-owned/no-structural-match	Prevention: test inline value-parameter constructors in argument position
+#9735	2026-07-07T23:04:03Z	closed	5	#10463	title:generator	Prevention: keep generator consumers off public getindex
+#9737	2026-07-07T23:12:29Z	closed	5	#10463	title:eltype	Bug: push!(ComplexF64[], real) stores a Float64 value under ComplexF64 eltype
+#9738	2026-07-07T23:25:01Z	closed	2	#10460	title:parametric	Flaky: numeric_bitinteger_parametric_widths_9381 fails order-dependently (~25%) with 'LoadSlotI64: expected numeric in x, got BigInt'
+#9741	2026-07-07T23:48:30Z	closed	0	#9741	self-owned/no-structural-match	typeof on type-name string literal returns DataType instead of String
+#9742	2026-07-07T23:53:57Z	closed	5	#10463	title:broadcast	[bug] eval-redefined function keeps executing the pre-redefinition body when called via a Function value (map/broadcast)
+#9743	2026-07-08T00:00:53Z	closed	0	#9743	self-owned/no-structural-match	Bug: complex integer array literal widens to ComplexF64
+#9746	2026-07-08T00:41:47Z	closed	2	#10460	title:typevar	Prevent scoped TypeVar regressions from name-only matching
+#9754	2026-07-08T02:06:32Z	closed	0	#9754	self-owned/no-structural-match	Prevention: typed comprehensions must test convert-vs-constructor semantics
+#9757	2026-07-08T02:37:42Z	closed	0	#9757	self-owned/no-structural-match	Prevention: Float32 colon range length must share TwicePrecision oracle
+#9760	2026-07-08T02:45:41Z	closed	5	#10463	title:eltype	Non-F64 float and BigFloat array literal eltype inference gaps
+#9762	2026-07-08T02:58:23Z	closed	0	#9762	self-owned/no-structural-match	Qualified Irrational singleton array literals infer Vector{Any}
+#9766	2026-07-08T03:26:31Z	closed	6	#10464	title:lowering	CLI lowering reports unknown macro for @assert
+#9768	2026-07-08T04:10:39Z	closed	0	#9768	self-owned/no-structural-match	Runtime typed dispatcher can route a BigInt into a concrete f(x::Int64) method (seed-dependent, #5966 class)
+#9769	2026-07-08T04:10:47Z	closed	0	#9769	self-owned/no-structural-match	Base bytecode not reproducible across compiles: closure capture_names use HashSet iteration order
+#9773	2026-07-08T05:02:25Z	closed	0	#9773	self-owned/no-structural-match	Rational typed array literal loses Int64 element type
+#9774	2026-07-08T05:07:37Z	closed	0	#9774	self-owned/no-structural-match	Bug: showerror ignores IOBuffer after print(io, ...) support
+#9776	2026-07-08T05:23:19Z	closed	0	#9776	self-owned/no-structural-match	SubArray fails AbstractVector{T} method dispatch and type-var binding
+#9777	2026-07-08T05:26:29Z	closed	0	#9777	self-owned/no-structural-match	Prevention: keep explicit IOBuffer writes isolated inside sprint
+#9778	2026-07-08T05:30:45Z	closed	0	#9778	self-owned/no-structural-match	Bug: end indexing on AbstractVector-dispatched Vector calls SubArray lastindex
+#9780	2026-07-08T05:36:07Z	closed	2	#10460	title:promotion	Prevention: array literal promotion must cover singleton numeric structs
+#9783	2026-07-08T05:49:01Z	closed	6	#10464	title:parser	Bug: subtype expression with parametric where RHS can panic parser/type handling
+#9785	2026-07-08T06:03:11Z	closed	0	#9785	self-owned/no-structural-match	StaticArrays SVector{0} partial annotation fails runtime dispatch
+#9786	2026-07-08T06:20:52Z	closed	6	#10464	title:destructur	Bug: NamedTuple global fails to destructure across evals under Persistent eval model (Issue #9199)
+#9787	2026-07-08T06:21:13Z	closed	0	#9787	self-owned/no-structural-match	Bug: REPL struct_heap grows unbounded across a long session under Persistent eval model (violates #8625 boundedness) (Issue #9199)
+#9789	2026-07-08T06:34:17Z	closed	5	#10463	title:generator	Bug: empty generator collect with dynamic body loses upstream inferred eltype
+#9796	2026-07-08T07:20:48Z	closed	5	#10463	title:eltype	Prevention: guard runtime-typejoined collection builders against empty-result eltype drift
+#9804	2026-07-08T09:42:40Z	closed	7	#10465	title:audit	Bug: compile/VM coupling audit is red on main
+#9805	2026-07-08T10:05:04Z	closed	6	#10464	title:lowering	Prevent tuple broadcast shape regressions across lowering and materialization
+#9808	2026-07-08T10:23:30Z	closed	7	#10465	title:audit	Prevention: keep compile/VM coupling audit green across test-only helpers
+#9811	2026-07-08T10:57:11Z	closed	0	#9811	self-owned/no-structural-match	Bug: UnitRange step returns Int64 instead of the range element type
+#9820	2026-07-08T12:14:39Z	closed	0	#9820	self-owned/no-structural-match	Prevent typed array literals from missing dynamic Array helper coverage
+#9829	2026-07-08T14:05:47Z	closed	2	#10460	title:parametric	Bug: parametric constructor with runtime-computed type parameter skips field conversion — imag(1.5 + 1im) is Int64 inside a ComplexF64
+#9831	2026-07-08T14:06:26Z	closed	2	#10460	title:promotion	Bug: promote() with ≥4 arguments silently returns the arguments unchanged (builtin fallback bypasses promotion and the not_sametype guard)
+#9832	2026-07-08T14:06:48Z	closed	0	#9832	self-owned/no-structural-match	Bug: promote_type ignores the opposite-direction promote_rule when both directions are defined — upstream reconciles via promote_result(T,S,R1,R2) = promote_type(R1,R2)
+#9833	2026-07-08T14:07:09Z	closed	2	#10460	title:subtyp	Bug: enumerated concrete promote_rule tables (Rational/BigInt/BigFloat) don't cover user-defined Integer/Real subtypes — promote_type(BigInt, MyInt) = Integer; stale Issue #5070 comments
+#9834	2026-07-08T14:07:39Z	closed	0	#9834	self-owned/no-structural-match	Bug: mixed numeric array literals fall to Vector{Any} outside the special-cased set — [0x1, 2], [1f0, 2.0], [1//2, 2], mixed via variables (no general promote_typeof reduction)
+#9835	2026-07-08T14:07:51Z	closed	5	#10463	title:eltype	Bug: Base.promote_op imprecise for Complex arguments — promote_op(+, Complex{Int64}, Float64) = Any (upstream: ComplexF64); zip-comprehension eltype degrades to Vector{Any}
+#9837	2026-07-08T14:11:55Z	closed	5	#10463	title:broadcast	Bug: broadcast UInt128 power widens to Int64 and wraps
+#9838	2026-07-08T14:15:11Z	closed	0	#9838	self-owned/no-structural-match	Bug: unary negation of typemin Int64 panics in dev-fast
+#9839	2026-07-08T14:16:21Z	closed	2	#10460	title:parametric	Bug: dispatch selects a ::Type{T} where {T<:Bound} method whose bound EXCLUDES a Type{ParametricStruct} argument — silent wrong method or 'Unbound type parameter: T' instead of MethodError
+#9840	2026-07-08T14:16:48Z	closed	0	#9840	self-owned/no-structural-match	Bug: type-level numeric functions on Type arguments — real(Complex{Float32}) returns ComplexF32 (silent); float(Rational{Int64}/Complex{Int64}) errors; complex(::Type) missing
+#9841	2026-07-08T14:17:02Z	closed	2	#10460	title:typejoin	Bug: typejoin with a UnionAll argument over-widens — typejoin(Complex{Float64}, Complex) = Number (upstream: Complex); propagates to promote_type
+#9849	2026-07-08T15:54:47Z	closed	0	#9849	self-owned/no-structural-match	Prevent numeric matrix residual allowlist regressions after milestone 62 cleanup
+#9892	2026-07-08T23:56:14Z	closed	0	#9892	self-owned/no-structural-match	Bug: check_no_new_domain_builtins negative selftest reason collides with clean failure
+#9896	2026-07-09T00:21:39Z	closed	0	#9896	self-owned/no-structural-match	Prevention: keep n-ary promote paths off silent unchanged-tuple fallbacks
+#9909	2026-07-09T02:02:08Z	closed	2	#10460	title:promotion	Bug: type-value (Type{T}) gap forces string-based promotion, causing systematic numeric/array-literal inference failures
+#9955	2026-07-09T10:47:07Z	closed	0	#9955	self-owned/no-structural-match	Bug: infer_return_type widens float(::Type{Float64}) result to Any
+#9964	2026-07-09T11:40:06Z	closed	0	#9964	self-owned/no-structural-match	Bug: --dump-bytecode fails on AbstractAlgebra Partition field access
+#9974	2026-07-09T13:02:43Z	closed	0	#9974	self-owned/no-structural-match	Bug: plot(f, range) dispatch falls through to generic plot(x, y)
+#9975	2026-07-09T13:08:43Z	closed	3	#10461	title:function value	Bug: reflection Base function value fixture records @test failure in harness
+#9979	2026-07-09T13:50:02Z	closed	3	#10461	title:function value	Bug: full suite routes ordinary function values through source-world dispatch
+#9980	2026-07-09T13:50:18Z	closed	0	#9980	self-owned/no-structural-match	Bug: if-wrapped module const live-path rejection regressed in full suite
+#9981	2026-07-09T14:00:07Z	closed	5	#10463	title:iterator	Bug: Base.map function value dispatch selects lazy Iterators.map
+#9987	2026-07-09T15:13:23Z	closed	0	#9987	self-owned/no-structural-match	Prevention: keep function-value dispatch on value-based resolver
+#9989	2026-07-09T15:31:33Z	closed	0	#9989	self-owned/no-structural-match	Bug: REPL if-wrapped module const live-path test still expects fail-closed behavior
+#9990	2026-07-09T15:59:16Z	closed	0	#9990	self-owned/no-structural-match	Bug: infer_return_type widens typed dispatch caller to Any
+#9992	2026-07-09T16:05:06Z	closed	3	#10461	title:callable	Prevent callable-value dispatch fixes from bypassing shared resolver policy
+#9994	2026-07-09T16:30:14Z	closed	0	#9994	self-owned/no-structural-match	Bug: dispatch parity regresses zero-arg typed varargs and ambiguity MethodError
+#9996	2026-07-09T17:01:23Z	closed	0	#9996	self-owned/no-structural-match	Prevention: keep REPL module live-path expectations tied to mirror collector coverage
+#9998	2026-07-09T17:05:59Z	closed	0	#9998	self-owned/no-structural-match	Prevention: keep source-order method activation scoped to current source
+#10002	2026-07-09T18:10:24Z	closed	0	#10002	self-owned/no-structural-match	Prevention: keep unsigned print-form separate from show-form
+#10004	2026-07-09T18:16:24Z	closed	0	#10004	self-owned/no-structural-match	Bug: take!(IOBuffer) returns String instead of Vector{UInt8}
+#10006	2026-07-09T18:58:24Z	closed	0	#10006	self-owned/no-structural-match	Bug: debug cargo test stack-overflows in public array literal routing regression
+#10008	2026-07-09T19:10:38Z	closed	0	#10008	self-owned/no-structural-match	Prevention: keep binary write separate from display text paths
+#10018	2026-07-09T21:09:14Z	closed	0	#10018	self-owned/no-structural-match	Bug: function-value step on native float StepRangeLen reads fields from RangeValue
+#10019	2026-07-09T21:26:58Z	closed	0	#10019	self-owned/no-structural-match	Bug: Float32 and Float16 colon ranges report wrong StepRangeLen type parameters
+#10023	2026-07-09T22:17:11Z	closed	0	#10023	self-owned/no-structural-match	Bug: long-form global assignment implicit return yields nothing
+#10024	2026-07-09T22:25:50Z	closed	5	#10463	title:collect	Bug: collect on narrow integer ranges returns Vector{Any} instead of Vector{T}
+#10034	2026-07-10T00:47:55Z	closed	0	#10034	self-owned/no-structural-match	Bug: keyword parameter named stderr resolves as stdio global
+#10035	2026-07-10T00:57:13Z	closed	0	#10035	self-owned/no-structural-match	Bug: devnull identity is not stable
+#10044	2026-07-10T01:49:36Z	closed	1	#10459	title:shadow	Prevention: compile-time stdio globals must not shadow locals
+#10047	2026-07-10T01:57:22Z	closed	7	#10465	title:gate	Bug: Register VM gate treats non-Int64 numeric returns as I64
+#10053	2026-07-10T02:13:51Z	closed	0	#10053	self-owned/no-structural-match	Bug: stdin identity is not stable
+#10054	2026-07-10T02:32:05Z	closed	0	#10054	self-owned/no-structural-match	Bug: Register VM native recursion can bypass StackOverflowError and OOM
+#10056	2026-07-10T02:35:19Z	closed	0	#10056	self-owned/no-structural-match	Prevention: keep builtin IO globals as VM-local singleton refs
+#10060	2026-07-10T03:34:24Z	closed	7	#10465	title:gate	Prevention: keep register VM gate coverage aligned with supported semantics
+#10067	2026-07-10T04:45:09Z	closed	0	#10067	self-owned/no-structural-match	Bug: Core.Binding undefined fields should throw UndefRefError
+#10070	2026-07-10T04:49:30Z	open	0	#10070	self-owned/no-structural-match	Prevention: keep narrow-float range type surfaces synchronized
+#10074	2026-07-10T05:05:14Z	closed	0	#10074	self-owned/no-structural-match	Bug: try/catch tail-position assignment returns wrong value / crashes instead of the assigned value
+#10076	2026-07-10T05:11:34Z	closed	0	#10076	self-owned/no-structural-match	Bug: similar(a) with no dims mis-binds static dispatch rank for a 2-D matrix-literal source
+#10077	2026-07-10T05:13:09Z	closed	3	#10461	title:function value	Bug: module-qualified function value fails isa Function (Module.func vs bare func)
+#10078	2026-07-10T05:14:58Z	closed	1	#10459	reviewed:bare-name-identity	Bug: module struct bare-name alias clobbers a same-named Base struct when Base-cache reuse is bypassed
+#10085	2026-07-10T05:27:40Z	closed	0	#10085	self-owned/no-structural-match	Bug: Vector(::Vector) constructor missing, breaks map(Vector, xs)
+#10089	2026-07-10T06:00:36Z	closed	4	#10462	title:cache	Bug: invperm returns Vector{Float64} instead of Vector{Int64} (duplicate definition, redefinition cache collision)
+#10090	2026-07-10T06:09:08Z	closed	4	#10462	explicit-ref-#10051	Bug: base_cache_schema_fingerprint.txt stale again — audit red on main after f003e2964 (Issue #9090 MethodTable move)
+#10091	2026-07-10T06:13:40Z	closed	2	#10460	explicit-ref-#10049	Bug: typejoin collapses ALL parametric params to bare wrapper when only some differ (upstream widens only the differing param via UnionAll)
+#10092	2026-07-10T06:14:40Z	closed	4	#10462	title:cache	Bug: standalone WeakRef target survives GC when persistent caches are enabled
+#10093	2026-07-10T06:17:40Z	closed	0	#10093	self-owned/no-structural-match	Bug: @test does not catch exceptions from its expression (sjulia propagates immediately instead of recording an errored test)
+#10100	2026-07-10T06:28:15Z	closed	2	#10460	explicit-ref-#10049	Bug: where-clause TypeVar binder shadowing a builtin type name causes stack overflow (self-referential bound) or silently drops the where (non-self-referential bound)
+#10111	2026-07-10T06:31:19Z	open	10	#10815	title:aot	Bug: AoT compiler unifies distinct top-level let-block variables of the same name to the first-seen static type
+#10112	2026-07-10T06:34:41Z	open	0	#10112	self-owned/no-structural-match	Prevent range exact-endpoint regressions across public and internal length APIs
+#10133	2026-07-10T06:54:13Z	closed	0	#10133	self-owned/no-structural-match	Bug: reflection does not constant-fold a type-level ternary over a where-bound type parameter (float(::Type{Int64}) infers as Any, not Type{Float64})
+#10138	2026-07-10T07:15:06Z	open	5	#10463	title:generator	Bug: all-filtered generator with function-call predicate preserves Int64 and sum returns 0 instead of upstream empty semantics
+#10140	2026-07-10T07:16:10Z	closed	5	#10463	title:generator	Bug: generator over zip reports HasLength and length errors instead of upstream HasShape length
+#10141	2026-07-10T07:16:55Z	closed	5	#10463	title:generator	Bug: generator over enumerate reports HasLength and length errors instead of upstream HasShape length
+#10144	2026-07-10T07:43:07Z	closed	0	#10144	self-owned/no-structural-match	Bug: bounded Channel put! does not suspend producer task mid-function
+#10145	2026-07-10T07:45:23Z	closed	0	#10145	self-owned/no-structural-match	Bug: Base.infer_effects reports a fully-total summary for user functions whose only side effect is inside an if/else branch
+#10146	2026-07-10T07:47:47Z	closed	1	#10459	title:shadow	Parameter shadowing a numeric constructor name (f(Float64) = Float64(2)) calls the builtin instead of the parameter
+#10164	2026-07-10T08:43:17Z	closed	4	#10462	title:prelude	Lowering::lower_source_file_inner never populates pending_doc — Base prelude docstrings silently dropped
+#10174	2026-07-10T09:09:50Z	open	0	#10174	self-owned/no-structural-match	Bug: replace with SubstitutionString emits capture references (\1, \g<name>, \0) literally instead of substituting
+#10180	2026-07-10T09:11:38Z	open	0	#10180	self-owned/no-structural-match	Bug: r"\v" matches only vertical tab, not the PCRE2 vertical-whitespace class
+#10181	2026-07-10T09:11:39Z	open	0	#10181	self-owned/no-structural-match	Unsupported: regex recursion (?R) / (?n) — (?n) errors and (?R) silently matches the wrong span
+#10182	2026-07-10T09:12:21Z	open	0	#10182	self-owned/no-structural-match	Bug: RegexMatch representation parity — captures/offsets are tuples (upstream: Vector), show format differs
+#10183	2026-07-10T09:12:23Z	open	0	#10183	self-owned/no-structural-match	Bug: regex divergences where sjulia succeeds but upstream julia errors (variable-length lookbehind, \x{...} under ALT_BSUX, PCRE match-limit)
+#10185	2026-07-10T09:25:45Z	open	7	#10465	title:audit	Prevention: audit duplicate same-signature Base definitions for divergent behavior
+#10187	2026-07-10T09:33:39Z	open	5	#10463	title:eltype	Bug: map(Vector, xs) returns imprecise outer eltype for vector-of-vectors
+#10190	2026-07-10T09:51:14Z	open	0	#10190	self-owned/no-structural-match	Bug: 3-D array literal with ;;; dim separators mis-shapes to Matrix instead of Array{T,3}
+#10192	2026-07-10T09:56:05Z	closed	2	#10460	explicit-ref-#10049	Core.apply_type with fewer args than a parametric type's arity yields a wrong DataType instead of a partial UnionAll
+#10195	2026-07-10T10:01:53Z	open	2	#10460	explicit-ref-#10049	UnionAll display does not elide a trailing free where-clause (Foo{Int64, B} where B should print as Foo{Int64})
+#10196	2026-07-10T10:01:58Z	closed	4	#10462	title:preload	Bug: --precompile-base waits on preload-cache locks
+#10197	2026-07-10T10:03:44Z	open	0	#10197	self-owned/no-structural-match	Bug: replace(s, pat => r; count=0) replaces every occurrence instead of none
+#10199	2026-07-10T10:04:14Z	open	0	#10199	self-owned/no-structural-match	Bug: eachmatch(re, s; overlap=true) silently ignores the overlap keyword
+#10201	2026-07-10T10:04:31Z	closed	0	#10201	self-owned/no-structural-match	Bug: 9198 allocation-counter tests flaky under parallel debug cargo test (global counting allocator sees sibling-test allocations)
+#10203	2026-07-10T10:06:32Z	open	0	#10203	self-owned/no-structural-match	Bug: r"\h" / r"\H" (horizontal-whitespace class) silently matches ANY character
+#10206	2026-07-10T10:10:48Z	closed	0	#10206	self-owned/no-structural-match	[tech-debt] ValueType::ArrayOf's Any element tag conflates 'known Any' (literal) with 'unknown' (comprehension) in the JuliaType dispatch bridge
+#10212	2026-07-10T10:19:32Z	closed	2	#10460	title:typevar	Bug: getfield on a bogus field of Expr/GlobalRef/QuoteNode/LineNumberNode/TypeVar throws TypeError, not upstream's FieldError
+#10213	2026-07-10T10:22:06Z	closed	3	#10461	title:callable	Prevention: audit callable array constructors against compiler intercepts
+#10214	2026-07-10T10:22:09Z	open	1	#10459	title:name collision	Bug: cross-module bare-name collision in nested-function/let-helper module-scope resolution (function_module_paths / module_scope_overrides)
+#10220	2026-07-10T10:30:12Z	closed	4	#10462	explicit-ref-#10051	Bug: Iterators.partition silently corrupts after a same-named module struct + cache-bypass (type-id reuse across compile passes, Refs #10051/#10078)
+#10221	2026-07-10T10:31:40Z	open	0	#10221	self-owned/no-structural-match	Bug: show/println of WeakRef prints Rust Debug repr instead of WeakRef(value)
+#10222	2026-07-10T10:32:16Z	open	0	#10222	self-owned/no-structural-match	Bug: print with IOContext skips IOContext-specific user show
+#10223	2026-07-10T10:33:02Z	closed	4	#10462	title:cache	Prevention: cache-mode-dependent GC/WeakRef bugs are invisible to the single-cache-mode fixture harness (follow-up to #10092)
+#10226	2026-07-10T10:33:56Z	closed	0	#10226	self-owned/no-structural-match	Bug: undefined name in a where-clause bound is silently accepted as a nominal type instead of UndefVarError
+#10227	2026-07-10T10:38:59Z	closed	5	#10463	title:generator	Bug: generator/comprehension expression at module top level fails with UndefVarError on the lifted __gen_body_N helper
+#10232	2026-07-10T10:53:15Z	open	4	#10462	title:restor	REPL: module redefinition does not reset module const state (restore_module_globals resurrects old state; both eval models)
+#10234	2026-07-10T10:55:45Z	open	1	#10459	title:shadow	Module const shadowing a Base function name (e.g. const log) mis-resolves to the Base function inside module function bodies
+#10235	2026-07-10T10:57:50Z	open	0	#10235	self-owned/no-structural-match	sjulia REPL multi-line continuation submits early on abstract type/let/do/quote/macro blocks (is_incomplete keyword list drift)
+#10236	2026-07-10T11:03:16Z	open	1	#10459	title:bare name	Module-body let helper collection: statement-position let still unresolved; module_scope_overrides keyed by bare name collides with Main-let helpers (follow-up #10073)
+#10237	2026-07-10T11:03:45Z	closed	7	#10465	title:fixture	Bug: 13 fixtures are green in the sjulia harness but red under upstream julia 1.12.6 (fixture drift found during #9671 Phase 3 aggregation)
+#10240	2026-07-10T11:07:15Z	closed	0	#10240	self-owned/no-structural-match	isdefined(::Core.Binding, i::Integer) only accepts Int64/Int32 keys — other Integer widths TypeError
+#10241	2026-07-10T11:07:38Z	closed	4	#10462	title:cache	PR #10229 merged with a stale base_cache_schema_fingerprint.txt snapshot
+#10242	2026-07-10T11:09:05Z	closed	6	#10464	title:macro expansion	Stdlib Test macro expansions leak quote-internal variables (catch e, local threw/result) into the enclosing @testset scope
+#10247	2026-07-10T11:11:12Z	closed	7	#10465	title:ratchet	PR #10067 (Core.Binding UndefRefError) added a BuiltinId variant without bumping the domain-builtins ratchet baseline
+#10252	2026-07-10T11:15:30Z	closed	2	#10460	title:typevar	Dependent TypeVar bound not represented as real TypeVar reference; name-keyed state corrupts unrelated types' typejoin widening
+#10257	2026-07-10T11:24:43Z	closed	4	#10462	explicit-ref-#10051	lookup_bare_struct_info ignores current_module_path: Base submodule bodies resolve a colliding bare struct name to the top-level Base struct (e.g. Threads.SpinLock)
+#10258	2026-07-10T11:26:27Z	closed	4	#10462	explicit-ref-#10051	build_method_tables converts Base method signatures with the clobbered struct_table: dispatch signatures use the wrong type_id after a bare-name collision + Base cache bypass
+#10274	2026-07-10T11:44:56Z	closed	2	#10460	explicit-ref-#10049	Bug: nested where-clause reusing the same binder name resolves the inner bound to a disconnected fresh TypeVar, not the outer binder (epic #10049)
+#10277	2026-07-10T12:09:51Z	closed	0	#10277	self-owned/no-structural-match	Prevention: keep sprint keyword rewrites ahead of function-specific fast-path exclusions
+#10279	2026-07-10T12:15:28Z	open	2	#10460	explicit-ref-#10049	[design] 名前文字列ベースの識別が型システム・struct lookup・method table で相次いで衝突バグを生んでいる
+#10280	2026-07-10T12:19:41Z	closed	2	#10460	explicit-ref-#10049	Bug: where-binder rebinding cannot distinguish a qualified global reference (Core.Builtin) from the bare shadowing name (epic #10049)
+#10281	2026-07-10T12:39:59Z	closed	0	#10281	self-owned/no-structural-match	Bug: Base.infer_return_type on Type{T}-ternary method (float(::Type{Int64})) infers DataType, not Type{Float64}
+#10282	2026-07-10T12:40:51Z	closed	0	#10282	self-owned/no-structural-match	supertype(AbstractMatrix)/supertype(Vector) don't match upstream Julia
+#10283	2026-07-10T12:42:26Z	closed	0	#10283	self-owned/no-structural-match	Bug: supertype() on a rank/dim-generic alias (AbstractMatrix, Vector) does not recurse to the correctly rank-specialized ancestor
+#10284	2026-07-10T12:45:36Z	closed	3	#10461	title:function value	Bug: Base.<allowlisted-fn> qualified function value still fails isa Function (Base.sqrt vs bare sqrt)
+#10290	2026-07-10T13:37:28Z	closed	0	#10290	self-owned/no-structural-match	Bug: array == uses isequal semantics for BigInt zero versus negative zero
+#10294	2026-07-10T14:30:26Z	open	0	#10294	self-owned/no-structural-match	visible_using_modules_for_name ignores in_base_function_scope: Base's own function bodies see the user script's using imports
+#10295	2026-07-10T14:30:55Z	open	1	#10459	explicit-ref-#10279	MethodSig/JuliaType-based dispatch also ignores struct origin: colliding-struct calls crash instead of raising MethodError
+#10296	2026-07-10T14:33:49Z	open	0	#10296	self-owned/no-structural-match	Vector{SubArray} == Vector{Vector} structural equality returns false (should be true, matching upstream)
+#10298	2026-07-10T14:38:18Z	open	0	#10298	self-owned/no-structural-match	Bug: @test mis-evaluates WeakKeyDict bracket lookup with array key
+#10299	2026-07-10T14:44:50Z	open	2	#10460	explicit-ref-#10049	Bug: rebind_where_binders missing CoreType::Module arm breaks == for a Module-shadowing where-binder (epic #10049)
+#10301	2026-07-10T14:45:41Z	open	2	#10460	explicit-ref-#10049	Bug: JuliaType::from_name's Vector{...}/Array{...}/... arms mismatch a trailing where-clause, corrupting the reparsed type
+#10302	2026-07-10T14:45:58Z	open	2	#10460	explicit-ref-#10049	Bug: nested same-name where-binder bound resolution recurses forever (stack overflow) in resolve_bound_for_check
+#10303	2026-07-10T14:46:11Z	open	2	#10460	explicit-ref-#10049	Bug: parenthesized value-position nested where-expression doesn't recurse through structural where-lowering
+#10304	2026-07-10T14:46:25Z	open	0	#10304	self-owned/no-structural-match	Bug: bare identifier Bottom incorrectly resolves to Union{} (upstream: UndefVarError)
+#10312	2026-07-10T15:39:33Z	open	0	#10312	self-owned/no-structural-match	supertype(BitVector)/supertype(BitMatrix)/supertype(BitArray) drop the Bool element parameter
+#10313	2026-07-10T15:43:27Z	open	0	#10313	self-owned/no-structural-match	Bug: Union type value misclassified as DataType (isa DataType wrongly true, .a/.b field access on Union errors)
+#10314	2026-07-10T15:45:28Z	open	2	#10460	title:parametric	supertype(AbstractVector{T})/supertype(AbstractMatrix{T}) (parametric instantiation) still return AbstractArray{T,N} instead of Any
+#10315	2026-07-10T15:48:53Z	open	0	#10315	self-owned/no-structural-match	Comprehension result with a Union{Vector{Any},Vector{T}} overload set statically binds to Vector{Any} instead of runtime-dispatching on the concrete element type
+#10318	2026-07-10T16:20:10Z	closed	0	#10318	self-owned/no-structural-match	Bug: getfield(::Module, :bogus) / dynamic module field access throws TypeError, not upstream's UndefVarError
+#10321	2026-07-10T16:27:54Z	open	0	#10321	self-owned/no-structural-match	Bug: ispunct classifies ASCII symbol characters ($ + < = > ^ ` | ~) as punctuation (C-locale table instead of Unicode P* categories)
+#10322	2026-07-10T16:28:23Z	open	0	#10322	self-owned/no-structural-match	Bug: string interpolation "$name!" excludes ! from the identifier (upstream interpolates name!)
+#10323	2026-07-10T16:28:25Z	open	0	#10323	self-owned/no-structural-match	Bug: @nospecialize(x) in value position returns x; upstream evaluates to nothing
+#10324	2026-07-10T16:28:53Z	open	5	#10463	title:eltype	Bug: sjulia accepts API shapes upstream Julia rejects (bytes2hex non-UInt8 eltype, positional rsplit limit, Memory{T}(n), capitalized Int128"..."/UInt128"...")
+#10325	2026-07-10T16:30:17Z	open	5	#10463	title:generator	check_audit_negative_selftest.sh FAILs on main: check_generator_trait_matrix.sh skiplist ratchet has 12 rows of slack, so the negative control trips the staleness branch instead
+#10332	2026-07-10T16:56:54Z	open	4	#10462	title:cache	Cache build fingerprint misses serde-shape changes in dependency crates (subset_julia_vm_types/_bytecode/_ir)
+#10333	2026-07-10T16:57:53Z	open	4	#10462	explicit-ref-#10265	[bug] cache-restore 後の compile context で inference_global_types が常に空 — fresh compile と reflection 結果が乖離する (#10265 棚卸し)
+#10334	2026-07-10T17:01:05Z	open	4	#10462	explicit-ref-#10265	[bug] cache-restore の disable_*_specialization 再導出が fresh 検出と乖離 — モジュール内 override / alias receiver を取りこぼす (#10265 棚卸し)
+#10335	2026-07-10T17:01:07Z	open	4	#10462	explicit-ref-#10265	[bug] seeded PROGRAM_CACHE ヒットは compile_context: None のまま返る — fresh compile と context 有無が乖離 (#10265 棚卸し)
+#10336	2026-07-10T17:01:09Z	open	4	#10462	explicit-ref-#10265	[bug] .sjvmbc restore で prelude 由来の Base type alias (Bottom 等) が compile context から欠落する (#5065 の cache-restore 版)
+#10337	2026-07-10T17:01:11Z	open	4	#10462	explicit-ref-#10265	[bug] cache-restore の struct_table/parametric_structs がモジュール struct の bare-name alias と parent qualification を失う (#10265 parity テスト実測)
+#10338	2026-07-10T17:01:59Z	open	0	#10338	self-owned/no-structural-match	Outer @testset summary line does not aggregate nested testset counts (and is duplicated)
+#10339	2026-07-10T17:12:28Z	open	4	#10462	explicit-ref-#10265	[bug] .sjvmbc ロードは compile_context 以外の deserialize 側 hydration (promotion registry replay / main_scope_names) を行わない (#10265 codex review)
+#10341	2026-07-10T17:22:01Z	open	4	#10462	explicit-ref-#10265	[bug] Base-cache lane の build_struct_tables スキップ分岐がモジュール struct の bare-name alias を登録しない — cache 有無で bare 名解決が変わる (#10265 parity テスト実測)
+#10342	2026-07-10T17:32:52Z	open	1	#10459	explicit-ref-#10279	Bug: later sibling module's same-named struct retroactively clobbers an earlier module's struct identity (subtype to declared abstract parent silently becomes false)
+#10343	2026-07-10T17:33:29Z	open	0	#10343	self-owned/no-structural-match	Bug: inference/reflection APIs (Base.infer_return_type, return_types, code_typed, infer_effects, infer_exception_type, methods, applicable) give wrong or failing results for functions defined inside a module
+#10344	2026-07-10T17:34:10Z	open	7	#10465	title:fixture	Bug: Main-green code crashes or fails to compile when wrapped in a module: pop! piracy fallback hits VM stack underflow; (<:) arity fixture hits NoMethodFound(lt); loop-narrowing fixtures hit out-of-bounds (module-wrap sweep umbrella)
+#10345	2026-07-10T17:39:49Z	open	1	#10459	explicit-ref-#10279	Bug: @testset-local where-form function in one module resolves to a same-named @testset-local function from a LATER sibling module (fresh regression on main)
+#10346	2026-07-10T17:39:59Z	open	0	#10346	self-owned/no-structural-match	Prevent module-body helper collection gaps for lifted expression helpers
+#10351	2026-07-10T18:05:26Z	open	0	#10351	self-owned/no-structural-match	Bug: multi-arg println/print writes earlier args before evaluating later args (argument side-effect order diverges)
+#10354	2026-07-10T18:05:48Z	open	8	#10813	title:@test_throws	Bug: @test_throws ignores the expected exception type — a wrong-type exception is recorded as Pass (upstream records Fail)
+#10356	2026-07-10T18:10:56Z	open	0	#10356	self-owned/no-structural-match	Prevention: keep array == and isequal fallback semantics separated
+#10363	2026-07-10T20:32:30Z	open	0	#10363	self-owned/no-structural-match	Bug: module-scope Ref index-assignment corrupts Int64 to Float64
+#10368	2026-07-10T20:45:06Z	open	0	#10368	self-owned/no-structural-match	Bug: infer_effects reports terminates=true for println reached via ternary/short-circuit, unlike top-level or if/else
+#10369	2026-07-10T20:45:17Z	open	1	#10459	title:shadow	Bug: user-defined macro (VM-backed macro_runtime path) catch variable leaks into enclosing scope, shadowing same-named global
+#10370	2026-07-10T20:47:17Z	closed	3	#10461	title:callable	Bug: struct literally written inside a user-defined macro's quote lowers but constructor is not callable
+#10373	2026-07-10T20:48:28Z	open	0	#10373	self-owned/no-structural-match	Bug: anonymous covariant where-bound shorthand (Vector{<:Undefined}) silently accepts an undefined name instead of UndefVarError
+#10374	2026-07-10T20:48:28Z	open	0	#10374	self-owned/no-structural-match	Bug: unqualified redefinition of a Base function name silently falls back to Base instead of erroring
+#10375	2026-07-10T20:50:53Z	closed	6	#10464	title:lowering	Bug: pending_doc leaks across ConstStatement/@kwdef/type-alias/catch-all in both lowering entry points, misattributing docstrings
+#10378	2026-07-10T21:06:44Z	open	0	#10378	self-owned/no-structural-match	Bug: trailing ;;/;;;/... array-literal separators drop dimension instead of padding shape with size-1 dims
+#10380	2026-07-10T21:08:53Z	open	0	#10380	self-owned/no-structural-match	Bug: single-';'-separated all-scalar array literal ([1;2;3]) produces (N,1) Matrix instead of (N,) Vector
+#10383	2026-07-10T21:13:28Z	open	1	#10459	explicit-ref-#10279	build_struct_tables field types + register_inner_constructors ctor params still use raw struct_table (2 residual sites from #10258)
+#10385	2026-07-10T21:24:06Z	open	0	#10385	self-owned/no-structural-match	Bug: println/show of rank>=3 Array prints internal MemoryRef representation instead of upstream's nested ;;;-literal format
+#10395	2026-07-10T22:16:33Z	open	1	#10459	title:same-name	Bug: two same-named let-root helpers in the same module (or same Main-level scope) still collide
+#10396	2026-07-10T22:18:34Z	open	0	#10396	self-owned/no-structural-match	Bug: declaration-position (function-signature) where-bound with an undefined name is silently accepted
+#10398	2026-07-10T22:28:05Z	open	0	#10398	self-owned/no-structural-match	Bug: sjulia leniently accepts array-literal separator forms upstream ParseErrors on (space/;; mixing, split ; runs)
+#10402	2026-07-10T22:42:54Z	open	0	#10402	self-owned/no-structural-match	struct nested in let/begin inside a function (itself nested, with a macro call in the function body) is silently accepted instead of rejected
+#10404	2026-07-10T23:12:22Z	closed	0	#10404	self-owned/no-structural-match	Bug: Vector{T}((tuple)) MethodError carries wrong f field (String instead of the constructor DataType)
+#10405	2026-07-10T23:12:50Z	open	3	#10461	title:callable	Bug: first-class parametric array constructors (Vector{T}/Array as a callable value) diverge from direct syntax
+#10406	2026-07-10T23:13:14Z	open	3	#10461	title:hof	Bug: HOF (map) dispatch failures raise an uncatchable Runtime error instead of a catchable MethodError
+#10407	2026-07-10T23:24:04Z	open	0	#10407	self-owned/no-structural-match	Bug: where-clause type parameter name colliding with a builtin type name is not bound/dispatched correctly
+#10410	2026-07-10T23:46:31Z	open	1	#10459	explicit-ref-#10279	Bug: isa ignores outer where-bound variable in chained bound
+#10412	2026-07-10T23:55:43Z	closed	2	#10460	title:typevar	Bug: Vector.body.parameters[1] / Dict.body.body.parameters no longer === the matching TypeVar (regressed by #10403)
+#10418	2026-07-11T00:21:30Z	open	3	#10461	title:runtime specializer	Prevention: audit runtime specializer callee-name fast paths for local shadowing
+#10420	2026-07-11T00:26:27Z	open	2	#10460	title:unionall	Prevention: keep UnionAll TypeVar projection identity owner-scoped
+#10422	2026-07-11T00:40:17Z	open	2	#10460	title:parametric	Bug: Core.apply_type reapplies concrete parametric DataType instead of erroring
+#10423	2026-07-11T00:55:49Z	open	0	#10423	self-owned/no-structural-match	Bug: module-wrapped first-class ntuple loses Base.identity lookup
+#10424	2026-07-11T01:00:30Z	open	0	#10424	self-owned/no-structural-match	Bug: Base function as a keyword-argument default fails (UndefVarError) when the function has positional parameters — regression
+#10425	2026-07-11T01:07:33Z	open	0	#10425	self-owned/no-structural-match	Bug: struct-backed colon ranges regress mixed Int/BigInt iteration (all/any) + native_range accessors order-dependence (post-#10388)
+#10431	2026-07-11T01:32:56Z	open	6	#10464	title:destructur	Bug: assignment-statement tail-position value propagation is unsound for IndexAssign/FieldAssign/DictAssign/DestructuringAssign (index/field/dict/tuple-destructure)
+#10433	2026-07-11T01:52:58Z	open	7	#10465	title:audit	Bug: check_no_new_domain_builtins.sh Layer-2 builtin LOC audit fails on origin/main
+#10440	2026-07-11T02:07:23Z	open	7	#10465	title:ratchet	Layer-2 builtin LOC ratchet drifted again without a bump (third #10247-class instance)
+#10442	2026-07-11T02:09:58Z	open	5	#10463	explicit-ref-#10050	Bug: array comprehension over Iterators.partition falls back to getindex instead of iterate protocol
+#10444	2026-07-11T02:19:31Z	open	6	#10464	title:destructur	Bug: independent literal-tuple destructuring (a,b)=(1,2) in tail position still returns last element, not the tuple
+#10445	2026-07-11T02:20:31Z	open	1	#10459	explicit-ref-#10279	Bug: user's concrete module struct silently hijacks a same-named Base PARAMETRIC struct's bare constructor (Enumerate analog of #10220)
+#10447	2026-07-11T02:24:21Z	open	3	#10461	title:hof	Bug: identity (and other Base function args) UndefVarError when passed through a first-class function argument to a builtin HOF like ntuple

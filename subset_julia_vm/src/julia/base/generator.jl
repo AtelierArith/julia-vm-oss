@@ -21,10 +21,21 @@
 #
 # Note: This Pure Julia implementation requires the field function call feature
 # (Issue #1357) to call g.f(element) dynamically.
-
-struct Generator
-    f::Any
-    iter
+#
+# Parametrized as upstream `Base.Generator{I,F}` (Issue #9200 slice 1): `iter::I`
+# is the wrapped iterator, `f::F` the mapping function. Field ORDER matches
+# upstream (`f` first, `iter` second) so the native `Value::Generator`
+# projection (`generator_projected_field_by_index`: 0 -> f, 1 -> iter) and the
+# `typeof` spelling `Base.Generator{I, F}` (iter first, callable second) stay in
+# lock-step. Every `Generator(...)` surface call is intercepted by the compiler
+# (`BuiltinOp::Generator`) and produces a native `Value::Generator`, so the
+# struct's auto-generated constructor is never dispatched at runtime — the
+# declaration exists to register the `Base.Generator` type for method dispatch
+# (`iterate`/`size`/`IteratorSize`/... on `::Generator`) and its `{I,F}` params
+# for the type-level iterator traits below.
+struct Generator{I, F}
+    f::F
+    iter::I
 end
 
 # Iterate protocol for Generator
@@ -56,12 +67,45 @@ function size(g::Generator)
     return size(g.iter)
 end
 
+# `isempty` of a generator must drive the iterate protocol, NOT `length`
+# (Issue #9320). Upstream models a filtered generator as
+# `Generator(map, Iterators.Filter(pred, iter))` and defines
+# `isempty(g::Generator) = isempty(g.iter)`; for the filtered case `g.iter` is
+# the `Filter`, whose `IteratorSize` is `SizeUnknown()`, so `isempty` reaches
+# the iterate-based generic `isempty(itr) = iterate(itr) === nothing`
+# (julia/base/essentials.jl) rather than `length`.
+#
+# sjulia collapses the filter into the generator's `callable` (Issue #9271), so
+# `g.iter` here is the UNFILTERED base iterator; delegating to `isempty(g.iter)`
+# would ignore the predicate (a fully filtered-out generator would wrongly
+# report non-empty). It would also route through the length-based generic
+# `isempty(arr) = length(arr) == 0` (range.jl), and `length` of a filtered
+# generator is a MethodError (Issue #9320) — so isempty threw instead of
+# returning a Bool. Drive `iterate(g)` directly: sjulia's generator iterate
+# applies the predicate, so this reports emptiness correctly for both filtered
+# and unfiltered generators and never touches `length`.
+function isempty(g::Generator)
+    return iterate(g) === nothing
+end
+
 function ndims(g::Generator)
     return ndims(g.iter)
 end
 
 function axes(g::Generator)
     return axes(g.iter)
+end
+
+# first(g::Generator) must apply the mapping, so it has to go through the
+# iterate protocol — the generic `first(arr) = arr[1]` fallback in range.jl
+# indexes the UNDERLYING iterator of a lazy generator and returns the raw
+# element without applying `g.f` (Issue #9103). This mirrors upstream's
+# generic `first(itr)` (julia/base/abstractarray.jl), which sjulia's generic
+# fallback does not implement.
+function first(g::Generator)
+    y = iterate(g)
+    y === nothing && throw(ArgumentError("collection must be non-empty"))
+    return y[1]
 end
 
 # =============================================================================
@@ -192,6 +236,21 @@ function IteratorSize(g::Generator)
     return IteratorSize(g.iter)
 end
 
+# Type-level iterator-size trait, mirroring upstream
+# `IteratorSize(::Type{<:Generator{I}}) where {I} = IteratorSize(I)`
+# (julia/base/generator.jl). A `Generator{I,F}` delegates to the wrapped
+# iterator type `I`, so e.g. `IteratorSize(typeof(x^2 for x in 1:5))` reports
+# `HasShape{1}()` via `IteratorSize(UnitRange{Int64})`.
+#
+# For a native `Value::Generator` the VM currently answers this trait through a
+# Rust fast path (`iterator_size_value_for_generator_iter_type_name`) that
+# shadows this method, so this definition is dormant for the collapsed
+# representation. It is added now as the upstream-shaped foundation the Filter
+# desugar slice (#9200 S3) will rely on once the Rust special-cases retire.
+function IteratorSize(::Type{Generator{I, F}}) where {I, F}
+    return IteratorSize(I)
+end
+
 # =============================================================================
 # Iterator Element Type Traits
 # =============================================================================
@@ -269,5 +328,13 @@ function IteratorEltype(::Type{StepRange{T,S}}) where {T,S}
 end
 
 function IteratorEltype(g::Generator)
+    return EltypeUnknown()
+end
+
+# Type-level iterator-eltype trait, mirroring upstream
+# `IteratorEltype(::Type{Generator{I,T}}) where {I,T} = EltypeUnknown()`
+# (julia/base/generator.jl). A generator's element type depends on the runtime
+# mapping result, so it is never statically known.
+function IteratorEltype(::Type{Generator{I, F}}) where {I, F}
     return EltypeUnknown()
 end

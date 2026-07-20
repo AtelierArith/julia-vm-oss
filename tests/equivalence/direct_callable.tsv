@@ -1,0 +1,39 @@
+# direct_callable.tsv — corpus for the metamorphic "direct vs callable" lane.
+#
+# Invariant (Issue #10465, root-cause class #3 of #10452): a public function or
+# constructor must produce the SAME result value, result type, and exception
+# class no matter how it is invoked:
+#     direct   f(x)
+#     base     Base.f(x)
+#     bind     g = f; g(x)
+#     hof      map(f, [x])[1]
+# These are the exact call shapes behind the #10187 / #10250 divergence family
+# (compiler intercept vs Base / first-class / HOF dispatch).
+#
+# The harness (scripts/metamorphic_equivalence.sh) runs each lane, normalizes
+# lane-induced noise (source line/col, stacktrace frames), and compares every
+# non-reference lane against the FIRST lane listed (the reference). A divergence
+# fails the gate unless it is registered in
+# docs/vm/EQUIVALENCE_KNOWN_DIVERGENCES.tsv with a linked Issue (two-sided: a
+# registered divergence that later AGREES also fails, forcing the row's removal).
+#
+# Columns (TAB-separated):
+#   name       unique case id (also the allowlist key)
+#   preamble   Julia setup statements (";"-separated); "-" for none
+#   call       function / constructor expression (bare name for the base lane)
+#   arg        single argument expression
+#   lanes      comma list from {direct,base,bind,hof}; first = reference
+#
+# All values are printed as `println(v)` + `println(typeof(v))` and compared.
+name	preamble	call	arg	lanes
+vector-copy-ctor	x = [[1], [2]]	Vector	x[1]	direct,base,bind,hof
+collect-range	-	collect	1:3	direct,base,bind,hof
+sum-vector	-	sum	[1, 2, 3]	direct,base,bind,hof
+abs-negative	-	abs	-5	direct,base,bind,hof
+length-vector	-	length	[10, 20, 30]	direct,base,bind,hof
+first-tuple	-	first	(10, 20)	direct,base,bind,hof
+reverse-vector	-	reverse	[1, 2, 3]	direct,base,bind,hof
+float64-ctor	-	Float64	3	direct,bind,hof
+string-int	-	string	42	direct,base,bind
+sqrt-domain-error	-	sqrt	-1	direct,base,bind,hof
+map-string-eltype	-	string	42	direct,bind,hof

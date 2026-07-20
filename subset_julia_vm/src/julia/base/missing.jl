@@ -2,6 +2,7 @@
 # Missing - Missing value support
 # =============================================================================
 # Based on Julia's base/missing.jl
+# upstream: julia/base/missing.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-06-28)
 #
 # The Missing type represents missing data in statistical and data analysis contexts.
 # Unlike `nothing` (absence of value), `missing` represents unknown or unavailable data.
@@ -13,6 +14,11 @@
 function ismissing(x)
     return x === missing
 end
+
+# nonmissingtype(T) removes Missing from a Union type. The public method is
+# Julia-owned; the underscored boundary keeps the existing runtime type lattice
+# operation while Ref/Compose/deepcopy migrate in the same Issue #8779 slice.
+nonmissingtype(T) = _nonmissingtype(T)
 
 # coalesce: return the first non-missing value
 # coalesce(x, y) returns x if x is not missing, otherwise y
@@ -111,6 +117,14 @@ function isequal(a, b::Missing)
     return false
 end
 
+# Issues #10612/#10693: `div(x, y)` in sjulia currently performs its own
+# promote/trunc path instead of upstream's `div(x, y, RoundToZero)` bridge, so
+# keep Missing propagation explicit for the 2-arg entry as well as the 3-arg
+# upstream shape.
+div(::Missing, ::Missing) = missing
+div(::Missing, ::Number) = missing
+div(::Number, ::Missing) = missing
+
 # Nothing specialization for isequal (Issue #2718)
 function isequal(a::Nothing, b::Nothing)
     return true
@@ -162,9 +176,17 @@ function isequal(t1::Tuple, t2::Tuple)
     return true
 end
 
-# Expr specialization: structural comparison via === (Issue #2718)
+# Expr specialization: structural comparison via `==` (Issue #2718, #9264).
+# Upstream has no dedicated `isequal(::Expr, ::Expr)`; it falls back to the
+# generic `isequal(x, y) = x == y`, which routes to the field-structural
+# `==(x::Expr, y::Expr) = x.head === y.head && isequal(x.args, y.args)`
+# (base/expr.jl). Mirror that: use `==` (structural), NOT `===`. Since `===`
+# is now object identity for the mutable `Expr` (Issue #9264), a `=== a`
+# definition here would make nested `isequal(x.args, y.args)` — reached for an
+# `Expr` element of another Expr's args — compare by identity and break
+# structural `==`/`isequal` on independently-built Exprs (regressing #9183).
 function isequal(a::Expr, b::Expr)
-    return a === b
+    return a == b
 end
 
 # =============================================================================
@@ -190,3 +212,33 @@ isunordered(x::Missing) = true
 #
 # For now, comparison operators (==, <, >, etc.) with literal `missing` values
 # are handled at compile-time in binary.rs.
+
+# =============================================================================
+# Three-valued logic (Issue #10692)
+# =============================================================================
+# Upstream base/missing.jl:158-172: bitwise &, |, xor over Bool/Integer and
+# Missing follow Kleene logic — `false & missing` is `false`, `true | missing`
+# is `true`, everything else involving missing is missing. Registered here in
+# missing.jl, which loads AFTER int.jl, so the Int64 methods stay the
+# first-registered runtime fallback for mixed-type bitwise calls (the
+# dispatch-order contract documented in base/bool.jl, Issue #8197).
+Base.:(&)(::Missing, ::Missing) = missing
+Base.:(&)(a::Missing, b::Bool) = ifelse(b, missing, false)
+Base.:(&)(b::Bool, a::Missing) = ifelse(b, missing, false)
+Base.:(&)(::Missing, ::Integer) = missing
+Base.:(&)(::Integer, ::Missing) = missing
+Base.:(|)(::Missing, ::Missing) = missing
+Base.:(|)(a::Missing, b::Bool) = ifelse(b, true, missing)
+Base.:(|)(b::Bool, a::Missing) = ifelse(b, true, missing)
+Base.:(|)(::Missing, ::Integer) = missing
+Base.:(|)(::Integer, ::Missing) = missing
+xor(::Missing, ::Missing) = missing
+xor(a::Missing, b::Bool) = missing
+xor(b::Bool, a::Missing) = missing
+xor(::Missing, ::Integer) = missing
+xor(::Integer, ::Missing) = missing
+Base.:(⊻)(::Missing, ::Missing) = missing
+Base.:(⊻)(a::Missing, b::Bool) = missing
+Base.:(⊻)(b::Bool, a::Missing) = missing
+Base.:(⊻)(::Missing, ::Integer) = missing
+Base.:(⊻)(::Integer, ::Missing) = missing

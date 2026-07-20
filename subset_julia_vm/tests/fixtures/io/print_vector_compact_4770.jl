@@ -5,7 +5,7 @@
 # `repr(::Vector)`; same root cause family but for the print path.
 #
 # Fix: add an Array-wrapper arm to `format_struct_instance` in
-# `subset_julia_vm/src/vm/formatting.rs` that walks the `_mem`
+# `subset_julia_vm_vm/src/vm/formatting.rs` that walks the `_mem`
 # Memory carrier and emits the compact `[a, b, c]` (1D) / `[a b; c d]`
 # (2D) / `T[]` (empty) form, mirroring the Pure-Julia
 # `_show_vector_compact` / `_show_matrix_compact` helpers in

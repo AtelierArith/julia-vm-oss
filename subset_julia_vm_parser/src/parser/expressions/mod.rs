@@ -6,6 +6,9 @@
 //! - Ternary expressions
 //! - Type declarations and parametric types
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 mod calls;
 mod field;
 mod index;
@@ -44,6 +47,31 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            if self.check(&Token::Newline)
+                && self.grouping_depth > 0
+                && self.peek_non_newline_token() == Some(Token::Question)
+                && min_prec <= Precedence::Conditional
+            {
+                self.skip_newlines();
+            }
+
+            // Inside delimited expressions, Julia treats a newline before a
+            // line-leading infix operator as continuation of the previous
+            // expression:
+            //     (a
+            //      | b)
+            // This must remain scoped to groupings so top-level `a\n+ b` still
+            // terminates the first statement (Issue #8759).
+            if self.check(&Token::Newline)
+                && self.grouping_depth > 0
+                && self
+                    .peek_non_newline_token()
+                    .and_then(|token| token.binary_precedence())
+                    .is_some()
+            {
+                self.skip_newlines();
+            }
+
             // Check for ternary operator
             if self.check(&Token::Question) && min_prec <= Precedence::Conditional {
                 left = self.parse_ternary(left)?;
@@ -60,7 +88,12 @@ impl<'a> Parser<'a> {
             // (Issue #5673). The body is parsed right-associatively at `Afunc`.
             if self.check(&Token::Arrow) {
                 self.advance();
-                let body = self.parse_expression_with_precedence(Precedence::Afunc)?;
+                self.skip_newlines();
+                let body = if self.current_starts_group_item() {
+                    self.parse_group_item_or_expression()?
+                } else {
+                    self.parse_expression_with_precedence(Precedence::Afunc)?
+                };
                 let span = self.source_map.span(left.span.start, body.span.end);
                 left = CstNode::with_children(
                     NodeKind::ArrowFunctionExpression,
@@ -80,7 +113,7 @@ impl<'a> Parser<'a> {
                 (token.token.clone(), token.span)
             };
 
-            let Some((prec, assoc)) = op_kind.binary_precedence() else {
+            let Some((prec, assoc)) = self.current_binary_precedence() else {
                 break;
             };
 
@@ -100,19 +133,12 @@ impl<'a> Parser<'a> {
 
             // Special case: Don't consume `:` as a range operator when it is the
             // separator of a ternary `cond ? then : else`. This only applies while
-            // parsing the *then*-branch (`in_ternary_then`): at the top of the
-            // then-branch (min_prec == Conditional) any `:` marks the end, and
-            // deeper down — inside a higher-precedence operator's right operand,
-            // e.g. the comparison in `cond ? a > b : c` — the separator is the
-            // whitespace-preceded `:` (the ternary `:` is always space-delimited, a
-            // range `1:2` is not), so genuine ranges like `cond ? (1 : 2) : c` still
-            // parse (Issue #8314). The else-branch and other Conditional-level parses
-            // are NOT gated, so a range in the else-branch (`cond ? a : b:c`) keeps
-            // its `:` as a range operator (Issue #8318).
-            if op_kind == Token::Colon
-                && self.in_ternary_then
-                && (min_prec == Precedence::Conditional || op_span.start > left.span.end)
-            {
+            // parsing the *then*-branch (`in_ternary_then`), and nested delimited
+            // contexts clear that flag before parsing their interior, so explicit
+            // grouped ranges like `cond ? (1:2) : c` still parse (Issue #8314).
+            // The else-branch is NOT gated, so a range in the else-branch
+            // (`cond ? a : b:c`) keeps its `:` as a range operator (Issue #8318).
+            if op_kind == Token::Colon && self.in_ternary_then {
                 break;
             }
             // In whitespace-separated matrix rows, `[:x :y]` means two Symbol
@@ -131,7 +157,9 @@ impl<'a> Parser<'a> {
             }
 
             // Consume the operator
-            let op_token = self.advance().unwrap();
+            let op_token = self.advance_checked(
+                "binary operator token already confirmed by current_binary_precedence() above",
+            )?;
 
             // Line continuation: skip newlines after a binary operator at end
             // of line (Issue #3660). Per Julia, an infix operator at the end
@@ -153,7 +181,8 @@ impl<'a> Parser<'a> {
             }
 
             // Special case for 'where' with braced type params: expr where {T, S}
-            if op_token.token == Token::KwWhere && self.check(&Token::LBrace) {
+            let is_where_operator = op_token.token == Token::Identifier && op_token.text == "where";
+            if is_where_operator && self.check(&Token::LBrace) {
                 let right = self.parse_braced_type_params()?;
                 let span = self.source_map.span(left.span.start, right.span.end);
                 left = CstNode::with_children(NodeKind::WhereExpression, span, vec![left, right]);
@@ -171,9 +200,18 @@ impl<'a> Parser<'a> {
             // double-bounded form `Lower<:T<:Upper`; parse it as a type
             // constraint so the bound direction is preserved (emitting
             // Subtype/SupertypeConstraint nodes), not flattened into a generic
-            // binary expression that loses `>:` (Issue #5650).
-            let right = if op_token.token == Token::KwWhere {
-                self.parse_type_constraint()?
+            // binary expression that loses `>:` (Issue #5650). Stop before a
+            // FOLLOWING chained `where` (`parse_type_constraint_before_chained_where`,
+            // mirroring the type-annotation path in `parse_type_expression_inner`)
+            // so this loop's own left-associative `where`-operator handling picks
+            // up the next `where` itself, rather than the constraint parser
+            // greedily nesting it as part of the bound/constraint expression.
+            // Using the postfix-consuming `parse_type_constraint` here made
+            // `Array{T,N} where N where T` parse right-associatively (constraints
+            // = `N where T`), which `parse_value_where_type_constraints` cannot
+            // unpack outside the bounded-constraint shape (Issue #10371).
+            let right = if is_where_operator {
+                self.parse_type_constraint_before_chained_where()?
             } else {
                 self.parse_expression_with_precedence(next_prec)?
             };
@@ -182,16 +220,16 @@ impl<'a> Parser<'a> {
             let span = self.source_map.span(left.span.start, right.span.end);
 
             // Special case for 'where' - create WhereExpression
-            if op_token.token == Token::KwWhere {
+            if is_where_operator {
                 left = CstNode::with_children(NodeKind::WhereExpression, span, vec![left, right]);
             } else if op_token.token == Token::Eq {
                 // Simple assignment: lhs = rhs
-                let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+                let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
                 left =
                     CstNode::with_children(NodeKind::Assignment, span, vec![left, op_node, right]);
             } else if op_token.token.is_compound_assignment() {
                 // Compound assignment: lhs += rhs, etc.
-                let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+                let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
                 left = CstNode::with_children(
                     NodeKind::CompoundAssignmentExpression,
                     span,
@@ -209,7 +247,7 @@ impl<'a> Parser<'a> {
                     vec![left, right],
                 );
             } else {
-                let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+                let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
                 left = CstNode::with_children(
                     NodeKind::BinaryExpression,
                     span,
@@ -233,10 +271,15 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| ParseError::unexpected_eof("expression", self.current_span()))?;
         let token_kind = token.token.clone();
 
+        self.reject_invalid_operator_identifier()?;
+
         // Check for dotted operators as expression start: .+([1,2,3]), .-(x, y)
         // This is the broadcast function call syntax where the operator is used as a function
         if token_kind.is_dotted_operator() {
-            let op_token = self.advance().unwrap();
+            let is_operator_value = self.operator_value_is_at_boundary();
+            let op_token = self.advance_checked(
+                "dotted-operator token already captured from self.current at function entry",
+            )?;
 
             // Check if followed by parenthesis - this means it's a broadcast function call
             if self.check(&Token::LParen) {
@@ -266,7 +309,7 @@ impl<'a> Parser<'a> {
                 let span = self.source_map.span(start, end_token.span.end);
 
                 // Create the callee node as an Operator node (the base operator)
-                let callee = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+                let callee = CstNode::leaf(NodeKind::Operator, op_token.span);
 
                 // Insert callee at the front of args
                 let mut all_children = vec![callee];
@@ -277,6 +320,8 @@ impl<'a> Parser<'a> {
                     span,
                     all_children,
                 ));
+            } else if is_operator_value {
+                return Ok(CstNode::leaf(NodeKind::Operator, op_token.span));
             } else {
                 // Dotted operator not followed by paren is an error
                 return Err(ParseError::unexpected_token(
@@ -289,18 +334,22 @@ impl<'a> Parser<'a> {
 
         // Operators at a statement/delimiter boundary are first-class function
         // values (`f = +; f(1, 2)`), not unary operators missing an operand.
-        if token_kind.is_operator() && self.operator_value_is_at_boundary() {
-            let op_token = self.advance().unwrap();
-            return Ok(CstNode::leaf(
-                NodeKind::Operator,
-                op_token.span,
-                op_token.text,
-            ));
+        if token_kind.is_operator_identifier() && self.operator_value_is_at_boundary() {
+            let op_token = self.advance_checked(
+                "operator token already captured from self.current at function entry",
+            )?;
+            return Ok(CstNode::leaf(NodeKind::Operator, op_token.span));
+        }
+
+        if token_kind.is_operator_identifier() && self.peek_next() == Some(Token::LBrace) {
+            return self.parse_operator_value_with_postfix();
         }
 
         // Check for unary operators
         if let Some(_prec) = token_kind.unary_precedence() {
-            let op_token = self.advance().unwrap();
+            let op_token = self.advance_checked(
+                "unary operator token already captured from self.current at function entry",
+            )?;
             // Parse operand: unary binds tighter than binary, but postfix binds tightest
             // So -abs(x) should be -(abs(x)), not (-abs)(x)
             let operand = self.parse_prefix_with_postfix()?;
@@ -310,7 +359,7 @@ impl<'a> Parser<'a> {
             let operand = self.absorb_power_into_unary_operand(operand)?;
 
             let span = self.source_map.span(op_token.span.start, operand.span.end);
-            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
             return Ok(CstNode::with_children(
                 NodeKind::UnaryExpression,
                 span,
@@ -350,23 +399,28 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| ParseError::unexpected_eof("expression", self.current_span()))?;
         let token_kind = token.token.clone();
 
+        self.reject_invalid_operator_identifier()?;
+
         // Check for unary operators (handles chained unary: --x, !!x)
-        if token_kind.is_operator() && self.operator_value_is_at_boundary() {
-            let op_token = self.advance().unwrap();
-            return Ok(CstNode::leaf(
-                NodeKind::Operator,
-                op_token.span,
-                op_token.text,
-            ));
+        if token_kind.is_operator_identifier() && self.operator_value_is_at_boundary() {
+            let op_token = self.advance_checked(
+                "operator token already captured from self.current at function entry",
+            )?;
+            return Ok(CstNode::leaf(NodeKind::Operator, op_token.span));
+        }
+        if token_kind.is_operator_identifier() && self.peek_next() == Some(Token::LBrace) {
+            return self.parse_operator_value_with_postfix();
         }
         if let Some(_prec) = token_kind.unary_precedence() {
-            let op_token = self.advance().unwrap();
+            let op_token = self.advance_checked(
+                "unary operator token already captured from self.current at function entry",
+            )?;
             let operand = self.parse_prefix_with_postfix()?;
             // `^`/`.^` bind tighter than the unary operator (Issue #7232).
             let operand = self.absorb_power_into_unary_operand(operand)?;
 
             let span = self.source_map.span(op_token.span.start, operand.span.end);
-            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
             return Ok(CstNode::with_children(
                 NodeKind::UnaryExpression,
                 span,
@@ -376,6 +430,26 @@ impl<'a> Parser<'a> {
 
         // Parse primary with postfix
         self.parse_primary_with_postfix()
+    }
+
+    fn parse_operator_value_with_postfix(&mut self) -> ParseResult<CstNode> {
+        // Callers (`parse_prefix`/`parse_prefix_with_postfix`) only reach this
+        // function after confirming `self.current` is an operator token and
+        // have not advanced since, so this is guaranteed present.
+        let op_token = self.advance_checked(
+            "operator token already confirmed present by the caller before dispatching here",
+        )?;
+        let mut left = CstNode::leaf(NodeKind::Operator, op_token.span);
+
+        while !self.is_at_end() {
+            if let Some(postfix) = self.try_parse_postfix(&left)? {
+                left = postfix;
+            } else {
+                break;
+            }
+        }
+
+        Ok(left)
     }
 
     /// `^`/`.^` (and the other Power-precedence operators `↑ ↓`) bind TIGHTER
@@ -392,19 +466,19 @@ impl<'a> Parser<'a> {
     /// power is a plain operand and is unaffected, so `2^-3` stays `2^(-3)`.
     fn absorb_power_into_unary_operand(&mut self, left: CstNode) -> ParseResult<CstNode> {
         let is_power = self
-            .current
-            .as_ref()
-            .and_then(|t| t.token.binary_precedence())
+            .current_binary_precedence()
             .map(|(prec, _)| prec == Precedence::Power)
             .unwrap_or(false);
         if !is_power {
             return Ok(left);
         }
 
-        let op_token = self.advance().unwrap();
+        let op_token = self.advance_checked(
+            "Power-precedence operator token already confirmed by current_binary_precedence() above",
+        )?;
         let right = self.parse_expression_with_precedence(Precedence::Power)?;
         let span = self.source_map.span(left.span.start, right.span.end);
-        let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+        let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
         Ok(CstNode::with_children(
             NodeKind::BinaryExpression,
             span,
@@ -419,6 +493,7 @@ impl<'a> Parser<'a> {
                 Token::Newline
                     | Token::Semicolon
                     | Token::Comma
+                    | Token::Eq
                     | Token::RParen
                     | Token::RBracket
                     | Token::RBrace
@@ -427,6 +502,28 @@ impl<'a> Parser<'a> {
                     | Token::KwElseif
                     | Token::KwCatch
                     | Token::KwFinally
+            )
+        )
+    }
+
+    fn current_starts_group_item(&self) -> bool {
+        matches!(
+            self.current.as_ref().map(|t| &t.token),
+            Some(
+                Token::KwFunction
+                    | Token::KwMacro
+                    | Token::KwStruct
+                    | Token::KwMutable
+                    | Token::KwAbstract
+                    | Token::KwPrimitive
+                    | Token::KwModule
+                    | Token::KwBaremodule
+                    | Token::KwImport
+                    | Token::KwUsing
+                    | Token::KwExport
+                    | Token::KwConst
+                    | Token::KwGlobal
+                    | Token::KwLocal
             )
         )
     }
@@ -449,32 +546,37 @@ impl<'a> Parser<'a> {
     fn try_parse_dotted_unary_broadcast_prefix(&mut self) -> ParseResult<Option<CstNode>> {
         // `.!x` / `.~x`: a Dot token followed by the unary operator token.
         if self.check(&Token::Dot) {
-            let base_op = match self.peek_next() {
-                Some(Token::Not) => "!",
-                Some(Token::Tilde) => "~",
+            match self.peek_next() {
+                Some(Token::Not) | Some(Token::Tilde) => {}
                 _ => return Ok(None),
-            };
-            return Ok(Some(self.parse_dotted_unary_broadcast_two_token(base_op)?));
+            }
+            return Ok(Some(self.parse_dotted_unary_broadcast_two_token()?));
         }
 
-        // `.+v` / `.-v`: a single dotted-operator token whose base operator has
-        // a prefix-unary form, not used as a broadcast function call (`.+(...)`).
+        // `.+v` / `.-v` / `.!v` / `.~v`: a single dotted-operator token whose
+        // base operator has a prefix-unary form, not used as a broadcast
+        // function call (`.+(...)`).
         let is_unary_dotted = matches!(
             self.current.as_ref().map(|t| &t.token),
-            Some(Token::DotPlus) | Some(Token::DotMinus)
+            Some(Token::DotPlus)
+                | Some(Token::DotMinus)
+                | Some(Token::DotNot)
+                | Some(Token::DotTilde)
         );
         if is_unary_dotted {
             if matches!(self.peek_next(), Some(Token::LParen)) {
                 // `.+(...)`/`.-(...)` is a broadcast function call, not unary.
                 return Ok(None);
             }
-            let op_token = self.advance().unwrap();
+            let op_token = self.advance_checked(
+                "dotted-unary operator token already captured from self.current above",
+            )?;
             let operand = self.parse_prefix_with_postfix()?;
             // `^`/`.^` bind tighter than the broadcast unary (Issue #7232).
             let operand = self.absorb_power_into_unary_operand(operand)?;
 
             let span = self.source_map.span(op_token.span.start, operand.span.end);
-            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
             return Ok(Some(CstNode::with_children(
                 NodeKind::BroadcastCallExpression,
                 span,
@@ -486,10 +588,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a two-token prefix dotted unary broadcast operator (`.!x`, `.~x`)
-    /// into a `BroadcastCallExpression`. `base_op` is the underlying unary
-    /// operator (`"!"` or `"~"`); the emitted operator node keeps the dotted
-    /// spelling (`.!` / `.~`) so lowering can strip the dot.
-    fn parse_dotted_unary_broadcast_two_token(&mut self, base_op: &str) -> ParseResult<CstNode> {
+    /// into a `BroadcastCallExpression`. The emitted operator node keeps the
+    /// dotted spelling (`.!` / `.~`, recovered from `op_span` against source)
+    /// so lowering can strip the dot.
+    fn parse_dotted_unary_broadcast_two_token(&mut self) -> ParseResult<CstNode> {
         let dot_token = self.expect(Token::Dot)?;
         let op_inner = self
             .advance()
@@ -502,7 +604,7 @@ impl<'a> Parser<'a> {
             .source_map
             .span(dot_token.span.start, op_inner.span.end);
         let span = self.source_map.span(dot_token.span.start, operand.span.end);
-        let op_node = CstNode::leaf(NodeKind::Operator, op_span, format!(".{base_op}"));
+        let op_node = CstNode::leaf(NodeKind::Operator, op_span);
 
         Ok(CstNode::with_children(
             NodeKind::BroadcastCallExpression,

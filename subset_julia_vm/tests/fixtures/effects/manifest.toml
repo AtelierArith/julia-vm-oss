@@ -1,0 +1,23 @@
+[[tests]]
+name = "effects_assume_effects_total_cse_8441"
+file = "assume_effects_total_cse_8441.jl"
+expected = true
+description = "Base.@assume_effects :total participates in pure-call optimization eligibility without changing runtime results"
+
+[[tests]]
+name = "effects_per_method_resolution_miscompile_probe_9495"
+file = "per_method_resolution_miscompile_probe_9495.jl"
+expected = true
+description = "a pure method statically resolved and CSE'd/DCE'd across an impure same-name sibling produces upstream-correct output (per-method effect summaries at resolved call sites)"
+
+[[tests]]
+name = "effects_infer_effects_retired_comparison_hints_8441"
+file = "infer_effects_retired_comparison_hints_8441.jl"
+expected = true
+description = "isless/!== effect summaries stay upstream-total after retiring their fixed name hints (body-derived proof)"
+
+[[tests]]
+name = "effects_infer_effects_retired_core_hints_8441"
+file = "infer_effects_retired_core_hints_8441.jl"
+expected = true
+description = "ifelse/tuple effect summaries stay upstream-total after retiring their fixed name hints (body-derived proof)"

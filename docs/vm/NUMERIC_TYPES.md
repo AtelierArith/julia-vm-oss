@@ -2,6 +2,30 @@
 
 This document covers numeric type implementation details: parity checklists, intrinsic dispatch completeness, and UInt/Int mixed-type dispatch.
 
+## Executable documentation sweep status (Issue #8721)
+
+Initial sweep date: 2026-07-02.
+
+- Reviewed as one of the five major docs named by #8694/#8721.
+- Checked the numeric parity checklist, `SdivInt`/`SremInt` intrinsic notes,
+  integer constructor semantics, and promote-fallback warning against current
+  source paths.
+- No stale behavior claim was changed in this initial pass.
+- Representative executable numeric behavior is now covered by `julia-doctest`.
+  Future executable numeric examples should use the same marker.
+
+```julia-doctest
+println(UInt8(255))
+println(typeof(UInt8(255)))
+println(typeof(0x01))
+println(typeof(0x0001))
+# output
+255
+UInt8
+UInt8
+UInt16
+```
+
 ## Numeric Type Parity Checklist (Issue #1856)
 
 When extending support for one numeric type (e.g., Float32), **all similar numeric types** (Float16, Float64) must be checked for the same support. This prevents parity gap bugs where one type works but another silently fails.
@@ -33,7 +57,7 @@ When adding an intrinsic to one mixed-type dispatch path, check that **related i
 
 | Category | Operations to check together |
 |----------|------------------------------|
-| Arithmetic | `AddFloat`, `SubFloat`, `MulFloat`, `DivFloat` |
+| Arithmetic | `DynamicAdd`, `DynamicSub`, `DynamicMul`, `DynamicDiv` |
 | Integer Division | `SdivInt`, `SremInt` |
 | Comparison | `EqFloat`, `NeFloat`, `LtFloat`, `LeFloat`, `GtFloat`, `GeFloat` |
 
@@ -41,11 +65,11 @@ When adding an intrinsic to one mixed-type dispatch path, check that **related i
 
 ```bash
 # Check primitive type coverage in dispatch paths
-rg -n 'left_is_primitive|right_is_primitive' subset_julia_vm/src/vm/exec/
+rg -n 'left_is_primitive|right_is_primitive' subset_julia_vm_vm/src/vm/exec/
 
 # Check F16/F32 parity in compiler
-rg -c 'F16|Float16' subset_julia_vm/src/compile/expr/binary/ subset_julia_vm/src/compile/expr/mod.rs
-rg -c 'F32|Float32' subset_julia_vm/src/compile/expr/binary/ subset_julia_vm/src/compile/expr/mod.rs
+rg -c 'F16|Float16' subset_julia_vm_compile/src/compile/expr/binary/ subset_julia_vm_compile/src/compile/expr/mod.rs
+rg -c 'F32|Float32' subset_julia_vm_compile/src/compile/expr/binary/ subset_julia_vm_compile/src/compile/expr/mod.rs
 ```
 
 ## Intrinsic Dispatch Completeness (Issue #1778)
@@ -64,7 +88,7 @@ ensure ALL runtime dispatch branches are covered:
 ### Required Intrinsics per Branch
 
 When adding mixed-type support for Float32, include ALL these intrinsics:
-- Arithmetic: `AddFloat`, `SubFloat`, `MulFloat`, `DivFloat`
+- Arithmetic: `DynamicAdd`, `DynamicSub`, `DynamicMul`, `DynamicDiv`
 - Comparison: `EqFloat`, `NeFloat`, `LtFloat`, `LeFloat`, `GtFloat`, `GeFloat`
 - Integer ops: `SremInt` (mod/rem), `SdivInt` (div) - use fmod/float semantics for mixed types
 
@@ -142,7 +166,7 @@ All of the following locations contain `match` statements on `Value` variants th
 
 ```bash
 # Count I128/U128 handling across coercion sites
-rg -c 'I128|U128' subset_julia_vm/src/vm/stack_ops.rs subset_julia_vm/src/vm/exec/conversion.rs subset_julia_vm/src/vm/convert.rs
+rg -c 'I128|U128' subset_julia_vm_vm/src/vm/stack_ops.rs subset_julia_vm_vm/src/vm/exec/conversion.rs subset_julia_vm_vm/src/vm/convert.rs
 ```
 
 ## Integer Type Constructor Semantics (Issue #3063)
@@ -201,6 +225,105 @@ the same-type ones. A mixed pair with no specific method falls into the generic
 (`Vm::MAX_CALL_DEPTH`, Issue #5969) is a fail-fast backstop, not a substitute. Full rules
 and the recursion mechanism: see **PROMOTION.md → "Promote-fallback termination & the
 call-depth guard"**.
+
+## Generated Numeric Matrix Oracle (Issue #8696)
+
+`scripts/gen_numeric_matrix_fixture.jl` runs under upstream Julia and generates
+the reduced numeric operator oracle:
+
+- `subset_julia_vm/tests/fixtures/numeric/numeric_matrix_reduced_8696.tsv`
+- `subset_julia_vm/tests/fixtures/numeric/numeric_matrix_reduced_8696.jl`
+
+The reduced matrix is the normal-value baseline for parent Issue #8683:
+16 numeric types (`Bool`, signed/unsigned integer widths, `Float16`/`32`/`64`,
+`BigInt`, `BigFloat`) × 16 right-hand types × 15 binary operators
+(`+`, `-`, `*`, `/`, `div`, `fld`, `cld`, `rem`, `mod`, and comparisons) =
+3840 upstream cells. Each TSV row records operand types/values, status,
+`typeof(result)`, `repr(result)`, or the exception type. Boundary values and
+sjulia comparison are intentionally left to follow-up Issue #8697. The initial
+reduced run takes about 15 seconds under upstream Julia and produces a ~193 KB
+TSV.
+
+`scripts/check_numeric_matrix_reduced.sh` is the sjulia-side comparator from
+Issue #8697. It generates one sjulia probe from the TSV, compares every row back
+to the upstream oracle, writes `target/numeric-matrix-reduced/diff.tsv`, and
+checks exact-count divergence families in
+`docs/vm/NUMERIC_MATRIX_REDUCED_ALLOWLIST.tsv`. As of the 2026-07-08 #9333
+closure remeasure, the reduced allowlist is intentionally header-only: all
+reduced matrix cells match upstream.
+
+Issue #8698 extends the same generator/checker to a boundary-inclusive full
+profile:
+
+```bash
+mkdir -p target/numeric-matrix-full
+julia --startup-file=no scripts/gen_numeric_matrix_fixture.jl \
+  --profile full \
+  --out-tsv target/numeric-matrix-full/oracle.tsv \
+  --out-fixture target/numeric-matrix-full/unused.jl
+ORACLE=target/numeric-matrix-full/oracle.tsv \
+  ALLOWLIST=docs/vm/NUMERIC_MATRIX_FULL_ALLOWLIST.tsv \
+  SKIPLIST=docs/vm/NUMERIC_MATRIX_FULL_SKIPLIST.tsv \
+  OUT_DIR=target/numeric-matrix-full \
+  TIMEOUT_SECONDS=900 \
+  bash scripts/check_numeric_matrix_reduced.sh
+```
+
+The full profile currently has 82,140 upstream rows:
+
+- reduced normal values plus `false`
+- signed integer `-1`, `0`, `typemin`, `typemax`
+- unsigned integer `0`, `typemax`
+- float and BigFloat `-1`, `0`, `-0.0`, `Inf`, `-Inf`, `NaN`
+- BigInt `-1`, `0`, and a large `typemax(Int128)` value
+
+`docs/vm/NUMERIC_MATRIX_FULL_ALLOWLIST.tsv` tracks full-profile divergence
+families with exact counts. As of the 2026-07-08 #9333 closure remeasure the
+remaining tracked families are fixed-width integer boundary status (#9716),
+signed-zero / NaN / Inf / boundary value-repr (#9717), and BigFloat mixed
+signed-zero precision (#9718), totaling 881 rows. Rows that currently
+exit or panic before the generated probe can catch an exception are kept in
+`docs/vm/NUMERIC_MATRIX_FULL_SKIPLIST.tsv` with explicit `ANY` wildcards and
+linked bugs (#8893/#8894/#8896 after #8892/#8895 were fixed). The nightly
+`numeric-matrix` job in
+`.github/workflows/nightly-gates.yml` regenerates this full oracle and runs the
+ratchet daily.
+
+When adding a numeric type, boundary value, or operator, update
+`REDUCED_VALUE_SPECS`, `FULL_VALUE_SPECS`, or `OP_SPECS` in
+`scripts/gen_numeric_matrix_fixture.jl`, regenerate the reduced committed oracle,
+and rerun both the reduced and full matrix checks.
+
+## BigFloat exponent range: astro-float vs MPFR (Issues #9290, #8885)
+
+sjulia's `BigFloat` is backed by astro-float, not MPFR. astro-float uses an
+i32-class exponent, so the representable magnitude range is about
+`10^±6.46e8`, while upstream MPFR uses `emax = 2^62`, about `10^±1.39e18`.
+Consequences:
+
+- `floatmax(BigFloat)` / `floatmin(BigFloat)` (base/gmp.jl, Issue #9290) and
+  `prevfloat(BigFloat(Inf))` / `nextfloat(zero(BigFloat))` return the largest /
+  smallest positive finite value of the *astro-float* range. The decimal
+  **values differ from upstream** (`floatmax(BigFloat)` is
+  `≈8.81e+646456992` in sjulia vs `≈5.88e+1388255822130839282` in MPFR-backed
+  Julia). The upstream *invariants* still hold and are what fixtures should
+  assert: `floatmax(BigFloat) == prevfloat(BigFloat(Inf))`,
+  `floatmin(BigFloat) == nextfloat(zero(BigFloat))`,
+  `nextfloat(floatmax(BigFloat)) == BigFloat(Inf)`,
+  `prevfloat(floatmin(BigFloat)) == 0`, finiteness, and ordering vs the
+  `Float64` limits. Do **not** assert upstream digit parity for these
+  range-boundary values.
+- MPFR's smallest positive value `2^(emin-1)` is precision-independent, so
+  upstream `floatmin(BigFloat)` is the same at every precision; astro-float's
+  minimum boundary varies with precision, so sjulia fixtures may only assert
+  `setprecision(() -> floatmin(BigFloat), BigFloat, 128) >= floatmin(BigFloat)`
+  (equality upstream, strict `>` in sjulia).
+- The same range family also shows up as value drift in the numeric matrix
+  (#8885 tracked decimal repr drift; boundary cells near the range limits stay
+  backend-dependent).
+
+This is a documented backend divergence, not a bug in the pure-Julia layer;
+closing it would require an MPFR-range big-float backend.
 
 ## Related Documentation
 

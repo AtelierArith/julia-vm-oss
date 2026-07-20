@@ -31,16 +31,40 @@
 # --- float forms (preserve the float type) with digits/sigdigits/base keywords ---
 # Each method folds the plain form (no keywords → the CPU intrinsic) and the
 # digits/sigdigits scaling into one definition (a positional method and a keyword
-# method would share the same signature and conflict). The scaling reproduces the
-# `x*factor`/`factor` algorithm of the former Rust round-digits builtins. `_scale`
-# returns the (factor) for a given digits/sigdigits request.
-function _round_scale(x, digits, sigdigits, base)
-    if digits !== nothing
-        return float(base) ^ digits
+# method would share the same signature and conflict). Match upstream's split:
+# nonnegative digits round to multiples of 1/invstep, while negative digits round
+# to multiples of step. Always using `x*factor/factor` makes cases like
+# round(1234.0, sigdigits=2) land on 1199.9999999999998.
+function _round_intrinsic(x, mode)
+    if mode === :floor
+        return floor_llvm(x)
+    elseif mode === :ceil
+        return ceil_llvm(x)
+    elseif mode === :trunc
+        return trunc_llvm(x)
     end
-    # sigdigits: scale so `sigdigits` significant digits survive (base-`base`).
+    return rint_llvm(x)
+end
+
+function _round_digits_scaled(x, digits, base, mode)
+    if digits >= 0
+        invstep = float(base) ^ digits
+        return _round_intrinsic(x * invstep, mode) / invstep
+    end
+    step = float(base) ^ -digits
+    return _round_intrinsic(x / step, mode) * step
+end
+
+function _round_sigdigits_scaled(x, sigdigits, base, mode)
     d = floor(Int, log(float(base), abs(x))) + 1
-    return float(base) ^ (sigdigits - d)
+    return _round_digits_scaled(x, sigdigits - d, base, mode)
+end
+
+function _round_digits_or_sigdigits(x, digits, sigdigits, base, mode)
+    if digits !== nothing
+        return _round_digits_scaled(x, digits, base, mode)
+    end
+    return _round_sigdigits_scaled(x, sigdigits, base, mode)
 end
 
 function floor(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
@@ -48,8 +72,7 @@ function floor(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:Abstr
         return floor_llvm(x)
     end
     (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
-    factor = _round_scale(x, digits, sigdigits, base)
-    return floor_llvm(x * factor) / factor
+    return _round_digits_or_sigdigits(x, digits, sigdigits, base, :floor)
 end
 
 function ceil(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
@@ -57,8 +80,7 @@ function ceil(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:Abstra
         return ceil_llvm(x)
     end
     (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
-    factor = _round_scale(x, digits, sigdigits, base)
-    return ceil_llvm(x * factor) / factor
+    return _round_digits_or_sigdigits(x, digits, sigdigits, base, :ceil)
 end
 
 function trunc(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
@@ -66,8 +88,7 @@ function trunc(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:Abstr
         return trunc_llvm(x)
     end
     (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
-    factor = _round_scale(x, digits, sigdigits, base)
-    return trunc_llvm(x * factor) / factor
+    return _round_digits_or_sigdigits(x, digits, sigdigits, base, :trunc)
 end
 
 function round(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:AbstractFloat}
@@ -75,8 +96,7 @@ function round(x::T; digits=nothing, sigdigits=nothing, base=10) where {T<:Abstr
         return rint_llvm(x)
     end
     (x == 0 || (sigdigits !== nothing && sigdigits <= 0)) && return zero(x)
-    factor = _round_scale(x, digits, sigdigits, base)
-    return rint_llvm(x * factor) / factor
+    return _round_digits_or_sigdigits(x, digits, sigdigits, base, :round)
 end
 
 # --- integer identity (floor(5) === 5, not 5.0) ---
@@ -100,16 +120,77 @@ end
 # cld: ceiling division - returns integer type for integers, float for floats
 # Julia's cld returns the same type as input for integers
 function cld(x::Int64, y::Int64)
-    # ceil() returns Float64, convert back to Int64
-    return Int64(ceil(x / y))
+    q = div(x, y)
+    r = rem(x, y)
+    return (r != 0 && ((x > 0) == (y > 0))) ? q + 1 : q
 end
 
+# Float64 ceiling division. Mirrors upstream
+# `div(x::T, y::T, ::RoundUp) where {T<:AbstractFloat} = round((x - rem(x, y, RoundUp)) / y)`
+# (base/div.jl), with `rem(x, y, RoundUp) == mod(x, -y)`. This is *not*
+# `ceil(x / y)`: an infinite `x` or a zero `y` makes the remainder NaN, so the
+# result is NaN like upstream instead of a leaked ±Inf (Issue #9450). The
+# explicit `copysign` on a zero remainder reproduces upstream float `mod`'s
+# `r == 0 ? copysign(r, y) : r` zero-sign rule locally (sjulia's generic `mod`
+# lacks it, Issue #9414), so cld(-0.0, -1.0) == 0.0 and cld(0.5, -1.0) == -0.0.
 function cld(x::Float64, y::Float64)
-    return ceil(x / y)
+    r = mod(x, -y)
+    if r == 0
+        r = copysign(r, -y)
+    end
+    return round((x - r) / y)
 end
+
+# Upstream keeps ceil/floor of the widened exact quotient for the narrow float
+# types (base/div.jl, Lefèvre: exact when eps(x/y) <= 1), so an infinite
+# dividend stays ±Inf here — unlike the Float64/BigFloat remainder formula,
+# which yields NaN (cld(Float32(Inf), 1.0f0) == Inf32 but cld(Inf, 1.0) is NaN).
+cld(x::Float32, y::Float32) = Float32(ceil(Float64(x) / Float64(y)))
+cld(x::Float16, y::Float16) = Float16(ceil(Float32(x) / Float32(y)))
+
+# BigFloat ceiling division. Mirrors upstream
+# `div(x::T, y::T, ::RoundUp) where {T<:AbstractFloat} = round((x - rem(x, y, RoundUp)) / y)`
+# (base/div.jl), with `rem(x, y, RoundUp) == mod(x, -y)`. Like `fld`, this is
+# *not* `ceil(x / y)`: an infinite `x` or a zero `y` makes `mod` yield `NaN`, so
+# the result is `NaN` (matching MPFR/Julia) instead of a spurious `±Inf`
+# (Issue #9443).
+cld(x::BigFloat, y::BigFloat) = round((x - mod(x, -y)) / y)
+# Mixed BigFloat/Real promotes to BigFloat, mirroring upstream
+# `cld(x::Real, y::Real) = div(promote(x, y)..., RoundUp)` (base/div.jl):
+# cld(big(Inf), 1) must be NaN, not the ±Inf the generic `ceil(x/y)` leaks.
+# `promote` (not `BigFloat(y)`) handles every Real width, including Bool/UInt8/
+# Float32 that lack a direct `BigFloat` constructor.
+cld(x::BigFloat, y::Real) = cld(promote(x, y)...)
+cld(x::Real, y::BigFloat) = cld(promote(x, y)...)
 
 function cld(x, y)
-    return ceil(x / y)
+    # Issue #8883: for integer operands, ceil(x/y) widens to Float64 and loses
+    # the integer type. Upstream Julia: cld(a,b) = div(a,b,RoundUp) which does
+    # type-preserving ceiling division. Replicate here using promote to match the
+    # promoted integer type: q + 1 when remainder is non-zero AND signs agree.
+    if x isa Integer && y isa Integer
+        px, py = promote(x, y)
+        q = div(px, py)
+        r = rem(px, py)
+        return (r != 0 && ((px > 0) == (py > 0))) ? q + one(q) : q
+    end
+    # Mixed Real pairs promote and re-dispatch, mirroring upstream
+    # `div(x::Real, y::Real, r::RoundingMode) = div(promote(x, y)..., r)`
+    # (base/div.jl), so e.g. cld(big(typemax(Int128)), Float16(Inf)) reaches
+    # the BigFloat method and yields NaN instead of the 0.0/±Inf that
+    # `ceil(x / y)` leaks (Issue #9450). `promote` is idempotent, so this
+    # bounces at most once: a same-type pair with no specific method falls
+    # through to the upstream AbstractFloat remainder formula below (see
+    # cld(::Float64, ::Float64)).
+    px, py = promote(x, y)
+    if !(typeof(px) == typeof(x) && typeof(py) == typeof(y))
+        return cld(px, py)
+    end
+    r = mod(px, -py)
+    if r == 0
+        r = copysign(r, -py)
+    end
+    return round((px - r) / py)
 end
 
 # modf: return (fractional part, integer part)

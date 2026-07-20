@@ -231,8 +231,7 @@ fn test_dispatch_local_keyword() {
 
 #[test]
 fn test_dispatch_bare_tuple_assignment() {
-    // Token::Identifier + peek_next() == Token::Comma -> parse_bare_tuple_assignment()
-    // Note: The parser currently returns BinaryExpression for assignments
+    // Statement-level comma tails parse as tuple assignment when followed by `=`.
     let node = parse_first("a, b = 1, 2");
     // Bare tuple assignment may result in a BinaryExpression with Assignment operator
     // The left side should contain a tuple structure
@@ -251,6 +250,39 @@ fn test_dispatch_bare_tuple_assignment() {
         node.kind
     );
     assert_eq!(node.children[0].kind, NodeKind::TupleExpression);
+}
+
+#[test]
+fn test_dispatch_bare_tuple_expression_statement_issue_8908() {
+    let node = parse_first("r, f");
+    assert_eq!(node.kind, NodeKind::TupleExpression);
+
+    let node = parse_first("xy, fma(x, y, -xy)");
+    assert_eq!(node.kind, NodeKind::TupleExpression);
+
+    let node = parse_first("unsafe_getindex(r, i), i");
+    assert_eq!(node.kind, NodeKind::TupleExpression);
+}
+
+#[test]
+fn test_dispatch_bare_tuple_assignment_with_postfix_lhs_issue_8908() {
+    let node = parse_first("v[i], v[r] = v[r], v[i]");
+    assert!(
+        node.kind == NodeKind::Assignment || node.kind == NodeKind::BinaryExpression,
+        "Expected Assignment or BinaryExpression, got {:?}",
+        node.kind
+    );
+    assert_eq!(node.children[0].kind, NodeKind::TupleExpression);
+}
+
+#[test]
+fn test_dispatch_nested_bare_tuple_assignment_rhs_issue_8759() {
+    let node = parse_first("l0, _ = left, right = firstindex(str), lastindex(str)");
+    assert_eq!(node.kind, NodeKind::BinaryExpression);
+    assert_eq!(node.children[0].kind, NodeKind::TupleExpression);
+    assert_eq!(node.children[2].kind, NodeKind::BinaryExpression);
+    assert_eq!(node.children[2].children[0].kind, NodeKind::TupleExpression);
+    assert_eq!(node.children[2].children[2].kind, NodeKind::TupleExpression);
 }
 
 #[test]
@@ -357,11 +389,12 @@ fn test_dispatch_dotted_operator_broadcast() {
 #[test]
 fn test_dispatch_dotted_operator_binary() {
     // Dotted operators used as binary operators (not function calls)
-    let node = parse_first("[1, 2] .+ [3, 4]");
+    let source = "[1, 2] .+ [3, 4]";
+    let node = parse_first(source);
     assert_eq!(node.kind, NodeKind::BinaryExpression);
     // The operator should be .+
     assert_eq!(node.children[1].kind, NodeKind::Operator);
-    assert_eq!(node.children[1].text.as_deref(), Some(".+"));
+    assert_eq!(node.children[1].text_from_source(source), ".+");
 }
 
 // ==================== Default Expression Dispatch Tests ====================
@@ -667,8 +700,8 @@ fn test_exhaustive_dotted_operators_as_binary_expressions() {
             source
         );
         assert_eq!(
-            operator_node.text.as_deref(),
-            Some(*op),
+            operator_node.text_from_source(source),
+            *op,
             "Operator text should be '{}' for source: {}",
             op,
             source

@@ -1,6 +1,5 @@
 use super::AotCodeGenerator;
-use crate::aot::abi::{AotAbiClass, AotAbiValue, AOT_RUNTIME_ABI_VERSION};
-use crate::aot::codegen::CAbiExport;
+use crate::aot::abi::AOT_RUNTIME_ABI_VERSION;
 use crate::aot::ir::{AotEnum, AotExpr, AotFunction, AotGlobal, AotProgram, AotStmt, AotStruct};
 use crate::aot::types::StaticType;
 use crate::aot::{AotError, AotResult, UnsupportedInstructionDiagnostic};
@@ -8,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::escape_rust_ident;
 use super::global_static_ident;
+
+mod c_abi;
 
 /// Collect the names of all variables *read* by an expression. Used by the
 /// branch-escaping-local hoist analysis (Issue #8181). Exhaustive over
@@ -224,144 +225,6 @@ impl AotCodeGenerator {
             }
         }
         Ok(())
-    }
-
-    pub(super) fn resolve_c_abi_exports(
-        &self,
-        program: &AotProgram,
-    ) -> AotResult<Vec<ResolvedCAbiExport>> {
-        let mut resolved = Vec::new();
-        let mut seen_export_names = HashSet::new();
-        let generated_names: HashSet<_> = program
-            .functions
-            .iter()
-            .map(|func| self.emitted_function_name(func))
-            .collect();
-
-        for request in &self.config.c_abi_exports {
-            if !Self::is_c_symbol_name(&request.export_name) {
-                return Err(AotError::CodegenError(format!(
-                    "C ABI export symbol `{}` is not a valid C/Rust symbol name",
-                    request.export_name
-                )));
-            }
-            if !seen_export_names.insert(request.export_name.clone()) {
-                return Err(AotError::CodegenError(format!(
-                    "duplicate C ABI export symbol `{}`",
-                    request.export_name
-                )));
-            }
-
-            let candidates: Vec<_> = program
-                .functions
-                .iter()
-                .filter_map(|func| {
-                    let rust_func_name = self.emitted_function_name(func);
-                    let name_matches = func.name == request.function_name
-                        || rust_func_name == request.function_name;
-                    let signature_matches = request.arg_types.as_ref().is_none_or(|arg_types| {
-                        func.params.iter().map(|(_, ty)| ty).eq(arg_types.iter())
-                    });
-                    if name_matches && signature_matches {
-                        Some((func, rust_func_name))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let [(func, rust_func_name)] = candidates.as_slice() else {
-                return Err(AotError::CodegenError(Self::c_abi_resolution_error(
-                    request,
-                    candidates.len(),
-                )));
-            };
-
-            if request.export_name != *rust_func_name
-                && generated_names.contains(&request.export_name)
-            {
-                return Err(AotError::CodegenError(format!(
-                    "C ABI export symbol `{}` conflicts with an existing generated Rust function; use a distinct export name",
-                    request.export_name
-                )));
-            }
-
-            Self::validate_c_abi_export(request, func)?;
-            resolved.push(ResolvedCAbiExport {
-                export_name: request.export_name.clone(),
-                rust_func_name: rust_func_name.clone(),
-                func: (*func).clone(),
-            });
-        }
-
-        Ok(resolved)
-    }
-
-    fn c_abi_resolution_error(request: &CAbiExport, candidate_count: usize) -> String {
-        if candidate_count == 0 {
-            format!(
-                "C ABI export `{}` could not find function `{}`",
-                request.export_name, request.function_name
-            )
-        } else {
-            format!(
-                "C ABI export `{}` is ambiguous for function `{}`; use `symbol=function(Int64,Float64)` or a generated method name such as `name_i64_i64`",
-                request.export_name, request.function_name
-            )
-        }
-    }
-
-    fn validate_c_abi_export(request: &CAbiExport, func: &AotFunction) -> AotResult<()> {
-        let abi = func.call_abi();
-        if !abi.is_fully_native() {
-            return Err(AotError::CodegenError(format!(
-                "C ABI export `{}` for `{}` requires a fully native AoT ABI; boxed runtime `Value` boundaries are not C ABI stable",
-                request.export_name, func.name
-            )));
-        }
-
-        for (idx, param) in abi.params().iter().enumerate() {
-            if !Self::c_abi_value_is_stable(param, false) {
-                return Err(AotError::CodegenError(format!(
-                    "C ABI export `{}` for `{}` has non-C-stable parameter {} of type `{}`",
-                    request.export_name,
-                    func.name,
-                    idx + 1,
-                    param.julia_type()
-                )));
-            }
-        }
-
-        if !Self::c_abi_value_is_stable(abi.ret(), true) {
-            return Err(AotError::CodegenError(format!(
-                "C ABI export `{}` for `{}` has non-C-stable return type `{}`",
-                request.export_name,
-                func.name,
-                abi.ret().julia_type()
-            )));
-        }
-
-        Ok(())
-    }
-
-    fn c_abi_value_is_stable(value: &AotAbiValue, allow_nothing: bool) -> bool {
-        if value.class() != AotAbiClass::UnboxedScalar {
-            return false;
-        }
-        matches!(
-            value.julia_type(),
-            StaticType::I64
-                | StaticType::I32
-                | StaticType::I16
-                | StaticType::I8
-                | StaticType::U64
-                | StaticType::U32
-                | StaticType::U16
-                | StaticType::U8
-                | StaticType::F64
-                | StaticType::F32
-                | StaticType::Bool
-        ) || (allow_nothing && matches!(value.julia_type(), StaticType::Nothing))
     }
 
     fn is_c_symbol_name(name: &str) -> bool {
@@ -715,9 +578,31 @@ impl AotCodeGenerator {
             return true;
         }
 
-        // For now, require exact type match for dispatch
-        // In the future, we could add subtyping rules here
+        if Self::bare_complex_accepts_concrete(expected, actual) {
+            return true;
+        }
+
         false
+    }
+
+    fn bare_complex_accepts_concrete(expected: &StaticType, actual: &StaticType) -> bool {
+        matches!(
+            (expected, actual),
+            (
+                StaticType::Struct {
+                    name: expected_name,
+                    ..
+                },
+                StaticType::Struct {
+                    name: actual_name, ..
+                }
+            ) if Self::is_bare_complex_name(expected_name)
+                && StaticType::complex_param_type_from_name(actual_name).is_some()
+        )
+    }
+
+    fn is_bare_complex_name(name: &str) -> bool {
+        name == "Complex"
     }
 
     fn method_more_specific(
@@ -767,6 +652,10 @@ impl AotCodeGenerator {
             if lhs == rhs {
                 continue;
             }
+            if Self::bare_complex_accepts_concrete(rhs, lhs) {
+                strictly_more_specific = true;
+                continue;
+            }
             if matches!(rhs, StaticType::Any) && !matches!(lhs, StaticType::Any) {
                 strictly_more_specific = true;
                 continue;
@@ -789,6 +678,10 @@ impl AotCodeGenerator {
                 } else if matches!(left, StaticType::Any) {
                     Some(right.clone())
                 } else if matches!(right, StaticType::Any) {
+                    Some(left.clone())
+                } else if Self::bare_complex_accepts_concrete(left, right) {
+                    Some(right.clone())
+                } else if Self::bare_complex_accepts_concrete(right, left) {
                     Some(left.clone())
                 } else {
                     None
@@ -1208,6 +1101,24 @@ impl AotCodeGenerator {
         self.write_line("const im: Complex = Complex::<f64> { re: 0.0, im: 1.0 };");
         self.blank_line();
 
+        self.write_line("impl<T> From<Complex<T>> for Value");
+        self.write_line("where T: Into<Value>");
+        self.write_line("{");
+        self.indent();
+        self.write_line("fn from(value: Complex<T>) -> Self {");
+        self.indent();
+        self.write_line("Value::Struct {");
+        self.indent();
+        self.write_line("type_name: \"Complex\".to_string(),");
+        self.write_line("fields: vec![value.re.into(), value.im.into()],");
+        self.dedent();
+        self.write_line("}");
+        self.dedent();
+        self.write_line("}");
+        self.dedent();
+        self.write_line("}");
+        self.blank_line();
+
         // Mixed-type operator impls for Float64-backed Complex arithmetic.
         self.write_line("impl std::ops::Mul<Complex> for f64 {");
         self.indent();
@@ -1262,6 +1173,23 @@ impl AotCodeGenerator {
         self.write_line("where T: Copy + std::ops::Add<Output = T> + std::ops::Mul<Output = T>");
         self.write_line("{ z.re * z.re + z.im * z.im }");
         self.write_line("fn abs2_f64(x: f64) -> f64 { x * x }");
+        self.write_line("fn __sjulia_value_as_complex(value: &Value) -> Option<Complex> {");
+        self.indent();
+        self.write_line("let Value::Struct { type_name, fields } = value else { return None; };");
+        self.write_line(
+            "if type_name != \"Complex\" && !type_name.starts_with(\"Complex{\") { return None; }",
+        );
+        self.write_line("let [re, imag] = fields.as_slice() else { return None; };");
+        self.write_line("Some(Complex::new(re.as_f64()?, imag.as_f64()?))");
+        self.dedent();
+        self.write_line("}");
+        self.write_line("fn abs2_value(value: &Value) -> f64 {");
+        self.indent();
+        self.write_line("if let Some(x) = value.as_f64() { return x * x; }");
+        self.write_line("let z = __sjulia_value_as_complex(value).unwrap_or_else(|| throw(RuntimeError::method_error(format!(\"abs2({}::{})\", value, value.type_name()))));");
+        self.write_line("abs2_complex(z)");
+        self.dedent();
+        self.write_line("}");
         self.blank_line();
 
         // real/imag for Complex numbers
@@ -1631,18 +1559,14 @@ impl AotCodeGenerator {
                 AotStmt::Assign {
                     target: AotExpr::Var { name, .. },
                     ..
-                } => {
-                    if param_names.contains(name) {
-                        reassigned.insert(name.clone());
-                    }
+                } if param_names.contains(name) => {
+                    reassigned.insert(name.clone());
                 }
                 AotStmt::CompoundAssign {
                     target: AotExpr::Var { name, .. },
                     ..
-                } => {
-                    if param_names.contains(name) {
-                        reassigned.insert(name.clone());
-                    }
+                } if param_names.contains(name) => {
+                    reassigned.insert(name.clone());
                 }
                 AotStmt::If {
                     then_branch,
@@ -1746,9 +1670,9 @@ impl AotCodeGenerator {
                             other => read_expr(other, scope, acc),
                         }
                     }
-                    AotStmt::Expr(expr) | AotStmt::Return(Some(expr)) => {
-                        read_expr(expr, scope, acc)
-                    }
+                    AotStmt::Expr(expr)
+                    | AotStmt::ValueCarrier(expr)
+                    | AotStmt::Return(Some(expr)) => read_expr(expr, scope, acc),
                     AotStmt::Return(None) | AotStmt::Break | AotStmt::Continue => {}
                     AotStmt::If {
                         condition,
@@ -1927,48 +1851,6 @@ impl AotCodeGenerator {
 
         self.dedent();
         self.write_line("}");
-
-        Ok(())
-    }
-
-    pub(super) fn emit_c_abi_wrappers(&mut self, exports: &[ResolvedCAbiExport]) -> AotResult<()> {
-        for export in exports {
-            if export.export_name == export.rust_func_name {
-                continue;
-            }
-
-            let params: Vec<_> = export
-                .func
-                .params
-                .iter()
-                .map(|(name, ty)| format!("{}: {}", escape_rust_ident(name), self.type_to_rust(ty)))
-                .collect();
-            let args: Vec<_> = export
-                .func
-                .params
-                .iter()
-                .map(|(name, _)| escape_rust_ident(name))
-                .collect();
-            let export_ident = escape_rust_ident(&export.export_name);
-            let return_ty = self.type_to_rust(&export.func.return_type);
-
-            self.write_line("#[no_mangle]");
-            self.write_line(&format!(
-                "pub extern \"C\" fn {}({}) -> {} {{",
-                export_ident,
-                params.join(", "),
-                return_ty
-            ));
-            self.indent();
-            if export.func.return_type == StaticType::Nothing {
-                self.write_line(&format!("{}({});", export.rust_func_name, args.join(", ")));
-            } else {
-                self.write_line(&format!("{}({})", export.rust_func_name, args.join(", ")));
-            }
-            self.dedent();
-            self.write_line("}");
-            self.blank_line();
-        }
 
         Ok(())
     }

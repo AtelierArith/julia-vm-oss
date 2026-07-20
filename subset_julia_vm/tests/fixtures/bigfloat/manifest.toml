@@ -5,6 +5,12 @@ expected = true
 description = "Test precision() for BigFloat type and values"
 
 [[tests]]
+name = "bigfloat_zero_precision_9599"
+file = "bigfloat_zero_precision_9599.jl"
+expected = true
+description = "Zero-valued and non-finite BigFloat values report their allocation precision instead of the astro-float significant-bit count, matching upstream MPFR behavior under setprecision (Issues #9599/#9651)."
+
+[[tests]]
 name = "bigfloat_setprecision"
 file = "setprecision.jl"
 expected = true
@@ -57,3 +63,111 @@ name = "bigfloat_bigfloat_int_conversion_6890"
 file = "bigfloat_int_conversion_6890.jl"
 expected = true
 description = "BigFloat -> integer conversion (Issue #6890). `Int(big(2.0))` and the typed rounding forms floor/ceil/round/trunc(Int, ::BigFloat) (= T(round(x)), base/floatfuncs.jl) previously failed with 'Cannot convert BigFloat(...) to Int64' — convert_to_iNN/uNN had no BigFloat arm. RustBigFloat::to_bigint_exact extracts the exact integer (integer-valued check via trunc, then astro_float decimal Display parsed to num_bigint::BigInt) and each converter range-checks it via ToPrimitive, raising InexactError on non-finite/fractional/out-of-range values like upstream (::Type{<:Integer})(::BigFloat). Covers signed/unsigned widths, negatives, ties-to-even round, and precision beyond Float64 (2^70, 18-digit). Rust-only, no base cache regen. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_tiny_positive_compare_8604"
+file = "bigfloat_tiny_positive_compare_8604.jl"
+expected = true
+description = "Tiny positive BigFloat values compare greater than zero (Issue #8604). astro_float cmp handles self==0 but not rhs==0, so `big\"1e-78\" >= big\"0.0\"` incorrectly returned false and `big\"1e-78\" < big\"0.0\"` true. RustBigFloat::cmp now special-cases zero on either side before delegating. Verified vs upstream Julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_zero_comparison_matrix_8607"
+file = "bigfloat_zero_comparison_matrix_8607.jl"
+expected = true
+description = "Prevention matrix for BigFloat zero-boundary comparisons (Issue #8607): tiny positive, tiny negative, and exact zero values are compared against zero in both operand orders across <, <=, >, >=, ==, and !=, for direct BigFloat values plus values loaded from Any and Real array slots so boxed/abstract comparison paths stay covered."
+
+[[tests]]
+name = "bigfloat_bigfloat_mixed_division_repr_8885"
+file = "bigfloat_mixed_division_repr_8885.jl"
+expected = true
+description = "BigFloat `repr` matches upstream Julia 1.12 (Base.MPFR) bit-for-bit in the last decimal place (Issue #8885). astro-float's Display emits `ceil(prec·log10 2)` significant digits, one fewer than MPFR's `%Re` (`1 + ceil(prec·log10 2)`); the same binary value therefore drifted in the last place (`true / BigFloat(\"2.5\")` printed `…0001` vs MPFR's `…0009`). format_bigfloat_julia now reproduces MPFR's digit count by re-rendering at higher precision and rounding the decimal string to m significant digits (ties-to-even), incl. sign, scientific e±NN form, and a carry-out case; terminating short-dyadic values (big(0.1), 2.5) stay unchanged. Rust-only, no base cache regen. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_nextfloat_prevfloat_9280"
+file = "bigfloat_nextfloat_prevfloat_9280.jl"
+expected = true
+description = "nextfloat/prevfloat on a BigFloat (Issue #9280). Previously errored with `reinterpret(Int64, BigFloat): size mismatch` because BigFloat fell through to the generic `nextfloat(x::T) where {T<:AbstractFloat}` (base/float.jl), which steps the Float64 bit pattern via reinterpret. BigFloat now has dedicated methods in base/gmp.jl that advance by one ULP at the value's precision via the `_bigfloat_nextfloat` builtin, mirroring MPFR mpfr_nextabove/nextbelow over the astro-float backend: full-digit repr for positive/negative/power-of-two values (the ULP halves below a power-of-two boundary), the (x, n) arity (n>0/=0/<0 and prevfloat symmetry), zero stepping to the smallest ± value with round-trip back to 0, and ±Inf/NaN edges. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_chained_division_9281"
+file = "bigfloat_chained_division_9281.jl"
+expected = true
+description = "Chained division whose left operand is a boxed non-Float64 numeric intermediate keeps that type instead of narrowing to Float64 (Issue #9281). `infer_expr_type`/`infer_julia_type` reported Float64 for every `BinaryOp::Div`, so the inner `BigFloat/BigFloat` (a BigFloat at runtime) was inferred Float64 and the outer `(…)/2` took the Float64 fast path (`DynamicToF64; ToF64; DivF64`), degrading `BigFloat/BigFloat/2` to Float64. Division inference now follows the operands (integer/integer → Float64, but BigFloat/BigInt/narrow-float/struct preserved), mirroring the runtime `DivBigFloat`/`DivF*` dispatch and lattice `tfunc_div`; the same fix restores chained Float32/Float16/BigInt/Rational divisions and the untyped-parameter case. Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_rational_convert_9288"
+file = "bigfloat_rational_convert_9288.jl"
+expected = true
+description = "Mixed BigFloat–Rational arithmetic (`+ - * / ==` in both operand orders) errored with `Cannot convert StructRef(..) to BigFloat` (Issue #9288). The generic Number promote-fallback widens the pair via `promote(::BigFloat, ::Rational)`, whose convert leg routes through `convert(::Type{T}, x::Number) = T(x)` to `BigFloat(::Rational)`; `BigFloat(x)` compiles to a direct `CallBuiltin(BigFloat, 1)`, so a pure-Julia `BigFloat(::Rational)` method could never dispatch and the Rust builtin threw on the Rational StructRef, leaving `promote` unable to terminate. The BigFloat builtin now converts a Rational{T} as `BigFloat(numerator) / BigFloat(denominator)` at the active precision (numerator/denominator taken exactly through their decimal string, so Rational{BigInt} is handled too), mirroring upstream base/mpfr.jl `BigFloat(x::Rational)`. Verified vs julia 1.12.6 (default 256-bit precision)."
+
+[[tests]]
+name = "bigfloat_exponent_significand_frexp_9286"
+file = "bigfloat_exponent_significand_frexp_9286.jl"
+expected = true
+description = "exponent/significand/frexp on a BigFloat (Issue #9286). Previously errored with `reinterpret(UInt64, BigFloat): size mismatch` because BigFloat fell through to the generic `where {T<:AbstractFloat}` definitions in base/float.jl, which decode the Float64 bit pattern via reinterpret. BigFloat now has dedicated methods in base/gmp.jl over the astro-float exponent (mirroring MPFR mpfr_get_exp/mpfr_frexp): `_bigfloat_get_exp(x)` gives E with x = m·2^E, m ∈ [0.5, 1), and `_bigfloat_scale2(x, n)` multiplies by 2^n by exact exponent shift. frexp returns (m, E), exponent is E-1 (Base [1,2) convention), significand is m·2 in [1,2); positive/negative/power-of-two/sub-1/exact-powers, cross-checks between the three, and ±0/±Inf/NaN edges (exponent throws DomainError; significand returns x; frexp returns (x, 0)). Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_irrational_promote_9317"
+file = "bigfloat_irrational_promote_9317.jl"
+expected = true
+description = "BigFloat + Irrational promotes to BigFloat at the active precision instead of degrading to Float64 (Issue #9317). A compile-time fast path (compile/expr/binary/mod.rs) recognizes the VM-known irrational singletons Irrational{:π}/Irrational{:ℯ} and forces both operands to Float64/Float32 for +,-,*,/ and the ordering comparisons <,<=,>,>=. The gate is now a WHITELIST: it takes that Float64/Float32 fast path only when the other operand is a concrete numeric whose pure-Julia irrational method result is Float64/Float32 (integers incl. Bool and BigInt, Float32, Float64), and falls through to method dispatch for everything else. The prior BLACKLIST (bail only on a statically BigFloat operand) still forced the common dynamically-typed cases — an untyped param `f(x)=x+pi; f(BigFloat(1))`, an Any[] element `Any[BigFloat(1)][1]+pi`, and a call result `g()=BigFloat(1); g()+pi`, all seen as Any — onto the Float64 fast path. Non-whitelisted operands promote through the pure-Julia `+(x::AbstractFloat, y::AbstractIrrational) = x + typeof(x)(y)` method (base/irrationals.jl) and `promote(::BigFloat, ::AbstractIrrational)` (base/promotion.jl), preserving BigFloat at the active precision; Float16 is likewise excluded (the mixed method yields Float16, not Float64). Covers +,-,*,/ in both operand orders (pi and ℯ), the three dynamic BigFloat forms, Float16, ordering comparisons (static and via an Any operand, no #5966 recursion), and confirms Float32/Float64/Integer operands keep their existing Float64/Float32 behavior. Verified vs julia 1.12.6 at the default 256-bit precision."
+
+[[tests]]
+name = "bigfloat_big_binop_inference_9304"
+file = "bigfloat_big_binop_inference_9304.jl"
+expected = true
+description = "Binary-op result-type inference hard-coded a Float64-family result for `^`, `*`, and the `//` (rational) call on BigInt/BigFloat/Rational operands, so the enclosing op took the wrong fast path or bound the wrong static method (Issues #9304, #9316, #9318). #9304: inline `big(2)//3` inferred BigFloat (the abstract `//(n::Integer,d::Integer)=Rational(promote(n,d)...)` return type) → `BigFloat(1)+big(2)//3` compiled to CallIntrinsic(AddBigFloat), whose pop_bigfloat rejects the Rational StructRef. #9316: `big(2)^300` inferred Float64 degraded the `//` operands → MethodError //(::Float64,::Float64). #9318: `BigFloat(2)^500`/`BigFloat*BigFloat` not inferred BigFloat → significand/exponent statically bound the generic Float64 reinterpret method. The Pow and Mul inference arms now follow the operands (BigInt^Int→BigInt, BigFloat^Int→BigFloat, BigFloat*BigFloat→BigFloat, BigInt+Float→BigFloat) and a `//`-with-BigInt-operand override reports Rational{BigInt}, mirroring the runtime PowBigInt/*BigFloat intrinsics and Rational dispatch; codegen routes through dynamic dispatch / the correct static method. Same family as #9281 (`/` fixed by #9287). Verified vs julia 1.12.6 (default 256-bit BigFloat precision)."
+
+[[tests]]
+name = "bigfloat_bigfloat_nan_signedzero_9339"
+file = "bigfloat_nan_signedzero_9339.jl"
+expected = true
+description = "BigFloat NaN comparisons are unordered and signed-zero add/sub follow IEEE-754 RNE (Issue #9339). The RustBigFloat::cmp NaN short-circuit was moved before the zero special-cases (a signed zero <= NaN previously resolved to an ordering and returned true), and add/sub now correct the sign of a zero sum: (+0)+(-0)=+0, -0 only when both effective operands are -0 ((-0)+(-0), (-0)-(+0)). Verified vs julia 1.12.6."
+
+[[tests]]
+name = "bigfloat_bigfloat_div_inf_signedzero_9443"
+file = "bigfloat_div_inf_signedzero_9443.jl"
+expected = true
+description = "BigFloat div/fld/cld/(/) over infinities and signed zeros match MPFR/upstream (Issue #9443, residual of #9339). fld/cld now mirror upstream div(x,y,r)=round((x - rem(x,y,r))/y): an infinite dividend or zero divisor makes rem NaN, so the result is NaN instead of the spurious ±Inf that floor/ceil(x/y) produced. RustBigFloat::trunc returns ±Inf for infinities (astro_float's int() gave NaN), fixing div(Inf,·) which is trunc(x/y). RustBigFloat::div fixes the sign of a zero quotient to sign(x) XOR sign(y) (1.0/-Inf == -0.0), which astro_float mis-signed. Verified vs julia 1.12.6 (MPFR)."
+
+[[tests]]
+name = "bigfloat_fractional_pow_6794"
+file = "bigfloat_fractional_pow_6794.jl"
+expected = true
+description = "BigFloat fractional powers (Issue #6794). Registered while closing the fixture-coverage gap (Issue #9360)."
+
+[[tests]]
+name = "bigfloat_bigfloat_signbit_generic_flcld_9450"
+file = "bigfloat_signbit_generic_flcld_9450.jl"
+expected = true
+description = "BigFloat signbit/abs/copysign/flipsign/mod signed zeros and generic-Real cld/fld over infinite dividends match MPFR/upstream (Issue #9450, residual of #9443). signbit(::BigFloat) is a Rust primitive reading the astro_float sign field (negative zero observable; NaN reports false). mod(::BigFloat,::BigFloat) mirrors upstream AbstractFloat mod (zero remainder takes the divisor's sign). Generic-Real and Float64 cld/fld mirror upstream div(x,y,r)=round((x - rem(x,y,r))/y) with mixed pairs promoted and re-dispatched, so cld(Inf,1.0), cld(big(typemax(Int128)),Float16(Inf)) etc. are NaN; same-type Float32/Float16 keep upstream's ceil/floor of the widened quotient (Inf32/Inf16 stay infinite). Verified vs julia 1.12.6 (MPFR)."
+
+[[tests]]
+name = "bigfloat_bigfloat_floatmax_floatmin_9290"
+file = "bigfloat_floatmax_floatmin_9290.jl"
+expected = true
+description = "floatmax(::Type{BigFloat}) / floatmin(::Type{BigFloat}) previously threw MethodError (Issue #9290); now defined in base/gmp.jl mirroring upstream base/mpfr.jl (floatmax = prevfloat(BigFloat(Inf)), floatmin = nextfloat(zero(BigFloat))). Asserts the upstream invariants (definitional identities, nextfloat(floatmax)==Inf, prevfloat(floatmin)==0, finiteness, ordering vs Float64 limits, precision growth of floatmax) rather than digit parity: the decimal VALUES intentionally differ from MPFR because astro-float's i32-class exponent range (~10^±6.46e8) is narrower than MPFR's emax=2^62 (~10^±1.39e18) — documented backend divergence (docs/vm/NUMERIC_TYPES.md, family of Issue #8885). Invariants verified vs julia 1.12."
+
+[[tests]]
+name = "bigfloat_bigfloat_setprecision_arith_9332"
+file = "bigfloat_setprecision_arith_9332.jl"
+expected = true
+description = "BigFloat binary/unary arithmetic results carry the active setprecision(BigFloat, p) precision instead of the default 256-bit (Issue #9332): +,-,*,/,neg,floor,sqrt inside setprecision(64)/(128) blocks report precision p, BigInt operands/exponents wider than the active precision stay exact across +,-,*,/,comparison,^ until final result rounding (Issues #9450/#9603/#9605), constructor rounding stays distinct from mixed-operation operands, and outside any block results carry the 256-bit default. Verified vs julia 1.12."
+
+[[tests]]
+name = "bigfloat_mixed_residuals_9515"
+file = "bigfloat_mixed_residuals_9515.jl"
+expected = true
+description = "Mixed BigFloat operands preserve MPFR signed-zero and exact-integer behavior for Issue #9515 residuals: exact zero add/sub, Float16 zero products, Bool strong-zero multiplication, and BigInt promotion for mod; also guards the conversion/sign exactness prevention tracked by Issue #9682."
+
+[[tests]]
+name = "bigfloat_mixed_signed_zero_9718"
+file = "bigfloat_mixed_signed_zero_9718.jl"
+expected = true
+description = "Mixed BigFloat signed-zero residuals from the full numeric matrix: Int128/UInt128 generic-promotion zeros, small signed/BigInt negative cancellation, and Bool/small-integer zero subtraction match MPFR/upstream (Issue #9718)."
+
+[[tests]]
+name = "bigfloat_hof_sqrt_10604"
+file = "hof_sqrt_bigfloat_10604.jl"
+expected = true
+description = "sqrt passed as a function value (map/HOF lane) keeps BigFloat precision and upstream DomainError/MethodError behavior, mirroring the direct builtin's BigFloat arm (Issue #10604); dot-broadcast narrowing remains Issue #11727"

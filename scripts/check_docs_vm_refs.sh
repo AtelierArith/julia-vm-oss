@@ -29,19 +29,36 @@ if [[ ! -d "$DOCS_VM" ]]; then
     exit 1
 fi
 
-# Extract all ALLCAPS*.md filenames referenced in CLAUDE.md (excluding CLAUDE.md itself).
-# Matches patterns like: STATUS.md, BUILTIN_OWNERSHIP.md, TYPE_SYSTEM.md.
+# Extract all ALLCAPS*.md references from CLAUDE.md.
+# Matches bare docs/vm-style names like STATUS.md, BUILTIN_OWNERSHIP.md,
+# TYPE_SYSTEM.md, and path-qualified references like docs/vm/STATUS.md.
+# Path-qualified references outside docs/vm (for example
+# .agents/skills/<name>/SKILL.md) are intentionally ignored.
 #
 # After extraction, we filter out placeholder-style names (FOO.md, BAR.md, etc.)
 # that appear in documentation examples but are not meant to be real file references.
 # A name is considered a placeholder if it does NOT exist in docs/vm/ AND it is a
 # common documentation placeholder word. This avoids both false positives from
 # example text and the need to hardcode individual exclusions.
-refs=$(grep -oE '[A-Z][A-Z0-9_]+\.md' "$CLAUDE" \
-    | grep -v '^CLAUDE\.md$' \
-    | grep -v '^REPOSITORY_RULES\.md$' \
-    | grep -v '^MEMORY\.md$' \
-    | sort -u)
+refs=$(
+    grep -oE '([.A-Za-z0-9_<>{}-]+/)+[A-Z][A-Z0-9_]+\.md|[A-Z][A-Z0-9_]+\.md' "$CLAUDE" \
+        | while IFS= read -r ref; do
+            if [[ "$ref" == */* ]]; then
+                [[ "$ref" == "$DOCS_VM/"* ]] || continue
+                ref="${ref#"$DOCS_VM/"}"
+            fi
+            # bash 3.2 mis-parses a `case`/`;;` nested inside this `$(...)`
+            # command substitution ("syntax error near unexpected token `;;'"),
+            # so use an `if` guard instead (Issue #9461).
+            if [[ "$ref" == CLAUDE.md || "$ref" == AGENTS.md \
+                || "$ref" == GEMINI.md || "$ref" == SKILL.md \
+                || "$ref" == REPOSITORY_RULES.md || "$ref" == MEMORY.md ]]; then
+                continue
+            fi
+            printf '%s\n' "$ref"
+        done \
+        | sort -u
+)
 
 # Common placeholder names used in documentation examples.
 # These are only excluded when they do NOT correspond to an actual file in docs/vm/.

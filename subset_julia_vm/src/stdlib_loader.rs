@@ -22,18 +22,95 @@ use crate::stdlib;
 static STDLIB_MACROS: Lazy<RwLock<HashMap<String, StoredMacroDef>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-/// Tracks which stdlib modules have had their macros loaded.
-static LOADED_STDLIB_MODULES: Lazy<RwLock<HashSet<String>>> =
-    Lazy::new(|| RwLock::new(HashSet::new()));
+#[derive(Default)]
+struct MacroLoadEntries {
+    loaded: HashSet<String>,
+    loading: HashSet<String>,
+}
 
-/// Tracks stdlib modules currently being scanned for macros.
-static LOADING_STDLIB_MODULES: Lazy<RwLock<HashSet<String>>> =
-    Lazy::new(|| RwLock::new(HashSet::new()));
+#[derive(Default)]
+struct MacroLoadState {
+    entries: RwLock<MacroLoadEntries>,
+}
 
-/// Tracks which bundled (embedded third-party) packages have had their macros
-/// registered. Separate from stdlib so the two registries stay independent.
-static LOADED_BUNDLED_PACKAGES: Lazy<RwLock<HashSet<String>>> =
-    Lazy::new(|| RwLock::new(HashSet::new()));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacroLoadOutcome {
+    AlreadyLoaded,
+    Reentrant,
+    Loaded,
+}
+
+struct MacroLoadingGuard<'a> {
+    state: &'a MacroLoadState,
+    module_name: &'a str,
+    active: bool,
+}
+
+impl MacroLoadState {
+    fn entries_write(&self) -> std::sync::RwLockWriteGuard<'_, MacroLoadEntries> {
+        self.entries
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn ensure_loaded<E>(
+        &self,
+        module_name: &str,
+        load_and_register: impl FnOnce() -> Result<(), E>,
+    ) -> Result<MacroLoadOutcome, E> {
+        {
+            let mut entries = self.entries_write();
+            if entries.loaded.contains(module_name) {
+                return Ok(MacroLoadOutcome::AlreadyLoaded);
+            }
+            if !entries.loading.insert(module_name.to_string()) {
+                return Ok(MacroLoadOutcome::Reentrant);
+            }
+        }
+
+        let guard = MacroLoadingGuard {
+            state: self,
+            module_name,
+            active: true,
+        };
+        load_and_register()?;
+        guard.publish_loaded();
+        Ok(MacroLoadOutcome::Loaded)
+    }
+
+    #[cfg(test)]
+    fn is_loaded(&self, module_name: &str) -> bool {
+        self.entries_write().loaded.contains(module_name)
+    }
+
+    #[cfg(test)]
+    fn is_loading(&self, module_name: &str) -> bool {
+        self.entries_write().loading.contains(module_name)
+    }
+}
+
+impl MacroLoadingGuard<'_> {
+    fn publish_loaded(mut self) {
+        let mut entries = self.state.entries_write();
+        entries.loaded.insert(self.module_name.to_string());
+        entries.loading.remove(self.module_name);
+        self.active = false;
+    }
+}
+
+impl Drop for MacroLoadingGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.state.entries_write().loading.remove(self.module_name);
+        }
+    }
+}
+
+/// Stdlib and bundled packages share one transition implementation but retain
+/// independent module states and macro registries.
+static STDLIB_MACRO_LOAD_STATE: Lazy<MacroLoadState> = Lazy::new(MacroLoadState::default);
+
+static BUNDLED_MACRO_LOAD_STATE: Lazy<MacroLoadState> = Lazy::new(MacroLoadState::default);
 
 /// Registry for bundled-package macros (e.g. Plots' `@animate` / `@gif`).
 ///
@@ -81,24 +158,6 @@ fn stdlib_macros_read() -> std::sync::RwLockReadGuard<'static, HashMap<String, S
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn loaded_stdlib_modules_write() -> std::sync::RwLockWriteGuard<'static, HashSet<String>> {
-    LOADED_STDLIB_MODULES
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn loaded_stdlib_modules_read() -> std::sync::RwLockReadGuard<'static, HashSet<String>> {
-    LOADED_STDLIB_MODULES
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn loading_stdlib_modules_write() -> std::sync::RwLockWriteGuard<'static, HashSet<String>> {
-    LOADING_STDLIB_MODULES
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// Register a macro from a stdlib module into the global registry.
 fn register_stdlib_macro(module: &str, name: &str, def: StoredMacroDef) {
     let key = format!("{}::{}", module, name);
@@ -131,30 +190,10 @@ pub fn ensure_stdlib_macros_loaded(module_name: &str) {
         return;
     }
 
-    // Check if already loaded
-    {
-        let loaded = loaded_stdlib_modules_read();
-        if loaded.contains(module_name) {
-            return;
-        }
-    }
-
-    {
-        let mut loading = loading_stdlib_modules_write();
-        if !loading.insert(module_name.to_string()) {
-            // Issue #7735: stdlib sources can contain relative imports back to
-            // the module currently being lowered, e.g. LinearAlgebra.LAPACK
-            // imports from ..LinearAlgebra. The nested import does not need a
-            // second macro scan.
-            return;
-        }
-    }
-
-    // Load the module
-    let module = load_stdlib_module(module_name);
-    loading_stdlib_modules_write().remove(module_name);
-
-    if let Ok(module) = module {
+    // Issue #7735: a stdlib source can import its parent while the parent is
+    // still lowering. The shared state machine suppresses that second scan.
+    let _ = STDLIB_MACRO_LOAD_STATE.ensure_loaded(module_name, || -> Result<_, StdlibLoadError> {
+        let module = load_stdlib_module(module_name)?;
         // Register macros from the module
         for macro_def in &module.macros {
             // Default to Any type for all params (stdlib macros don't have type annotations in IR)
@@ -171,10 +210,8 @@ pub fn ensure_stdlib_macros_loaded(module_name: &str) {
             };
             register_stdlib_macro(module_name, &macro_def.name, stored);
         }
-
-        // Mark as loaded
-        loaded_stdlib_modules_write().insert(module_name.to_string());
-    }
+        Ok(())
+    });
 }
 
 /// Ensure a bundled package's macros are registered so user code can expand them
@@ -192,66 +229,62 @@ pub fn ensure_bundled_package_macros_loaded(module_name: &str) {
         return;
     }
 
-    {
-        let loaded = LOADED_BUNDLED_PACKAGES
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if loaded.contains(module_name) {
-            return;
-        }
-    }
-
-    let usings = vec![UsingImport {
-        module: module_name.to_string(),
-        is_relative: false,
-        relative_level: 0,
-        symbols: None,
-        alias_bindings: Vec::new(),
-        span: crate::span::Span::new(0, 0, 0, 0, 0, 0),
-    }];
-    let mut loader = crate::loader::PackageLoader::new(crate::loader::LoaderConfig::from_env());
-    if let Ok(modules) = loader.load_for_usings(&usings) {
-        for module in &modules {
-            let mut members: HashSet<String> = HashSet::new();
-            members.extend(
-                module
-                    .functions
-                    .iter()
-                    .filter(|f| !f.is_base_extension)
-                    .map(|f| f.name.clone()),
-            );
-            members.extend(module.structs.iter().map(|s| s.name.clone()));
-            members.extend(module.abstract_types.iter().map(|a| a.name.clone()));
-            members.extend(module.primitive_types.iter().map(|p| p.name.clone()));
-            members.extend(module.type_aliases.iter().map(|t| t.name.clone()));
-            let exports: HashSet<String> = module.exports.iter().cloned().collect();
-            for macro_def in &module.macros {
-                // Bundled-package macros carry no IR type annotations, so every
-                // parameter defaults to `Any` (matching the stdlib path).
-                let param_types = vec![MacroParamType::Any; macro_def.params.len()];
-                let stored = StoredMacroDef {
-                    params: macro_def.params.clone(),
-                    param_types,
-                    has_varargs: macro_def.has_varargs,
-                    body: macro_def.body.clone(),
-                    expansion_functions: module.functions.clone(),
-                    expansion_structs: module.structs.clone(),
-                    hygiene: Some(MacroHygieneInfo {
-                        module: module.name.clone(),
-                        members: members.clone(),
-                        exports: exports.clone(),
-                    }),
-                    span: macro_def.span,
-                };
-                bundled_macros_write()
-                    .insert(format!("{}::{}", module.name, macro_def.name), stored);
+    // Issue #11141: cold package-source lowering can expand one of the
+    // package's own macros. Only the outer scan registers the full surface.
+    let _ = BUNDLED_MACRO_LOAD_STATE.ensure_loaded(
+        module_name,
+        || -> Result<_, crate::loader::LoadError> {
+            let usings = vec![UsingImport {
+                module: module_name.to_string(),
+                is_import: false,
+                is_relative: false,
+                relative_level: 0,
+                symbols: None,
+                alias_bindings: Vec::new(),
+                span: crate::span::Span::new(0, 0, 0, 0, 0, 0),
+            }];
+            let mut loader =
+                crate::loader::PackageLoader::new(crate::loader::LoaderConfig::from_env());
+            let modules = loader.load_for_usings(&usings)?;
+            for module in &modules {
+                let mut members: HashSet<String> = HashSet::new();
+                members.extend(
+                    module
+                        .functions
+                        .iter()
+                        .filter(|f| !f.is_base_extension)
+                        .map(|f| f.name.clone()),
+                );
+                members.extend(module.structs.iter().map(|s| s.name.clone()));
+                members.extend(module.abstract_types.iter().map(|a| a.name.clone()));
+                members.extend(module.primitive_types.iter().map(|p| p.name.clone()));
+                members.extend(module.type_aliases.iter().map(|t| t.name.clone()));
+                let exports: HashSet<String> = module.exports.iter().cloned().collect();
+                for macro_def in &module.macros {
+                    // Bundled-package macros carry no IR type annotations, so every
+                    // parameter defaults to `Any` (matching the stdlib path).
+                    let param_types = vec![MacroParamType::Any; macro_def.params.len()];
+                    let stored = StoredMacroDef {
+                        params: macro_def.params.clone(),
+                        param_types,
+                        has_varargs: macro_def.has_varargs,
+                        body: macro_def.body.clone(),
+                        expansion_functions: module.functions.clone(),
+                        expansion_structs: module.structs.clone(),
+                        hygiene: Some(MacroHygieneInfo {
+                            module: module.name.clone(),
+                            members: members.clone(),
+                            exports: exports.clone(),
+                        }),
+                        span: macro_def.span,
+                    };
+                    bundled_macros_write()
+                        .insert(format!("{}::{}", module.name, macro_def.name), stored);
+                }
             }
-        }
-        LOADED_BUNDLED_PACKAGES
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(module_name.to_string());
-    }
+            Ok(())
+        },
+    );
 }
 
 /// Add bundled-package helper functions/types to a caller macro context before
@@ -266,6 +299,7 @@ pub fn add_bundled_package_macro_context(module_name: &str, lambda_ctx: &LambdaC
 
     let usings = vec![UsingImport {
         module: module_name.to_string(),
+        is_import: false,
         is_relative: false,
         relative_level: 0,
         symbols: None,
@@ -391,7 +425,9 @@ fn load_stdlib_module(module_name: &str) -> Result<Module, StdlibLoadError> {
             error: format!("{:?}", e),
         })?;
 
-    // Lower using unified Lowering (same code path as tree-sitter)
+    // Lower using the same unified Lowering pipeline shared by every entry point
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    crate::macro_runtime::install();
     let mut lowering = Lowering::new(source);
     let program = lowering
         .lower(parse_outcome)
@@ -431,6 +467,89 @@ fn extract_module(module_name: &str, program: Program) -> Result<Module, StdlibL
 }
 
 #[cfg(test)]
+mod macro_load_state_tests_11145 {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    fn exercise_macro_load_state_machine(state: &MacroLoadState, namespace: &str) {
+        let recursive_module = format!("{namespace}Recursive");
+        let load_calls = Cell::new(0);
+        let registered = RefCell::new(Vec::new());
+
+        let outer = state.ensure_loaded(&recursive_module, || {
+            load_calls.set(load_calls.get() + 1);
+            assert!(state.is_loading(&recursive_module));
+            assert!(!state.is_loaded(&recursive_module));
+
+            let nested = state.ensure_loaded(&recursive_module, || {
+                load_calls.set(load_calls.get() + 1);
+                Ok::<(), &'static str>(())
+            });
+            assert_eq!(nested, Ok(MacroLoadOutcome::Reentrant));
+
+            registered.borrow_mut().push("first_macro");
+            assert!(
+                !state.is_loaded(&recursive_module),
+                "loaded must stay unpublished until the complete macro surface is registered"
+            );
+            registered.borrow_mut().push("second_macro");
+            Ok::<(), &'static str>(())
+        });
+
+        assert_eq!(outer, Ok(MacroLoadOutcome::Loaded));
+        assert_eq!(load_calls.get(), 1, "re-entry invoked a second load");
+        assert_eq!(&*registered.borrow(), &["first_macro", "second_macro"]);
+        assert!(state.is_loaded(&recursive_module));
+        assert!(!state.is_loading(&recursive_module));
+
+        let already_loaded = state.ensure_loaded(&recursive_module, || {
+            load_calls.set(load_calls.get() + 1);
+            Ok::<(), &'static str>(())
+        });
+        assert_eq!(already_loaded, Ok(MacroLoadOutcome::AlreadyLoaded));
+        assert_eq!(load_calls.get(), 1, "loaded module invoked the callback");
+
+        let retry_module = format!("{namespace}Retry");
+        let failed = state.ensure_loaded(&retry_module, || Err::<(), _>("cold load failed"));
+        assert_eq!(failed, Err("cold load failed"));
+        assert!(!state.is_loaded(&retry_module));
+        assert!(
+            !state.is_loading(&retry_module),
+            "failed load retained the loading marker and blocked retry"
+        );
+        let retried = state.ensure_loaded(&retry_module, || Ok::<(), &'static str>(()));
+        assert_eq!(retried, Ok(MacroLoadOutcome::Loaded));
+
+        let first_module = format!("{namespace}First");
+        let second_module = format!("{namespace}Second");
+        let order = RefCell::new(Vec::new());
+        let first = state.ensure_loaded(&first_module, || {
+            order.borrow_mut().push("first:start");
+            let second = state.ensure_loaded(&second_module, || {
+                order.borrow_mut().push("second");
+                Ok::<(), &'static str>(())
+            });
+            assert_eq!(second, Ok(MacroLoadOutcome::Loaded));
+            assert!(state.is_loaded(&second_module));
+            assert!(!state.is_loaded(&first_module));
+            order.borrow_mut().push("first:end");
+            Ok::<(), &'static str>(())
+        });
+        assert_eq!(first, Ok(MacroLoadOutcome::Loaded));
+        assert_eq!(&*order.borrow(), &["first:start", "second", "first:end"]);
+    }
+
+    #[test]
+    fn test_macro_load_state_machines_cold_reentry_11145() {
+        // Fresh local state and injected callbacks are intentional: persistent
+        // and preload caches can make real macro registries warm, bypassing the
+        // cold source-load re-entry that regressed in Issues #11141/#11132.
+        exercise_macro_load_state_machine(&MacroLoadState::default(), "Stdlib");
+        exercise_macro_load_state_machine(&MacroLoadState::default(), "Bundled");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -453,6 +572,7 @@ mod tests {
     fn test_load_for_usings() {
         let usings = vec![UsingImport {
             module: "Statistics".to_string(),
+            is_import: false,
             is_relative: false,
             relative_level: 0,
             symbols: None,
@@ -503,6 +623,10 @@ mod tests {
         assert!(
             macro_names.contains(&"test_broken"),
             "Should have @test_broken macro"
+        );
+        assert!(
+            macro_names.contains(&"test_skip"),
+            "Should have @test_skip macro (Issue #10350)"
         );
     }
 

@@ -1,17 +1,5 @@
 
 [[tests]]
-name = "types_unionall_apply_parenthesized_8430"
-file = "unionall_apply_parenthesized_8430.jl"
-expected = true
-description = "Applying type parameters directly to a parenthesized UnionAll value lowers as runtime type application instead of treating the first parameter as the static base name (Issue #8430)"
-
-[[tests]]
-name = "types_covariant_bound_type_arg_8352"
-file = "covariant_bound_type_arg_8352.jl"
-expected = true
-description = "A covariant/contravariant bound shorthand inside `{}` (`Foo{<:Bound}`/`Foo{>:Bound}`) lowers as a static bounded type expression instead of being misclassified as a dynamic value parameter and rejected with UnsupportedOperator(\"<:\") (regression from #8339, Issue #8352)"
-
-[[tests]]
 name = "integer_value_type_params_6625"
 file = "integer_value_type_params_6625.jl"
 expected = true
@@ -24,82 +12,16 @@ expected = true
 description = "Value type parameters from generic method signatures compile in arithmetic and comparison contexts while type parameters still work as constructors (Issue #7736)"
 
 [[tests]]
+name = "types_value_type_param_positions_8539"
+file = "value_type_param_positions_8539.jl"
+expected = true
+description = "Value type parameters from where clauses work as call arguments (fill/Vector undef dims) and range endpoints (for 1:N, collect(2:N)), including multi-parameter sums (Issue #8539)"
+
+[[tests]]
 name = "types_partial_parametric_constructors_7734"
 file = "partial_parametric_constructors_7734.jl"
 expected = true
 description = "Partial and fully applied parametric constructor methods bind static callable parameters into the constructor frame (Issue #7734)"
-
-[[tests]]
-name = "types_invariant_parametric_subtype_5047"
-file = "invariant_parametric_subtype_5047.jl"
-expected = true
-description = "Invariant parametric subtyping for builtin container abstract types: AbstractVector{Int}/AbstractArray{T,N} retain their element+dimension parameters so Vector{Float64} <: AbstractVector{Int64} is false, while bare-abstract covariance and matching-element cases stay correct (Advances Issue #5047)"
-
-[[tests]]
-name = "types_typeintersect_invariant_5048"
-file = "typeintersect_invariant_5048.jl"
-expected = true
-description = "Concrete invariant-parametric typeintersect: parametric containers differing in an invariant element/dimension parameter intersect to Union{} (Vector{Int} vs Vector{Real}, vs AbstractVector{Real}, vs AbstractArray{Int,2}, recursive Vector{Vector{...}}, Matrix), while true-subtype, union-distribution, and covariant-Tuple cases keep the non-empty intersection (Advances Issue #5048)"
-
-[[tests]]
-name = "types_typeintersect_diagonal_unionall_5048"
-file = "typeintersect_diagonal_unionall_5048.jl"
-expected = true
-description = "Diagonal UnionAll typeintersect narrows repeated TypeVars across tuple elements and a representative invariant-container occurrence Tuple{T,Vector{T}} where T: concrete meets substitute the TypeVar, abstract meets tighten the UnionAll bound, and disjoint meets return Union{} (Advances Issue #5048)"
-
-[[tests]]
-name = "types_typeintersect_nary_invariant_container_5048"
-file = "typeintersect_nary_invariant_container_5048.jl"
-expected = true
-description = "Diagonal UnionAll typeintersect recovers the diagonal var from an N-ary invariant container that holds it in one slot (Dict{Symbol,T}, Dict{T,Symbol}, Pair{Symbol,T}, Dict{T,T}), requiring every non-diagonal slot to be invariantly equal so a mismatched slot still yields Union{} (Advances Issue #5048)"
-
-[[tests]]
-name = "types_typeof_datatype_subtype_5048"
-file = "types_typeof_datatype_subtype_5048.jl"
-expected = true
-description = "Type{T} <: DataType honors T's nominal-DataType shape: concrete/abstract nominal and fully-applied parametric T (Int/Integer/Any/Vector{Int}/Vector{Real}) make Type{T}<:DataType, while Union/bare-parametric/Type{<:Bound} stay false; typeintersect(Type{T},DataType) therefore keeps the concrete Type side (===Type{Int}) instead of collapsing to Union{} (Advances Issue #5048)"
-
-[[tests]]
-name = "types_array_family_subtype_direction_5640"
-file = "types_array_family_subtype_direction_5640.jl"
-expected = true
-description = "Array-family subtyping respects the abstract<->concrete direction: an abstract/dense family is never a subtype of a more concrete family (AbstractVector{Int}<:Vector{Int}, DenseArray{Int}<:Array{Int}, etc. are all false), while concrete->abstract relations and element/rank invariance are preserved; typeintersect therefore returns the concrete side (typeintersect(AbstractVector{Int},Vector{Int})===Vector{Int}) (Issue #5640, advances #5048)"
-
-[[tests]]
-name = "types_array_unionall_core_subtype_gate_5615"
-file = "array_unionall_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime array-family UnionAll subtype checks are CoreType-authoritative: Vector/Matrix/Array rank aliases satisfy Array{T} where T and Array{<:Real} while preserving invariant Array{Real} and rank false cases (Issue #5615)."
-
-[[tests]]
-name = "types_container_typevar_core_subtype_gate_5615"
-file = "container_typevar_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime non-array container TypeVar subtype checks are CoreType-authoritative for Dict/Set/Ref TypeVar patterns, including invariant mismatch and bounded TypeVar false cases (Issues #5615/#5949)."
-
-[[tests]]
-name = "types_subtype_abstract_supertype_tuple_5564"
-file = "subtype_abstract_supertype_tuple_5564.jl"
-expected = true
-description = "Parametric struct <: its parametrized abstract supertype with EQUAL invariant params (Dict{String,Int}<:AbstractDict{String,Int}, Set{Int}<:AbstractSet{Int}, generalizing the #5563 array path), differing params stay false, bare abstract stays covariant; and covariant Tuple matching honors element invariance so Tuple{Vector{Int}}<:Tuple{Vector{Real}} is false while Tuple{Int}<:Tuple{Real} stays true (Issue #5564, advances #5047)"
-
-[[tests]]
-name = "types_typed_local_var"
-file = "typed_local_var.jl"
-expected = true
-description = "Test typed local variable declarations (x::Type = value)"
-
-[[tests]]
-name = "types_typed_assignment_convert_5148"
-file = "typed_assignment_convert_5148.jl"
-expected = true
-description = "Typed declaration x::T = v converts v through convert(T, v) (InexactError on non-integral), bare x::T is a type assertion, and global g::T enforces the declared type (Issue #5148)"
-
-[[tests]]
-name = "types_array_return_type"
-file = "array_return_type.jl"
-expected = true
-description = "Test array return type annotations (::Array{T,N}, ::Vector{T}, ::Matrix{T})"
 
 [[tests]]
 name = "types_array_dimension_params"
@@ -111,7 +33,7 @@ description = "Array{T,N} dimension parameters match Vector/Matrix aliases and w
 name = "types_value_param_constructors"
 file = "value_param_constructors.jl"
 expected = true
-description = "Zero-field value-parameter constructors for Val and Base.HasShape"
+description = "Zero-field value-parameter constructors for Val and Base.HasShape, including inline argument/comparison positions for Base.HasShape{N}() (Issue #9401)"
 
 [[tests]]
 name = "types_value_param_binding_4268"
@@ -120,34 +42,10 @@ expected = true
 description = "Val and NTuple value parameters bind where variables; infer_return_type over method arrays uses indexed return_types traversal (Issues #4268, #5584)"
 
 [[tests]]
-name = "types_nested_param_constructor_4851"
-file = "nested_param_constructor_4851.jl"
-expected = true
-description = "Parametric constructor binds type vars inside nested field types like Tuple{T,T} (Issue #4851)"
-
-[[tests]]
 name = "types_infer_return_typevar_4845"
 file = "infer_return_typevar_4845.jl"
 expected = true
 description = "infer_return_type resolves direct TypeVar / value-param returns (Issue #4845)"
-
-[[tests]]
-name = "types_float_identity_4582"
-file = "float_identity_4582.jl"
-expected = true
-description = "Float16/Float32/Bool identity and isequal parity (Issues #4582, #4583, #4584)"
-
-[[tests]]
-name = "types_datatype_equality"
-file = "test_datatype_equality.jl"
-expected = true
-description = "Test equality comparison for DataType values (== and !=)"
-
-[[tests]]
-name = "types_char_comparison"
-file = "char_comparison.jl"
-expected = true
-description = "Char comparison operators (==, !=)"
 
 [[tests]]
 name = "types_dynamic_type_change"
@@ -156,28 +54,10 @@ expected = true
 description = "Variable types can change dynamically"
 
 [[tests]]
-name = "types_eltype"
-file = "eltype_test.jl"
-expected = true
-description = "eltype function returns element type of collections"
-
-[[tests]]
 name = "types_hof_type_inference"
 file = "hof_type_inference.jl"
 expected = 3.0
 description = "HOF return type inference with map and filter"
-
-[[tests]]
-name = "types_isa_infix"
-file = "isa_infix.jl"
-expected = true
-description = "isa infix syntax: a isa T => isa(a, T)"
-
-[[tests]]
-name = "types_isbits_basic"
-file = "isbits_basic.jl"
-expected = true
-description = "isbits/isbitstype - check if type is bits type"
 
 [[tests]]
 name = "types_ismutable_structref"
@@ -186,100 +66,16 @@ expected = true
 description = "ismutable with StructRef (mutable structs on heap)"
 
 [[tests]]
-name = "types_length_returns_int"
-file = "length_returns_int.jl"
-expected = true
-description = "length() returns Int64 type for Array"
-
-[[tests]]
-name = "types_length_returns_int_range"
-file = "length_returns_int_range.jl"
-expected = true
-description = "length() returns Int64 type for Range"
-
-[[tests]]
-name = "types_length_returns_int_string"
-file = "length_returns_int_string.jl"
-expected = true
-description = "length() returns Int64 type for String"
-
-[[tests]]
-name = "types_length_returns_int_tuple"
-file = "length_returns_int_tuple.jl"
-expected = true
-description = "length() returns Int64 type for Tuple"
-
-[[tests]]
-name = "types_missing_basic"
-file = "missing_basic.jl"
-expected = true
-description = "Missing type: literal, typeof, ismissing, coalesce functions"
-
-[[tests]]
 name = "types_power_any_param"
 file = "power_any_param.jl"
 expected = true
 description = "Power operator with Any-typed parameter preserves input type"
 
 [[tests]]
-name = "types_promote_type"
-file = "promote_type.jl"
-expected = true
-description = "promote_type function for type promotion"
-
-[[tests]]
-name = "types_sizeof_basic"
-file = "sizeof_basic.jl"
-expected = true
-description = "sizeof - get size of value in bytes"
-
-[[tests]]
-name = "types_covariant_type_params"
-file = "test_covariant_type_params.jl"
-expected = true
-description = "Covariant type parameters in dispatch"
-
-[[tests]]
-name = "types_index_style"
-file = "test_index_style.jl"
-expected = true
-description = "IndexStyle types (IndexLinear, IndexCartesian)"
-
-[[tests]]
-name = "types_rounding_mode"
-file = "test_rounding_mode.jl"
-expected = true
-description = "RoundingMode types and instances"
-
-[[tests]]
 name = "types_traits"
 file = "test_traits.jl"
 expected = true
 description = "Trait types (ArithmeticStyle, RangeStepStyle)"
-
-[[tests]]
-name = "types_type_alias"
-file = "test_type_alias.jl"
-expected = true
-description = "Type aliases with const assignment"
-
-[[tests]]
-name = "types_type_as_value"
-file = "test_type_as_value.jl"
-expected = true
-description = "Type{T} as first-class values"
-
-[[tests]]
-name = "types_type_t_pattern"
-file = "test_type_t_pattern.jl"
-expected = true
-description = "Type{T} pattern matching in function dispatch"
-
-[[tests]]
-name = "types_version"
-file = "test_version.jl"
-expected = true
-description = "VersionNumber type and VERSION constant"
 
 [[tests]]
 name = "types_typeof_reassignment"
@@ -294,12 +90,6 @@ expected = true
 description = "typeof after reassignment inside function"
 
 [[tests]]
-name = "types_typeof_set"
-file = "typeof_set.jl"
-expected = true
-description = "typeof for Set collections preserves upstream element types (Issues #527, #4018)"
-
-[[tests]]
 name = "types_fieldcount"
 file = "types_fieldcount.jl"
 expected = true
@@ -310,30 +100,6 @@ name = "types_hasfield"
 file = "types_hasfield.jl"
 expected = true
 description = "hasfield - check if type has a field"
-
-[[tests]]
-name = "types_isabstracttype"
-file = "types_isabstracttype.jl"
-expected = true
-description = "isabstracttype - check if type is abstract"
-
-[[tests]]
-name = "types_isconcretetype"
-file = "types_isconcretetype.jl"
-expected = true
-description = "isconcretetype - check if type is concrete"
-
-[[tests]]
-name = "types_ismutable"
-file = "types_ismutable.jl"
-expected = true
-description = "ismutable - check if value is mutable"
-
-[[tests]]
-name = "types_ismutabletype"
-file = "types_ismutabletype.jl"
-expected = true
-description = "ismutabletype - check if type is mutable"
 
 [[tests]]
 name = "types_isprimitivetype"
@@ -348,118 +114,10 @@ expected = true
 description = "isstructtype - check if type is a struct"
 
 [[tests]]
-name = "types_isunordered"
-file = "types_isunordered.jl"
-expected = true
-description = "isunordered - check if value is unordered (NaN, Missing)"
-
-[[tests]]
-name = "types_objectid"
-file = "types_objectid.jl"
-expected = true
-description = "objectid - get unique object identifier"
-
-[[tests]]
 name = "types_supertype"
 file = "types_supertype.jl"
 expected = true
 description = "supertype - get parent type in type hierarchy"
-
-[[tests]]
-name = "types_union_subtype"
-file = "union_subtype.jl"
-expected = true
-description = "Union type subtype checking: T <: Union{A, B}"
-
-[[tests]]
-name = "types_widen"
-file = "widen.jl"
-expected = true
-description = "widen function for type widening"
-
-[[tests]]
-name = "types_widen_promotion_hierarchy_5110"
-file = "widen_promotion_hierarchy_5110.jl"
-expected = true
-description = "widen promotion hierarchy: full int/uint/float chain incl Int128->BigInt, Float64->BigFloat (Issue #5110)"
-
-[[tests]]
-name = "types_bool_struct_fields"
-file = "bool_struct_fields.jl"
-expected = true
-description = "Bool struct field access (regression test for Issue #1612)"
-
-[[tests]]
-name = "types_float_field_type_preservation"
-file = "float_field_type_preservation.jl"
-expected = true
-description = "Float field type preservation in parametric structs (prevention for Issue #1651/#1655)"
-
-[[tests]]
-name = "types_collection_type_identity"
-file = "collection_type_identity.jl"
-expected = true
-description = "Collection type identity for Dict, Set, NamedTuple with typed Dict/Set metadata (Issues #1894, #4018)"
-
-[[tests]]
-name = "types_typed_f32_f16_instructions"
-file = "typed_f32_f16_instructions.jl"
-expected = true
-description = "Typed Return/Store/Load instructions for Float32 and Float16 (Issue #1893)"
-
-[[tests]]
-name = "types_compound_field_assignment"
-file = "compound_field_assignment.jl"
-expected = true
-description = "Compound assignment on mutable struct fields: obj.field += expr (Issue #2140)"
-
-[[tests]]
-name = "types_float_all_numeric"
-file = "float_all_numeric.jl"
-expected = true
-description = "float() supports all numeric types: identity for AbstractFloat, Float64 for Integer (Issue #2165)"
-
-[[tests]]
-name = "types_zero_type_correctness"
-file = "zero_type_correctness.jl"
-expected = true
-description = "zero(T) and zero(x) return correct types for all numeric types (Issue #2181)"
-
-[[tests]]
-name = "types_float_type_preservation"
-file = "float_type_preservation.jl"
-expected = true
-description = "Float arithmetic type preservation for F16, F32, F64 (prevention for Issue #1647/#1653)"
-
-[[tests]]
-name = "types_diagonal_rule"
-file = "diagonal_rule.jl"
-expected = true
-description = "Diagonal Rule: type variables with multiple covariant occurrences must bind to concrete types (Issue #2554)"
-
-[[tests]]
-name = "types_nested_diagonal_rule_5050"
-file = "nested_diagonal_rule_5050.jl"
-expected = true
-description = "Diagonal Rule for nested covariant occurrences: Vector{T}/Matrix{T} element types must equal a bare T argument (Issue #5050)"
-
-[[tests]]
-name = "types_typejoin"
-file = "test_typejoin.jl"
-expected = true
-description = "typejoin(A, B) computes smallest common supertype (Pure Julia, Issue #2569)"
-
-[[tests]]
-name = "types_apply_type_5112"
-file = "apply_type_5112.jl"
-expected = true
-description = "Core.apply_type and splat in T{xs...} construct parametric types from computed type values (Issue #5112)"
-
-[[tests]]
-name = "types_typejoin_parametric_5112"
-file = "typejoin_parametric_5112.jl"
-expected = true
-description = "typejoin over parametric Tuple types and same-name parametric structs (Issue #5112)"
 
 [[tests]]
 name = "types_const_type_alias_dispatch"
@@ -468,70 +126,10 @@ expected = true
 description = "Const type aliases in dispatch: const Alias = ExistingType{Param} (Issue #2527)"
 
 [[tests]]
-name = "types_isunordered_pure_julia"
-file = "test_isunordered_pure_julia.jl"
-expected = true
-description = "isunordered Pure Julia: NaN, Missing, normal values (Issue #2715)"
-
-[[tests]]
-name = "types_isequal_pure_julia"
-file = "test_isequal_pure_julia.jl"
-expected = true
-description = "isequal Pure Julia: Float64, cross-type, Missing, Array, Tuple (Issue #2718)"
-
-[[tests]]
 name = "types_hash_pure_julia"
 file = "test_hash_pure_julia.jl"
 expected = true
 description = "hash Pure Julia: 1-arg and 2-arg forms with _hash intrinsic (Issue #2582)"
-
-[[tests]]
-name = "types_eltype_pure_julia"
-file = "test_eltype_pure_julia.jl"
-expected = true
-description = "eltype Pure Julia: arrays, strings, mixed types (Issue #2570)"
-
-[[tests]]
-name = "types_eltype_number_dynamic_dispatch_4665"
-file = "eltype_number_dynamic_dispatch_4665.jl"
-expected = true
-description = "eltype on scalar numbers preserves upstream element type through generic dynamic dispatch (Issue #4665)"
-
-[[tests]]
-name = "types_sizeof_datatype_layout_3909"
-file = "sizeof_datatype_layout_3909.jl"
-expected = true
-description = "sizeof(::DataType) and isbitstype use runtime layout metadata (Issue #3909)"
-
-[[tests]]
-name = "types_sizeof_logical_array_element_3908"
-file = "sizeof_logical_array_element_3908.jl"
-expected = true
-description = "sizeof(::Array) uses logical ArrayValue element type for Complex arrays (Issue #3908)"
-
-[[tests]]
-name = "types_vararg_tuple_value_param_4841"
-file = "vararg_tuple_value_param_4841.jl"
-expected = true
-description = "explicit Tuple{Vararg{T,N}} signatures bind both T and N as value-parameter where-clause variables on the same dispatch path as the synonymous NTuple{N,T} alias, by canonicalizing the Vararg{element,length} spelling into NTuple{length,element} during JuliaType::from_name parsing so the existing NTuple infrastructure (dispatch matching + val-parameter detection + runtime length/type binding) covers both spellings (Issue #4841)"
-
-[[tests]]
-name = "types_ntuple_val_length_4975"
-file = "ntuple_val_length_4975.jl"
-expected = true
-description = "ntuple(f, Val(N)) extracts the numeric value parameter N from the Val{N} length wrapper passed directly as the ntuple length argument, so the builtin ntuple HOF accepts the compile-time Val length form in addition to a plain integer (Issue #4975)"
-
-[[tests]]
-name = "types_ntuple_first_class_4973"
-file = "ntuple_first_class_4973.jl"
-expected = true
-description = "ntuple is a first-class function value (f = ntuple, Base.ntuple, passed as an argument, captured in a closure) backed by a pure-Julia method in base/tuple.jl, while the direct ntuple(f, n) / ntuple(f, Val(N)) call shapes keep their constant-propagation fast path (Issue #4973)"
-
-[[tests]]
-name = "types_nested_ntuple_value_param_binding_4842"
-file = "nested_ntuple_value_param_binding_4842.jl"
-expected = true
-description = "nested NTuple value parameters bind in method frames: for NTuple{N,NTuple{M,T}} the inner length value parameter M and element type parameter T are bound (not only the outer length N) by recursively descending the NTuple element type during both value-parameter detection (compile) and runtime where-clause binding (vm), covering arbitrarily deep nesting like NTuple{A,NTuple{B,NTuple{C,T}}} (Issue #4842)"
 
 [[tests]]
 name = "types_parametric_type_alias_5055"
@@ -540,28 +138,10 @@ expected = true
 description = "user-defined parametric type aliases (MyVec{T} = Vector{T}, MyDict{K,V} = Dict{K,V}, BoxAlias{T} = Box{T}) plus non-parametric aliases (IntVec = Vector{Int}, const FloatVec = Vector{Float64}) register as UnionAll-valued bindings during lowering and expand at type-name chokepoints, so alias instantiation identity (MyVec{Int} === Vector{Int}), construction (MyVec{Int}([1,2,3]) -> Vector{Int}), isa, subtyping (<: Vector{Int}, <: AbstractVector) and dispatch on parametric-alias annotations all resolve to the target type (Issue #5055)"
 
 [[tests]]
-name = "types_union_normalization_5066"
-file = "union_normalization_5066.jl"
-expected = true
-description = "deep nested Union normalization: Union construction flattens nested unions, drops Bottom, removes duplicates, absorbs subtype members (Int <: Integer), sorts into upstream's canonical order (singleton < isbits < other DataType < non-DataType, ties by name), and collapses singleton/empty unions, so equal Unions share one normal form and compare === regardless of nesting depth, member order, or duplicates, with display matching julia (Union{Int, Float64} prints Union{Float64, Int64}); covers both Union{...} parsing (from_name) and the runtime _type_union builtin (Issue #5066)"
-
-[[tests]]
-name = "types_single_letter_struct_datatype_5252"
-file = "single_letter_struct_datatype_5252.jl"
-expected = true
-description = "single uppercase-letter struct/abstract names (P, T, N, M) classify as DataType not TypeVar: typeof/isa/isconcretetype/isbitstype/sizeof/fieldnames, construction, instance typing, and multiple dispatch on single-letter concrete and abstract-supertype annotations all resolve to the declared type, matching upstream (Issue #5252)"
-
-[[tests]]
 name = "types_single_letter_typevar_regression_5252"
 file = "single_letter_typevar_regression_5252.jl"
 expected = true
 description = "regression guard for Issue #5252: legitimate single-letter where-clause and parametric type variables (f(x::T) where T, where {A,B}, where S<:Real, Type{T}, Box{T}, Vector{T}) still bind as type variables and are not mis-promoted to DataType by the declared-type disambiguation"
-
-[[tests]]
-name = "types_subtype_concrete_not_bottom_5257"
-file = "subtype_concrete_not_bottom_5257.jl"
-expected = true
-description = "Nothing is a concrete singleton DataType, not the bottom type: Nothing <: T for unrelated concrete/abstract T (Int64, Union{Int64}, Union{Int64,Float64}) is false; only Union{} (Bottom) is <: everything; Nothing <: Any / Nothing / Union{Nothing,Int64} stay true; Missing and other concrete pairs (Int64 <: Float64, Int64 <: Nothing) are false (Issue #5257)"
 
 [[tests]]
 name = "types_typeof_first_class_5068"
@@ -569,197 +149,10 @@ file = "typeof_first_class_5068.jl"
 expected = true
 description = "Type{T} first-class treatment (Issue #5068): bounded Type{<:Number} and Type{<:Integer} dispatch with correct specificity (more specific bound wins, no ambiguity), Type{T} where {T} and Type{T} where {T<:Real} type-variable binding, value-level subtype relations honoring invariance for concrete inner (Type{Int} <: Type{Integer} is false, Type{Int} <: Type{<:Number} is true), DataType <: Type, and isa for type-object values against Type{...} patterns (Int isa Type{Int} true, Int isa Type{Integer} false, Int isa Type{<:Number} true, Vector{Int} isa Type{<:AbstractArray} true, 3 isa Type{Int} false), matching upstream Julia"
 [[tests]]
-name = "types_bottom_systematic_5065"
-file = "bottom_systematic_5065.jl"
-expected = true
-description = "systematic Union{} (Bottom) semantics: const Bottom === Union{}; Bottom <: T holds for every type T (Int, Number, String, Any, Union, Bottom) while T <: Bottom holds only for Bottom; typeintersect treats Bottom as the zero element (Int/String, Int/Bottom, Bottom/Number all meet at Bottom) and leaves non-disjoint meets (Int/Integer === Int) intact; empty-Union normalization absorbs/collapses Bottom (Union{Int}===Int, Union{Bottom,Int}===Int, Union{Bottom}===Bottom); and no value isa Bottom (Issue #5065)"
-[[tests]]
-name = "types_tuple_vararg_subtype_5061"
-file = "tuple_vararg_subtype_5061.jl"
-expected = true
-description = "Tuple{Int, Vararg{T}} vs general-tuple subtype and typeintersect over the fixed-prefix + trailing-Vararg normal form: fixed tuples <: trailing Vararg with covariant element widening (Tuple{Int,Int} <: Tuple{Int,Vararg{Int}}, Tuple{Int,Vararg{Int}} <: Tuple{Vararg{Integer}}), Vararg{T,N} fixed lengths, isa, typeintersect, and the bare Tuple === Tuple{Vararg{Any}} equivalence (Tuple <: Tuple{Vararg{Any}} but not <: any narrower vararg or fixed-arity tuple) (Issue #5061)"
-[[tests]]
-name = "types_vararg_len_subtype_intersect_5062"
-file = "vararg_len_subtype_intersect_5062.jl"
-expected = true
-description = "subtype and typeintersect over the fixed-length value parameter N of Vararg{T,N} / NTuple{N,T}: both directions of the equivalence NTuple{3,Int} <-> Tuple{Int,Int,Int} hold, length mismatches (NTuple{2,Int} vs Tuple{Int,Int,Int}) are rejected, element covariance (NTuple{3,Int} <: Tuple{Real,Real,Real}, NTuple{3,Int} <: NTuple{3,Integer}) survives the alias expansion, and typeintersect flattens the alias to the canonical Tuple{Int,Int,Int} (or Union{} on mismatch), by expanding a concrete-length Vararg{T,N} element into the flat Tuple{T,...,T} shape on both operands during subtype/intersect (Issue #5062)"
-[[tests]]
 name = "types_parametric_invariance_5052"
 file = "parametric_invariance_5052.jl"
 expected = true
 description = "User-defined parametric structs are invariant in their parameters (Box{Int} <: Box{Number} is false; multi-param and nested invariance hold), while a parametric struct is a subtype of its bare parametric abstract supertype (Box{Int} <: AbstractBox, Box <: AbstractBox); invariance still forbids Box{Int} <: AbstractBox{Number} (Issue #5052)"
-[[tests]]
-name = "types_capture_avoiding_instantiate_5054"
-file = "capture_avoiding_instantiate_5054.jl"
-expected = true
-description = "regression guard for capture-avoiding type-variable substitution (Issue #5054): ordinary parametric instantiation on the common, non-capturing path keeps producing the right concrete types and dispatch — builtin Vector{Int}/Dict{String,Int}/Tuple{Int,String} construction, isa and subtyping; user parametric struct Box{Int} construction with parametric methods (unwrap/boxtype via where T); and a multi-parameter struct Pair2{A,B} whose distinct type-variable names resolve independently (firsttype===Int, secondtype===String) without colliding"
-[[tests]]
-name = "types_abstract_irrational_hierarchy_5134"
-file = "abstract_irrational_hierarchy.jl"
-expected = true
-description = "AbstractIrrational <: Real <: Number abstract hierarchy backing Irrational dispatch/promote: AbstractIrrational/Irrational/Irrational{:π} subtype relations, supertype(AbstractIrrational)==Real, supertype(Irrational)==AbstractIrrational, constructed Irrational{:π}() isa across the chain, user-defined MyIrr{sym}<:AbstractIrrational isa Real, pi isa Real, AbstractIrrational-vs-Real more-specific dispatch regression coverage for bug #5582 / broader #5072, and Tuple covariance (Issue #5134)"
-[[tests]]
-name = "types_val_tuple_value_param_5067"
-file = "val_tuple_value_param_5067.jl"
-expected = true
-description = "structured (tuple / symbol-tuple / nested-tuple) value type parameters for Val: typeof renders Val{(1, 2)} / Val{(:a, :b)} / Val{(1, (2, 3))} with a cosmetic space after each comma; isa treats the spaced typeof spelling and the tight source-literal spelling (Val{(1,2)}) as the same DataType while keeping distinct tuples distinct; multiple dispatch selects the method whose tuple value parameter matches (Issue #5067)"
-
-[[tests]]
-name = "types_eltype_union_array_5335"
-file = "eltype_union_array_5335.jl"
-expected = true
-description = "eltype of a Union-typed array is a real Union type object; typeof(union) is Union (Issue #5335)"
-
-[[tests]]
-name = "types_primitive_type_decl_5058"
-file = "primitive_type_decl_5058.jl"
-expected = true
-description = "user `primitive type Name Bits end` declarations integrate with type reflection: isprimitivetype/isbitstype/sizeof (Bits/8) on bare and large primitives, supertype defaults to Any and honors an explicit `<: Unsigned` parent (with transitive `<: Integer`), and the type is a first-class DataType value (MyBits isa Type, === identity). Value construction is out of scope (Issue #5058)"
-
-[[tests]]
-name = "types_where_expression_value_5047"
-file = "where_expression_value_5047.jl"
-expected = true
-description = "`where`-expression in value/expression position lowers to a first-class UnionAll type value (Tuple{T,T} where T, Array{T,N} where {T,N}, Vector{T} where T, bounded where T<:Number): typeof==UnionAll, isa UnionAll/Type, display, unwrap_unionall/rewrap_unionall round-trip, and identity with builtin aliases (Vector{T} where T===Vector, Array{T,N} where {T,N}===Array). Subtype SOLVING with where is out of scope — a later increment (Issue #5047, advances #5049/#5053)"
-
-[[tests]]
-name = "types_nested_unionall_apply_5053"
-file = "nested_unionall_apply_5053.jl"
-expected = true
-description = "Nested/multi-variable UnionAll application: Array{T,N} where {T,N}, Tuple{T,U} where {T,U}, and Vector{Tuple{T,U}} where {T,U} instantiate one binder per argument through both curly syntax and Core.apply_type, including uppercase runtime UnionAll bindings that must not be static alias-prescan expanded, plus Array rank alias canonicalization to Matrix/Vector (Issue #5053)"
-
-[[tests]]
-name = "types_where_subtype_existsright_5047"
-file = "where_subtype_existsright_5047.jl"
-expected = true
-description = "Exists-right subtype solving A <: (B where V...) where the RHS is a UnionAll value (#5569): finds bound-variable bindings making A <: B[bindings] under each var's bounds and the diagonal rule. Re-parses the rendered `Body where V` surface name into CoreType::UnionAll so the existing matches_unionall_pattern solver fires, and gates check_subtype off the legacy string heuristics for where-bearing operands. Covers diagonal (Tuple{Int,Int} true, Tuple{Int,String}/Tuple{Int,Real} false), bounds (Vector{Int}<:Vector{T} where T<:Real true, Vector{String} false, Tuple{T,T} where T<:Integer/AbstractString), multi-var (Tuple{T,S} where {T,S}, Dict{K,V} where {K,V}), Vararg (Tuple{Vararg{T}} where T), plus must-stay-correct invariant non-where guards. Bare-typevar-body collapse is covered separately by Issue #5570. Advances Issue #5047"
-
-[[tests]]
-name = "types_where_bare_typevar_body_5570"
-file = "where_bare_typevar_body_5570.jl"
-expected = true
-description = "Bare typevar where-expression bodies collapse to their upper bound rather than evaluating the identifier as a value: T where T === Any, T where T<:Real === Real, and subtype/string/typeof surfaces match Julia (Issue #5570, advances Issue #5047)"
-
-[[tests]]
-name = "types_where_subtype_forallleft_5047"
-file = "where_subtype_forallleft_5047.jl"
-expected = true
-description = "Forall-left subtype solving (B where V...) <: C where the LHS is a UnionAll value (#5569): introduces a fresh RIGID variable per bound var (confined to its declared bounds) and checks B[rigid] <: C for ALL such choices. substitute_typevar_bound rewrites the body's bound occurrences — parsed as unbounded typevars by from_julia_name — with the bound-carrying var so the declared upper bound flows into the check; combined with the exists-right solver (#5571) this yields forall-exists ALTERNATION for single/diagonal-var cases. Covers bare bounded var (Vector{T} where T <: AbstractVector / not Vector{Int}, Tuple{T,T} where T <: Tuple), builtin alias (Array <: AbstractArray), representative both-sides-where Issue #5049 cases (Tuple{T,T} where T <: Tuple{S,U} where {S,U} true, reverse false), alternation (Tuple{T} where T<:Integer <: Tuple{S} where S<:Real true, reverse false, invariant Vector{T} where T<:Integer <: Vector{S} where S<:Real true, diagonal Tuple{T,T} where T<:Integer <: Tuple{S,S} where S<:Real true via TypeVar-as-concrete-diagonal). Regression-guards exists-right (#5571) + invariant + non-where. Vector<:AbstractVector excluded (bare Vector renders as rank-erased Array). Advances Issue #5047 and closes Issue #5049"
-
-[[tests]]
-name = "types_nested_alias_param_subtype_5047"
-file = "nested_alias_param_subtype_5047.jl"
-expected = true
-description = "Nested / alias-spelled parametric params in the exists-right where subtype solver. A nested parametric param (Box{Box{Int}}) renders with the 64-bit word alias Int (not canonical Int64), parsing to an opaque Named(Int); the subtype relation now resolves Named(Int)/Named(UInt) to Int64/UInt64 so the structured matcher runs the bound check on the concrete primitive (from_julia_name keeps the Named spelling so type-propagation/dispatch are unchanged). Covers nested bounded exists-right (Box{Box{Int}} <: Box{Box{T}} where T<:Integer/Number/Real true, String/Float64 false), UInt word alias (T<:Unsigned/Integer true, Signed false), alias in user where-bound clause (Box{Int} <: Box{T} where T<:Int), triple nesting + diagonal, and regression guards (explicit Int64, unbounded where T, plain invariant). Advances Issue #5047"
-
-[[tests]]
-name = "types_struct_forall_left_abstract_parent_5614"
-file = "types_struct_forall_left_abstract_parent_5614.jl"
-expected = true
-description = "Forall-left where-form over a user-defined PARAMETRIC struct resolves its declared abstract parent: (Circle{T} where T) <: Shape is true upstream for struct Circle{T<:Real} <: Shape, but sjulia reported false. The where operand is decided authoritatively by the structured CoreType solver (it does not fall through to the runtime reflection table that handles brace-free Circle{Int} <: Shape), which lacked a (Struct, Named) arm AND never received parametric user structs in its STRUCT_PARENT_REGISTRY (they instantiate lazily, outside struct_defs, Issue #5052). Fix adds the (Struct, Named) arm to CoreType::is_subtype_of and seeds parametric_structs' (base name -> declared parent base name) into the inference registry alongside struct_defs/abstract_types. Covers explicit where (Circle{T} where T / where T<:Real / where T<:Integer), multi-level user-abstract chains (Dog{T} -> Mammal -> Animal), parametric abstract parent (MyVec{T} <: Wrapper{T} so bare Wrapper matches while invariant Wrapper{Int} does not), and negative/regression guards. Advances Issue #5047"
-
-[[tests]]
-name = "types_typeof_core_subtype_gate_5615"
-file = "typeof_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime `check_subtype` treats built-in `Type{...}` pairs as CoreType-authoritative, including invariant `Type{Int} <: Type{Integer}` false and covariant `Type{<:Bound}` true/false cases (Issue #5615)"
-
-[[tests]]
-name = "types_tuple_core_subtype_gate_5615"
-file = "tuple_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime `check_subtype` treats built-in `Tuple{...}` covariance pairs as CoreType-authoritative while preserving ordinary tuple subtype behavior (Issue #5615)"
-
-[[tests]]
-name = "types_wrapper_array_core_subtype_gate_5615"
-file = "wrapper_array_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime `check_subtype` treats wrapper array types (`SubArray`, `ReshapedArray`) as CoreType-authoritative for their direct AbstractArray/AbstractVector/AbstractMatrix relations while preserving Julia's false DenseArray/DenseVector/DenseMatrix relations (Issue #5615)"
-
-[[tests]]
-name = "types_range_core_subtype_gate_5615_5875"
-file = "range_core_subtype_gate_5615_5875.jl"
-expected = true
-description = "Runtime `check_subtype` treats known range families as CoreType-authoritative, preserving true AbstractRange relations for UnitRange/StepRange/StepRangeLen/LinRange and Julia's false `LogRange <: AbstractRange` relation (Issues #5615/#5875)"
-
-[[tests]]
-name = "types_range_abstract_array_hierarchy_5880"
-file = "range_abstract_array_hierarchy_5880.jl"
-expected = true
-description = "Range abstract and concrete families subtype AbstractVector/AbstractArray with invariant element/rank parameters while preserving Julia's false `LogRange <: AbstractRange` relation (Issues #5615/#5880)"
-
-[[tests]]
-name = "types_pairs_parametric_abstractdict_parent_5882"
-file = "pairs_parametric_abstractdict_parent_5882.jl"
-expected = true
-description = "Pairs{K,V,I,A} instantiates its declared AbstractDict{K,V} parent through the CoreType subtype registry: Base.Pairs{Symbol,Int64,...} <: AbstractDict{Symbol,Int64} is true while invariant K/V mismatches remain false (Issues #5615/#5882)."
-
-[[tests]]
-name = "types_user_nominal_core_subtype_gate_5615"
-file = "user_nominal_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime `check_subtype` treats registered user nominal subtype relations as CoreType-authoritative, including covariant Tuple pairs that contain user struct/abstract names, while preserving negative unrelated user relations (Issue #5615)"
-
-[[tests]]
-name = "types_user_parametric_core_subtype_gate_5615"
-file = "user_parametric_core_subtype_gate_5615.jl"
-expected = true
-description = "Runtime `check_subtype` treats registered parametric user struct parent relations as CoreType-authoritative, including covariant Tuple pairs containing concrete user parametric structs, while preserving negative unrelated parents (Issue #5615)"
-
-[[tests]]
-name = "types_parametric_exists_right_5615"
-file = "parametric_exists_right_5615.jl"
-expected = true
-description = "A user parametric struct with a parametric abstract parent (struct MyVec{T} <: Wrapper{T}) subtypes an existential parametric right operand (Wrapper{S} where S) from a forall/bare left, via the declared parametric parent template, while a concrete invariant parent (Wrapper{Real}) stays false (Issue #5615)"
-
-[[tests]]
-name = "types_user_parametric_parent_where_right_5852"
-file = "user_parametric_parent_where_right_5852.jl"
-expected = true
-description = "Runtime subtype checks walk user parametric declared parents before a where-right supertype: MyVec{T}<:Wrapper{T} satisfies Wrapper{S} where S and bounded variants while preserving invariant concrete mismatch (Issues #5852/#5615)"
-
-[[tests]]
-name = "types_irrational_bare_family_subtype_5853"
-file = "irrational_bare_family_subtype_5853.jl"
-expected = true
-description = "Runtime subtype checks accept value-parameter Irrational instances as subtypes of bare Irrational before CoreType false-gating (Issue #5853)"
-
-[[tests]]
-name = "types_anonymous_bounded_typevar_display_5644"
-file = "types_anonymous_bounded_typevar_display_5644.jl"
-expected = true
-description = "An anonymous bounded type variable (internal placeholder name `_`, from the covariant shorthand Vector{<:Integer}) prints with the bound-only shorthand <:Bound, not _<:Bound. Fixes JuliaType::name() TypeVar arm (types/julia_type/display.rs) and the runtime typevar formatter (vm/formatting.rs format_runtime_typevar) to elide the `_` placeholder for anonymous upper/lower bounds. Display-only divergence; the internal _<: spelling round-trips through parsing. Covers Vector/Set/Type/Array/Ref/Dict (double bound)/nested anonymous bounds and a typeintersect result, plus regression guards that NAMED (T<:Real) and unbounded/concrete parametric types are unchanged. Remaining (representation gap, separate follow-up): where-clause lower bounds (Vector{T} where Int<:T<:Real renders as Vector{T}) and >: normalization (Vector{>:Int} not Int64) — both need JuliaType to carry a lower bound. Issue #5644"
-
-[[tests]]
-name = "typeintersect_unionall_abstract_container_5048"
-file = "typeintersect_unionall_abstract_container_5048.jl"
-expected = true
-description = "Focused typeintersect slice (Issue #5048): a bare parametric container UnionAll met with a ground parametric instantiation, e.g. typeintersect(Vector{T} where T<:Real, AbstractVector{Int}) === Vector{Int}. Each where-variable is forced (invariant containers) to the matching positional parameter of the other operand, bound-checked, with diagonal variables required to agree and the concrete result verified <: the operand (rejecting unrelated families / wrong dimensionality). Covers Vector/Matrix/Dict/Pair, partial instantiation (Dict{Int,V} where V), AbstractArray{T,N}, and bound violations."
-
-[[tests]]
-name = "types_where_lower_bound_display_5650"
-file = "types_where_lower_bound_display_5650.jl"
-expected = true
-description = "Type display carries where-clause LOWER bounds and normalizes the contravariant `>:` shorthand: string(Vector{T} where Int<:T<:Real) == \"Vector{T} where Int64<:T<:Real\", string(Vector{T} where T>:Int) == \"Vector{T} where T>:Int64\", string(Vector{>:Int}) == \"Vector{>:Int64}\". JuliaType::UnionAll gained a (boxed) lower_bound; the value-position where parser routes its constraint through parse_type_constraint so the `>:` direction is preserved; make_typevar_expr passes the declared lower bound. Upper-only/covariant/concrete forms unchanged (Issue #5650)."
-
-[[tests]]
-name = "types_qualified_base_oneto_subtype_5874"
-file = "types_qualified_base_oneto_subtype_5874.jl"
-expected = true
-description = "A qualified Base TYPE (Base.OneTo) used in a subtype expression resolves to the type object instead of erroring 'Base has no function named OneTo'. Base.OneTo <: AbstractUnitRange and <: AbstractRange both return true; Base.OneTo isa Type; Base.RefValue <: Ref still works. The Base.X module-call path now resolves known Base types (struct/parametric/abstract/builtin/enum/primitive) to a DataType (Issue #5874)."
-
-[[tests]]
-name = "types_pairs_abstractdict_subtype_5882"
-file = "types_pairs_abstractdict_subtype_5882.jl"
-expected = true
-description = "Base.Pairs{K,V,I,A} <: AbstractDict{K,V} parametric parent threading: Pairs{Symbol,Int64,...} <: AbstractDict{Symbol,Int64} is true (parameterized) and supertype(Pairs{...}) == AbstractDict{Symbol,Int64}. supertype_name now consults parametric_structs (which carries the threaded parent) before the builtin direct-supertype table that hardcoded Pairs to Any. Invariant mismatches stay false; Complex/Dict/Array supertypes unregressed (Issue #5882)."
-
-[[tests]]
-name = "types_typeintersect_set_theoretic_5048"
-file = "typeintersect_set_theoretic_5048.jl"
-expected = true
-description = "Set-theoretic typeintersect: distributive law over Union, element-wise Tuple intersection (length mismatch -> Bottom), strict invariant parametric intersection, UnionAll x UnionAll / diagonal variables, and the correctness properties typeintersect(A,B) <: A & <: B and A<:B => typeintersect(A,B)==A, sharing the subtype engine env (Issue #5048)"
-
 [[tests]]
 name = "types_bare_typevar_return_inference"
 file = "bare_typevar_return_inference.jl"
@@ -771,36 +164,6 @@ name = "types_user_type_builtin_abstract_subtype_5915"
 file = "user_type_builtin_abstract_subtype_5915.jl"
 expected = true
 description = "Issue #5915 wave 3: runtime `<:` (check_subtype) is decided solely by the shared CoreSubtypeEngine over the VM struct hierarchy, with the legacy nominal-chain / type_ancestors / Union / tuple-walk fallbacks retired. The engine's new (Named, Abstract) arm walks a non-parametric user struct/abstract (struct Money <: Real, abstract type Currency <: Number) into the built-in abstract lattice, and the existential-right matcher walks a parametric user struct's substituted parent (MyVec{Int} <: Wrapper{S} where S binds S=Int) while keeping invariant parameters. Verified against upstream julia 1.12."
-
-[[tests]]
-name = "types_sizeof_value_narrow_type_6766"
-file = "sizeof_value_narrow_type_6766.jl"
-expected = true
-description = "Issue #6766: sizeof(x) on a VALUE returns the logical type size (sizeof(typeof(x))), not the boxed Value representation size. Narrow bits types (Int8/16/32, UInt8/16/32, Float16/32, Int128/UInt128, Bool, Char) previously fell through the BuiltinId::Sizeof handler's default arm returning 8; now each scalar bits-type Value variant maps to its CoreType layout size (Int32(4)==4, Int8(1)==1, Float32==4, UInt16==2, Int128==16). sizeof(::Type) stays correct (regression guard). Verified against upstream julia 1.12."
-
-[[tests]]
-name = "types_vector_matrix_alias_ndims_6814"
-file = "vector_matrix_alias_ndims_6814.jl"
-expected = true
-description = "Issue #6814: bare array aliases Vector (=Array{T,1}) and Matrix (=Array{T,2}) keep their fixed rank in isa/<:. The array-family subtype shortcut previously returned true for any pair whose supertype had no parameters, treating a bare rank-pinned alias as rank-free, so Vector <: Matrix, Array{Int64,1} <: Matrix, and [1,2,3] isa Matrix were spuriously true. Only Array/AbstractArray/DenseArray/BitArray are rank-free when bare. Verified against upstream julia 1.12."
-
-[[tests]]
-name = "types_abstractarray_parent_param_chain_7728"
-file = "abstractarray_parent_param_chain_7728.jl"
-expected = true
-description = "Issue #7728: a value/type-parameter chain through an AbstractArray{T,N} parent across an abstract supertype chain (StaticArray7728{S,T,N} <: AbstractArray{T,N}; StaticVector7728{N,T} <: StaticArray7728{Tuple{N},T,1}; SVector7728{N,T} <: StaticVector7728{N,T}) threads the concrete element/dim parameters down to the AbstractArray instantiation, so SVector7728{3,Int64} <: AbstractArray{Int64,1} is true while element/rank-mismatched cases stay false. The fix preserves the parametric PARENT's parameters when lowering an abstract type declaration (they were dropped to the bare base name). Verified against upstream julia 1.12."
-
-[[tests]]
-name = "types_bare_abstractarray_user_chain_7787"
-file = "bare_abstractarray_user_chain_7787.jl"
-expected = true
-description = "Issue #7787: a user type whose declared abstract parent chain reaches AbstractArray{T,N} is <: the BARE, parameter-free AbstractArray (and the bare AbstractVector/AbstractMatrix when its rank matches), not just the parameterized AbstractArray{T} form fixed in #7728. struct_is_subtype_of_abstract_with_lookup's array-family arms now walk the instantiated parent chain to the array-family ancestor: MyArr{Float64} <: AbsContainer{T} <: AbstractArray{T,2} gives MyArr{Float64} <: AbstractArray and <: AbstractMatrix (rank 2) but not <: AbstractVector or DenseArray, while a DenseArray-rooted chain is also <: DenseArray. Verified against upstream julia 1.12."
-
-[[tests]]
-name = "types_value_param_abstractarray_parent_chain_7819"
-file = "value_param_abstractarray_parent_chain_7819.jl"
-expected = true
-description = "Issue #7819 (follow-up to #7728): the AbstractArray{T,N} subtype edge survives an EXTRA value-parameter intermediate that re-passes {S,T,N} (the StaticArrays shape: Vec <: StaticVector <: StaticVecOrMat{Tuple{N},T,1} <: StaticArray{S,T,N} <: AbstractArray{T,N}). A monomorphized instance previously clobbered the parametric family's hierarchy entry with an EMPTY type-parameter list, so registered_instantiated_struct_parent_in could not substitute the concrete arguments and every edge in the chain went false. Registering parametric templates before concrete instances (struct_setup) keeps the type-parameter names, so Vec7819{3,Int64} <: AbstractArray{Int64,1} is true while element/rank mismatches stay false. Verified against upstream julia 1.12."
 
 [[tests]]
 name = "types_parametric_sibling_isa_subtype_8092"
@@ -815,7 +178,379 @@ expected = true
 description = "Issue #8359: value-position partial parametric type syntax lowers anonymous bounded parameters (`Foo{<:Real}`) to TypeVar values and runtime isa/<: for user parametric structs honors the bound instead of treating it as an unsupported `<:` expression or exact invariant parameter"
 
 [[tests]]
-name = "types_coretype_parity_8415"
-file = "coretype_parity_8415.jl"
+name = "types_nameof_nfields"
+file = "test_nameof_nfields.jl"
 expected = true
-description = "Issue #8415: Core type parity regressions for tuple/Array/value-param typejoin, diagonal tuple typeintersect, where lower/cross-bound dispatch rejection, nested UnionAll exists-right subtype, and applying a concrete argument to a parenthesized UnionAll base"
+description = "nameof and field metadata reflection matrix for Tuple, struct, and NamedTuple shapes: fieldnames value kind, fieldtypes, fieldcount, and nfields (Issues #9469/#9540). Registered while closing the fixture-coverage gap (Issue #9360)."
+
+[[tests]]
+name = "types_typevar_name_collision_scope_9563"
+file = "typevar_name_collision_scope_9563.jl"
+expected = true
+description = "Issue #9563: short uppercase and uppercase+digit struct names (S2/V2/P/T/N/A1) remain nominal for DataType reflection, typed arrays/literals, and operator dispatch while where/type-parameter binders with the same spellings still shadow globals structurally."
+
+[[tests]]
+name = "types_subtype_matrix_oracle_10049"
+file = "subtype_matrix_oracle_10049.jl"
+expected = true
+description = "Differential subtype (`<:`) property matrix for tech-debt epic #10049: 82 deterministic type-pair expressions (concrete numerics, abstract hierarchy, invariant parametric-struct params, Vector/Matrix/Tuple combinations, Union, UnionAll upper/lower bounds including contravariant {>:T}, the diagonal rule, UnionAll<:UnionAll, and Type{T}) asserted against upstream julia's verdict. Generated by scripts/gen_subtype_matrix_fixture.jl; divergences are tracked in docs/vm/SUBTYPE_MATRIX_SKIPLIST.tsv, not asserted here. See docs/vm/SUBTYPING.md."
+
+[[tests]]
+name = "types_where_binder_shadow_scope_10100"
+file = "where_binder_shadow_scope_10100.jl"
+expected = true
+description = "Issues #10100/#10299/#10460 (epic #10049): a where-clause TypeVar binder whose name collides with an existing type shadows it lexically instead of crashing or dropping the wrapper. Asserts structural equality/subtyping/identity, nested binder bounds that reference the outer shadowing binder, mixed bare plus module-qualified leaves where only the bare spelling is captured, and ordinary/unused/chained where-clauses."
+
+[[tests]]
+name = "types_where_binder_qualified_shadow_10280"
+file = "where_binder_qualified_shadow_10280.jl"
+expected = true
+description = "Issue #10280 (epic #10049): a where-clause TypeVar binder shadows only the BARE (unqualified) spelling of its name; an explicitly module-qualified reference whose last component equals the binder name (`Core.Builtin` under `where Builtin`, or a user/Base-qualified path like `Base.RefValue{Int64}`) is NOT shadowed, so the binder is unused and the `where` collapses to the concrete DataType. Previously the keep-vs-drop check tokenized `Core.Builtin` and matched the bare token `Builtin`, wrongly keeping a spurious UnionAll. The fix skips `.`-preceded (module-qualified) tokens generally, not a `Core.` special case. Also guards that ordinary bare binders (including the #10100 builtin-name shadow `Int64<:Real`) still keep their where."
+
+[[tests]]
+name = "types_typejoin_partial_param_widen_10091"
+file = "typejoin_partial_param_widen_10091.jl"
+expected = true
+description = "Issue #10091 (tech-debt epic #10049): typejoin's same-typename branch widens ONLY the differing parametric parameter positions to a fresh where-bound TypeVar (via UnionAll), keeping every agreeing parameter, instead of collapsing straight to the bare wrapper. Covers the MWE's two rows (differing trailing / leading param), a 3-param differing-middle-position case, and a value-kind (non-Type, rank-like) differing parameter. Trailing-differing cases assert lattice semantics via `<:` rather than display strings because of a separate known display-elision gap (Issue #10195). Also covers the dependent-bound follow-up (a later param's declared bound references an earlier one, e.g. `struct Dep2{A, B<:A}`): the earlier position's resolved value must substitute into the later position's bound (agreeing leading param, both differ, and a 2-level dependency chain with only the trailing or both trailing positions differing), otherwise the join escapes a free TypeVar and is not a valid upper bound. Issue #10252 guards that TypeVar identity cache entries from one dependent-bound wrapper do not leak into another wrapper that reuses the same parameter names. Also covers a partial UnionAll result fed back into typejoin as an operand (reduce/mapreduce-style accumulation), which must be unwrapped ahead of the DataType-only paths."
+
+[[tests]]
+name = "types_typejoin_dependent_bound_name_collision_10252"
+file = "typejoin_dependent_bound_name_collision_10252.jl"
+expected = true
+description = "Issues #10252/#10261: dependent TypeVar bounds preserve owner-scoped object identity (`B.ub === A`, `C.ub === B`) across a UnionAll wrapper chain. Reproduces the Dep2/Dep3 same-name collision and requires exact upstream typejoin precision after the collision (`Dep3{Number,B,C} where {B<:Number,C<:B}`), in addition to both operands remaining subtypes. Also pins upstream `within_typevar` behavior for composite, upper, and lower bounds containing a free runtime variable, plus arbitrary-rank Array parameter identity."
+
+[[tests]]
+name = "types_agg_subtype_9671"
+file = "types_agg_subtype_9671.jl"
+expected = true
+description = "Aggregated concat-safe types subtype / typeintersect / unionall lattice fixtures (31 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "types_agg_predicates_9671"
+file = "types_agg_predicates_9671.jl"
+expected = true
+description = "Aggregated concat-safe types type predicate (isbits/ismutable/objectid/...) fixtures (11 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "types_agg_eltype_size_9671"
+file = "types_agg_eltype_size_9671.jl"
+expected = true
+description = "Aggregated concat-safe types eltype / length / sizeof / typejoin fixtures (14 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "types_agg_promote_float_9671"
+file = "types_agg_promote_float_9671.jl"
+expected = true
+description = "Aggregated concat-safe types promotion / widen / float identity fixtures (13 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "types_where_bound_undefvarerror_10226"
+file = "where_bound_undefvarerror_10226.jl"
+expected = true
+description = "Issue #10226 (discovered while fixing #10100): a where-clause bound expression referencing a genuinely undefined identifier (`Vector{Int64} where Int64<:SomeUndefinedName123`, `Vector{T} where T<:T` with no outer T) now raises UndefVarError instead of being silently accepted as a nominal Struct placeholder. Also covers a broad non-regression matrix so the fix does not false-positive on legitimate where usage: plain/bounded/multi/sibling-referencing/chained where-clauses, Issue #10274's nested same-name where-bound scope in BOTH spellings (parenthesized, and the unparenthesized chain `Vector{T} where T<:T where T<:Real` that previously corrupted the reparsed type or aborted with a stack overflow -- Issues #10301/#10302/#10303, display residual in #10572), the Issue #10100 builtin-name-collision shapes, a bound naming a real previously-declared struct/abstract type or a plain global alias (resolved via ordinary global lookup, not a static literal), compound bound expressions (parametric/Union/qualified, untouched by this fix), and function-signature where clauses."
+
+[[tests]]
+name = "types_where_decl_bound_undefvarerror_10396"
+file = "where_decl_bound_undefvarerror_10396.jl"
+expected = true
+description = "Issue #10396 (declaration-position sibling of #10226): a function-signature where-bound naming an undefined identifier (`h2(x::T) where T<:UndefZZZ = x`) now raises UndefVarError when the method definition executes, instead of being silently accepted and later surfacing as a misleading MethodError at the call site. Covers upper (`<:`), lower (`>:`), and two-sided (`lo<:T<:hi`) bounds in short-form, long-form, and multi-parameter braced clauses, plus a non-regression matrix: builtin bounds, sibling-binder (`{T, S<:T}`) and chained (`where S<:T where T`) references, and bounds naming user abstract types, parametric struct bases, and plain global aliases."
+
+[[tests]]
+name = "types_covariant_shorthand_undef_bound_10373"
+file = "covariant_shorthand_undef_bound_10373.jl"
+expected = true
+description = "Issue #10373 (sibling of #10226): the anonymous covariant/contravariant bound shorthand in value position (`Vector{<:SomeUndefinedName}`, `Vector{>:...}`, nested `Dict{String, <:...}`, `Vector{Vector{<:...}}`, `Type{<:...}`, and the same inside a function-body assignment) now raises UndefVarError instead of being silently accepted as a compound type-name literal by the static string parser. Regression guards: builtin bounds keep the static path and display, user struct/abstract-type bounds resolve via runtime global lookup (including top-level assignments that previously registered as static string aliases, and the contravariant `>:` single-parameter projection), subtype semantics through the dynamic route, a runtime type-valued global as bound resolving to its value, and annotation-position (signature) covariant shorthand staying unaffected (#10396's separate path)."
+[[tests]]
+name = "types_agg_parametric_subtype_10238"
+file = "types_agg_parametric_subtype_10238.jl"
+expected = true
+description = "Aggregated types parametric subtyping and abstract parents fixtures with top-level definitions, each former fixture isolated in its own module (21 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "types_agg_typeof_alias_10238"
+file = "types_agg_typeof_alias_10238.jl"
+expected = true
+description = "Aggregated types type aliases, typeof and first-class type objects fixtures with top-level definitions, each former fixture isolated in its own module (7 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "types_agg_misc_10238"
+file = "types_agg_misc_10238.jl"
+expected = true
+description = "Aggregated types miscellaneous definition-heavy fixtures with top-level definitions, each former fixture isolated in its own module (14 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "types_agg_value_params_10238"
+file = "types_agg_value_params_10238.jl"
+expected = true
+description = "Aggregated types value-type parameters (Val, NTuple, vararg tuples) fixtures with top-level definitions, each former fixture isolated in its own module (6 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3), plus the Issue #10457 prevention module: a value-parameter load matrix driving Int64/Float64/Bool/Char/Symbol/Tuple parameters through the same LoadTypeBinding body shape (`(::VP{v}) where {v} = v`), which caught Issue #10599 (non-Int64/Symbol value params bound as DataType wrappers) on first run"
+
+[[tests]]
+name = "types_apply_type_partial_unionall_10192"
+file = "apply_type_partial_unionall_10192.jl"
+expected = true
+description = "Issues #10192 and #11232: Core.apply_type and literal type application with fewer arguments than a user parametric type's arity return a partial UnionAll, preserve already-applied prefix parameters across subsequent application and Type{W{T}} method-body binding, and print with upstream's prefix shorthand."
+
+[[tests]]
+name = "types_apply_type_dynamic_splat_10191"
+file = "apply_type_dynamic_splat_10191.jl"
+expected = true
+description = "Issues #10191, #10554, #10555, #10558, #10570, #10613: Core.apply_type and equivalent base{args...} syntax accept array/tuple splats while literal, local, and splatted bases share UnionAll validation. Covers whole-call flattening, multiple splat segments, partial/builtin/abstract wrappers, identity-distinct unbounded and two-sided Runtime TypeVar parameters, nested same-name runtime UnionAll binders with dependent bounds, an empty splat, a 17-parameter wrapper, direct/runtime bound and arity errors, concrete-base rejection including zero arguments, Core.TypeName.wrapper, and dependent upper/lower bounds across direct and partial application."
+
+[[tests]]
+name = "types_scoped_typevar_identity_10279"
+file = "scoped_typevar_identity_10279.jl"
+expected = true
+description = "Issue #10279: nested same-name where binders have distinct scoped TypeVar identity, so an inner `Vector{T} where T` does not reuse the outer `where T` binding while the outer binder still remains consistent in its own scope."
+
+[[tests]]
+name = "types_where_chained_single_var_10371"
+file = "where_chained_single_var_10371.jl"
+expected = true
+description = "Issue #10371: a value-position `where` expression chaining single-variable clauses over a multi-parameter body (`Array{T,N} where N where T`) lowers to the same UnionAll as the braced multi-variable form (`Array{T,N} where {T,N}`). The parser now stops the unbraced constraint before a following chained `where` so the Pratt loop builds the nested UnionAll left-associatively; covers bounded/Tuple/Dict bodies, string+`==`+`===`+instantiation parity vs the braced form, and non-regression on existing braced/single/sibling-referencing where forms."
+
+[[tests]]
+name = "types_where_parametric_alias_assignment_10372"
+file = "where_parametric_alias_assignment_10372.jl"
+expected = true
+description = "Issue #10372: a plain-assignment parametric type alias whose RHS carries a `where` clause (`MyVec{T} = Vector{T} where T<:Real`) now lowers (previously UnsupportedAssignmentTarget) and binds a usable UnionAll, mirroring upstream Meta.lower (wrap the RHS value in one UnionAll(TypeVar(:P)) per LHS parameter, outermost-first). Asserts definition (isa UnionAll, string) and direct application (`MyVec{Float64} === Vector{Float64}`), plus a multi-param alias using #10371's chained where. The MWE's bare-identifier consumption line `z = MyVec{Float64}` is a separate pre-existing bug (Issue #10501) and is intentionally NOT asserted here."
+
+[[tests]]
+name = "types_union_isa_branch_fields_10313"
+file = "union_isa_branch_fields_10313.jl"
+expected = true
+description = "Issue #10313: a Union type value classifies as the Union kind for isa (isa DataType false / isa Union true / isa UnionAll false / isa Type true, consistent with typeof), and exposes its branch types through the fields a/b in upstream-canonical order (singletons < isbits < other DataTypes < UnionAlls, ties alphabetical, right-nested chains), via both dot access and getfield."
+
+[[tests]]
+name = "types_bottom_undefvar_10304"
+file = "types_bottom_undefvar_10304.jl"
+expected = true
+description = "Issue #10304: a bare `Bottom` identifier raises UndefVarError like upstream (Base's `const Bottom = Union{}` is unexported; sjulia's prelude alias and the static `\"Bottom\"` type-name arms are removed), in value position, isa RHS, and both `<:` operands, while the canonical `Union{}` spelling keeps full Bottom-of-the-lattice semantics (subtype universality, typeintersect zero element, Union normalization identity)."
+
+[[tests]]
+name = "types_where_chained_bound_isa_10410"
+file = "where_chained_bound_isa_10410.jl"
+expected = true
+description = "Issue #10410: `isa` against a chained different-name where bound (`Vector{T} where T<:S where S<:Real`) resolves the outer binder S through the inner binder T's upper bound, so `Float64[1.0] isa r` agrees with `Vector{Float64} <: r` (and `Any[1,2] isa r` stays false). The subtype engine was already correct; two string-level mangles on the isa route were fixed: JuliaType::from_name's prefix arms mis-split the rendered brace form `Vector{T} where {S<:Real, T<:S}` into a garbage element type, and normalize_type_for_isa's space-stripping destroyed the top-level ` where ` keyword for user-struct targets. Also pins the user-struct chained/single-bound isa cases and the #10274/#10302 same-name chained bound (terminating, correct membership)."
+
+[[tests]]
+name = "types_apply_type_concrete_datatype_typeerror_10422"
+file = "apply_type_concrete_datatype_typeerror_10422.jl"
+expected = true
+description = "Issues #10422/#10587: Core.apply_type on a concrete/non-UnionAll DataType base (fully-applied parametric instantiations such as Vector{Int64}, bare non-parametric concrete/abstract types such as Int64/Real, a non-parametric user struct, or the same traced through a variable) raises TypeError like upstream jl_apply_type instead of stripping/rebuilding the base name; positive controls keep bare UnionAll bases and #10192 partial application working."
+
+[[tests]]
+name = "types_alias_application_assignment_10501"
+file = "alias_application_assignment_10501.jl"
+expected = true
+description = "Issue #10501: a bare-identifier assignment of a parametric alias application (`z = AliasG{Float64}` after `const AliasG{T} = Vector{T}`) is no longer frozen as a verbatim static alias string; the stored target is alias-expanded to the resolved type, and when the RHS base is a runtime type binding (a `where`-clause parametric alias, Issue #10372, or a bare where-RHS binding) the extraction declines so the statement lowers as an ordinary runtime assignment applying the UnionAll. Covers const/plain/where alias forms, const-of-application, chained assignment, and guards that legitimate bare-identifier alias definitions (`const IntVec = Vector{Int}`, user-struct applications) still register for annotations/dispatch."
+
+[[tests]]
+name = "types_apply_type_union_runtime_typevars_10623"
+file = "apply_type_union_runtime_typevars_10623.jl"
+expected = true
+description = "Issue #10623: Core.apply_type(Union, members...) is a distinct applicable base family (not a UnionAll parameter application) whose members may be arbitrary types including fresh runtime TypeVars, deduplicated by object identity (upstream jl_type_union / jl_egal). Two DISTINCT TypeVar(:F) build Union{F, F} (not the collapsed F) order-insensitively (u1 == u2); a runtime variable holding Union works the same; zero members give Union{}; a free TypeVar mixes with concrete members without collapsing (Union{Int64, F}) and is absorbed only by Any; concrete-only unions keep the ordinary flatten/dedup/subtype-absorb/sort canonicalization."
+
+[[tests]]
+name = "types_value_isa_user_abstract_covariant_bound_10576"
+file = "value_isa_user_abstract_covariant_bound_10576.jl"
+expected = true
+description = "Issue #10576: value-level `isa` against an anonymous covariant bound naming a user abstract type (`[DogIsa()] isa Vector{<:AniIsa}`) now agrees with `typeof(x) <: T`. Array-carrier values (StructRef/Struct wrapper and the legacy native carrier) route their concrete parametric type name through the runtime `check_subtype` (the user-hierarchy-aware engine behind `<:`) instead of the static `type_values_subtype` fallback that only knew builtin bounds; covers invariant/covariant user-struct elements, abstract-container and ndims checks, matrices, Union targets, empty typed arrays, and the preserved builtin `Vector{<:Real}` case."
+
+[[tests]]
+name = "types_type_application_matrix_10556"
+file = "type_application_matrix_10556.jl"
+expected = true
+description = "Issue #10556 prevention: static-vs-dynamic type-application parity matrix. Exercises T{args...} and Core.apply_type across static syntax vs runtime-held bases (local / function parameter) and positional vs one-or-more-splat forms, over valid full/partial applications and invalid upper-bound, lower-bound, over-arity (leftover params after binders), non-type-base, and concrete-base cases, comparing success values or thrown exception classes against upstream julia. Includes a user parametric type with upper+lower bounds and >=2 binders. Every ConstructParametricType*/ApplyTypeDynamic*/PushDataType opcode is emitted and pinned; scripts/check_type_application_matrix.sh fails when a new type-application opcode is unrepresented. The fixture asserts only cases matching upstream (parity-comparable); currently-diverging cases are tracked in docs/vm/TYPE_APPLICATION_MATRIX_SKIPLIST.tsv (#10643 chained-literal, #10654 literal bare base, #10586 under-applied builtin). #10554 (static-path bound/arity), #10642 (lower-bound >:), and #10587 (Core.apply_type bare base) are fixed on main and asserted on both static and dynamic paths."
+
+[[tests]]
+name = "types_string_ctor_value_param_10597"
+file = "types_string_ctor_value_param_10597.jl"
+expected = true
+description = "Issue #10597: the uppercase `String` constructor applied to a where-bound value parameter (`g(::VP{v}) where {v} = String(v)`) compiles and dispatches `String(::Symbol)` on the runtime value instead of raising a spurious compile-time `Unknown function: String`. `String` has a pure-Julia method table but no builtin op, so the static builtin-fallback arm misrouted the runtime-unknown value-parameter argument to `compile_builtin_call`; the value-type-parameter argument now defers to runtime dynamic dispatch like an `Any`-typed argument. Keeps the sibling `string(v)` / `Symbol(v)` constructors and `String(x)` on a type-parameter value argument green."
+
+[[tests]]
+name = "types_pair_unionall_param_collapse_10635"
+file = "pair_unionall_param_collapse_10635.jl"
+expected = true
+description = "Issue #10635: a `where` binder whose variable repeats in an earlier parameter position (`Pair{T, T} where T`, or nested as in `Pair{Vector{B}, B} where B`, and the same for user-defined two-parameter families) is no longer elided from the printed parameter list. `format_left_prefix_partial_unionall` now mirrors upstream `show_can_elide`: a trailing where-bound variable is dropped only when it does not also occur among the retained prefix parameters. This fixes both the collapsed display (`Pair{T}`) and structural subtyping (`x <: y` / `y <: x`), since `<:` stringifies through the collapsed name. Positive controls keep the #10192 partial-application shortening (`Pair{Int64, B} where B` -> `Pair{Int64}`) working, with token-boundary matching so `Bool` does not block eliding binder `B`."
+
+[[tests]]
+name = "types_apply_type_builtin_base_eligibility_10586"
+file = "apply_type_builtin_base_eligibility_10586.jl"
+expected = true
+description = "Issue #10586: an under-applied builtin parametric family (Array{Float64}, Dict{String}) evaluates to a trailing UnionAll that is `isa UnionAll`, has `typeof == UnionAll`, equals Core.apply_type(Array, Float64), takes its remaining parameter (Array{Float64}{2} === Matrix{Float64}), and stays constructible (Array{Float64}(undef, n), zeros, ::Type{Array{T}} element binding); also regression-guards that Core.apply_type on a bare non-parametric base (Int64/Real/Bool/String, a non-parametric struct/abstract type, or one traced through a variable) raises TypeError (Issue #10587) and preserves #10422 fully-applied concrete-base TypeError."
+
+[[tests]]
+name = "types_where_binder_body_builtin_shadow_10934"
+file = "where_binder_body_builtin_shadow_10934.jl"
+expected = true
+description = "Issue #10934: a function-body parametric type expression consults the active lexical where-binder before classifying a builtin spelling as static. `f(x::Float64) where Float64<:Real = Vector{Float64}` now returns Vector{Int64} for an Int64 argument instead of freezing the body occurrence to builtin Float64; covers short/full/operator definitions, nested Vector/Dict/Tuple applications, the top type Any as a second builtin-name collision, runtime type-constructor bases (`F{Float64}`, `F{Vector{Float64}}`, and nested binder base `A{A{Int64}}`) whose source-text fast path must retain binders as runtime values, a binder shadowing a registered type alias in base position, and anonymous bounds (`Vector{<:Float64}`)."
+
+[[tests]]
+name = "types_where_binder_closure_body_11031"
+file = "where_binder_closure_body_11031.jl"
+expected = true
+description = "Issue #11031: a builtin-spelled `where` binder remains lexical inside assigned-arrow and nested named-function closure bodies. Assigned arrows and both full-/short-form nested functions construct `Vector{Int64}` when the enclosing method binds `Float64 = Int64`, instead of freezing the body occurrence to the builtin Float64 type."
+
+[[tests]]
+name = "types_value_param_builtin_base_shadow_10948"
+file = "value_param_builtin_base_shadow_10948.jl"
+expected = true
+description = "Issue #10948: an ordinary positional, keyword, destructured, assigned-arrow, or inline-arrow value parameter whose name matches a builtin type constructor shadows that global in a function-body parametric base. `f(Vector::Type) = Vector{Int64}` called with `Set` now constructs `Set{Int64}` instead of freezing the base to global `Vector`; includes the original adversarial MWE combined with Issue #10934's builtin-spelled where binder and a static unshadowed control."
+
+[[tests]]
+name = "types_struct_double_bounded_param_10644"
+file = "struct_double_bounded_param_10644.jl"
+expected = true
+description = "Issue #10644: a struct/abstract parameter declared with both bounds (`struct DB{Int8<:T<:Signed}`; also the mirrored `Signed>:T>:Int8` chain) parses and binds the lower AND upper bound, matching upstream's comparison-chain grammar. Instantiation within bounds works (DB{Int8}, constructible), instantiation outside either bound raises TypeError at literal type application (DB{Int16} violates the lower bound, DB{Integer} the upper). Function-signature double bounds keep working in braced and unbraced where forms, including the existential Int16 dispatch match (T == Signed)."
+
+[[tests]]
+name = "types_typevar_projection_structural_key_10987"
+file = "typevar_projection_structural_key_10987.jl"
+expected = true
+description = "Issue #10987 (epic #10459 Phase 1 completion): UnionAll binder projection identity is keyed by the fully structural TypeVarProjectionKey (normalized final-body owner with nested UnionAll binders preserved + binder depth + as-declared bounds parsed as JuliaType), never by rendered name/bound strings. Covers the three adversarial codex-review scenarios: an outer binder occurring only inside a nested binder's bound (Tuple{Vector{S} where S<:T} where T vs the U-renamed sibling stays distinct), module-qualified bounds (M1.Box{Int} vs M2.Box{Int} stay distinct at identity level; display-level assert until #11021), a two-sided bound whose upper contains a nested <: (Vector{Int64}<:T<:Vector{<:Real} parses to upstream lb/ub via the bracket-depth-aware interval split, Issue #11020), plus the same-body-different-bounds family from where_binder_shadow_scope_10100.jl pinned at the projection-identity level."
+
+[[tests]]
+name = "types_frame_binding_namespace_scope_11069_11071"
+file = "frame_binding_namespace_scope_11069_11071.jl"
+expected = true
+description = "Issues #11069/#11070/#11071: lexical frame namespaces do not become dynamic caller scope. An unrelated callee cannot read or report a caller where-binder as defined; an inner where-binder shadows an inherited same-named capture during closure snapshot; module-level eval inside a function sees globals but not caller locals, captures, or lexical where-bindings, while an eval-defined method retains its own ordinary local assignments."
+
+[[tests]]
+name = "types_type_application_literal_nonparametric_typeerror_10654"
+file = "type_application_literal_nonparametric_typeerror_10654.jl"
+expected = true
+description = "Issue #10654: literal type application T{...} on a bare non-parametric base (Int64{Float64}, Real{Int64}, Any/String/Bool/Nothing, or a non-parametric user struct) raises TypeError like upstream jl_apply_type instead of fabricating a nonsense DataType; the literal compile path now routes such bases through the same runtime ApplyTypeDynamic validator as Core.apply_type (#10587/#10554), at top level and inside function bodies, with positive controls keeping parametric-family literals (Vector/Union/NTuple/Val/user structs) static."
+
+[[tests]]
+name = "types_type_application_chained_literal_10643"
+file = "type_application_chained_literal_10643.jl"
+expected = true
+description = "Issue #10643: chained type application T{a}{b} on a user parametric type binds the trailing UnionAll binders with the outer group in every spelling — direct chained literal (Plain{Int64}{Float64}, Trio{Int64}{Float64,String}), a top-level type-valued binding (w = Plain{Int64}; w{Float64}, which registers an applied-target alias that used to expand statically and DROP the outer arguments), the same binding inside a function body, and Core.apply_type on the partial UnionAll (#10192); over-application errors like upstream and a fully-applied alias target raises TypeError."
+
+[[tests]]
+name = "types_type_application_lower_bound_param_10642"
+file = "type_application_lower_bound_param_10642.jl"
+expected = true
+description = "Issue #10642: literal T{S} on a user type parameter with a lower bound (S>:Int32) accepts exactly the S with Int32 <: S (the bound itself and proper supertypes Signed/Integer/Any) and raises TypeError for non-supertypes (Int64, Int16, Union{}), matching upstream jl_apply_type bound-direction validation, at top level and inside a function body, with Core.apply_type agreeing (#10554)."
+
+[[tests]]
+name = "types_param_annotation_undefvarerror_10582"
+file = "param_annotation_undefvarerror_10582.jl"
+expected = true
+description = "a parameter type annotation naming an undefined identifier raises UndefVarError when the method definition executes (short/long form, optional, vararg, non-first param), matching upstream's eager signature evaluation; guards builtin/abstract/parametric/alias/where-binder/dead-branch annotations (Issue #10582, sibling of #10226/#10396)"
+
+[[tests]]
+name = "types_where_binder_signature_builtin_shadow_10942"
+file = "where_binder_signature_builtin_shadow_10942.jl"
+expected = true
+description = "Issue #10942: a builtin-spelled where binder shadows the builtin type name inside SIGNATURE annotations, so `f(::Type{Float64}) where Float64` lowers to `Type{TypeVar}` and dispatch binds the binder to the actual type argument (`f(Vector) == Vector{Int64}`). Covers Type{...}, nested Type{Vector{...}}, bounded binders, Vector/Tuple/Union annotation positions, the name-based alias negative (`Type{Int}` under `where Int64` stays builtin), and unshadowed controls. Verified at parity with julia 1.12."
+
+[[tests]]
+name = "types_lambda_context_routing_surfaces_10936"
+file = "lambda_context_routing_surfaces_10936.jl"
+expected = true
+description = "Issue #10936: LambdaContext routing is exhaustive across function-definition entry surfaces. A builtin-spelled where binder in a body parametric type stays lexical for short form, full form, begin-block and let-local definitions, a Base operator extension, and @eval-generated short/full definitions. Verified at parity with julia 1.12."
+
+[[tests]]
+name = "types_type_alias_signature_source_order_11086"
+file = "type_alias_signature_source_order_11086.jl"
+expected = true
+description = "Issue #11086: type aliases used in method signatures obey Julia source order while retaining canonical dispatch identity. A later alias at top level or inside a module raises UndefVarError for an earlier definition; earlier, module-local same-leaf, Main, qualified, uniquely imported, and nested aliases still dispatch through their canonical targets."
+
+[[tests]]
+name = "types_const_type_alias_annotation_11104"
+file = "const_type_alias_annotation_11104.jl"
+expected = true
+description = "Issues #11104/#11029: a const type alias used as a PARAMETER ANNOTATION dispatches after expansion, owner qualification, and abstract reclassification. The lowering pre-scan collects program-declared type names (struct / mutable struct / abstract type / primitive type, including inside modules) and iterates alias chains to a fixpoint. Covers aliases of struct / abstract / mutable / builtin / parametric-applied types, both parametric-alias spellings, where-bounds, keyword annotations, alias-of-alias, module-local ordinary and explicit parametric inner-constructor signatures, and value/constructor controls."
+
+[[tests]]
+name = "types_type_alias_chain_depth_11099"
+file = "type_alias_chain_depth_11099.jl"
+expected = true
+description = "Issue #11099: a type alias whose RHS is another bare type alias (`const B = A`) dispatches through the canonical target regardless of chain depth. Pins 2- and 3-link chains for a builtin target, a user-declared struct target, and a parametric (Vector{Int64}) target, plus value/constructor identity for every link. Regression coverage for the alias-classification + pre-scan fixpoint fix landed with Issue #11104."
+
+[[tests]]
+name = "types_const_type_alias_of_base_struct_annotation_11113"
+file = "const_type_alias_of_base_struct_annotation_11113.jl"
+expected = true
+cache_sensitive = true
+description = "Issue #11113 (sibling of #11104): a const alias of a BASE/STDLIB-declared type (Pair, Regex, UnitRange, VersionNumber) used as a parameter annotation dispatches, at top level and module-local. Lowering's alias gate cannot see Base's declared type names (Base is lowered in an isolated pass, or never lowered at all under the Base cache), so the compiler resolves any bare-identifier const binding still unregistered after lowering through struct_table (Pure-Julia structs) and the compiler-visible builtin-type registry (native VM types with no struct_table entry) — both populated in either cache mode. Covers a parametric use of the alias and re-checks the #11104 builtin/program-declared controls alongside it."
+
+[[tests]]
+name = "types_kwparam_type_annotation_11024"
+file = "kwparam_type_annotation_11024.jl"
+expected = true
+description = "Keyword-parameter type annotations survive lowering and are asserted against every supplied value like upstream (TypeError: in keyword argument x, expected Int64, got a value of type Float64), while an abstract annotation (x::Real) stays permissive; an annotated keyword with no default is REQUIRED and raises UndefKeywordError (Issues #11024, #11081)"
+
+[[tests]]
+name = "types_signature_forward_reference_11025"
+file = "signature_forward_reference_11025.jl"
+expected = true
+description = "A signature annotation naming a type defined LATER in the source is a forward reference and raises UndefVarError at the definition like upstream, while annotations naming earlier-defined, Base/precompiled, or module-local types stay valid. Probe ordering compares current-source definition positions only, with byte offsets for lifted hard-scope methods whose ordinal is zero (Issues #11025, #11117). The eval'd-typed-parameter forward-reference case (upstream raises UndefVarError from a runtime-eval'd method signature) is split into signature_forward_reference_eval_typed_param_gap_11025.jl, which sjulia does not yet implement (Issue #10354 Phase 1a / #11146)."
+
+[[tests]]
+name = "types_signature_forward_reference_eval_typed_param_gap_11025"
+file = "signature_forward_reference_eval_typed_param_gap_11025.jl"
+expected = true
+description = "Upstream Julia raises UndefVarError at eval-time for a runtime-eval'd method signature naming a not-yet-defined type, because it evaluates signature annotations EAGERLY when the definition executes. sjulia now mirrors that (probe_eval_signature_annotations, the runtime sibling of the compiled path's Instr::LoadAny probes): the gap this file was split out to track — eval's typed-parameter path raised VmError::NotImplemented, which per Issue #8664 had no Julia exception object at all, so typeof(caught) was a bare String — is CLOSED by Issue #11146 (#10813 Phase 2a). The @test_broken wrappers and skip_julia_test are therefore removed exactly as Issue #10354 predicted they would be, and the assertions are real @test_throws (type-checking since #10354). Both interpreters now agree; verified against julia 1.12.6 (Issues #11025, #10354, #11146)."
+
+[[tests]]
+name = "types_signature_definition_order_nested_11111"
+file = "signature_definition_order_nested_11111.jl"
+expected = true
+description = "A LOCAL/nested function definition (inside a @testset/if/for/... body) annotating a parameter with an already-defined Base abstract type (AbstractDict), Base parametric type (Rational), or earlier user struct must NOT probe-fail with UndefVarError: definition_order remains 0 (unstamped) for nested function defs and the #11025 comparison must treat that as \"unknown\", not \"defined at the very first ordinal\"; root abstract declarations gained explicit chronology in Issue #11654 (Issue #11111, regression from PR #11082)"
+
+[[tests]]
+name = "types_unionall_alpha_alias_runtime_typevar_11013"
+file = "unionall_alpha_alias_runtime_typevar_11013.jl"
+expected = true
+description = "Issue #11013 / #10460: a fully generic runtime-built UnionAll recognizes its canonical Vector alias by TypeVar identity rather than binder spelling. Ordinary and macro-hygiene-style `#` names agree with upstream for display, equality in both directions, and subtyping in both directions, while a lower-bounded runtime binder remains a proper subset instead of collapsing to the bare alias."
+
+[[tests]]
+name = "types_runtime_typevar_nested_type_identity_10861"
+file = "runtime_typevar_nested_type_identity_10861.jl"
+expected = true
+description = "Issue #10861 / #10460: nested parametric type literals retain free runtime TypeVar IDs instead of string-round-tripping them. Covers direct and Core.apply_type construction of Tuple{Vector{A}}, nested Tuple/Dict, Type{Vector{A}} singleton semantics, builtin/user trailing UnionAll wrappers, concrete and dependent bounds in literal/dynamic paths, and the original bounded two-binder reproducer; whole-type == and === agree with upstream when all parameters are identical."
+
+[[tests]]
+name = "types_base_const_type_aliases_10579"
+file = "base_const_type_aliases_10579.jl"
+expected = true
+description = "Qualified access to Base-internal const type aliases: Base.Bottom === Union{} (qualified-only, no bare-name leak per #10304/#10578), Base.BitSigned/BitUnsigned/BitInteger resolve from the prelude alias list — not the flat shared table, so user aliases stay unreachable as Base.X (Issue #10579)"
+
+[[tests]]
+name = "types_apply_type_union_alias_11003"
+file = "apply_type_union_alias_11003.jl"
+expected = true
+description = "Core.apply_type resolves const-Union-alias upper bounds when validating parametric type arguments (in-bounds Int/String accepted, BigInt through Integer, Float64 raises TypeError) — pins the Issue #11003 contract"
+
+[[tests]]
+name = "types_construct_parametric_type_invalid_param_typeerror_11555"
+file = "construct_parametric_type_invalid_param_typeerror_11555.jl"
+expected = true
+description = "Issue #11555: the literal/compile-time-known-base parametric construction path (Vector{expr}, Instr::ConstructParametricType) validates each parameter value like Core.apply_type's dynamic-base path does — an ErrorException instance, a String, or a non-isbits Number (BigInt/BigFloat, expected Int64) is not a Type/TypeVar/Symbol/isbits value, so it raises TypeError instead of silently degrading to Vector{Any}; the valid isbits case (Vector{7}, Issue #4644) keeps working, and other upstream-valid isbits parameters (Complex, Rational, nothing, missing, a Module, a bare Function, an @enum value, a ComposedFunction) keep NOT raising, guarding against a false-positive TypeError regression."
+
+[[tests]]
+name = "types_runtime_nominal_control_flow_11654"
+file = "runtime_nominal_control_flow_11654.jl"
+expected = true
+description = "Issue #11654: struct, abstract, primitive, and enum declarations nested in top-level if/for/while/try publish only when reached; matches upstream's special @enum-inside-for no-publication behavior."
+
+[[tests]]
+name = "types_runtime_nominal_control_flow_edges_11654"
+file = "runtime_nominal_control_flow_edges_11654.jl"
+expected = true
+description = "Issues #11654/#11684/#11686/#11687/#11688/#11698 edge coverage: false and zero-iteration paths stay unpublished; expression-position try commits reached definitions; invalid parents, missing field types, and invalid primitive widths fail catchably before publication; reached runtime types are visible to later signatures; repeated runtime struct/abstract/primitive sites reuse identity; compatible runtime/root declarations coalesce in either source order for all four nominal families while values created between sites keep identity; lexical module ownership covers all four families and qualified enum instances; runtime definitions coexist with later distinct root definitions; and runtime @enum member collisions retain the upstream published prefix. Mixed-error REPL recovery remains tracked by Issue #11683."
+
+[[tests]]
+name = "types_type_alias_sibling_module_no_bare_leak_11452"
+file = "type_alias_sibling_module_no_bare_leak_11452.jl"
+expected = true
+description = "Issue #11452: a module-local type alias whose leaf matches a builtin (baremodule AliasOwner; const BigInt = Int64) stays private to its lexical owner — a sibling module's bare BigInt annotation resolves through its own implicit using Base, so f(BigInt(1)) dispatches instead of MethodError; an exported alias imported with using keeps resolving bare (imported control), and the qualified spelling stays available."
+
+[[tests]]
+name = "types_unionall_trailing_elision_10505"
+file = "unionall_trailing_elision_10505.jl"
+expected = true
+description = "UnionAll show elides a trailing unbounded where binder that is exactly the last type parameter (upstream show_can_elide), keeping bounded binders; non-elidable same-name/bounded shapes keep their full rendering (Issues #10505/#10635)"

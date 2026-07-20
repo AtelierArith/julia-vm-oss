@@ -52,4 +52,12 @@ end
     @test overflow_msg_accessible() == "test overflow"
 end
 
-true
+# Final value gates the fixture harness (Issue #9326). The manifest-driven
+# harness only compares the VM's final returned value against `expected`; it does
+# NOT inspect @testset pass/fail. A trailing literal `true` would therefore mask
+# a regression (factorial(21) silently wrapping instead of raising OverflowError),
+# so return the conjunction of the checks instead.
+factorial_overflow_caught() &&
+    !factorial_small_no_error() &&
+    overflow_add_caught() &&
+    overflow_msg_accessible() == "test overflow"

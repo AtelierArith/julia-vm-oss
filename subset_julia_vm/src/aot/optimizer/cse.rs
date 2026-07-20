@@ -300,7 +300,11 @@ impl AotCSE {
 
                     expr_map.clear();
                 }
-                AotStmt::Expr(_) | AotStmt::Return(_) | AotStmt::Break | AotStmt::Continue => {
+                AotStmt::Expr(_)
+                | AotStmt::ValueCarrier(_)
+                | AotStmt::Return(_)
+                | AotStmt::Break
+                | AotStmt::Continue => {
                     // No variables modified, no CSE opportunity for standalone expr
                 }
             }
@@ -347,6 +351,7 @@ impl AotCSE {
                 AotStmt::Assign { .. }
                 | AotStmt::CompoundAssign { .. }
                 | AotStmt::Expr(_)
+                | AotStmt::ValueCarrier(_)
                 | AotStmt::Return(_)
                 | AotStmt::Break
                 | AotStmt::Continue => {}

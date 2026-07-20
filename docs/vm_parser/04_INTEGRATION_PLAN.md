@@ -106,7 +106,7 @@ impl CstWalker for PureRustWalker {
 ### Step 3: Lowering の更新
 
 ```rust
-// subset_julia_vm/src/lowering/mod.rs
+// subset_julia_vm_lowering/src/lowering/mod.rs
 
 use crate::parser::walker::{CstWalker, PureRustWalker};
 

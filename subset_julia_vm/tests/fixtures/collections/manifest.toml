@@ -293,3 +293,9 @@ name = "collections_dict_nonliteral_constructor_6531"
 file = "dict_nonliteral_constructor_6531.jl"
 expected = true
 description = "Dict constructors accept non-literal Pair values and iterable pairs (Issue #6531)"
+
+[[tests]]
+name = "collections_dict_set_ctor_kwargs_11177"
+file = "dict_set_ctor_kwargs_11177.jl"
+expected = true
+description = "Explicit parametric Dict{K,V}/Set{T} constructors (qualified, bare, and keyword-splat forms) reject unsupported keyword arguments with a catchable MethodError, evaluating each keyword expression exactly once (Issue #11177)"

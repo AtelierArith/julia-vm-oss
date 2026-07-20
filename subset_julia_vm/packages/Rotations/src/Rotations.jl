@@ -5,8 +5,11 @@ module Rotations
 # Pure-Julia, upstream-shaped MVP adapted to the sjulia subset.  Mirrors the
 # upstream `extern/Rotations.jl/src/` include layout, but hand-expands the
 # upstream `@eval`/`@generated`/`Base.@pure` constructs that exceed current
-# macro/lowering support and adapts to sjulia's 3-parameter `SMatrix{M,N,T}`
-# (no length parameter `L`).  Numeric output matches upstream Rotations 1.7.1
+# macro/lowering support and keeps `RotMatrix{N,T}` written against the
+# incompletely-parameterized `SMatrix{N,N,T}` (bundled StaticArrays' `SMatrix`
+# gained its upstream fourth length parameter `L` in Issue #11432; `RotMatrix`
+# still drops it the same way upstream's own `SMatrix{S1,S2,T}` spelling does).
+# Numeric output matches upstream Rotations 1.7.1
 # for the MVP fixtures.  Deferred surface (ForwardDiff derivatives, RecipesBase
 # plotting, Unitful, exhaustive Euler-order variants, eigen/decomposition
 # parity) is documented in docs/vm/ROTATIONS.md.

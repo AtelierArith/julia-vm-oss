@@ -23,3 +23,9 @@ name = "abstract_algebra_core_traits_7489_7490"
 file = "core_traits_7489_7490.jl"
 expected = true
 description = "Phase 3/4 seed gate: ZZ/QQ parent objects, core traits, exact integer/rational arithmetic, and AbstractAlgebra error display (Issues #7489/#7490)"
+
+[[tests]]
+name = "abstract_algebra_req_macro_export_9185"
+file = "req_macro_export_9185.jl"
+expected = true
+description = "@doc-defined @req is added to module.macros and exported via using AbstractAlgebra (bundled-package macro boundary, Issue #9185)"

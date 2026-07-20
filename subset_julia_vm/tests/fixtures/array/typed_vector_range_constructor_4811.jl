@@ -57,12 +57,13 @@ end
 end
 
 @testset "Vector{T}(::Array) regression — non-range arg (Issue #4811)" begin
-    # Confirms my typed-range intercept did not regress the
-    # non-range case (the no-op shallow copy is preserved).
+    # Confirms the typed-range intercept did not regress the
+    # non-range case. Upstream copies even when the eltype already matches.
     src = [10, 20, 30]
     v = Vector{Int64}(src)
     @test typeof(v) === Vector{Int64}
     @test v == [10, 20, 30]
+    @test !(v === src)
 end
 
 true

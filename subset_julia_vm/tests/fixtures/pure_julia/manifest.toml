@@ -211,6 +211,12 @@ expected = true
 description = "Base-qualified layout predicates route through method dispatch before Rust fallback (Issue #3911)"
 
 [[tests]]
+name = "pure_julia_base_isbitstype_dynamic_callsite_dispatch_first_10871"
+file = "base_isbitstype_dynamic_callsite_dispatch_first_10871.jl"
+expected = true
+description = "DispatchFirst isbitstype keeps its Rust builtin fallback reachable at a dynamic (unannotated-parameter) call site, not just static/typeof call sites (Issue #10871/#10786)"
+
+[[tests]]
 name = "pure_julia_base_objectid_dispatch_first_3911"
 file = "base_objectid_dispatch_first_3911.jl"
 expected = true

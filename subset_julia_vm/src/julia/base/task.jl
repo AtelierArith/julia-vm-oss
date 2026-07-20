@@ -18,6 +18,9 @@ const task_state_failed   = Int64(2)
 # Task Type
 # =============================================================================
 
+# Helper for the main task's no-op function (arrow functions not supported at module load)
+_main_task_noop() = nothing
+
 """
     Task
 
@@ -32,7 +35,11 @@ sequentially. The cooperative model has no true concurrency.
 - `result`: The return value or exception
 - `_isexception`: Whether result is an exception
 - `started`: Whether the task has been started
+- `queued`: Whether the task is waiting in the runnable queue
 - `storage`: Task-local storage (Dict or nothing)
+- `vm_id`: VM scheduler slot for this task
+- `waiters`: Tasks parked until this task exits
+- `error_monitored`: Whether a future failure should be reported to stderr
 
 # Examples
 ```julia
@@ -47,11 +54,29 @@ mutable struct Task
     result
     _isexception::Bool
     started::Bool
+    queued::Bool
     storage::Any
+    vm_id::Int64
+    waiters::Vector{Any}
+    error_monitored::Bool
 
     function Task(f::Function)
-        new(f, 0, nothing, false, false, nothing)
+        new(f, 0, nothing, false, false, false, nothing, -1, Any[], false)
     end
+end
+
+const __sjulia_current_task_cell__ = Any[nothing]
+
+function __sjulia_main_task()
+    current = __sjulia_current_task_cell__[1]
+    if current === nothing
+        main = Task(_main_task_noop)
+        main.started = true
+        main.vm_id = _task_register_main(main)
+        __sjulia_current_task_cell__[1] = main
+        return main
+    end
+    return current
 end
 
 # =============================================================================
@@ -109,10 +134,25 @@ function _close_bound_channels(t)
     return nothing
 end
 
+function __sjulia_finish_task(t::Task)
+    if t._isexception && t.error_monitored
+        println(stderr, "Unhandled Task ERROR: ", string(t.result))
+    end
+    _close_bound_channels(t)
+    waiters = t.waiters
+    t.waiters = Any[]
+    for waiter in waiters
+        _task_wake(waiter.vm_id)
+    end
+    return nothing
+end
+
 """
     schedule(t::Task)
 
-Execute a task immediately in SubsetJuliaVM's cooperative model.
+Mark a task runnable. The task body runs when the scheduler reaches a yield/wait
+point, matching Julia's observable schedule-before-run behavior on a single
+thread (Issue #8989).
 """
 function schedule(t::Task)
     if t.state !== 0
@@ -121,7 +161,21 @@ function schedule(t::Task)
     if t.started
         error("schedule: Task already started")
     end
+    if t.queued
+        error("schedule: Task not runnable")
+    end
 
+    __sjulia_main_task()  # register task 0 before the first child task
+    t.vm_id = _task_schedule(t, __sjulia_task_entry)
+    t.queued = true
+    return t
+end
+
+function __sjulia_task_entry(t::Task)
+    if t.state !== 0
+        return t
+    end
+    t.queued = false
     t.started = true
 
     try
@@ -133,9 +187,28 @@ function schedule(t::Task)
         t.state = 2  # failed
     end
 
-    _close_bound_channels(t)
+    __sjulia_finish_task(t)
 
     return t
+end
+
+# Compatibility entry used by older Base code: drive the VM scheduler rather
+# than calling the task body recursively/run-to-completion.
+function __sjulia_run_task(t::Task)
+    wait(t)
+    return t
+end
+
+function __sjulia_run_one_task()
+    _task_yield()
+    return true
+end
+
+function __sjulia_run_until_done(t::Task)
+    while !istaskdone(t)
+        wait(t)
+    end
+    return nothing
 end
 
 """
@@ -153,7 +226,8 @@ function schedule(t::Task, val; _error::Bool=false)
         t._isexception = true
         t.state = 2  # failed
         t.started = true
-        _close_bound_channels(t)
+        t.queued = false
+        __sjulia_finish_task(t)
     else
         schedule(t)
     end
@@ -171,8 +245,14 @@ end
 Block until task `t` is complete. Re-throws any failure as `TaskFailedException`.
 """
 function wait(t::Task)
-    if !istaskdone(t)
+    if !istaskdone(t) && t.vm_id < 0
         error("wait: Task not done - schedule the task first")
+    end
+
+    while !istaskdone(t)
+        waiter = current_task()
+        push!(t.waiters, waiter)
+        _task_park()
     end
 
     if istaskfailed(t)
@@ -220,19 +300,14 @@ end
 # Current Task
 # =============================================================================
 
-# Helper for the main task's no-op function (arrow functions not supported at module load)
-_main_task_noop() = nothing
-
 """
     current_task() -> Task
 
 Return the currently running Task.
-In SubsetJuliaVM's cooperative model this returns a new main task singleton each call.
 """
 function current_task()
-    main = Task(_main_task_noop)
-    main.started = true
-    return main
+    __sjulia_main_task()
+    return _task_current()
 end
 
 # =============================================================================
@@ -300,28 +375,37 @@ end
 """
     yield()
 
-No-op in SubsetJuliaVM's cooperative model.
+Suspend at this exact yield point, run the next runnable VM task, and resume
+this task later (Issue #10349).
 """
 function yield()
+    _task_yield()
     return nothing
 end
 
 """
     yield(t::Task)
 
-Schedule `t` and yield to it. In SubsetJuliaVM runs the task immediately.
+Schedule `t` and cooperatively wait for it.
 """
 function yield(t::Task)
-    schedule(t)
+    if !t.started && !t.queued && t.state === 0
+        schedule(t)
+    end
+    wait(t)
     return nothing
 end
 
 """
     yieldto(t::Task, val=nothing)
 
-Yield to task `t`. In SubsetJuliaVM this is a no-op.
+Yield to task `t` through the cooperative scheduler.
 """
 function yieldto(t::Task, val=nothing)
+    if !t.started && !t.queued && t.state === 0
+        schedule(t)
+    end
+    yield()
     return val
 end
 
@@ -333,12 +417,26 @@ end
     waitany(tasks; throw=true) -> (done_tasks, remaining_tasks)
 
 Return tasks partitioned into done and remaining.
-Since SubsetJuliaVM tasks execute immediately on scheduling, all scheduled
-tasks are already done when this is called.
+If none are done, cooperatively yield until at least one scheduled task exits.
 
 If `throw` is `true`, throws `CompositeException` when any done task failed.
 """
 function waitany(tasks; _throw::Bool=true)
+    while true
+        any_done = false
+        for t in tasks
+            if istaskdone(t)
+                any_done = true
+            elseif t.vm_id < 0
+                error("waitany: encountered an unscheduled task")
+            end
+        end
+        if any_done || isempty(tasks)
+            break
+        end
+        yield()
+    end
+
     done_tasks = Task[]
     remaining_tasks = Task[]
     exceptions = Any[]
@@ -365,11 +463,20 @@ end
     waitall(tasks; failfast=true, throw=true) -> (done_tasks, remaining_tasks)
 
 Wait for all given tasks to complete.
-Since SubsetJuliaVM tasks execute immediately, this inspects tasks after scheduling.
+Each incomplete task parks the caller until its completion wakeup.
 
 If `throw` is `true`, throws `CompositeException` on any failure.
 """
 function waitall(tasks; failfast::Bool=true, _throw::Bool=true)
+    for t in tasks
+        if !istaskdone(t)
+            wait(t)
+        end
+        if failfast && istaskfailed(t)
+            break
+        end
+    end
+
     done_tasks = Task[]
     remaining_tasks = Task[]
     exceptions = Any[]
@@ -405,6 +512,7 @@ end
 If task `t` has failed, print an error to stderr.
 """
 function errormonitor(t::Task)
+    t.error_monitored = true
     if istaskfailed(t)
         println(stderr, "Unhandled Task ERROR: ", string(t.result))
     end
@@ -414,28 +522,35 @@ end
 # =============================================================================
 # Condition (notify extension — Condition struct is defined in lock.jl)
 # =============================================================================
-# The Condition struct with `waiting::Int64` is defined in lock.jl.
-# Here we provide a no-op `wait(c::Condition)` override and an extended
-# `notify` that accepts optional value / keyword arguments.
-# Note: Condition in lock.jl does not have a task waitq, so notify is a no-op.
+# The Condition struct and its blocking `wait` method are defined in lock.jl.
+# This extended `notify` wakes one or all parked VM continuations.
 
 """
     wait(c::Condition; first::Bool=false)
 
-No-op in SubsetJuliaVM's cooperative model (true blocking requires coroutines).
+Park the current task until `notify` wakes it.
 """
 function wait(c::Condition; first::Bool=false)
-    return nothing
+    return _wait_condition(c)
 end
 
 """
     notify(c::Condition, val=nothing; all::Bool=true, error::Bool=false) -> Int
 
-No-op in SubsetJuliaVM (no tasks are truly waiting on a Condition).
-Returns 0.
+Wake one or all tasks waiting on `c` and return the number woken.
 """
 function notify(c::Condition, val=nothing; all::Bool=true, _error::Bool=false)
-    return 0
+    c.value = val
+    waiters = c.waitq
+    if isempty(waiters)
+        return 0
+    end
+    count = all ? length(waiters) : 1
+    for i in 1:count
+        _task_wake(waiters[i].vm_id)
+    end
+    c.waitq = waiters[count + 1:end]
+    return count
 end
 
 # =============================================================================

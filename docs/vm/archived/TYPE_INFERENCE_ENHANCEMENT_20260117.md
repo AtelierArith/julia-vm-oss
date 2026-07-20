@@ -94,11 +94,11 @@ end
 ```
 
 ### 参照
-- 型推論エンジン: `subset_julia_vm/src/compile/abstract_interp/engine.rs`
-- 型格子: `subset_julia_vm/src/compile/lattice/types.rs`
-- ループ解析: `subset_julia_vm/src/compile/abstract_interp/loop_analysis.rs`
-- 条件分岐: `subset_julia_vm/src/compile/abstract_interp/conditional.rs`
-- 転送関数: `subset_julia_vm/src/compile/tfuncs/`
+- 型推論エンジン: `subset_julia_vm_compile/src/compile/abstract_interp/engine.rs`
+- 型格子: `subset_julia_vm_compile/src/compile/lattice/types.rs`
+- ループ解析: `subset_julia_vm_compile/src/compile/abstract_interp/loop_analysis.rs`
+- 条件分岐: `subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs`
+- 転送関数: `subset_julia_vm_compile/src/compile/tfuncs/`
 
 ---
 
@@ -163,7 +163,7 @@ struct Conditional {
 **実装上の注意**: 設計仕様では Conditional 型を使用することを想定していますが、
 実際の実装では**環境分割（Environment Splitting）**アプローチを採用しています。
 これは機能的に等価であり、実装の簡潔性と保守性を優先した選択です。
-詳細は `subset_julia_vm/src/compile/abstract_interp/conditional.rs` を参照してください。
+詳細は `subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs` を参照してください。
 
 ### MustAlias
 

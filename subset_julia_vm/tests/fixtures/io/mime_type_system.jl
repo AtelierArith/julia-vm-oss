@@ -43,13 +43,13 @@ using Test
     # Test 9: 3-argument show with MIME type
     io = IOBuffer()
     show(io, MIME("text/plain"), 42)
-    result = take!(io)
+    result = String(take!(io))
     @test result == "42"
 
     # Test 10: 3-argument show with string
     io2 = IOBuffer()
     show(io2, MIME("text/plain"), "hello")
-    result2 = take!(io2)
+    result2 = String(take!(io2))
     @test result2 == "\"hello\""
 end
 

@@ -2,10 +2,7 @@ use subset_julia_vm_parser::parse;
 
 fn print_tree(node: &subset_julia_vm_parser::cst::CstNode, source: &str, indent: usize) {
     let prefix = " ".repeat(indent);
-    let text = node
-        .text
-        .as_deref()
-        .unwrap_or_else(|| source.get(node.span.start..node.span.end).unwrap_or(""));
+    let text = node.text_from_source(source);
     let text_short = if text.len() > 30 {
         format!("{}...", &text[..30])
     } else {

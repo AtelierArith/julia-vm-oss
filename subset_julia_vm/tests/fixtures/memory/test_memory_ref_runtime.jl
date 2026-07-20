@@ -1,7 +1,7 @@
 using Test
 
 @testset "MemoryRef runtime offset operations" begin
-    m = Memory{Int64}(4)
+    m = Memory{Int64}(undef, 4)
     m[1] = 10
     m[2] = 20
     m[3] = 30

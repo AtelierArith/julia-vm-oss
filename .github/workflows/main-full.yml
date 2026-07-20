@@ -1,0 +1,171 @@
+# main-full — full regression gate on every push to main (Issue #8633, parent #8613).
+#
+# This is the catch-net for bugs that only surface in the full test suite
+# in a single accumulated process — particularly dispatch-order / cache /
+# HashMap-seed-dependent regressions like the promote-fallback recursion
+# described in Issue #5966 (Complex type interop), which slip past any
+# targeted category run.
+#
+# Runs scripts/test_with_cache.sh in two phases: one prepare job builds sjulia,
+# pre-compiles Base, and builds embedded-cache test binaries; partition jobs
+# download that target artifact and run `cargo nextest run --partition`.
+#
+# Concurrency: one run at a time on main; new push supersedes old.
+
+name: main-full
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: main-full-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  # Run the full 1000-iteration stress version of long-session boundedness tests.
+  # Local iteration defaults to 100 iterations (see regression_scope_session_tests.rs).
+  SJULIA_LONG_SESSION_ITERATIONS: "1000"
+
+jobs:
+  prepare-nextest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # generous; test_with_cache.sh itself caps at 1800 s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Prepare nextest binaries (with embedded Base cache)
+        # scripts/test_with_cache.sh: build sjulia → precompile Base cache →
+        # cargo nextest run --release --no-run (with SJULIA_BASE_CACHE set).
+        # This eliminates per-process cold Base-compile overhead (~350 ms each)
+        # without requiring a persistent on-disk cache.
+        run: bash scripts/test_with_cache.sh --prepare-only --no-fail-fast
+
+      - name: Pack prepared target
+        run: tar -czf main-full-target.tar.gz target/release target/base_cache.bin
+
+      - name: Upload prepared target
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-full-target-${{ github.sha }}
+          path: main-full-target.tar.gz
+          if-no-files-found: error
+
+  full-nextest:
+    needs: prepare-nextest
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # generous; test_with_cache.sh itself caps at 1800 s
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Download prepared target
+        uses: actions/download-artifact@v4
+        with:
+          name: main-full-target-${{ github.sha }}
+
+      - name: Extract prepared target
+        run: tar -xzf main-full-target.tar.gz
+
+      - name: Run full nextest partition ${{ matrix.partition }}/4
+        env:
+          SJULIA_FIXTURE_JOURNAL: target/fixture-journal/main-full-partition-${{ matrix.partition }}.jsonl
+        run: |
+          mkdir -p target/fixture-journal
+          bash scripts/test_with_cache.sh --run-only \
+            --no-fail-fast --partition count:${{ matrix.partition }}/4
+
+      - name: Upload fixture journal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-full-fixture-journal-${{ matrix.partition }}-${{ github.sha }}
+          path: target/fixture-journal/*.jsonl
+          if-no-files-found: ignore
+
+  # Open a GitHub issue when the full suite fails so regressions are visible
+  # even if no one is watching the Actions log.
+  notify-on-failure:
+    needs: [prepare-nextest, full-nextest]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Create failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "main-full CI failure on ${{ github.sha }}" \
+            --label "bug" \
+            --body "$(cat <<EOF
+          The \`main-full\` workflow failed on commit ${{ github.sha }} pushed to \`main\`.
+
+          **Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          This is the full \`cargo nextest run --release\` suite — the catch-net for
+          dispatch-order / cache / HashMap-seed-dependent regressions (Issue #5966
+          type bugs) that slip past targeted category runs (Issue #8633, parent #8613).
+
+          **Action required**: investigate whether this is a genuine regression or
+          infrastructure flakiness. If flaky, label the issue \`flaky\` and track in
+          Issue #8634 (burn-in).
+          EOF
+          )"

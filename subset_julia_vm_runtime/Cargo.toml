@@ -2,6 +2,7 @@
 name = "subset_julia_vm_runtime"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Runtime library for SubsetJuliaVM AoT compiled code"
 license = "MIT OR Apache-2.0"
 

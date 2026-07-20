@@ -1,7 +1,8 @@
 [package]
 name = "subset_julia_vm_ffi"
-version = "0.9.0"
+version = "0.9.2"
 edition = "2021"
+rust-version.workspace = true
 license = "MIT OR Apache-2.0"
 description = "C ABI static/dynamic library for SubsetJuliaVM (iOS and native platforms)"
 
@@ -13,7 +14,12 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 subset_julia_vm = { path = "../subset_julia_vm" }
+subset_julia_vm_bytecode = { path = "../subset_julia_vm_bytecode" }
 serde_json = "1"
+
+[features]
+default = []
+ffi-panic-test = []
 
 [lints.clippy]
 unwrap_used = "allow"

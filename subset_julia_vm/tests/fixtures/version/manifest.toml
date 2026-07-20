@@ -10,4 +10,10 @@ description = "VersionNumber construction and VERSION constant"
 name = "version_comparison"
 file = "version_comparison.jl"
 expected = true
-description = "VersionNumber equality, comparison operators, string repr, default args (Issues #3123, #7529)"
+description = "VersionNumber equality, comparison operators, string/print repr, default args (Issues #3123, #7529, #9327)"
+
+[[tests]]
+name = "version_prerelease_show_9371_9372"
+file = "prerelease_show_9371_9372.jl"
+expected = true
+description = "VersionNumber stores prerelease identifiers for equality/order/string parity (Issue #9372) and show/repr render the upstream v\"...\" literal form while interpolation uses print form (Issue #9371)"

@@ -18,6 +18,11 @@ push!(checks, !(([0.2, 0.5, 0.8],) == ([0.2, 0.5, 0.9],)))
 push!(checks, ([1, 2], [3, 4]) == ([1, 2], [3, 4]))
 push!(checks, !(([1, 2], [3, 4]) == ([1, 2], [3, 5])))
 
+# --- Vector elements with different concrete element types (Issue #10631) -
+push!(checks, (Any[1, 2], Any[3, 4]) == ([1, 2], [3, 4]))
+push!(checks, !((Any[1, 2], Any[3, 4]) == ([1, 2], [3, 5])))
+push!(checks, ismissing((Any[missing],) == ([missing],)))
+
 # --- mixed Vector + primitive elements -----------------------------------
 push!(checks, ([1.0, 2.0], 3) == ([1.0, 2.0], 3))
 push!(checks, !(([1.0, 2.0], 3) == ([1.0, 2.0], 4)))

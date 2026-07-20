@@ -1,0 +1,879 @@
+# nightly-gates — AoT feature gate + WASM build/smoke, run nightly (Issue #8633, parent #8613).
+#
+# History: AoT codegen regressions in #6629 / #5658 slipped through because
+# the default feature set omits `--features aot` entirely — the AoT module is
+# never built or exercised. This workflow reuses scripts/test_aot.sh to gate
+# those paths on a schedule. WASM is a separate build/runtime target also absent
+# from the default gate.
+#
+# iOS simulator build: macOS runner at $0.08/min is 8× ubuntu-latest cost.
+# Weekly cadence (Sunday UTC 18:00) via platform-builds.yml keeps that cost low;
+# this workflow covers the Linux-runnable guards (AoT + WASM + upstream
+# julia/test sweep ratchet + full numeric matrix + docs/vm doctests +
+# docs/vm link/archive maintenance). A note about the iOS tradeoff is recorded
+# on Issue #8633.
+#
+# Concurrency: nightly runs do not cancel each other (the previous nightly
+# should drain before the next starts given the 120 min timeout).
+
+name: nightly-gates
+
+on:
+  schedule:
+    # 02:00 UTC every day — off-peak, after the East Asian business day closes.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # notify-on-failure creates issues
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. AoT gate (scripts/test_aot.sh)
+  #    Runs the full AoT nextest suite + Clippy (--features aot) + generated
+  #    Rust Clippy smoke test.  This is the direct translation of the
+  #    "run bash scripts/test_aot.sh periodically" convention from CLAUDE.md
+  #    into an enforced gate.
+  # ──────────────────────────────────────────────────────────────────────────
+  aot-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-aot-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-aot-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Run AoT gate (scripts/test_aot.sh)
+        # test_aot.sh: nextest --features aot + clippy --features aot +
+        # generated Rust Clippy smoke (juliars output).
+        run: bash scripts/test_aot.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. WASM build + source-execution smoke (Issues #8710/#8711, parent #8688)
+  # ──────────────────────────────────────────────────────────────────────────
+  wasm-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-wasm-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WASM package (web-release profile)
+        run: wasm-pack build --locked --target web --profile web-release
+        working-directory: subset_julia_vm_web
+
+      - name: Run WASM fixture smoke (Node semantic tier)
+        run: scripts/wasm_fixture_smoke.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Upstream julia/test sweep ratchet (Issue #8701, parent #8684)
+  #    Runs the initial upstream test-file set through upstream Julia and sjulia,
+  #    then fails if a new non-allowlisted failure appears, an allowlist entry is
+  #    stale, or sjulia testset coverage drops below the committed baseline.
+  # ──────────────────────────────────────────────────────────────────────────
+  upstream-test-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true   # julia/test corpus for #8684/#8701
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-upstream-test-sweep-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-upstream-test-sweep-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia release binary
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run upstream julia/test sweep ratchet
+        run: |
+          mkdir -p target/upstream-test-sweep
+          JULIA_TEST_ROOT=julia/test \
+            TIMEOUT_SECONDS=300 \
+            OUT_DIR=target/upstream-test-sweep \
+            scripts/upstream_test_sweep.sh > target/upstream-test-sweep/sweep.tsv
+          SWEEP_TSV=target/upstream-test-sweep/sweep.tsv \
+            bash scripts/check_upstream_test_sweep_allowlist.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Full numeric matrix parity ratchet (Issue #8698, parent #8683)
+  #    Regenerates the full boundary-inclusive upstream oracle, then compares
+  #    sjulia against exact-count allowlists/skiplists so new numeric tower
+  #    regressions or improvements cannot drift silently.
+  # ──────────────────────────────────────────────────────────────────────────
+  numeric-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-numeric-matrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-numeric-matrix-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia release binary
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run full numeric matrix parity ratchet
+        run: |
+          mkdir -p target/numeric-matrix-full
+          julia --startup-file=no scripts/gen_numeric_matrix_fixture.jl \
+            --profile full \
+            --out-tsv target/numeric-matrix-full/oracle.tsv \
+            --out-fixture target/numeric-matrix-full/unused.jl
+          ORACLE=target/numeric-matrix-full/oracle.tsv \
+            ALLOWLIST=docs/vm/NUMERIC_MATRIX_FULL_ALLOWLIST.tsv \
+            SKIPLIST=docs/vm/NUMERIC_MATRIX_FULL_SKIPLIST.tsv \
+            OUT_DIR=target/numeric-matrix-full \
+            TIMEOUT_SECONDS=900 \
+            bash scripts/check_numeric_matrix_reduced.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. docs/vm executable documentation doctests (Issue #8694)
+  #    Runs marked ```julia-doctest blocks against sjulia and upstream Julia so
+  #    behavior claims in design docs cannot drift silently.
+  # ──────────────────────────────────────────────────────────────────────────
+  docs-doctest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-docs-doctest-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-docs-doctest-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia release binary
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run docs/vm doctests
+        run: bash scripts/docs_doctest.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. docs/vm maintenance checks (Issue #9008)
+  #    Internal markdown links, external-host allowlist, and STATUS/DONE live
+  #    file line budgets.
+  # ──────────────────────────────────────────────────────────────────────────
+  docs-maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check docs/vm markdown links
+        run: python3 scripts/docs_vm_link_check.py
+
+      - name: Check STATUS/DONE archive budget
+        run: bash scripts/archive_status_done.sh --check
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 7. North Star metrics (docs/vm/NORTH_STAR.md, Issues #8680/#8681/#8682)
+  #    Collects the Linux-collectable metrics (NS-1 parity / NS-2 corpus /
+  #    NS-4 benchmark / NS-5 cold start / NS-7 debt) + transcribes NS-6 from the
+  #    latest main-full run, appends the dated record + TSV row to
+  #    benchmarks/results/north_star/, checks for trend regression (exit 3), and
+  #    pushes the record to main. NS-3 (iOS) is macOS-only → manual/monthly.
+  # ──────────────────────────────────────────────────────────────────────────
+  north-star:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write   # pushes the dated record to main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true   # julia/ corpus for NS-2
+          token: ${{ github.token }}
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-north-star-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-north-star-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Collect North Star metrics (+ trend-regression check)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NORTH_STAR_ENV: ci
+        # exit 3 = trend regression → step fails → notify-on-failure below.
+        run: bash scripts/north_star_report.sh --check-regression
+
+      - name: Push dated record to main
+        if: always()   # record even a regression run so the trend is captured
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add benchmarks/results/north_star/
+          if ! git diff --cached --quiet; then
+            git commit -m "north-star: nightly record $(date -u +%F)"
+            # rebase onto any concurrent main pushes, then push. Best-effort:
+            # if main has branch protection that rejects the push, warn rather
+            # than red the whole nightly — the regression signal already came
+            # from the collector step's exit code, not this push.
+            git pull --rebase origin main || true
+            git push origin HEAD:main \
+              || echo "::warning::north-star record push failed (branch protection?); record not persisted to main"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 7. Dispatch determinism seed-variation sweep (Issue #8659, parent #8641)
+  #    std HashMap seeds differ per process, so an iteration-order leak in
+  #    dispatch produces output that varies BETWEEN processes (#5966 class:
+  #    passes targeted tests, dies only in the full suite). Run every fixture
+  #    in N separate sjulia processes and fail if any output hash differs.
+  # ──────────────────────────────────────────────────────────────────────────
+  dispatch-seed-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-seed-sweep-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-seed-sweep-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia release binary
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Seed-variation sweep (all fixture categories, 2 processes each)
+        run: bash scripts/dispatch_seed_sweep.sh --all --runs 2
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 8. Cold/cached cache-transparency parity (Issue #8719, parent #8693)
+  #    Runs the same fixture-category selection with embedded Base cache and
+  #    with all sjulia caches disabled. A pass/fail difference means a cache is
+  #    hiding or introducing a compiler/lowering/runtime regression.
+  # ──────────────────────────────────────────────────────────────────────────
+  cold-cached-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-cold-cached-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-cold-cached-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Compare cached and cold fixture categories
+        run: |
+          bash scripts/check_cold_cached_nextest.sh \
+            --test fixture_tests dispatch:: where_tests:: type_inference:: --no-fail-fast
+
+      - name: Cache-sensitive fixture categories under both cache modes (Issue #10223)
+        run: bash scripts/check_cache_sensitive_fixture_lane.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 8b. Fixture upstream-parity sweep (Issue #10246; drift backlog #10237)
+  #     Runs the registered fixtures of the audited category set under both
+  #     sjulia and upstream julia (fixture_julia_parity.sh --red-green) and
+  #     ratchets known drift through docs/vm/FIXTURE_PARITY_SWEEP_ALLOWLIST.tsv
+  #     (two-sided: new divergence fails; stale allowlist entry fails).
+  #     Expanding the category set toward --all is tracked on Issue #10246.
+  # ──────────────────────────────────────────────────────────────────────────
+  fixture-parity-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-fixture-parity-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-fixture-parity-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia release binary
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run fixture upstream-parity sweep (audited categories)
+        run: |
+          bash scripts/check_fixture_parity_sweep.sh --jobs 4 \
+            ref strings macros types arithmetic dispatch closures scope io
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 9. Runtime error trace parity ratchet (Issue #8713, parent #8690)
+  #    Compares representative upstream Julia and sjulia runtime stack traces
+  #    for user-frame line-number parity, while tracking known format gaps.
+  # ──────────────────────────────────────────────────────────────────────────
+  error-trace-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-error-trace-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-error-trace-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia release binary
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run runtime error trace parity ratchet
+        run: scripts/error_trace_parity_ratchet.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 10. Differential fuzzing budget (Issue #8717, parent #8692)
+  #     Runs the deterministic numeric-expression generator/runner with a fixed
+  #     15-minute wall-clock fuzz budget. New non-known fingerprints generate
+  #     MWE + julia/sjulia output-table issues through the report helper.
+  # ──────────────────────────────────────────────────────────────────────────
+  differential-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Install Julia (PARITY_TARGET series — Issue #8667)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-differential-fuzz-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-differential-fuzz-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Build sjulia dev-fast binary
+        run: cargo build --locked --profile dev-fast -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run differential fuzzing budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p target/differential-fuzz
+          seed="$(date -u +%Y%m%d)"
+          SJULIA_BIN=target/dev-fast/sjulia \
+            python3 scripts/differential_fuzz_runner.py \
+              --seed "$seed" \
+              --count 100000 \
+              --budget-sec 900 \
+              --timeout-sec 5 \
+              --out-jsonl target/differential-fuzz/results.jsonl \
+              --work-dir target/differential-fuzz/work \
+            || true
+          python3 scripts/differential_fuzz_report_findings.py \
+            --jsonl target/differential-fuzz/results.jsonl \
+            --known docs/vm/DIFFERENTIAL_FUZZ_KNOWN_FINDINGS.tsv \
+            --out-md target/differential-fuzz/findings.md \
+            --repo "${{ github.repository }}" \
+            --create-issues
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 11. UB safety: miri VM smoke + FFI sanitizer harness (Issue #9004)
+  #     Panic containment (#8707) stops Rust unwinds at C ABI boundaries; this
+  #     job covers the orthogonal UB axis with miri and ASan/UBSan.
+  # ──────────────────────────────────────────────────────────────────────────
+  ub-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RUSTC_WRAPPER: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native sanitizer dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+
+      - name: Install nightly Rust with miri and rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri,rust-src
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-ub-safety-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-ub-safety-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Check unsafe inventory baseline
+        run: bash scripts/check_unsafe_inventory.sh
+
+      - name: Run miri VM smoke
+        run: timeout 1800 bash scripts/test_miri_vm.sh
+
+      - name: Run FFI ASan/UBSan harness
+        env:
+          CC: clang
+        run: timeout 1800 bash scripts/test_ffi_sanitizers.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 12. Nightly multi-bench performance gate (Issue #9003)
+  #     Expands the single-bench catastrophic guard (ci.yml benchmark-threshold
+  #     job) to 8 representative Criterion benchmarks covering dispatch,
+  #     broadcast, string, Int128, SSA pipeline, and register VM.
+  #     Threshold: actual ≤ baseline × 1.20 (20% regression gate, matching
+  #     NS-4 policy in docs/vm/NORTH_STAR.md).
+  #     BASELINE CALIBRATION: baseline_seconds in
+  #     benchmarks/baselines/multi_bench_nightly_thresholds.json are
+  #     provisional upper bounds until calibrated by the first nightly run.
+  #     After each run update the JSON with the mean point estimates and commit
+  #     in the same PR that introduces the intentional performance change.
+  # ──────────────────────────────────────────────────────────────────────────
+  perf-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write   # pushes the nightly TSV row to main
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and bench build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-perf-gate-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-perf-gate-
+            ${{ runner.os }}-cargo-benchmark-
+            ${{ runner.os }}-cargo-
+
+      - name: Run 8-bench nightly performance gate
+        run: bash scripts/run_perf_gate_benches.sh
+
+      - name: Check multi-bench thresholds (20% regression gate)
+        run: |
+          python3 benchmarks/scripts/check_criterion_thresholds.py \
+            benchmarks/baselines/multi_bench_nightly_thresholds.json target/criterion
+
+      - name: Append nightly TSV row (benchmarks/results/perf_gate.tsv)
+        if: always()   # record even a regression run so the trend is visible
+        run: |
+          python3 benchmarks/scripts/append_perf_gate_tsv.py \
+            benchmarks/baselines/multi_bench_nightly_thresholds.json \
+            target/criterion \
+            "$(date -u +%F)" \
+            "$(git rev-parse --short HEAD)"
+
+      - name: Push perf_gate.tsv to main
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add benchmarks/results/perf_gate.tsv
+          if ! git diff --cached --quiet; then
+            git commit -m "perf-gate: nightly record $(date -u +%F)"
+            git pull --rebase origin main || true
+            git push origin HEAD:main \
+              || echo "::warning::perf-gate TSV push failed (branch protection?); record not persisted to main"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 13. Supply chain: cargo-audit + cargo-deny + vendored fork drift (Issue #9000)
+  #
+  # Why nightly, not per-PR: RUSTSEC advisories are published independently of
+  # code changes. Tying the advisory gate to PR pushes creates intermittent red
+  # noise when a new advisory appears between PR opening and CI run. Nightly
+  # cadence matches other slow-changing gates (upstream-test-sweep, etc.).
+  # On failure, notify-on-failure creates a GitHub Issue as with other jobs.
+  # ──────────────────────────────────────────────────────────────────────────
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and advisory-db
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-db
+          key: ${{ runner.os }}-cargo-supply-chain-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-supply-chain-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Run cargo audit (RUSTSEC advisories)
+        # cargo audit fetches the advisory-db and scans Cargo.lock.
+        # Known acceptable advisories are documented in deny.toml [advisories]
+        # ignore list with WHY comments; see docs/vm/SUPPLY_CHAIN.md §1.
+        run: cargo audit
+
+      - name: Run cargo deny check (advisories + licenses + bans + sources)
+        # deny.toml at repo root; all allowlist entries are commented with WHY.
+        # See docs/vm/SUPPLY_CHAIN.md §1 for the allowlist decision log.
+        run: cargo deny check
+
+      - name: Check vendored fork drift (vendor/astro-float-num vs upstream)
+        # Queries crates.io for the latest astro-float-num release and compares
+        # to our pinned vendored version. Exits 1 if upstream has a newer release.
+        # See docs/vm/SUPPLY_CHAIN.md §3 for the re-patching procedure.
+        run: bash scripts/check_vendored_drift.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 14. Notification on nightly failure
+  # ──────────────────────────────────────────────────────────────────────────
+  notify-on-failure:
+    needs: [aot-gate, wasm-build, upstream-test-sweep, numeric-matrix, docs-doctest, docs-maintenance, north-star, dispatch-seed-sweep, cold-cached-parity, error-trace-parity, differential-fuzz, ub-safety, perf-gate, supply-chain]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Create failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          aot="${{ needs.aot-gate.result }}"
+          wasm="${{ needs.wasm-build.result }}"
+          upstream="${{ needs.upstream-test-sweep.result }}"
+          numeric="${{ needs.numeric-matrix.result }}"
+          docs="${{ needs.docs-doctest.result }}"
+          docs_maintenance="${{ needs.docs-maintenance.result }}"
+          ns="${{ needs.north-star.result }}"
+          seed="${{ needs.dispatch-seed-sweep.result }}"
+          cache="${{ needs.cold-cached-parity.result }}"
+          trace="${{ needs.error-trace-parity.result }}"
+          fuzz="${{ needs.differential-fuzz.result }}"
+          ub="${{ needs.ub-safety.result }}"
+          perf="${{ needs.perf-gate.result }}"
+          sc="${{ needs.supply-chain.result }}"
+          body="The \`nightly-gates\` workflow failed (Issue #8633).\n\n"
+          body+="**Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n"
+          body+="| Job | Result |\n|---|---|\n"
+          body+="| aot-gate | $aot |\n"
+          body+="| wasm-build | $wasm |\n"
+          body+="| upstream-test-sweep | $upstream |\n"
+          body+="| numeric-matrix | $numeric |\n"
+          body+="| docs-doctest | $docs |\n"
+          body+="| docs-maintenance | $docs_maintenance |\n"
+          body+="| north-star | $ns |\n"
+          body+="| dispatch-seed-sweep | $seed |\n"
+          body+="| cold-cached-parity | $cache |\n"
+          body+="| error-trace-parity | $trace |\n"
+          body+="| differential-fuzz | $fuzz |\n"
+          body+="| ub-safety | $ub |\n"
+          body+="| perf-gate | $perf |\n"
+          body+="| supply-chain | $sc |\n\n"
+          body+="upstream-test-sweep failure = upstream julia/test parity ratchet "
+          body+="regression (Issue #8701): see the sweep and allowlist check logs.\n"
+          body+="numeric-matrix failure = full numeric tower parity ratchet "
+          body+="changed (Issue #8698): inspect target/numeric-matrix-full/diff.tsv "
+          body+="and update/fix the linked allowlist issue.\n"
+          body+="docs-doctest failure = a docs/vm julia-doctest block no longer "
+          body+="matches sjulia/upstream output (Issue #8694): update the code or "
+          body+="correct the documented expected output.\n"
+          body+="docs-maintenance failure = a docs/vm markdown link/anchor broke, "
+          body+="an external host is not allowlisted, or STATUS.md/DONE.md exceeded "
+          body+="the archive budget (Issue #9008): run "
+          body+="\`python3 scripts/docs_vm_link_check.py\` and "
+          body+="\`bash scripts/archive_status_done.sh --check\` locally.\n"
+          body+="north-star failure = a North Star trend regression (Issue #8682): "
+          body+="see the collector step log for which metric moved the wrong way "
+          body+="(docs/vm/NORTH_STAR.md「後退の扱い」).\n"
+          body+="dispatch-seed-sweep failure = dispatch output depends on the "
+          body+="per-process HashMap seed (Issue #8641/#8659 policy): a fixture "
+          body+="printed different output across processes — an iteration-order "
+          body+="leak in dispatch (the #5966 class).\n"
+          body+="cold-cached-parity failure = cached and cold nextest selections "
+          body+="do not agree (Issue #8693/#8719): inspect whether embedded/"
+          body+="persistent Base/prelude caches are hiding or introducing a "
+          body+="compiler/lowering/runtime regression.\n"
+          body+="error-trace-parity failure = runtime stack trace user-frame "
+          body+="line-number parity drifted or the known format baseline changed "
+          body+="(Issue #8713): inspect scripts/error_trace_parity_ratchet.sh "
+          body+="output and tighten docs/vm/ERROR_TRACE_PARITY_BASELINE.tsv "
+          body+="only when the trace improved intentionally.\n"
+          body+="differential-fuzz failure = a new generated-program semantic "
+          body+="divergence was found and reported with a fingerprint/MWE "
+          body+="(Issue #8717): inspect target/differential-fuzz/findings.md "
+          body+="and add the fingerprint to docs/vm/DIFFERENTIAL_FUZZ_KNOWN_FINDINGS.tsv "
+          body+="after triage.\n"
+          body+="ub-safety failure = UB detection layer failed (Issue #9004): "
+          body+="inspect the unsafe inventory, miri VM smoke, or FFI ASan/UBSan "
+          body+="harness logs. This is orthogonal to the panic-free #8686/#8707 "
+          body+="axis.\n"
+          body+="perf-gate failure = one or more of the 8 nightly Criterion "
+          body+="benchmarks exceeded baseline × 1.20 (20% regression gate, Issue #9003): "
+          body+="inspect benchmarks/results/perf_gate.tsv for FAIL rows and the "
+          body+="perf-gate job log for which bench exceeded its threshold. "
+          body+="If the regression is intentional (planned optimization), update "
+          body+="benchmarks/baselines/multi_bench_nightly_thresholds.json baselines "
+          body+="in the same PR. If unintentional: bisect and fix. See "
+          body+="NORTH_STAR.md NS-4 for the +20% noise allowance rationale.\n"
+          body+="supply-chain failure = a new RUSTSEC advisory, license violation, "
+          body+="banned crate, unknown source, or vendor drift was detected "
+          body+="(Issue #9000): run \`cargo audit\`, \`cargo deny check\`, and "
+          body+="\`bash scripts/check_vendored_drift.sh\` locally. If the advisory "
+          body+="is not exploitable, add a time-bounded allowlist entry in deny.toml "
+          body+="with a WHY comment and update docs/vm/SUPPLY_CHAIN.md §1. "
+          body+="If vendor drift: review upstream changelog and re-patch if needed "
+          body+="(see docs/vm/SUPPLY_CHAIN.md §3).\n"
+          body+="If this is a genuine regression: investigate and fix.\n"
+          body+="If flaky: label this issue \`flaky\` and track in Issue #8634 (burn-in)."
+          printf '%b' "$body" | gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "nightly-gates failure $(date -u +%Y-%m-%d)" \
+            --label "bug" \
+            --body-file -

@@ -105,3 +105,27 @@ name = "static_arrays_fused_nested_broadcast_8176"
 file = "static_arrays_fused_nested_broadcast_8176.jl"
 expected = true
 description = "Issue #8176: an all-static fused nested broadcast (abs.(SVector .+ SVector), 2.0 .* (SVector .+ SVector), 3-level, SMatrix) returned an out-of-bounds crash instead of the element-wise static result. sjulia fuses .-chains into nested Broadcasted; the inner all-static node has empty axes () (bare static arrays look 0-dimensional), and _broadcastable_shape(::Broadcasted) crashed indexing the empty ax[1] inside instantiate — before copy's static hook ran. The n==0 case now returns the scalar shape (), so copy's hook (Issue #8161 tree classification) fires and produces the static SVector/SMatrix result. Mixed static/dynamic fused-nested broadcasts still return a dynamic Array (Issue #8161 regression). Parity-clean with upstream julia."
+
+[[tests]]
+name = "static_arrays_svector_mutable_temp_8507"
+file = "svector_mutable_temp_8507.jl"
+expected = true
+description = "StaticArrays: similar(SVector{N,T}) mutable scratch vectors, vector-index broadcast assignment, and SVector construction from a vector, covering the HCubature Genz-Malik temporary-buffer slice (Issue #8507)"
+
+[[tests]]
+name = "static_arrays_svector_zero_partial_dispatch_9785"
+file = "static_arrays_svector_zero_partial_dispatch_9785.jl"
+expected = true
+description = "Issue #9785: runtime dispatch must treat SVector{0} as a partial parametric UnionAll, so an SVector{0,Float64} value matches both single-argument and HCubature-style multi-argument methods annotated with SVector{0}"
+
+[[tests]]
+name = "static_arrays_core_smatrix_four_param_11542"
+file = "static_arrays_core_smatrix_four_param_11542.jl"
+expected = true
+description = "Issue #11542: the separate, independent bundled StaticArraysCore package's own SMatrix struct now declares the upstream canonical fourth length parameter (SMatrix{M,N,T,L}, L == M*N, mirroring the #11432 fix applied to bundled StaticArrays), so a struct field annotated SMatrix{2,2,Float64,4} no longer raises 'too many parameters for type StaticArraysCore.SMatrix' under `using StaticArraysCore` directly. Covers full/partial parameterization construction and isa checks, dispatch on the narrower SMatrix{N,N,T} form, and a mismatched-length constructor call still erroring. Parity-clean against upstream julia + installed StaticArraysCore (which lacks vararg/2-param SMatrix constructors and the AbstractArray interface, so only Tuple-arg constructors/isa/typeof/dispatch are exercised)."
+
+[[tests]]
+name = "static_arrays_smatrix_four_param_11432"
+file = "static_arrays_smatrix_four_param_11432.jl"
+expected = true
+description = "Issue #11432: bundled SMatrix now declares the upstream canonical fourth length parameter (SMatrix{M,N,T,L}, L == M*N), so a struct field annotated SMatrix{2,2,Float64,4} (the synced IFS fractals sample) no longer raises 'too many parameters for type StaticArrays.SMatrix'. Covers full/partial parameterization construction and isa checks, dispatch on the narrower SMatrix{N,N,T} form, matvec fast-path result typing, and a mismatched-length constructor call still erroring."

@@ -340,11 +340,14 @@ _new_plot(x, y, seriestype::Symbol, aspect_ratio, title) = _new_plot(x, y, serie
 _new_plot(x, y, seriestype::Symbol, aspect_ratio) = _new_plot(x, y, seriestype, aspect_ratio, "", nothing)
 _new_plot(x, y, seriestype::Symbol) = _new_plot(x, y, seriestype, :auto, "", nothing)
 
-function _new_plot_3d(x, y, z, seriestype::Symbol, aspect_ratio, title, label)
-    s = Series(_plots_copy_data(x), _plots_copy_data(y), _plots_copy_data(z), label, seriestype)
+function _new_plot_3d(x, y, z, seriestype::Symbol, aspect_ratio, title, label, levels)
+    s = Series(_plots_copy_data(x), _plots_copy_data(y), _plots_copy_data(z), label, seriestype, levels)
     series = [s]
     _plots_set_current!(series, aspect_ratio, title, nothing, nothing, Float64[], Float64[])
     return Plot(series, :text, aspect_ratio, title)
+end
+function _new_plot_3d(x, y, z, seriestype::Symbol, aspect_ratio, title, label)
+    return _new_plot_3d(x, y, z, seriestype, aspect_ratio, title, label, nothing)
 end
 _new_plot_3d(x, y, z, seriestype::Symbol, aspect_ratio, title) = _new_plot_3d(x, y, z, seriestype, aspect_ratio, title, nothing)
 _new_plot_3d(x, y, z, seriestype::Symbol, aspect_ratio) = _new_plot_3d(x, y, z, seriestype, aspect_ratio, "", nothing)
@@ -374,13 +377,13 @@ _append_to_current(x, y, seriestype::Symbol, aspect_ratio, title) = _append_to_c
 _append_to_current(x, y, seriestype::Symbol, aspect_ratio) = _append_to_current(x, y, seriestype, aspect_ratio, "", nothing)
 _append_to_current(x, y, seriestype::Symbol) = _append_to_current(x, y, seriestype, nothing, "", nothing)
 
-function _append_to_current_3d(x, y, z, seriestype::Symbol, aspect_ratio, title, label)
+function _append_to_current_3d(x, y, z, seriestype::Symbol, aspect_ratio, title, label, levels)
     if length(_CURRENT_SERIES) == 0
         ar = aspect_ratio === nothing ? :auto : aspect_ratio
-        return _new_plot_3d(x, y, z, seriestype, ar, title, label)
+        return _new_plot_3d(x, y, z, seriestype, ar, title, label, levels)
     end
     current_series = _CURRENT_SERIES[1]
-    s = Series(x, y, z, label, seriestype)
+    s = Series(x, y, z, label, seriestype, levels)
     push!(current_series, s)
     ar = aspect_ratio === nothing ? _plots_current_aspect_ratio() : aspect_ratio
     t = isempty(title) ? _plots_current_title() : title
@@ -390,6 +393,9 @@ function _append_to_current_3d(x, y, z, seriestype::Symbol, aspect_ratio, title,
     vl = _plots_current_vlines()
     _plots_set_current!(current_series, ar, t, xl, yl, hl, vl)
     return Plot(current_series, :text, ar, t, xl, yl, hl, vl)
+end
+function _append_to_current_3d(x, y, z, seriestype::Symbol, aspect_ratio, title, label)
+    return _append_to_current_3d(x, y, z, seriestype, aspect_ratio, title, label, nothing)
 end
 _append_to_current_3d(x, y, z, seriestype::Symbol, aspect_ratio, title) = _append_to_current_3d(x, y, z, seriestype, aspect_ratio, title, nothing)
 _append_to_current_3d(x, y, z, seriestype::Symbol, aspect_ratio) = _append_to_current_3d(x, y, z, seriestype, aspect_ratio, "", nothing)
@@ -924,9 +930,12 @@ function surface(x, y, z; aspect_ratio=:auto, aspectratio=nothing, axis_ratio=no
     return _new_plot_3d(x, y, z, :surface, ar, title, label)
 end
 
-# heatmap -- Plots.jl-compatible rectangular z-array rendering. `heatmap(z)`
-# uses column and row indices as x/y coordinates; `heatmap(x, y, z)` preserves
-# explicit axes. The z orientation matches surface: row=y, col=x.
+# heatmap / contour -- Plots.jl-compatible rectangular z-array rendering.
+# `heatmap(z)` / `contour(z)` use column and row indices as x/y coordinates;
+# `(x, y, z)` preserves explicit axes. The z orientation matches surface:
+# row=y, col=x. Contour is the upstream shorthand shape
+# `plot(args...; seriestype=:contour)`, with a small `levels` subset forwarded to
+# Plotly's contour trace.
 function heatmap(z; aspect_ratio=:auto, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing)
     xs = collect(1:size(z, 2))
     ys = collect(1:size(z, 1))
@@ -936,6 +945,38 @@ end
 function heatmap(x, y, z; aspect_ratio=:auto, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing)
     ar = _plots_aspect_ratio_kw(aspect_ratio, aspectratio, axis_ratio, axisratio, ratio)
     return _new_plot_3d(x, y, z, :heatmap, ar, title, label)
+end
+
+function _plots_check_contour_levels(levels)
+    if levels === nothing
+        return levels
+    elseif isa(levels, Integer)
+        if levels <= 0
+            throw(ArgumentError("must pass a positive number of contours to the levels keyword argument"))
+        end
+        return levels
+    elseif isa(levels, AbstractVector)
+        if length(levels) < 2
+            throw(ArgumentError("must pass at least two contour levels"))
+        end
+        return levels
+    end
+    throw(ArgumentError("levels must be an Integer or AbstractVector for contour plots"))
+end
+
+function contour(z; aspect_ratio=:auto, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing, levels=nothing, kwargs...)
+    xs = collect(1:size(z, 2))
+    ys = collect(1:size(z, 1))
+    return contour(xs, ys, z; aspect_ratio=aspect_ratio, aspectratio=aspectratio, axis_ratio=axis_ratio, axisratio=axisratio, ratio=ratio, title=title, label=label, levels=levels)
+end
+
+function contour(x, y, zf::Function; aspect_ratio=:auto, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing, levels=nothing, kwargs...)
+    return contour(x, y, _plots_surface_z_from_function(x, y, zf); aspect_ratio=aspect_ratio, aspectratio=aspectratio, axis_ratio=axis_ratio, axisratio=axisratio, ratio=ratio, title=title, label=label, levels=levels)
+end
+
+function contour(x, y, z; aspect_ratio=:auto, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing, levels=nothing, kwargs...)
+    ar = _plots_aspect_ratio_kw(aspect_ratio, aspectratio, axis_ratio, axisratio, ratio)
+    return _new_plot_3d(x, y, z, :contour, ar, title, label, _plots_check_contour_levels(levels))
 end
 
 function plot!(x, y, z; aspect_ratio=nothing, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing)
@@ -957,6 +998,21 @@ end
 function heatmap!(x, y, z; aspect_ratio=nothing, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing)
     ar = _plots_append_aspect_ratio(aspect_ratio, aspectratio, axis_ratio, axisratio, ratio)
     return _append_to_current_3d(x, y, z, :heatmap, ar, title, label)
+end
+
+function contour!(z; aspect_ratio=nothing, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing, levels=nothing, kwargs...)
+    xs = collect(1:size(z, 2))
+    ys = collect(1:size(z, 1))
+    return contour!(xs, ys, z; aspect_ratio=aspect_ratio, aspectratio=aspectratio, axis_ratio=axis_ratio, axisratio=axisratio, ratio=ratio, title=title, label=label, levels=levels)
+end
+
+function contour!(x, y, zf::Function; aspect_ratio=nothing, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing, levels=nothing, kwargs...)
+    return contour!(x, y, _plots_surface_z_from_function(x, y, zf); aspect_ratio=aspect_ratio, aspectratio=aspectratio, axis_ratio=axis_ratio, axisratio=axisratio, ratio=ratio, title=title, label=label, levels=levels)
+end
+
+function contour!(x, y, z; aspect_ratio=nothing, aspectratio=nothing, axis_ratio=nothing, axisratio=nothing, ratio=nothing, title="", label=nothing, levels=nothing, kwargs...)
+    ar = _plots_append_aspect_ratio(aspect_ratio, aspectratio, axis_ratio, axisratio, ratio)
+    return _append_to_current_3d(x, y, z, :contour, ar, title, label, _plots_check_contour_levels(levels))
 end
 
 # --- Animation (Issue #6355) ---
@@ -1010,8 +1066,19 @@ end
 # Upstream Plots extends the current figure in place, so `current()` reflects each
 # `push!`; re-syncing here restores that invariant for the sjulia holder model.
 function _plots_resync_current!(plt::Plot)
-    _plots_set_current!(plt.series, plt.aspect_ratio, plt.title,
-                        plt.xlims, plt.ylims, plt.hlines, plt.vlines)
+    # `push!(plt, …)` calls this on *every* push so that `current()` (and thus
+    # `@animate`/`@gif`) keeps reflecting the mutated figure (Issue #8214). sjulia
+    # stores the series vector into `_CURRENT_SERIES[1]` **by reference**, so once
+    # `plt` is the current figure `_CURRENT_SERIES[1] === plt.series` and in-place
+    # extends are already visible through `current()`. Re-publishing all 7 holders
+    # on every push is then O(pushes×7) redundant global writes and the dominant
+    # cost of push!-based animations — ~38× the actual data update (Issue #9203).
+    # Only (re)publish when `plt` is not already current; the Issue #8214 invariant
+    # (pushed plot becomes/stays current) is preserved in both branches.
+    if length(_CURRENT_SERIES) == 0 || !(_CURRENT_SERIES[1] === plt.series)
+        _plots_set_current!(plt.series, plt.aspect_ratio, plt.title,
+                            plt.xlims, plt.ylims, plt.hlines, plt.vlines)
+    end
     return plt
 end
 
@@ -1038,7 +1105,7 @@ function _plots_extend_xyz!(plt::Plot, i::Integer, x, y, z)
     push!(s.y, y)
     if s.z === nothing
         newz = Float64[z]
-        plt.series[i] = Series(s.x, s.y, newz, s.label, s.seriestype)
+        plt.series[i] = Series(s.x, s.y, newz, s.label, s.seriestype, s.levels)
     else
         push!(s.z, z)
     end
@@ -1077,9 +1144,17 @@ function Base.push!(plt::Plot, x::Number, y::Number, z::Number)
     return _plots_extend_xyz!(plt, 1, x, y, z)
 end
 
+function _plots_copy_levels(levels)
+    if levels === nothing || isa(levels, Number)
+        return levels
+    end
+    return _plots_copy_data(levels)
+end
+
 function _plots_copy_series(s)
     z = s.z === nothing ? nothing : _plots_copy_data(s.z)
-    return Series(_plots_copy_data(s.x), _plots_copy_data(s.y), z, s.label, s.seriestype)
+    return Series(_plots_copy_data(s.x), _plots_copy_data(s.y), z, s.label, s.seriestype,
+                  _plots_copy_levels(s.levels))
 end
 
 function _plots_copy_series_list(series)
@@ -1159,16 +1234,28 @@ end
 # trailing `every N` / `when cond` modifier samples a subset (Issue #7272). The
 # block's value is the `Animation`.
 macro animate(forloop, args...)
+    # Workaround: hold the frame counter in a `Ref` so the loop mutates storage. (Issue #9476)
+    # contents (`_anim_counter[] = …`, a `setindex!` — not a rebinding of the
+    # `_anim_counter` name) rather than reassigning a plain top-level counter.
+    # Under strict file-mode soft scope (Issue #9210), a plain counter assigned
+    # before the loop and `+=`-ed inside it is soft-scope-localized to a fresh
+    # loop-local, so its read-before-write raises `UndefVarError` — this broke
+    # the animation samples once the C ABI / WASM hosts went strict (Issue #9283).
+    # Upstream Plots sidesteps it with macro hygiene (a `gensym` local counter);
+    # the natural sjulia analogue would emit `global _anim_counter` or wrap the
+    # counter in a `let`, but sjulia's macro runtime rejects both in expansion
+    # output (Issue #9476). The `Ref` mutation is the upstream-valid shape the
+    # runtime accepts. See docs/vm/WORKAROUNDS.md (Issue #9476 / #9283).
     should = length(args) >= 2 ?
         (args[1] === :every ?
-            Expr(:call, Symbol("=="), Expr(:call, :mod1, :_anim_counter, args[2]), 1) :
+            Expr(:call, Symbol("=="), Expr(:call, :mod1, :(_anim_counter[]), args[2]), 1) :
             args[2]) :
         true
-    newbody = Expr(:block, forloop.args[2], Expr(:call, :frame, :_anim, should), :(_anim_counter += 1))
+    newbody = Expr(:block, forloop.args[2], Expr(:call, :frame, :_anim, should), :(_anim_counter[] = _anim_counter[] + 1))
     newloop = Expr(forloop.head, forloop.args[1], newbody)
     quote
         local _anim = Animation()
-        local _anim_counter = 1
+        local _anim_counter = Ref(1)
         $(esc(newloop))
         _anim
     end
@@ -1396,16 +1483,20 @@ end
 # `@gif for … end` is `@animate` followed by an immediate `gif(…)`; it accepts the
 # same trailing `every N` / `when cond` modifier (Issue #7272).
 macro gif(forloop, args...)
+    # Workaround: `Ref` frame counter — see the `@animate` macro above. (Issue #9476)
+    # full rationale (strict file-mode soft scope localizes a plain top-level
+    # counter; sjulia's macro runtime rejects `global`/`let` in expansion output).
+    # Issue #9476 / #9283, docs/vm/WORKAROUNDS.md.
     should = length(args) >= 2 ?
         (args[1] === :every ?
-            Expr(:call, Symbol("=="), Expr(:call, :mod1, :_anim_counter, args[2]), 1) :
+            Expr(:call, Symbol("=="), Expr(:call, :mod1, :(_anim_counter[]), args[2]), 1) :
             args[2]) :
         true
-    newbody = Expr(:block, forloop.args[2], Expr(:call, :frame, :_anim, should), :(_anim_counter += 1))
+    newbody = Expr(:block, forloop.args[2], Expr(:call, :frame, :_anim, should), :(_anim_counter[] = _anim_counter[] + 1))
     newloop = Expr(forloop.head, forloop.args[1], newbody)
     quote
         local _anim = Animation()
-        local _anim_counter = 1
+        local _anim_counter = Ref(1)
         $(esc(newloop))
         gif(_anim)
     end

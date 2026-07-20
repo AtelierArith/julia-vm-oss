@@ -1,0 +1,10 @@
+{
+  "benchmarks": [
+    {
+      "criterion_id": "vm_calc_pi/run_only/100",
+      "baseline_seconds": 10.0,
+      "max_regression_ratio": 1.0,
+      "description": "Catastrophic-regression guard for calc_pi(100) Vm::run()"
+    }
+  ]
+}

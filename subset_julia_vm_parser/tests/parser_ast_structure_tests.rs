@@ -34,11 +34,16 @@ fn parse_stmt(source: &str) -> CstNode {
         .expect("no statement parsed")
 }
 
-/// Debug helper: prints actual node structure on failure
+/// Debug helper: prints actual node structure on failure.
+///
+/// Kind/child-shape only (no leaf text) — `CstNode` no longer stores an
+/// owned `text` copy, and this helper's ~21 call sites throughout the file
+/// don't otherwise need the original source string threaded in just for a
+/// diagnostic dump (Issue #10126).
 fn debug_structure(node: &CstNode) -> String {
     fn inner(node: &CstNode, indent: usize) -> String {
         let prefix = "  ".repeat(indent);
-        let mut result = format!("{}[{}] {:?} = {:?}\n", prefix, indent, node.kind, node.text);
+        let mut result = format!("{}[{}] {:?}\n", prefix, indent, node.kind);
         for (i, child) in node.children.iter().enumerate() {
             result.push_str(&format!("{}  Child {}:\n", prefix, i));
             result.push_str(&inner(child, indent + 2));
@@ -87,14 +92,15 @@ fn assert_structure(node: &CstNode, expected_kind: NodeKind, expected_children: 
 #[test]
 fn test_structure_call_expression_with_args() {
     // CallExpression: [callee, ArgumentList] - always 2 children
-    let node = parse_expr("foo(1, 2)");
+    let source = "foo(1, 2)";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::CallExpression,
         &[NodeKind::Identifier, NodeKind::ArgumentList],
     );
     // Verify callee name
-    assert_eq!(node.children[0].text.as_deref(), Some("foo"));
+    assert_eq!(Some(node.children[0].text_from_source(source)), Some("foo"));
     // Verify argument count
     assert_eq!(node.children[1].children.len(), 2);
 }
@@ -102,7 +108,8 @@ fn test_structure_call_expression_with_args() {
 #[test]
 fn test_structure_call_expression_empty() {
     // IMPORTANT: Empty calls still have ArgumentList child
-    let node = parse_expr("bar()");
+    let source = "bar()";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::CallExpression,
@@ -115,7 +122,8 @@ fn test_structure_call_expression_empty() {
 #[test]
 fn test_structure_call_expression_chained() {
     // Method call on field: obj.method(x)
-    let node = parse_expr("obj.method(x)");
+    let source = "obj.method(x)";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::CallExpression);
     assert_eq!(node.children.len(), 2);
     assert_eq!(node.children[0].kind, NodeKind::FieldExpression);
@@ -127,7 +135,8 @@ fn test_structure_call_expression_chained() {
 
 #[test]
 fn test_structure_binary_expression_simple() {
-    let node = parse_expr("1 + 2");
+    let source = "1 + 2";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::BinaryExpression,
@@ -138,25 +147,27 @@ fn test_structure_binary_expression_simple() {
         ],
     );
     // Verify operator
-    assert_eq!(node.children[1].text.as_deref(), Some("+"));
+    assert_eq!(Some(node.children[1].text_from_source(source)), Some("+"));
 }
 
 #[test]
 fn test_structure_binary_expression_nested() {
     // a * b + c -> BinaryExpression[BinaryExpression[a, *, b], +, c]
-    let node = parse_expr("a * b + c");
+    let source = "a * b + c";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::BinaryExpression);
     assert_eq!(node.children.len(), 3);
     // Left child is nested BinaryExpression (due to precedence)
     assert_eq!(node.children[0].kind, NodeKind::BinaryExpression);
     assert_eq!(node.children[1].kind, NodeKind::Operator);
-    assert_eq!(node.children[1].text.as_deref(), Some("+"));
+    assert_eq!(Some(node.children[1].text_from_source(source)), Some("+"));
     assert_eq!(node.children[2].kind, NodeKind::Identifier);
 }
 
 #[test]
 fn test_structure_binary_expression_comparison() {
-    let node = parse_expr("x < y");
+    let source = "x < y";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::BinaryExpression,
@@ -166,7 +177,7 @@ fn test_structure_binary_expression_comparison() {
             NodeKind::Identifier,
         ],
     );
-    assert_eq!(node.children[1].text.as_deref(), Some("<"));
+    assert_eq!(Some(node.children[1].text_from_source(source)), Some("<"));
 }
 
 // ==================== UnaryExpression Structure Tests ====================
@@ -174,24 +185,26 @@ fn test_structure_binary_expression_comparison() {
 
 #[test]
 fn test_structure_unary_expression_minus() {
-    let node = parse_expr("-x");
+    let source = "-x";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::UnaryExpression,
         &[NodeKind::Operator, NodeKind::Identifier],
     );
-    assert_eq!(node.children[0].text.as_deref(), Some("-"));
+    assert_eq!(Some(node.children[0].text_from_source(source)), Some("-"));
 }
 
 #[test]
 fn test_structure_unary_expression_not() {
-    let node = parse_expr("!flag");
+    let source = "!flag";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::UnaryExpression,
         &[NodeKind::Operator, NodeKind::Identifier],
     );
-    assert_eq!(node.children[0].text.as_deref(), Some("!"));
+    assert_eq!(Some(node.children[0].text_from_source(source)), Some("!"));
 }
 
 // ==================== TernaryExpression Structure Tests ====================
@@ -199,7 +212,8 @@ fn test_structure_unary_expression_not() {
 
 #[test]
 fn test_structure_ternary_expression() {
-    let node = parse_expr("x > 0 ? 1 : 0");
+    let source = "x > 0 ? 1 : 0";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::TernaryExpression,
@@ -213,7 +227,8 @@ fn test_structure_ternary_expression() {
 
 #[test]
 fn test_structure_ternary_nested() {
-    let node = parse_expr("a ? b : c ? d : e");
+    let source = "a ? b : c ? d : e";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::TernaryExpression);
     assert_eq!(node.children.len(), 3);
     // Right side is nested ternary
@@ -225,7 +240,8 @@ fn test_structure_ternary_nested() {
 
 #[test]
 fn test_structure_index_expression_single() {
-    let node = parse_expr("arr[1]");
+    let source = "arr[1]";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::IndexExpression,
@@ -235,7 +251,8 @@ fn test_structure_index_expression_single() {
 
 #[test]
 fn test_structure_index_expression_multi() {
-    let node = parse_expr("matrix[i, j]");
+    let source = "matrix[i, j]";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::IndexExpression);
     assert_eq!(node.children.len(), 3); // object + 2 indices
     assert_eq!(node.children[0].kind, NodeKind::Identifier);
@@ -245,7 +262,8 @@ fn test_structure_index_expression_multi() {
 
 #[test]
 fn test_structure_index_expression_chained() {
-    let node = parse_expr("a[1][2]");
+    let source = "a[1][2]";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::IndexExpression);
     assert_eq!(node.children.len(), 2);
     // First child is nested IndexExpression
@@ -257,23 +275,28 @@ fn test_structure_index_expression_chained() {
 
 #[test]
 fn test_structure_field_expression() {
-    let node = parse_expr("obj.field");
+    let source = "obj.field";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::FieldExpression,
         &[NodeKind::Identifier, NodeKind::Identifier],
     );
-    assert_eq!(node.children[1].text.as_deref(), Some("field"));
+    assert_eq!(
+        Some(node.children[1].text_from_source(source)),
+        Some("field")
+    );
 }
 
 #[test]
 fn test_structure_field_expression_chained() {
-    let node = parse_expr("a.b.c");
+    let source = "a.b.c";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::FieldExpression);
     assert_eq!(node.children.len(), 2);
     // First child is nested FieldExpression
     assert_eq!(node.children[0].kind, NodeKind::FieldExpression);
-    assert_eq!(node.children[1].text.as_deref(), Some("c"));
+    assert_eq!(Some(node.children[1].text_from_source(source)), Some("c"));
 }
 
 // ==================== RangeExpression Structure Tests ====================
@@ -282,7 +305,8 @@ fn test_structure_field_expression_chained() {
 
 #[test]
 fn test_structure_range_expression_two_part() {
-    let node = parse_expr("1:10");
+    let source = "1:10";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::RangeExpression,
@@ -293,7 +317,8 @@ fn test_structure_range_expression_two_part() {
 #[test]
 fn test_structure_range_expression_three_part() {
     // Three-part ranges are nested: 1:2:10 -> RangeExpression[RangeExpression[1,2], 10]
-    let node = parse_expr("1:2:10");
+    let source = "1:2:10";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::RangeExpression);
     assert_eq!(node.children.len(), 2);
     // First child is nested RangeExpression (1:2)
@@ -307,7 +332,8 @@ fn test_structure_range_expression_three_part() {
 
 #[test]
 fn test_structure_typed_expression() {
-    let node = parse_expr("x::Int");
+    let source = "x::Int";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::TypedExpression,
@@ -317,7 +343,8 @@ fn test_structure_typed_expression() {
 
 #[test]
 fn test_structure_typed_expression_parametric() {
-    let node = parse_expr("y::Vector{T}");
+    let source = "y::Vector{T}";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::TypedExpression);
     assert_eq!(node.children.len(), 2);
     assert_eq!(node.children[0].kind, NodeKind::Identifier);
@@ -329,7 +356,8 @@ fn test_structure_typed_expression_parametric() {
 
 #[test]
 fn test_structure_broadcast_call_expression() {
-    let node = parse_expr("f.(x, y)");
+    let source = "f.(x, y)";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::BroadcastCallExpression);
     assert_eq!(node.children.len(), 3); // callee + 2 args (no ArgumentList wrapper!)
     assert_eq!(node.children[0].kind, NodeKind::Identifier);
@@ -339,7 +367,8 @@ fn test_structure_broadcast_call_expression() {
 
 #[test]
 fn test_structure_broadcast_dotted_operator() {
-    let node = parse_expr(".+([1, 2])");
+    let source = ".+([1, 2])";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::BroadcastCallExpression);
     assert_eq!(node.children.len(), 2); // operator + 1 arg
                                         // First child is the operator
@@ -348,11 +377,12 @@ fn test_structure_broadcast_dotted_operator() {
 
 #[test]
 fn test_structure_broadcast_dotted_not_prefix() {
-    let node = parse_expr(".!flags");
+    let source = ".!flags";
+    let node = parse_expr(source);
     assert_eq!(node.kind, NodeKind::BroadcastCallExpression);
     assert_eq!(node.children.len(), 2); // operator + operand
     assert_eq!(node.children[0].kind, NodeKind::Operator);
-    assert_eq!(node.children[0].text.as_deref(), Some(".!"));
+    assert_eq!(Some(node.children[0].text_from_source(source)), Some(".!"));
     assert_eq!(node.children[1].kind, NodeKind::Identifier);
 }
 
@@ -360,7 +390,8 @@ fn test_structure_broadcast_dotted_not_prefix() {
 
 #[test]
 fn test_structure_vector_expression() {
-    let node = parse_expr("[1, 2, 3]");
+    let source = "[1, 2, 3]";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::VectorExpression,
@@ -374,13 +405,15 @@ fn test_structure_vector_expression() {
 
 #[test]
 fn test_structure_vector_expression_empty() {
-    let node = parse_expr("[]");
+    let source = "[]";
+    let node = parse_expr(source);
     assert_structure(&node, NodeKind::VectorExpression, &[]);
 }
 
 #[test]
 fn test_structure_tuple_expression() {
-    let node = parse_expr("(1, 2, 3)");
+    let source = "(1, 2, 3)";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::TupleExpression,
@@ -394,44 +427,62 @@ fn test_structure_tuple_expression() {
 
 #[test]
 fn test_structure_tuple_expression_empty() {
-    let node = parse_expr("()");
+    let source = "()";
+    let node = parse_expr(source);
     assert_structure(&node, NodeKind::TupleExpression, &[]);
 }
 
 #[test]
 fn test_structure_matrix_expression() {
-    let node = parse_expr("[1 2; 3 4]");
+    // A single `;` separator now surfaces as an explicit `Semicolon` CST leaf
+    // between the two `MatrixRow`s (not just "2 adjacent rows"), so lowering
+    // can recover the separator's dimension level for N-D literals like
+    // `;;`/`;;;`/... (Issue #10190).
+    let source = "[1 2; 3 4]";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::MatrixExpression,
-        &[NodeKind::MatrixRow, NodeKind::MatrixRow],
+        &[
+            NodeKind::MatrixRow,
+            NodeKind::Semicolon,
+            NodeKind::MatrixRow,
+        ],
     );
     // Each row has 2 elements
     assert_eq!(node.children[0].children.len(), 2);
-    assert_eq!(node.children[1].children.len(), 2);
+    assert_eq!(node.children[2].children.len(), 2);
 }
 
 #[test]
 fn test_structure_matrix_symbol_literals_are_separate_elements_issue_4576() {
-    let node = parse_expr("[:x :y; :z :w]");
+    // See `test_structure_matrix_expression`: the `;` separator is now an
+    // explicit `Semicolon` leaf between the two `MatrixRow`s (Issue #10190).
+    let source = "[:x :y; :z :w]";
+    let node = parse_expr(source);
     assert_structure(
         &node,
         NodeKind::MatrixExpression,
-        &[NodeKind::MatrixRow, NodeKind::MatrixRow],
+        &[
+            NodeKind::MatrixRow,
+            NodeKind::Semicolon,
+            NodeKind::MatrixRow,
+        ],
     );
     assert_eq!(node.children[0].children.len(), 2);
-    assert_eq!(node.children[1].children.len(), 2);
+    assert_eq!(node.children[2].children.len(), 2);
     assert_eq!(node.children[0].children[0].kind, NodeKind::QuoteExpression);
     assert_eq!(node.children[0].children[1].kind, NodeKind::QuoteExpression);
-    assert_eq!(node.children[1].children[0].kind, NodeKind::QuoteExpression);
-    assert_eq!(node.children[1].children[1].kind, NodeKind::QuoteExpression);
+    assert_eq!(node.children[2].children[0].kind, NodeKind::QuoteExpression);
+    assert_eq!(node.children[2].children[1].kind, NodeKind::QuoteExpression);
 }
 
 // ==================== Statement Structure Tests ====================
 
 #[test]
 fn test_structure_if_statement_simple() {
-    let node = parse_stmt("if x y end");
+    let source = "if x y end";
+    let node = parse_stmt(source);
     assert_eq!(node.kind, NodeKind::IfStatement);
     assert!(node.children.len() >= 2); // condition + body
                                        // First child is condition (expression)
@@ -441,7 +492,8 @@ fn test_structure_if_statement_simple() {
 
 #[test]
 fn test_structure_if_statement_with_else() {
-    let node = parse_stmt("if x y else z end");
+    let source = "if x y else z end";
+    let node = parse_stmt(source);
     assert_eq!(node.kind, NodeKind::IfStatement);
     // Should have ElseClause
     let has_else = node.children.iter().any(|c| c.kind == NodeKind::ElseClause);
@@ -453,7 +505,8 @@ fn test_structure_if_statement_with_else() {
 
 #[test]
 fn test_structure_for_statement() {
-    let node = parse_stmt("for i in 1:10 x end");
+    let source = "for i in 1:10 x end";
+    let node = parse_stmt(source);
     assert_structure(
         &node,
         NodeKind::ForStatement,
@@ -463,7 +516,8 @@ fn test_structure_for_statement() {
 
 #[test]
 fn test_structure_while_statement() {
-    let node = parse_stmt("while x > 0 x -= 1 end");
+    let source = "while x > 0 x -= 1 end";
+    let node = parse_stmt(source);
     assert_eq!(node.kind, NodeKind::WhileStatement);
     assert_eq!(node.children.len(), 2);
     // First child is condition (BinaryExpression)
@@ -474,13 +528,15 @@ fn test_structure_while_statement() {
 
 #[test]
 fn test_structure_return_statement_empty() {
-    let node = parse_stmt("return");
+    let source = "return";
+    let node = parse_stmt(source);
     assert_structure(&node, NodeKind::ReturnStatement, &[]);
 }
 
 #[test]
 fn test_structure_return_statement_with_value() {
-    let node = parse_stmt("return x + 1");
+    let source = "return x + 1";
+    let node = parse_stmt(source);
     assert_structure(
         &node,
         NodeKind::ReturnStatement,
@@ -490,22 +546,27 @@ fn test_structure_return_statement_with_value() {
 
 #[test]
 fn test_structure_function_definition() {
-    let node = parse_stmt("function add(x, y) x + y end");
+    let source = "function add(x, y) x + y end";
+    let node = parse_stmt(source);
     assert_eq!(node.kind, NodeKind::FunctionDefinition);
     assert!(node.children.len() >= 2);
     // First child is name
     assert_eq!(node.children[0].kind, NodeKind::Identifier);
-    assert_eq!(node.children[0].text.as_deref(), Some("add"));
+    assert_eq!(Some(node.children[0].text_from_source(source)), Some("add"));
 }
 
 #[test]
 fn test_structure_struct_definition() {
-    let node = parse_stmt("struct Point x y end");
+    let source = "struct Point x y end";
+    let node = parse_stmt(source);
     assert_eq!(node.kind, NodeKind::StructDefinition);
     assert!(!node.children.is_empty());
     // First child is name
     assert_eq!(node.children[0].kind, NodeKind::Identifier);
-    assert_eq!(node.children[0].text.as_deref(), Some("Point"));
+    assert_eq!(
+        Some(node.children[0].text_from_source(source)),
+        Some("Point")
+    );
 }
 
 // ==================== Regression Tests ====================
@@ -537,7 +598,8 @@ fn test_regression_call_expression_always_has_argument_list() {
 fn test_regression_range_is_not_binary_expression() {
     // Issue #1581: Developers assumed 1:10 uses BinaryExpression
     // Correct behavior: RangeExpression
-    let node = parse_expr("1:10");
+    let source = "1:10";
+    let node = parse_expr(source);
     assert_eq!(
         node.kind,
         NodeKind::RangeExpression,

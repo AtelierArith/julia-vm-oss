@@ -41,3 +41,15 @@ name = "abstract_parametric_abstract_supertype_dispatch_7235"
 file = "parametric_abstract_supertype_dispatch_7235.jl"
 expected = true
 description = "A method on a bare abstract type matches when that abstract type has a parametric abstract supertype (`abstract type Dist{F,S} <: Sampleable{F,S} end`): the parser's top-level parametric-parent node no longer overwrites the abstract type's own name, so the abstract type is registered and `isa`/`<:`/dispatch on it (and its grandparent) all work (Issue #7235 sub2)"
+
+[[tests]]
+name = "abstract_builtin_family_declared_subtyping_8560"
+file = "builtin_family_declared_subtyping_8560.jl"
+expected = true
+description = "User structs declared `<:` a built-in abstract family (AbstractSet, IO, Function functors, AbstractString, AbstractRange/AbstractUnitRange) derive their membership from the declared supertype chain, so `<:`, `isa`, and dispatch all agree with upstream Julia instead of hard-coded per-family Rust name lists (Issue #8560)"
+
+[[tests]]
+name = "abstract_type_shadows_base_struct_name_8861"
+file = "type_shadows_base_struct_name_8861.jl"
+expected = true
+description = "A user-declared `abstract type Set end` shadowing `Base.Set` (same bare name, no module scoping) still gets its own (unrelated) parent link in StructHierarchy instead of silently losing to Base's concrete `Set{T} <: AbstractSet{T}` struct entry, so a struct declared under the user's own abstract hierarchy dispatches its own `show`/`string` instead of Base's `AbstractSet` one (Issue #8861)"

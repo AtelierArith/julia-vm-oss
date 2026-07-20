@@ -5,7 +5,7 @@ using Test
 #
 # Prevention follow-up to Issue #8017 (#8040). The original #8017 bug was a
 # heuristic in `extract_default_from_parameter_node`
-# (subset_julia_vm/src/lowering/function/defaults.rs) that skipped every bare
+# (subset_julia_vm_lowering/src/lowering/function/defaults.rs) that skipped every bare
 # `Identifier` child as if it were a type annotation, dropping bare-identifier
 # defaults so no reduced-arity stub was generated → `No method matching …`.
 # Existing fixtures only exercised the SHORT form with LITERAL defaults, so the

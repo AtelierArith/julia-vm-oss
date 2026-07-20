@@ -269,3 +269,27 @@ name = "dict_typed_datatype_param_ctor_7934"
 file = "dict_typed_datatype_param_ctor_7934.jl"
 expected = true
 description = "Typed Dict constructors whose type parameters are DataType values (`Dict{Type, Dict{Symbol, Any}}()`) construct, index, nest, and `isa`-check correctly (regression fixture; resolved on current main) (Issue #7934)."
+
+[[tests]]
+name = "dict_user_keys_values_pairs_cached_dispatch_8602"
+file = "user_keys_values_pairs_cached_dispatch_8602.jl"
+expected = true
+description = "User keys/values/pairs methods anchored to a user struct dispatch correctly on the precompiled-Base-cache path (Issue #8602 retires the #4671 full-compile bypass via the #8555 cached-candidate refresh). Direct calls, Base-generic composition (collect/sum/length/for-iteration), passing the extended generic as a HOF argument, and Base-known Dict/NamedTuple receivers all keep upstream semantics; piracy over Base-known Dict instantiations still bypasses. Verified vs upstream julia 1.12."
+
+[[tests]]
+name = "dict_view_collect_eltype_8730"
+file = "dict_view_collect_eltype_8730.jl"
+expected = true
+description = "collect(keys(d)) and collect(values(d)) preserve KeySet/ValueIterator eltypes so Dict view display is [:x]/[10] rather than Any[:x]/Any[10] (Issue #8730)."
+
+[[tests]]
+name = "dict_array_show_prefix_8824"
+file = "dict_array_show_prefix_8824.jl"
+expected = true
+description = "Array show treats Dict{K,V} element types with implicit key/value types as bare, matching upstream typeinfo_implicit (Issue #8824)."
+
+[[tests]]
+name = "dict_pure_julia_minimal"
+file = "test_pure_julia_dict_minimal.jl"
+expected = true
+description = "Minimal Pure Julia Dict construction/indexing smoke test. Registered while closing the fixture-coverage gap (Issue #9360)."

@@ -6,12 +6,12 @@ using Test
     # UnitRange
     buf = IOBuffer()
     show(buf, 1:10)
-    @test take!(buf) == "1:10"
+    @test String(take!(buf)) == "1:10"
 
     # StepRange
     buf = IOBuffer()
     show(buf, 1:2:10)
-    @test take!(buf) == "1:2:9"
+    @test String(take!(buf)) == "1:2:9"
 end
 
 true

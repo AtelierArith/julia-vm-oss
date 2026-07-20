@@ -8,7 +8,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 use std::time::Instant;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 
 // Access private parse_and_lower by using compile_and_run_value
 fn parse_and_lower_helper(src: &str) -> subset_julia_vm::ir::core::Program {
@@ -35,7 +35,7 @@ fn parse_and_lower_helper(src: &str) -> subset_julia_vm::ir::core::Program {
         let user_method_sigs: std::collections::HashSet<_> = user_program
             .functions
             .iter()
-            .map(get_method_signature)
+            .map(|f| get_method_signature(f))
             .collect();
 
         let user_func_names_non_base: std::collections::HashSet<_> = user_program
@@ -60,7 +60,7 @@ fn parse_and_lower_helper(src: &str) -> subset_julia_vm::ir::core::Program {
         all_structs.extend(user_program.structs);
         user_program.structs = all_structs;
 
-        let mut all_functions: Vec<subset_julia_vm::ir::core::Function> = prelude
+        let mut all_functions: Vec<std::sync::Arc<subset_julia_vm::ir::core::Function>> = prelude
             .functions
             .iter()
             .filter(|f| {

@@ -1,0 +1,69 @@
+{
+  "_comment": "Nightly multi-bench performance gate (Issue #9003). Expanded from the single-bench catastrophic guard (vm_calc_pi_thresholds.json) to cover 7 representative VM code paths. max_regression_ratio: 0.20 means actual may not exceed baseline × 1.20 (20% regression gate, matching NS-4 policy). BASELINE CALIBRATION: the baseline_seconds values below are placeholder upper bounds set at initial gate rollout. After the first nightly CI run (ubuntu-latest, 2-vCPU runner), update them with the mean point estimates from target/criterion/<id>/new/estimates.json — see UPDATE PROCEDURE at the bottom of this comment. Environment: nightly CI (ubuntu-latest) is the authoritative timing environment; local/provisional values are marked with a factor. UPDATE PROCEDURE: (1) On a GitHub Actions ubuntu-latest runner, run scripts/run_perf_gate_benches.sh; (2) For each criterion_id, read target/criterion/<id>/new/estimates.json[mean][point_estimate]/1e9 to get seconds; (3) Update baseline_seconds here; (4) Commit as part of the same PR that introduces the intentional performance change, or as a standalone calibration PR. THRESHOLD POLICY: consistent with NS-4 (NORTH_STAR.md): >20% slower than baseline on the CI runner triggers a gate failure and nightly-gates notify-on-failure issue creation (Issue #9003).",
+  "benchmarks": [
+    {
+      "criterion_id": "vm_calc_pi/run_only/100",
+      "baseline_seconds": 10.0,
+      "max_regression_ratio": 0.20,
+      "description": "calc_pi(100) Vm::run() — representative NS-4 benchmark; was the single catastrophic guard (Issue #8682). Provisional baseline: needs CI calibration.",
+      "bench_binary": "calc_pi_benchmark",
+      "ci_filter": "vm_calc_pi/run_only/100"
+    },
+    {
+      "criterion_id": "vm_dynamic_dispatch/run_only",
+      "baseline_seconds": 5.0,
+      "max_regression_ratio": 0.20,
+      "description": "Dynamic dispatch overhead: norm2+sinc_approx over 10 000 points, all calls through runtime CallDynamic path (Issue #6853). Detects dispatch-loop regressions in any dispatch path that lacks a per-call-site cache hit. Provisional baseline: needs CI calibration.",
+      "bench_binary": "vm_dynamic_dispatch_benchmark",
+      "ci_filter": "vm_dynamic_dispatch/run_only"
+    },
+    {
+      "criterion_id": "dispatch_loop_overhead_20000",
+      "baseline_seconds": 5.0,
+      "max_regression_ratio": 0.20,
+      "description": "Hot-path dispatch loop: 20 000 iterations of a typed dispatch + arithmetic call. Detects loop-overhead regressions in the compiled fast dispatch path (hot_paths_benchmark). Provisional baseline: needs CI calibration.",
+      "bench_binary": "hot_paths_benchmark",
+      "ci_filter": "dispatch_loop_overhead_20000"
+    },
+    {
+      "criterion_id": "vm_broadcast_mixed_float_int/run_only/pow_float",
+      "baseline_seconds": 5.0,
+      "max_regression_ratio": 0.20,
+      "description": "Broadcast dispatch: x .^ 2.0 over a 629-element Float64 array, 200 iterations — covers the Float scalar broadcast path. Detects regressions in broadcast dispatch, elementwise runtime, and Array allocation (vm_broadcast_mixed_float_int_benchmark). Provisional baseline: needs CI calibration.",
+      "bench_binary": "vm_broadcast_mixed_float_int_benchmark",
+      "ci_filter": "vm_broadcast_mixed_float_int/run_only/pow_float"
+    },
+    {
+      "criterion_id": "vm_string/run_only/join_split_concat",
+      "baseline_seconds": 5.0,
+      "max_regression_ratio": 0.20,
+      "description": "String operations: join + split + repeated string concat mix (vm_string_benchmark). Detects regressions in string allocation, iteration, and built-in string dispatch. Provisional baseline: needs CI calibration.",
+      "bench_binary": "vm_string_benchmark",
+      "ci_filter": "vm_string/run_only/join_split_concat"
+    },
+    {
+      "criterion_id": "vm_int128_arith/run_only",
+      "baseline_seconds": 5.0,
+      "max_regression_ratio": 0.20,
+      "description": "Int128 arithmetic loop: add/mul/div over large Int128 values (vm_int128_arith_benchmark). Detects regressions in Int128 boxing, dispatch, and arithmetic builtins. Provisional baseline: needs CI calibration.",
+      "bench_binary": "vm_int128_arith_benchmark",
+      "ci_filter": "vm_int128_arith/run_only"
+    },
+    {
+      "criterion_id": "register_vm_gate/fib_25/register_vm",
+      "baseline_seconds": 10.0,
+      "max_regression_ratio": 0.20,
+      "description": "Register VM fib(25) — go/no-go gate for the register-VM execution path (register_vm_gate_benchmark, Issue #8440). Detects regressions in register-VM dispatch, stack-slot management, and calling convention. Provisional baseline: needs CI calibration.",
+      "bench_binary": "register_vm_gate_benchmark",
+      "ci_filter": "register_vm_gate/fib_25/register_vm"
+    },
+    {
+      "criterion_id": "ssa_pipeline_gate/calc_pi_loop_carried/ssa_pipeline",
+      "baseline_seconds": 10.0,
+      "max_regression_ratio": 0.20,
+      "description": "SSA pipeline calc_pi loop-carried — go/no-go gate for SSA optimization pipeline output quality (ssa_pipeline_gate_benchmark). Detects regressions in CSE/DCE/loop-carried-dep lowering passes. Provisional baseline: needs CI calibration.",
+      "bench_binary": "ssa_pipeline_gate_benchmark",
+      "ci_filter": "ssa_pipeline_gate/calc_pi_loop_carried/ssa_pipeline"
+    }
+  ]
+}

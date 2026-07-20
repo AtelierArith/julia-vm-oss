@@ -11,10 +11,27 @@ set -euo pipefail
 
 errors=0
 
-range_target="subset_julia_vm/src/vm/value/range.rs"
-legacy_range_target="subset_julia_vm/src/vm/exec/range.rs"
-iteration_target="subset_julia_vm/src/vm/type_ops/iteration.rs"
+# Range::collect moved to the bytecode crate in the #8655/#8656 crate split;
+# the old vm/value/range.rs path made this audit's collect(range) check a
+# silent no-op (Issue #9573).
+range_target="subset_julia_vm_bytecode/src/value/range.rs"
+legacy_range_target="subset_julia_vm_vm/src/vm/exec/range.rs"
+iteration_target="subset_julia_vm_vm/src/vm/type_ops/iteration.rs"
 iterators_jl_target="subset_julia_vm/src/julia/base/iterators.jl"
+
+# Guard against path drift (Issue #9573): a grep over a missing file is a
+# silently dead check ("OK" without looking). Fail loudly instead.
+for target in "$range_target" "$legacy_range_target" "$iteration_target" "$iterators_jl_target"; do
+    if [[ ! -f "$target" ]]; then
+        echo "ERROR: audit target file missing: $target (moved/removed by a refactor? Repoint this audit — Issue #9573)."
+        errors=$((errors + 1))
+    fi
+done
+if [[ "$errors" -gt 0 ]]; then
+    echo ""
+    echo "FAILED: collect Memory-first audit failed (Issue #3954)."
+    exit 1
+fi
 
 if rg -n 'ArrayValue::(i64_vector|vector|from_i64|from_f64)\(' "$range_target"; then
     echo "ERROR: $range_target materializes collect(range) without Memory-first helpers."

@@ -13,13 +13,16 @@
 # Outer constructors perform GCD normalization using concrete types to avoid
 # Issue #2384 (where T dispatch in inner constructor returns Float64 from div).
 
+# Workaround: keep raw allocation in a same-name marker-token inner until differently named struct-body helpers can use `new` (Issue #11005).
+struct _RationalRawToken end
+
 # Rational number struct (parametric version)
 # Julia's Rational is Rational{T<:Integer} <: Real
 struct Rational{T<:Integer} <: Real
     num::T
     den::T
     # Inner constructor: raw, no normalization (unsafe_rational equivalent)
-    function Rational{T}(num::T, den::T) where T
+    function Rational{T}(::_RationalRawToken, num::T, den::T) where T
         return new{T}(num, den)
     end
 end
@@ -28,13 +31,28 @@ end
 # Raw terminal constructor (Issue #5132)
 # =============================================================================
 # Mirror of Base.unsafe_rational: an unexported, no-normalization terminal.
-# It reaches the raw inner constructor via the `where T` (type-variable)
-# constructor path, which the compiler routes through bare-name dispatch and so
-# never intercepts as an explicit `Rational{IntN}(...)` call. The explicit-typed
-# public constructors below delegate here for the final allocation, so they never
-# recurse into themselves.
+# It reaches the tagged explicit-parametric inner with the caller's `T` binding;
+# the private marker argument makes that raw three-argument method distinct from
+# every public two-argument normalizing outer constructor. The explicit-typed
+# public constructors below delegate here for final allocation without recursion.
 function unsafe_rational(::Type{T}, num::T, den::T) where {T<:Integer}
-    return Rational{T}(num, den)
+    return Rational{T}(_RationalRawToken(), num, den)
+end
+
+# =============================================================================
+# 0//0 rejection (Issue #9514)
+# =============================================================================
+# Upstream `julia/base/rational.jl` rejects the invalid rational `0//0` in
+# `Rational{T}(num, den)` via
+#   iszero(den) && iszero(num) && __throw_rational_argerror_zero(T)
+# The `1//0` / `-1//0` Inf sentinels (num != 0, den == 0) are still permitted.
+# sjulia's constructors leave den == 0 raw to preserve those sentinels, so this
+# helper is invoked from each den == 0 branch guarded by an additional
+# `num == 0` check, matching upstream semantics and message. Without it, the
+# Rational rem/mod path `x - div(x, y) * y` with an infinite divisor `y`
+# produced the invalid `0//0` instead of raising an ArgumentError.
+@noinline function __throw_rational_argerror_zero(::Type{T}) where {T}
+    throw(ArgumentError(string("invalid rational: zero(", T, ")//zero(", T, ")")))
 end
 
 # =============================================================================
@@ -55,6 +73,7 @@ function Rational{Int64}(num::Integer, den::Integer)
     n = Int64(num)
     d = Int64(den)
     if d == Int64(0)
+        n == Int64(0) && __throw_rational_argerror_zero(Int64)
         return unsafe_rational(Int64, n, d)
     end
     if d < Int64(0)
@@ -74,6 +93,7 @@ function Rational{Int32}(num::Integer, den::Integer)
     n = Int32(num)
     d = Int32(den)
     if d == Int32(0)
+        n == Int32(0) && __throw_rational_argerror_zero(Int32)
         return unsafe_rational(Int32, n, d)
     end
     if d < Int32(0)
@@ -93,6 +113,7 @@ function Rational{Int16}(num::Integer, den::Integer)
     n = Int16(num)
     d = Int16(den)
     if d == Int16(0)
+        n == Int16(0) && __throw_rational_argerror_zero(Int16)
         return unsafe_rational(Int16, n, d)
     end
     if d < Int16(0)
@@ -112,6 +133,7 @@ function Rational{Int8}(num::Integer, den::Integer)
     n = Int8(num)
     d = Int8(den)
     if d == Int8(0)
+        n == Int8(0) && __throw_rational_argerror_zero(Int8)
         return unsafe_rational(Int8, n, d)
     end
     if d < Int8(0)
@@ -131,6 +153,7 @@ function Rational{BigInt}(num::Integer, den::Integer)
     n = big(num)
     d = big(den)
     if d == big(0)
+        n == big(0) && __throw_rational_argerror_zero(BigInt)
         return unsafe_rational(BigInt, n, d)
     end
     if d < big(0)
@@ -143,6 +166,140 @@ function Rational{BigInt}(num::Integer, den::Integer)
         d = div(d, g)
     end
     return unsafe_rational(BigInt, n, d)
+end
+
+# Concrete two-argument constructors for the wide/unsigned element types. Like
+# the Int8..Int64/BigInt methods above these are enumerated because the generic
+# `where {T<:Integer}` form below is not reliably selected by the VM dispatcher
+# for a syntactically-parameterized call with narrower Integer arguments (e.g.
+# `Rational{Int128}(5, 1)` fell through to the outer `Rational(::Int64,::Int64)`
+# and produced Int64 fields instead of coercing to Int128, Issue #9526). Int128
+# flips the sign like the signed forms; the Unsigned family and Bool never do
+# (negating them would wrap/error). den == 0 is left raw to keep Inf/NaN
+# sentinels, matching the constructors above.
+function Rational{Int128}(num::Integer, den::Integer)
+    n = Int128(num)
+    d = Int128(den)
+    if d == Int128(0)
+        n == Int128(0) && __throw_rational_argerror_zero(Int128)
+        return unsafe_rational(Int128, n, d)
+    end
+    if d < Int128(0)
+        n = Int128(0) - n
+        d = Int128(0) - d
+    end
+    g = gcd(n, d)
+    if g > Int128(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(Int128, n, d)
+end
+function Rational{UInt8}(num::Integer, den::Integer)
+    n = UInt8(num)
+    d = UInt8(den)
+    if d == UInt8(0)
+        n == UInt8(0) && __throw_rational_argerror_zero(UInt8)
+        return unsafe_rational(UInt8, n, d)
+    end
+    g = gcd(n, d)
+    if g > UInt8(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(UInt8, n, d)
+end
+function Rational{UInt16}(num::Integer, den::Integer)
+    n = UInt16(num)
+    d = UInt16(den)
+    if d == UInt16(0)
+        n == UInt16(0) && __throw_rational_argerror_zero(UInt16)
+        return unsafe_rational(UInt16, n, d)
+    end
+    g = gcd(n, d)
+    if g > UInt16(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(UInt16, n, d)
+end
+function Rational{UInt32}(num::Integer, den::Integer)
+    n = UInt32(num)
+    d = UInt32(den)
+    if d == UInt32(0)
+        n == UInt32(0) && __throw_rational_argerror_zero(UInt32)
+        return unsafe_rational(UInt32, n, d)
+    end
+    g = gcd(n, d)
+    if g > UInt32(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(UInt32, n, d)
+end
+function Rational{UInt64}(num::Integer, den::Integer)
+    n = UInt64(num)
+    d = UInt64(den)
+    if d == UInt64(0)
+        n == UInt64(0) && __throw_rational_argerror_zero(UInt64)
+        return unsafe_rational(UInt64, n, d)
+    end
+    g = gcd(n, d)
+    if g > UInt64(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(UInt64, n, d)
+end
+function Rational{UInt128}(num::Integer, den::Integer)
+    n = UInt128(num)
+    d = UInt128(den)
+    if d == UInt128(0)
+        n == UInt128(0) && __throw_rational_argerror_zero(UInt128)
+        return unsafe_rational(UInt128, n, d)
+    end
+    g = gcd(n, d)
+    if g > UInt128(1)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(UInt128, n, d)
+end
+function Rational{Bool}(num::Integer, den::Integer)
+    n = Bool(num)
+    d = Bool(den)
+    if !d
+        n || __throw_rational_argerror_zero(Bool)
+    end
+    return unsafe_rational(Bool, n, d)
+end
+
+# Generic typed constructor for the remaining integer element types. The
+# explicit Int8..Int64/BigInt and Int128/Unsigned/Bool methods above are more
+# specific and still win for those types; this method only fires for element
+# types that have no dedicated constructor. It mirrors upstream
+# `Rational{T}(num, den) where T<:Integer` (base/rational.jl): reduce by gcd and
+# normalize the sign, but only flip the sign for Signed element types — Bool and
+# Unsigned values are never negative, and negating them would wrap/error.
+# A den == 0 input is left raw to preserve the Inf/NaN sentinels, matching the
+# signed constructors above (Issue #9315).
+function Rational{T}(num::Integer, den::Integer) where {T<:Integer}
+    n = T(num)
+    d = T(den)
+    if d == zero(T)
+        n == zero(T) && __throw_rational_argerror_zero(T)
+        return unsafe_rational(T, n, d)
+    end
+    if T <: Signed && signbit(d)
+        n = zero(T) - n
+        d = zero(T) - d
+    end
+    g = gcd(n, d)
+    if g > one(T)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(T, n, d)
 end
 
 # Single-argument form: Rational{T}(x) == Rational{T}(x, 1)
@@ -161,6 +318,41 @@ end
 function Rational{BigInt}(x::Integer)
     return unsafe_rational(BigInt, big(x), big(1))
 end
+# Single-argument Integer constructors for the wide/unsigned element types.
+# Like the signed forms above they are enumerated with concrete element types
+# (never a generic `where T`, see the NOTE below / Issue #9315) and coexist with
+# the `Rational{T}(x::Rational)` conversions further down exactly as the Int64
+# pair does. Needed so that promoting an Integer to Rational{Int128}/Rational{UInt*}
+# (the second operand of `max(3//4, Int128(5))`) can build the widened value via
+# the generic `convert(::Type{T}, x) = T(x)` fallback (Issue #9526).
+function Rational{Int128}(x::Integer)
+    return unsafe_rational(Int128, Int128(x), Int128(1))
+end
+function Rational{UInt8}(x::Integer)
+    return unsafe_rational(UInt8, UInt8(x), UInt8(1))
+end
+function Rational{UInt16}(x::Integer)
+    return unsafe_rational(UInt16, UInt16(x), UInt16(1))
+end
+function Rational{UInt32}(x::Integer)
+    return unsafe_rational(UInt32, UInt32(x), UInt32(1))
+end
+function Rational{UInt64}(x::Integer)
+    return unsafe_rational(UInt64, UInt64(x), UInt64(1))
+end
+function Rational{UInt128}(x::Integer)
+    return unsafe_rational(UInt128, UInt128(x), UInt128(1))
+end
+function Rational{Bool}(x::Integer)
+    return unsafe_rational(Bool, Bool(x), Bool(1))
+end
+# NOTE: no generic single-argument `Rational{T}(x::Integer) where T` is defined
+# on purpose (Issue #9315). Under sjulia's typed-constructor dispatch, the bare
+# abstract `x::Integer` annotation was loosely matched to a `Rational` argument,
+# stealing the `Rational{Int64}(x::Rational)` conversion call above and raising
+# `InexactError: Int64(3//4)`. The single-argument OUTER constructor
+# `Rational(num::T)` below reaches the raw 2-argument path instead, so Bool /
+# Unsigned / Int128 single-argument construction still works.
 
 # Rational-from-Rational conversion: Rational{T}(r) re-types num/den to T.
 # r is already normalized, so no further reduction is required.
@@ -179,97 +371,41 @@ end
 function Rational{BigInt}(x::Rational)
     return unsafe_rational(BigInt, big(x.num), big(x.den))
 end
+# Rational-from-Rational conversion for the wide/unsigned element types. These
+# mirror the signed constructors above and, like them, are enumerated with
+# concrete element types on purpose: a generic single-argument
+# `Rational{T}(x::Rational) where {T<:Integer}` would be loosely matched to
+# Integer arguments by the VM dispatcher (same hazard as the single-argument
+# Integer form, see the note above / Issue #9315). x is already normalized, so
+# no further gcd reduction is required. Needed so that promoting a
+# Rational{Int64} to Rational{Int128}/Rational{UInt*} (e.g. via the max/min
+# promote fallback `max(3//4, Int128(5))`) can construct the widened value
+# instead of raising MethodError (Issue #9526).
+function Rational{Int128}(x::Rational)
+    return unsafe_rational(Int128, Int128(x.num), Int128(x.den))
+end
+function Rational{UInt8}(x::Rational)
+    return unsafe_rational(UInt8, UInt8(x.num), UInt8(x.den))
+end
+function Rational{UInt16}(x::Rational)
+    return unsafe_rational(UInt16, UInt16(x.num), UInt16(x.den))
+end
+function Rational{UInt32}(x::Rational)
+    return unsafe_rational(UInt32, UInt32(x.num), UInt32(x.den))
+end
+function Rational{UInt64}(x::Rational)
+    return unsafe_rational(UInt64, UInt64(x.num), UInt64(x.den))
+end
+function Rational{UInt128}(x::Rational)
+    return unsafe_rational(UInt128, UInt128(x.num), UInt128(x.den))
+end
+function Rational{Bool}(x::Rational)
+    return unsafe_rational(Bool, Bool(x.num), Bool(x.den))
+end
 
 # =============================================================================
-# Outer constructors with GCD normalization (concrete types)
+# Outer constructors with GCD normalization
 # =============================================================================
-# Each concrete type has its own constructor to avoid Issue #2384
-# (div(x::T, y::T) in where T context dispatches to generic div returning Float64)
-
-# Int64 outer constructor with normalization
-function Rational(num::Int64, den::Int64)
-    if den == Int64(0)
-        return Rational{Int64}(num, Int64(0))
-    end
-    if den < Int64(0)
-        num = Int64(0) - num
-        den = Int64(0) - den
-    end
-    g = gcd(num, den)
-    if g > Int64(1)
-        num = div(num, g)
-        den = div(den, g)
-    end
-    return Rational{Int64}(num, den)
-end
-
-# Int32 outer constructor with normalization
-function Rational(num::Int32, den::Int32)
-    if den == Int32(0)
-        return Rational{Int32}(num, Int32(0))
-    end
-    if den < Int32(0)
-        num = Int32(0) - num
-        den = Int32(0) - den
-    end
-    g = gcd(num, den)
-    if g > Int32(1)
-        num = div(num, g)
-        den = div(den, g)
-    end
-    return Rational{Int32}(num, den)
-end
-
-# Int16 outer constructor with normalization
-function Rational(num::Int16, den::Int16)
-    if den == Int16(0)
-        return Rational{Int16}(num, Int16(0))
-    end
-    if den < Int16(0)
-        num = Int16(0) - num
-        den = Int16(0) - den
-    end
-    g = gcd(num, den)
-    if g > Int16(1)
-        num = div(num, g)
-        den = div(den, g)
-    end
-    return Rational{Int16}(num, den)
-end
-
-# Int8 outer constructor with normalization
-function Rational(num::Int8, den::Int8)
-    if den == Int8(0)
-        return Rational{Int8}(num, Int8(0))
-    end
-    if den < Int8(0)
-        num = Int8(0) - num
-        den = Int8(0) - den
-    end
-    g = gcd(num, den)
-    if g > Int8(1)
-        num = div(num, g)
-        den = div(den, g)
-    end
-    return Rational{Int8}(num, den)
-end
-
-# BigInt outer constructor with normalization (Issue #2497)
-function Rational(num::BigInt, den::BigInt)
-    if den == big(0)
-        return Rational{BigInt}(num, big(0))
-    end
-    if den < big(0)
-        num = big(0) - num
-        den = big(0) - den
-    end
-    g = gcd(num, den)
-    if g > big(1)
-        num = div(num, g)
-        den = div(den, g)
-    end
-    return Rational{BigInt}(num, den)
-end
 
 # Single-argument constructors
 function Rational(num::Int64)
@@ -292,6 +428,57 @@ function Rational(num::BigInt)
     return Rational{BigInt}(num, big(1))
 end
 
+# Same-type outer constructor for integer element types. Upstream writes this as
+# `Rational(n::T, d::T) where {T<:Integer} = Rational{T}(n, d)`.
+#
+# This is the method that TERMINATES the promote-based `Rational(::Integer,
+# ::Integer)` fallback below for same-type pairs such as `true // true` and
+# `0x01 // 0x03` (Issue #9315). Without it, `promote(true, true)` returns the
+# unchanged `(true, true)` pair, dispatch re-enters the promoting fallback, and
+# the constructor self-recurses until MAX_CALL_DEPTH (the classic
+# promote-fallback recursion trap, Issue #5966). Being parameterized on a single
+# type variable `T`, it is more specific than the two-`::Integer` fallback, and
+# The reduction is inlined here (rather than delegating to `Rational{T}(...)`)
+# because a `Rational{T}(...)` call under a type *variable* `T` routes to the
+# raw inner constructor — the same bare-name path `unsafe_rational` uses — and
+# would skip normalization, mirroring the signed outer/typed constructors above
+# which likewise duplicate the reduction. Sign is only flipped for Signed `T`;
+# Bool/Unsigned values are never negative.
+function Rational(num::T, den::T) where {T<:Integer}
+    n = num
+    d = den
+    if d == zero(T)
+        n == zero(T) && __throw_rational_argerror_zero(T)
+        return unsafe_rational(T, n, d)
+    end
+    if T <: Signed && signbit(d)
+        n = zero(T) - n
+        d = zero(T) - d
+    end
+    g = gcd(n, d)
+    if g > one(T)
+        n = div(n, g)
+        d = div(d, g)
+    end
+    return unsafe_rational(T, n, d)
+end
+
+# NOTE: no generic single-argument `Rational(num::T) where T<:Integer` is
+# defined on purpose (Issue #9315). Like the single-argument typed constructor
+# above, sjulia's dispatcher loosely matched its parametric integer argument to
+# a `Rational` value, so `Rational(3 // 4)` was routed here (raising an internal
+# LoadSlot error) instead of to a `Rational`-to-`Rational` path. Single-argument
+# construction for Bool / Unsigned / Int128 is out of scope for this fix, which
+# targets the `//` (two-argument) recursion; the explicit signed single-argument
+# constructors above are unaffected.
+
+# Identity constructor: a Rational is already a Rational (Issue #9363).
+# Upstream: base/rational.jl `Rational(x::Rational) = x`. Without this method a
+# `Rational` argument was loose-matched to the concrete single-argument
+# `Rational(num::Int64)` constructor above, whose body treated the struct value
+# as an integer numerator and raised an InternalError.
+Rational(x::Rational) = x
+
 # Mixed-type constructor: promote both args to a common type
 function Rational(num::Integer, den::Integer)
     pn, pd = promote(num, den)
@@ -302,25 +489,6 @@ end
 # // operator: creates Rational from two integers
 # =============================================================================
 # Based on Julia's base/rational.jl:91: //(n::Integer, d::Integer) = Rational(n,d)
-# Concrete type methods to ensure correct compile-time dispatch to the
-# matching Rational outer constructor (avoids Issue #2384 style widening
-# when abstract Integer param causes dispatch to Int64 method).
-function //(n::Int64, d::Int64)
-    return Rational(n, d)
-end
-function //(n::Int32, d::Int32)
-    return Rational(n, d)
-end
-function //(n::Int16, d::Int16)
-    return Rational(n, d)
-end
-function //(n::Int8, d::Int8)
-    return Rational(n, d)
-end
-function //(n::BigInt, d::BigInt)
-    return Rational(n, d)
-end
-# Mixed-type fallback: promote to common type
 function //(n::Integer, d::Integer)
     return Rational(n, d)
 end
@@ -370,11 +538,11 @@ end
 # =============================================================================
 
 function iszero(x::Rational)
-    return x.num == 0 && x.den != 0
+    return iszero(numerator(x))
 end
 
 function isone(x::Rational)
-    return x.num == 1 && x.den == 1
+    return isone(numerator(x)) & isone(denominator(x))
 end
 
 function isinteger(x::Rational)
@@ -491,12 +659,15 @@ function Base.:+(y::BigInt, x::Rational)
     return Rational{BigInt}(y, big(1)) + convert(Rational{BigInt}, x)
 end
 
+# Mirror upstream julia/base/rational.jl: the cross-multiplied numerator is
+# formed with checked_mul/checked_add so an over/underflow raises a catchable
+# OverflowError instead of silently wrapping (Issue #9527).
 function Base.:+(x::Rational, y::Integer)
-    return Rational(x.num + x.den * y, x.den)
+    return Rational(checked_add(x.num, checked_mul(x.den, y)), x.den)
 end
 
 function Base.:+(y::Integer, x::Rational)
-    return Rational(y * x.den + x.num, x.den)
+    return Rational(checked_add(checked_mul(x.den, y), x.num), x.den)
 end
 
 function Base.:-(x::Rational, y::BigInt)
@@ -508,11 +679,11 @@ function Base.:-(y::BigInt, x::Rational)
 end
 
 function Base.:-(x::Rational, y::Integer)
-    return Rational(x.num - x.den * y, x.den)
+    return Rational(checked_sub(x.num, checked_mul(x.den, y)), x.den)
 end
 
 function Base.:-(y::Integer, x::Rational)
-    return Rational(y * x.den - x.num, x.den)
+    return Rational(checked_sub(checked_mul(x.den, y), x.num), x.den)
 end
 
 function Base.:*(x::Rational, y::BigInt)
@@ -545,6 +716,55 @@ end
 
 function Base.:/(y::Integer, x::Rational)
     return Rational(y * x.den, x.num)
+end
+
+# Mixed Rational/AbstractFloat arithmetic (Issue #9524).
+#
+# Upstream reaches these through the generic `Number` promotion fallback
+# (`+(x::Number, y::Number) = +(promote(x, y)...)`), and a *fresh* sjulia
+# process does too. But sjulia's runtime dispatcher can loosely match a Float
+# operand to the `::Integer` methods above once the specialization cache has
+# been populated by a preceding mixed-type sweep (the #5966 / #7334
+# loose-abstract-match class): `3//4 + Float32(2.5)` then wrongly selects
+# `+(x::Rational, y::Integer)`, feeds a Float numerator into the `Rational`
+# constructor, and aborts with `Inconsistent type inference for T`.
+#
+# Defining the mixed Rational/AbstractFloat methods explicitly gives the Float
+# case a genuine, correct, more-specific method so the dispatcher never needs
+# to loose-match a Float to `::Integer`. Each just promotes both operands to a
+# common floating type (mirroring the upstream promotion result) and operates,
+# so the value and type match upstream exactly.
+function Base.:+(x::Rational, y::AbstractFloat)
+    px, py = promote(x, y)
+    return px + py
+end
+function Base.:+(x::AbstractFloat, y::Rational)
+    px, py = promote(x, y)
+    return px + py
+end
+function Base.:-(x::Rational, y::AbstractFloat)
+    px, py = promote(x, y)
+    return px - py
+end
+function Base.:-(x::AbstractFloat, y::Rational)
+    px, py = promote(x, y)
+    return px - py
+end
+function Base.:*(x::Rational, y::AbstractFloat)
+    px, py = promote(x, y)
+    return px * py
+end
+function Base.:*(x::AbstractFloat, y::Rational)
+    px, py = promote(x, y)
+    return px * py
+end
+function Base.:/(x::Rational, y::AbstractFloat)
+    px, py = promote(x, y)
+    return px / py
+end
+function Base.:/(x::AbstractFloat, y::Rational)
+    px, py = promote(x, y)
+    return px / py
 end
 
 # =============================================================================
@@ -767,6 +987,114 @@ function Base.:(!=)(x::AbstractFloat, y::Rational)
     return !(x == y)
 end
 
+# =============================================================================
+# Rational vs hardware-float comparisons (Issue #9340)
+# =============================================================================
+# Upstream base/rational.jl compares a Rational with an AbstractFloat *exactly*
+# (infinite precision): `==` requires the rational's denominator to be a power
+# of two and the float to reproduce the numerator exactly; `<`/`<=` cross-
+# multiply the exact integer ratio of the float against the rational. The
+# bundled base/rational.jl previously lacked these mixed methods, so the numeric
+# operator promote-fallback handled them by rounding *both* operands to Float64
+# first — making e.g. `1//3 == 0.3333333333333333` wrongly return `true`.
+#
+# Mirror upstream's exact semantics. Rather than depend on `decompose`/
+# `ndigits0z` (not available here), decompose the finite float into an exact
+# power-of-two ratio via `frexp` (x == m * 2^(e-53), m an exact integer) and
+# compare in `BigInt` to avoid overflow. These signatures are strictly more
+# specific than the generic `==`/`<`/`<=` promote fallback, so they win.
+#
+# Scope: all AbstractFloats. `Float16`/`Float32`/`Float64` widen to Float64
+# losslessly, so the power-of-two ratio is exact; `BigFloat` (Issue #9424)
+# decomposes at its own precision via `frexp` + an exact mantissa shift, so
+# e.g. `1//3 == BigFloat(1)/BigFloat(3)` is `false` at any precision, exactly
+# as upstream.
+
+# Exact rational (num::BigInt, den::BigInt), den = 2^k >= 1, with x == num/den.
+# Precondition: `x` is a finite hardware float. Sign is carried in `num`;
+# `den` is positive.
+function _rational_float_ratio(x::Union{Float16,Float32,Float64})
+    f, e = frexp(Float64(x))
+    m = round(Int64, ldexp(f, 53)) # |m| < 2^53, exact integer
+    p = e - 53
+    if p >= 0
+        return (big(m) * big(2)^p, big(1))
+    else
+        return (big(m), big(2)^(-p))
+    end
+end
+
+# BigFloat: decompose at the value's own precision (Issue #9424). `frexp`
+# gives x == f·2^e with f ∈ [0.5, 1); scaling f by 2^prec is an exact
+# astro_float exponent shift (`_bigfloat_scale2`, no rounding), producing an
+# integer-valued BigFloat that the exact `BigInt` conversion reads verbatim.
+function _rational_float_ratio(x::BigFloat)
+    f, e = frexp(x)
+    prec = precision(x)
+    m = BigInt(_bigfloat_scale2(f, prec)) # |m| <= 2^prec, exact integer
+    p = e - prec
+    if p >= 0
+        return (m * big(2)^p, big(1))
+    else
+        return (m, big(2)^(-p))
+    end
+end
+
+function Base.:(==)(x::AbstractFloat, q::Rational)
+    isnan(x) && return false
+    isfinite(x) || return x == q.num / q.den
+    xn, xd = _rational_float_ratio(x)
+    return xn * big(q.den) == big(q.num) * xd
+end
+
+function Base.:(==)(q::Rational, x::AbstractFloat)
+    return x == q
+end
+
+function Base.:<(x::AbstractFloat, q::Rational)
+    isnan(x) && return false
+    isfinite(x) || return x < q.num / q.den
+    xn, xd = _rational_float_ratio(x)
+    return xn * big(q.den) < big(q.num) * xd
+end
+
+function Base.:<(q::Rational, x::AbstractFloat)
+    isnan(x) && return false
+    isfinite(x) || return q.num / q.den < x
+    xn, xd = _rational_float_ratio(x)
+    return big(q.num) * xd < xn * big(q.den)
+end
+
+function Base.:<=(x::AbstractFloat, q::Rational)
+    isnan(x) && return false
+    isfinite(x) || return x <= q.num / q.den
+    xn, xd = _rational_float_ratio(x)
+    return xn * big(q.den) <= big(q.num) * xd
+end
+
+function Base.:<=(q::Rational, x::AbstractFloat)
+    isnan(x) && return false
+    isfinite(x) || return q.num / q.den <= x
+    xn, xd = _rational_float_ratio(x)
+    return big(q.num) * xd <= xn * big(q.den)
+end
+
+function Base.:>(x::AbstractFloat, q::Rational)
+    return q < x
+end
+
+function Base.:>(q::Rational, x::AbstractFloat)
+    return x < q
+end
+
+function Base.:>=(x::AbstractFloat, q::Rational)
+    return q <= x
+end
+
+function Base.:>=(q::Rational, x::AbstractFloat)
+    return x <= q
+end
+
 function Base.:<(x::Rational, y::Integer)
     return x.num < x.den * y
 end
@@ -976,6 +1304,14 @@ function Base.:^(x::Rational, n::Int64)
     return result
 end
 
+# Float raised to a Rational exponent. Upstream (base/rational.jl):
+#   ^(x::T, y::Rational) where {T<:AbstractFloat} = x^convert(T,y)
+# converts the exponent to the base's float type and dispatches to the
+# same-type float `^`, which raises a DomainError for a negative base with a
+# non-integer exponent (e.g. `(-8.0)^(1//3)`) instead of returning NaN
+# (Issue #9344).
+Base.:^(x::T, y::Rational) where {T<:AbstractFloat} = x^convert(T, y)
+
 # =============================================================================
 # GCD/LCM (Julia standard - using dispatch)
 # =============================================================================
@@ -1102,12 +1438,21 @@ function div(x::Rational, y::Rational)
     return div(x.num * y.den, x.den * y.num)
 end
 
+# Mixed Rational/Integer div mirrors upstream's `div(x, y, RoundToZero)` path
+# (julia/base/rational.jl:503-509): the cross-multiplied operands go through the
+# 3-arg integer `div(a, b, RoundToZero)`, which for a mixed Signed/Unsigned pair
+# promotes to the common (unsigned) type *before* dividing — unlike the 2-arg
+# `div`, whose #9337 signedness rule keeps the signed type. Promote here so the
+# quotient's element type matches upstream (e.g. `div(1//1, UInt64(3))::UInt64`,
+# not `::Int64`). Issue #9440.
 function div(x::Rational, y::Integer)
-    return div(x.num, x.den * y)
+    a, b = promote(x.num, x.den * y)
+    return div(a, b)
 end
 
 function div(x::Integer, y::Rational)
-    return div(x * y.den, y.num)
+    a, b = promote(x * y.den, y.num)
+    return div(a, b)
 end
 
 # fld (floored): fld(a//b, c//d) = fld(a*d, b*c)
@@ -1151,28 +1496,59 @@ function mod(x::Rational, y::Rational)
     return x - fld(x, y) * y
 end
 
-# Mixed: Rational / Integer
+# Mixed: Rational / Integer — mirror upstream's direct rem/mod formulas
+# (julia/base/rational.jl:383-404) rather than `x - div(x,y)*y`. Upstream applies
+# the integer `rem`/`mod` to the cross-multiplied numerator and wraps the result
+# with the ORIGINAL denominator, so the element type follows the integer
+# `rem`/`mod` signedness rule: `rem(1//1, UInt64(3))` yields `Rational{Int64}`
+# (rem(Int, UInt) is signed) while `mod(1//1, UInt64(3))` yields
+# `Rational{UInt64}` (mod(Int, UInt) is unsigned). The `x - div(x,y)*y` form
+# forced the whole result to the unsigned promotion. Issue #9440.
+# The cross-multiplication uses `checked_mul` like upstream, so a boundary
+# operand (e.g. `rem(3//4, typemax(UInt128))`) raises upstream's catchable
+# OverflowError instead of silently wrapping (Issues #9416 / #9422).
 function rem(x::Rational, y::Integer)
-    return x - div(x, y) * y
+    return Rational(rem(x.num, checked_mul(x.den, y)), x.den)
 end
 
 function mod(x::Rational, y::Integer)
-    return x - fld(x, y) * y
+    return Rational(mod(x.num, checked_mul(x.den, y)), x.den)
 end
 
-# Mixed: Integer / Rational
+# Mixed: Integer / Rational (julia/base/rational.jl:397-404)
 function rem(y::Integer, x::Rational)
-    return y - div(y, x) * x
+    return Rational(rem(checked_mul(x.den, y), x.num), x.den)
 end
 
 function mod(y::Integer, x::Rational)
-    return y - fld(y, x) * x
+    return Rational(mod(checked_mul(x.den, y), x.num), x.den)
 end
 
-function rem(y::Int64, x::Rational{Int64})
-    return y - div(y, x) * x
+# Mixed: Rational × Real (AbstractFloat, BigFloat, …). Upstream reaches these
+# through the generic `rem(x::Real, y::Real) = rem(promote(x,y)...)` /
+# `mod(x::Real, y::Real)` fallbacks in julia/base/promotion.jl. sjulia's
+# untyped generic rem/mod (base/math.jl) instead fall through to the `%`
+# builtin, which has no Float×Rational path → MethodError (Issue #9416).
+# Scope the promote fallback to Rational-involved pairs so unrelated Real
+# pairs cannot enter the promote-fallback recursion trap (Issue #5966); the
+# more-specific Rational×Rational and Rational×Integer methods above still win
+# for those pairs, and `promote` raises `sametype_error` if it cannot widen.
+function rem(x::Rational, y::Real)
+    px, py = promote(x, y)
+    return rem(px, py)
 end
 
-function mod(y::Int64, x::Rational{Int64})
-    return y - fld(y, x) * x
+function rem(x::Real, y::Rational)
+    px, py = promote(x, y)
+    return rem(px, py)
+end
+
+function mod(x::Rational, y::Real)
+    px, py = promote(x, y)
+    return mod(px, py)
+end
+
+function mod(x::Real, y::Rational)
+    px, py = promote(x, y)
+    return mod(px, py)
 end

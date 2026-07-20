@@ -2,10 +2,18 @@
 # Bool - Boolean operations
 # =============================================================================
 # Based on Julia's base/bool.jl
+# upstream: julia/base/bool.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-07-02)
 #
 # IMPORTANT: This module only contains functions that exist in Julia Base.
 # Removed functions (not in Julia Base):
 #   - implies (not in Julia)
+
+# Bool constructor
+# Based on Julia's base/bool.jl:
+#   Bool(x::Real) = x==0 ? false : x==1 ? true : throw(InexactError(:Bool, Bool, x))
+function Bool(x::Real)
+    return x == 0 ? false : x == 1 ? true : throw(InexactError(:Bool, Bool, x))
+end
 
 # isnothing: check if value is nothing
 # INTENTIONAL_NOOP (Issue #4703): upstream `isnothing(x) = x === nothing`
@@ -153,9 +161,39 @@ function div(x::Bool, y::Bool)
     return y ? x : throw(DivideError())
 end
 
+# rem/mod/fld/cld on Bool×Bool stay Bool (Issue #9337; upstream base/bool.jl
+# defines rem/mod, and fld/cld reduce to div for the Bool same-type case).
+function rem(x::Bool, y::Bool)
+    return y ? false : throw(DivideError())
+end
+
+function mod(x::Bool, y::Bool)
+    return rem(x, y)
+end
+
+function fld(x::Bool, y::Bool)
+    return div(x, y)
+end
+
+function cld(x::Bool, y::Bool)
+    return div(x, y)
+end
+
 # Power with integer base
 # Based on Julia's base/bool.jl:22
 ^(x::Integer, y::Bool) = ifelse(y, x, one(x))
+
+# Bool "strong zero" multiply (Issue #9343)
+# Based on Julia's base/bool.jl:
+#   *(x::Bool, y::T) where {T<:AbstractFloat} = ifelse(x, y, copysign(zero(y), y))
+#   *(y::AbstractFloat, x::Bool) = x * y
+# `false * y` is a strong zero (`copysign(zero(y), y)`), stronger than IEEE NaN
+# propagation, so `false * Inf == 0.0` and `false * -Inf == -0.0` (not NaN).
+# For the primitive float widths (Float16/Float32/Float64) this is intercepted in
+# the VM before Bool→Int normalization; this pure-Julia method covers the
+# remaining AbstractFloat subtypes (e.g. BigFloat) via dispatch.
+*(x::Bool, y::T) where {T<:AbstractFloat} = ifelse(x, y, copysign(zero(y), y))
+*(y::AbstractFloat, x::Bool) = x * y
 
 # =============================================================================
 # Comparison operations for Bool (using intrinsics)

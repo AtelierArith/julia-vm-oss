@@ -6,11 +6,17 @@
 //! any modifications, deletions, or simplifications. This ensures that what
 //! works in tests will also work in the iOS app.
 
-use subset_julia_vm::compile::compile_with_cache;
-use subset_julia_vm::compile_and_run_value;
-use subset_julia_vm::pipeline::parse_and_lower;
+use subset_julia_vm::compile::host_support::compile_with_cache;
+// Run the bundled samples under STRICT file-mode soft scope (Issue #9283): this
+// is the soft scope the C ABI / WASM editor hosts apply, so the samples are
+// validated exactly as the iOS "Run" button executes them (matching
+// `julia file.jl`). A sample that mutates a pre-existing global in a top-level
+// loop without `global` now fails here, as it would in the app.
+use subset_julia_vm::compile_and_run_value_file_mode as compile_and_run_value;
+use subset_julia_vm::pipeline::parse_and_lower_strict as parse_and_lower;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::Value;
 
 /// Helper to run code through the Core IR pipeline (tree-sitter → lowering → compile_core)
 /// Includes prelude functions (Complex methods, etc.)
@@ -20,10 +26,7 @@ fn run_core_pipeline(src: &str, seed: u64) -> Result<Value, String> {
 
 /// Helper function to run a test and check if it succeeds (doesn't panic/error)
 fn run_ios_sample(name: &str, src: &str) {
-    match run_core_pipeline(src, 12345) {
-        Ok(_) => {} // Success
-        Err(e) => panic!("[{}] Runtime error: {}", name, e),
-    }
+    run_core_pipeline(src, 12345).unwrap_or_else(|e| panic!("[{name}] Runtime error: {e}"));
 }
 
 /// Helper function to run a test and capture output for comparison
@@ -34,10 +37,9 @@ fn run_ios_sample_with_output(name: &str, src: &str) -> String {
 
     let rng = StableRng::new(12345);
     let mut vm = Vm::new_program(compiled, rng);
-    match vm.run() {
-        Ok(_) => vm.get_output().to_string(),
-        Err(e) => panic!("[{}] Runtime error: {}", name, e),
-    }
+    vm.run()
+        .unwrap_or_else(|e| panic!("[{name}] Runtime error: {e}"));
+    vm.get_output().to_string()
 }
 
 #[test]
@@ -126,7 +128,7 @@ println("1:2:10 has length ", length(r2))
 # Sum elements in a range
 sum = 0
 for x in 1:100
-    sum += x
+    global sum += x
 end
 println("Sum 1 to 100 = ", sum)
 
@@ -150,7 +152,7 @@ end
 # Sum of squares
 sum = 0.0
 for i in 1:length(squares)
-    sum += squares[i]
+    global sum += squares[i]
 end
 println("Sum of squares: ", sum)
 
@@ -376,7 +378,7 @@ val = 1
 for i in 1:rows
     for j in 1:cols
         m[i, j] = val
-        val += 1
+        global val += 1
     end
 end
 
@@ -1135,7 +1137,7 @@ in_set = 0
 for row in 1:20
     for col in 1:40
         if grid[row, col] == 100
-            in_set += 1
+            global in_set += 1
         end
     end
 end
@@ -1289,7 +1291,7 @@ for row in 1:height
         n = iterations[col]
         if n == maxiter
             print("#")
-            in_set += 1
+            global in_set += 1
         elseif n > 10
             print("+")
         elseif n > 4
@@ -1409,7 +1411,7 @@ end
 sum = 0.0
 for i in 1:3
     for j in 1:3
-        sum += m[i, j]
+        global sum += m[i, j]
     end
 end
 println("Sum of matrix elements: ", sum)
@@ -1442,7 +1444,7 @@ max_val = mat[1, 1]
 for i in 1:2
     for j in 1:3
         if mat[i, j] > max_val
-            max_val = mat[i, j]
+            global max_val = mat[i, j]
         end
     end
 end
@@ -2172,7 +2174,7 @@ end
 # Calculate sample mean (should be close to 0)
 sum = 0.0
 for i in 1:length(arr)
-    sum += arr[i]
+    global sum += arr[i]
     end
 mean = sum / length(arr)
 println("Sample mean: ", mean)
@@ -2206,8 +2208,8 @@ n = 12
 for i in 1:3
     for j in 1:4
         v = mat[i, j]
-        sum += v
-        sum_sq += v * v
+        global sum += v
+        global sum_sq += v * v
     end
 end
 

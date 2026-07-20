@@ -1,5 +1,8 @@
 //! Control flow statement parsers (if, for, while, try, begin, let, quote)
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::ParseResult;
 use crate::node_kind::NodeKind;
@@ -92,12 +95,15 @@ impl<'a> Parser<'a> {
         let start_token = self.expect(Token::KwFor)?;
         let start = start_token.span.start;
 
+        self.skip_newlines();
+
         // Parse first binding
         let mut bindings = vec![self.parse_for_binding()?];
 
         // Parse additional bindings separated by comma
         while self.check(&Token::Comma) {
             self.advance(); // consume comma
+            self.skip_newlines();
             bindings.push(self.parse_for_binding()?);
         }
 
@@ -201,7 +207,7 @@ impl<'a> Parser<'a> {
         let body = self.parse_block_until(&[Token::KwElse, Token::KwFinally, Token::KwEnd])?;
         children.push(body);
 
-        let end = children.last().unwrap().span.end;
+        let end = self.last_span_end(&children, "catch clause always pushes `body` above")?;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::CatchClause,
@@ -281,6 +287,7 @@ impl<'a> Parser<'a> {
         if !self.check(&Token::Newline)
             && !self.check(&Token::Semicolon)
             && !self.check(&Token::KwEnd)
+            && !self.is_at_end()
         {
             children.push(self.parse_let_bindings()?);
         }
@@ -309,10 +316,11 @@ impl<'a> Parser<'a> {
 
         while self.check(&Token::Comma) {
             self.advance();
+            self.skip_newlines();
             bindings.push(self.parse_expression()?);
         }
 
-        let end = bindings.last().unwrap().span.end;
+        let end = self.last_span_end(&bindings, "let bindings always push `first` above")?;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::LetBindings,
@@ -323,6 +331,12 @@ impl<'a> Parser<'a> {
 
     /// Parse quote expression: quote body end
     pub(crate) fn parse_quote_expression(&mut self) -> ParseResult<CstNode> {
+        // `quote ... end` resets the special indexing meaning of `end`, just
+        // like `:(...)`. The wrapper guarantees restoration on parse errors.
+        self.with_end_symbol_depth(0, |parser| parser.parse_quote_expression_inner())
+    }
+
+    fn parse_quote_expression_inner(&mut self) -> ParseResult<CstNode> {
         let start_token = self.expect(Token::KwQuote)?;
         let start = start_token.span.start;
 

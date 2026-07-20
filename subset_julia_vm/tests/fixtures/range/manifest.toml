@@ -5,6 +5,12 @@ expected = true
 description = "Range slicing with a range index r[a:b] returns a sub-range, preserving step/type; unblocks first(range, n) (Issue #5751)"
 
 [[tests]]
+name = "range_abstractrange_typevar_10150"
+file = "abstractrange_typevar_10150.jl"
+expected = true
+description = "AbstractRange{T} dispatch binds T for native and struct-backed range values (Issue #10150)"
+
+[[tests]]
 name = "range_linrange_basic"
 file = "linrange_basic.jl"
 expected = true
@@ -137,7 +143,108 @@ expected = true
 description = "Floating step ranges keep an endpoint that is lost by raw quotient flooring, e.g. 0:0.1:0.3 has length 4 like upstream Julia (Issue #7024)"
 
 [[tests]]
+name = "range_float32_colon_length_9510"
+file = "float32_colon_length_9510.jl"
+expected = true
+description = "Float32 colon ranges compute length with Float32 rational semantics, so 0.1f0:0.1f0:0.5f0 and the descending counterpart include the endpoint and collect as Vector{Float32} (Issue #9510)"
+
+[[tests]]
 name = "range_for_head_nonliteral_float_step_7800"
 file = "for_head_nonliteral_float_step_7800.jl"
 expected = true
 description = "Inline range literal with an integer start and a non-literal float step in a top-level for-head (e.g. 0:(2π/12):2π) iterates 13 times like upstream Julia, not zero; covers float-start and function-scope cases too (Issue #7800, follow-up to #3551)"
+
+[[tests]]
+name = "range_for_head_any_param_step_9291"
+file = "for_head_any_param_step_9291.jl"
+expected = true
+description = "A for-head range whose step infers as Any (e.g. an unannotated function-parameter step) takes the generic typed-range path and iterates the right number of times instead of truncating the float step to 0; integer steps and plain stepless loops stay correct (Issue #9291, regression from PR #9287's operand-following division inference)"
+
+[[tests]]
+name = "range_mixed_float_width_promotion_9322"
+file = "mixed_float_width_promotion_9322.jl"
+expected = true
+description = "A range with mixed floating-point widths takes the promotion JOIN of start/step/stop (Base.colon, base/range.jl) instead of the step's width: 0:0.5f0:6.0 (Int+Float32+Float64) is a Float64 range, and Float16 promotes up to a wider float, while pure Float32 stays Float32 (Issue #9322)"
+
+[[tests]]
+name = "range_colon_operand_promotion_9345"
+file = "colon_operand_promotion_9345.jl"
+expected = true
+description = "Range/colon construction promotes its endpoint operands (Base.colon, base/range.jl): 1:Int8(5) is UnitRange{Int64} (promote(Int64,Int8)=Int64), Int8(1):Int16(5) widens to Int16, and eltype of float ranges (1:0.5:3, 0:0.5f0:6.0) is the promoted float element instead of Any (Issue #9345)"
+
+[[tests]]
+name = "range_twiceprecision_colon_collect_9421"
+file = "twiceprecision_colon_collect_9421.jl"
+expected = true
+description = "Float colon ranges materialize with TwicePrecision semantics (julia/base/twiceprecision.jl): collect(0:0.1:1) yields shortest-decimal grid values (0.3, not 0.30000000000000004), getindex/last/iteration/membership agree, and slices keep exact values (Issue #9421)"
+
+[[tests]]
+name = "range_length_twiceprecision_9419"
+file = "range_length_twiceprecision_9419.jl"
+expected = true
+description = "range(start, stop; length) on Int64/Float64 endpoints returns upstream's TwicePrecision-backed StepRangeLen (typeof string parity) with _linspace-exact values, including start==stop, len<2 and irrational-endpoint cases (Issue #9419)"
+[[tests]]
+name = "range_bigint_endpoint_9420"
+file = "bigint_endpoint_9420.jl"
+expected = true
+description = "A BigInt endpoint promotes the range element type to BigInt (promote_type(BigInt, <:Integer) == BigInt): 1:big(3) is UnitRange{BigInt} with eltype BigInt, iteration/indexing/first/last/collect materialize BigInt elements, big(2) in 1:big(3) is true, and typed narrow-int unit ranges ((UInt8(1):UInt8(3))[2]) index at their element type instead of Int64 (Issue #9420)"
+
+[[tests]]
+name = "range_bigint_large_endpoints_9518"
+file = "bigint_large_endpoints_9518.jl"
+expected = true
+description = "BigInt-promoted UnitRange and StepRange endpoints beyond Float64-exact range remain exact for length, first/last, getindex, iteration, collect, membership, and step(r) instead of clamping or rounding through f64 (Issue #9518)"
+
+[[tests]]
+name = "range_steprange_step_type_9519"
+file = "steprange_step_type_9519.jl"
+expected = true
+description = "Explicit-step StepRange typeof and step(r) preserve the user step type parameter S separately from promoted element type T for BigInt, narrow-int, unsigned, empty/singleton, and Char ranges (Issue #9519)"
+
+[[tests]]
+name = "range_unitrange_step_type_9811"
+file = "unitrange_step_type_9811.jl"
+expected = true
+description = "UnitRange step(r) returns a one value at the promoted range element type T, including empty mixed-width signed/unsigned UnitRange values that previously fell through to the generic array fallback and returned Int64 (Issue #9811)"
+
+[[tests]]
+name = "range_native_identity_accessors_9815"
+file = "native_range_identity_accessors_9815.jl"
+expected = true
+description = "Native UnitRange, StepRange, Char range, and float StepRangeLen values keep typeof/eltype, first/last/getindex/length/collect/iterate, direct step(r), function-value first/last/step/length calls, Any-slot dispatch, adjoint/broadcast use, method dispatch identity, and narrow integer collect Vector element types synchronized with their visible type parameters (Issues #9815/#10018/#10024)"
+
+[[tests]]
+name = "range_float16_float32_colon_type_params_10019"
+file = "float16_float32_colon_type_params_10019.jl"
+expected = true
+description = "Float16 and Float32 colon ranges report upstream StepRangeLen type parameters: Float16/Float32 element type with Float64 accumulator fields, typed step/first/last/getindex results, and Vector{Float16}/Vector{Float32} collect eltypes (Issue #10019)"
+
+[[tests]]
+name = "range_struct_constructors_10150"
+file = "range_struct_constructors_10150.jl"
+expected = true
+description = "Direct UnitRange and StepRange constructors create first-class Julia structs with field access, normalized endpoints, typed step/collect/getindex, iteration, function-value step calls, and AbstractRange dispatch for Int64, BigInt, Float64, Float32, Char, and UInt8/UInt16 (Issue #10150)"
+
+[[tests]]
+name = "range_colon_struct_fields_10150"
+file = "range_colon_struct_fields_10150.jl"
+expected = true
+description = "Non-float colon range literals lower to first-class UnitRange/StepRange structs so explicit getfield over start/step/stop works for Int64, BigInt, narrow unsigned, and Char ranges, while float colon ranges stay StepRangeLen with TwicePrecision fields (Issue #10150)"
+
+[[tests]]
+name = "range_length_twiceprecision_9509"
+file = "range_length_twiceprecision_9509.jl"
+expected = true
+description = "range(start, stop; length) lifts Float32/Float16/narrow-int/mixed endpoints to upstream's TwicePrecision-backed StepRangeLen (StepRangeLen{Float32, Float64, Float64, Int64} etc.), range(start; step, length) returns the TwicePrecision form with authoritative length, upstream ArgumentError texts, and show's zero-step StepRangeLen constructor form (Issues #9509, #11440)"
+
+[[tests]]
+name = "range_colon_base_owned_dispatch_11444"
+file = "range_colon_base_owned_dispatch_11444.jl"
+expected = true
+description = "Colon range literals stay Base-owned when a user outer constructor contaminates the bare UnitRange table: 1:2 lowers through the parametric UnitRange{T} constructor (matching upstream Base.:(:)) while a direct bare UnitRange(3, 4) call still reaches the user extension (Issue #11444)"
+
+[[tests]]
+name = "range_linrange_length_type_param_11441"
+file = "range_linrange_length_type_param_11441.jl"
+expected = true
+description = "LinRange carries upstream's length type parameter L (LinRange{Float64, Int64}, LinRange{BigFloat, Int64}), partial application LinRange{T} still matches values and stays <: AbstractRange, and IteratorSize/eltype/repr/step/getindex dispatch on the two-parameter form (Issues #11441, #11449)"

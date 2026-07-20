@@ -20,7 +20,7 @@ use crate::aot::AotResult;
 use std::collections::{HashMap, HashSet};
 
 /// Escape identifiers that are Rust reserved keywords by prefixing with `r#`.
-pub(super) fn escape_rust_ident(name: &str) -> String {
+pub(crate) fn escape_rust_ident(name: &str) -> String {
     let sanitized: String = name
         .chars()
         .map(|ch| {
@@ -362,7 +362,7 @@ impl AotCodeGenerator {
             AotStmt::CompoundAssign { target, value, .. } => {
                 Self::expr_uses_complex(target) || Self::expr_uses_complex(value)
             }
-            AotStmt::Expr(expr) => Self::expr_uses_complex(expr),
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => Self::expr_uses_complex(expr),
             AotStmt::Return(expr) => expr.as_ref().is_some_and(Self::expr_uses_complex),
             AotStmt::If {
                 condition,
@@ -529,7 +529,6 @@ impl AotCodeGenerator {
             ty,
             StaticType::Struct { name, .. }
                 if name == "Complex"
-                    || name == "Complex64"
                     || StaticType::complex_param_type_from_name(name).is_some()
         )
     }

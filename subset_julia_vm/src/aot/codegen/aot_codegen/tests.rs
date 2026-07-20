@@ -909,9 +909,26 @@ fn tuple_dynamic_index_is_gated_issue_6962() {
         elem_ty: StaticType::Any,
         is_tuple: true,
     };
-    let message = codegen.emit_expr_to_string(&expr).unwrap_err().to_string();
-    assert!(message.contains("out of bounds"), "{message}");
-    assert!(message.contains("Issue #6962"), "{message}");
+    let generated = codegen.emit_expr_to_string(&expr).unwrap();
+    assert!(generated.contains("aot_throw"), "{generated}");
+    assert!(generated.contains("BoundsError"), "{generated}");
+}
+
+#[test]
+fn dynamic_value_index_handles_tuple_and_array_10464() {
+    let codegen = AotCodeGenerator::default_config();
+    let expr = AotExpr::Index {
+        array: Box::new(AotExpr::Var {
+            name: "value".to_string(),
+            ty: StaticType::Any,
+        }),
+        indices: vec![AotExpr::LitI64(2)],
+        elem_ty: StaticType::Any,
+        is_tuple: false,
+    };
+
+    let generated = codegen.emit_expr_to_string(&expr).unwrap();
+    assert_eq!(generated, "(value).destructure_index(2i64)");
 }
 
 #[test]
@@ -1369,7 +1386,7 @@ fn test_aot_codegen_complete_program() {
     assert!(result.contains("#![allow(clippy::needless_range_loop)]"));
     assert!(result.contains("#![allow(clippy::no_effect)]"));
     assert!(result
-        .contains("const _: [(); subset_julia_vm_runtime::AOT_RUNTIME_ABI_VERSION] = [(); 1];"));
+        .contains("const _: [(); subset_julia_vm_runtime::AOT_RUNTIME_ABI_VERSION] = [(); 2];"));
     assert!(result.contains("fn __sjulia_format_float64(value: f64) -> String"));
     assert!(result.contains("fn __sjulia_format_float32(value: f32) -> String"));
     assert!(result.contains("pub fn square"));
@@ -2039,7 +2056,10 @@ fn test_aot_codegen_dynamic_call_routes_to_dispatcher_with_value_args() {
     };
 
     let result = codegen.emit_expr_to_string(&expr).unwrap();
-    assert_eq!(result, "add(x, Value::from(2i64)).unwrap()");
+    assert_eq!(
+        result,
+        "add(x, Value::from(2i64)).unwrap_or_else(|e| subset_julia_vm_runtime::error::aot_throw(e))"
+    );
 }
 
 #[test]
@@ -2057,7 +2077,7 @@ fn dynamic_binop_uses_runtime_dispatcher_issue_7074() {
     let result = codegen.emit_expr_to_string(&expr).unwrap();
     assert_eq!(
         result,
-        "subset_julia_vm_runtime::dynamic_binop(subset_julia_vm_runtime::BinOp::Add, &(x), &(Value::from(2i64))).unwrap()"
+        "subset_julia_vm_runtime::dynamic_binop(subset_julia_vm_runtime::BinOp::Add, &(x), &(Value::from(2i64))).unwrap_or_else(|e| subset_julia_vm_runtime::error::aot_throw(e))"
     );
 }
 

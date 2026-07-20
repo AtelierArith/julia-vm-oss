@@ -1,7 +1,10 @@
 # Issue #3762/#3763: reflection hierarchy queries should share the same
 # direct-supertype/subtype information for builtin and user-defined types.
+# `supertypes` lives in InteractiveUtils upstream (not Base); import it so the
+# fixture runs under upstream julia too (Issue #10237).
 
 using Test
+using InteractiveUtils
 
 abstract type ReflectionHierarchyRoot3762 end
 abstract type ReflectionHierarchyMid3762 <: ReflectionHierarchyRoot3762 end
@@ -16,13 +19,13 @@ end
     @test supertype(ReflectionHierarchyLeaf3762) === ReflectionHierarchyMid3762
     @test supertype(ReflectionHierarchyMid3762) === ReflectionHierarchyRoot3762
 
-    leaf_chain = Base.supertypes(ReflectionHierarchyLeaf3762)
+    leaf_chain = supertypes(ReflectionHierarchyLeaf3762)
     @test leaf_chain[1] === ReflectionHierarchyLeaf3762
     @test leaf_chain[2] === ReflectionHierarchyMid3762
     @test leaf_chain[3] === ReflectionHierarchyRoot3762
     @test leaf_chain[4] === Any
 
-    bigint_chain = Base.supertypes(BigInt)
+    bigint_chain = supertypes(BigInt)
     @test bigint_chain[1] === BigInt
     @test bigint_chain[2] === Signed
     @test bigint_chain[3] === Integer

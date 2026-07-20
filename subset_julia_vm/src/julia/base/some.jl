@@ -26,7 +26,7 @@ function something(x)
     if x !== nothing
         return x
     end
-    error("ArgumentError: No value other than `nothing` found")
+    throw(ArgumentError("No value other than `nothing` found"))
 end
 
 function something(x, y)
@@ -42,7 +42,7 @@ function something(x, y)
     if y !== nothing
         return y
     end
-    error("ArgumentError: No value other than `nothing` found")
+    throw(ArgumentError("No value other than `nothing` found"))
 end
 
 function something(x, y, z)
@@ -64,7 +64,7 @@ function something(x, y, z)
     if z !== nothing
         return z
     end
-    error("ArgumentError: No value other than `nothing` found")
+    throw(ArgumentError("No value other than `nothing` found"))
 end
 
 function something(x, y, z, w)
@@ -92,5 +92,5 @@ function something(x, y, z, w)
     if w !== nothing
         return w
     end
-    error("ArgumentError: No value other than `nothing` found")
+    throw(ArgumentError("No value other than `nothing` found"))
 end

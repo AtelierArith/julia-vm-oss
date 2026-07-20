@@ -115,7 +115,7 @@ end
 
 # _shorthash7(hsh) - extract 7 MSBs and set bit 7
 # Reference: julia/base/dict.jl:122
-# hash() returns Int64; use >>> (logical right shift)
+# hash() returns UInt64; use >>> (logical right shift)
 # Result: 128-255 (bit 7 always set), stored as UInt8
 function _shorthash7(hsh)
     return UInt8((hsh >>> 57) | 128)
@@ -125,8 +125,8 @@ end
 # Reference: julia/base/dict.jl:127-132
 # sz must be a power of 2; returns (1-based index, shorthash7)
 function hashindex(key, sz)
-    hsh = hash(key)
-    idx = (hsh & (sz - 1)) + 1
+    hsh = reinterpret(UInt64, hash(key))
+    idx = Int64((hsh & UInt64(sz - 1)) + UInt64(1))
     return idx, _shorthash7(hsh)
 end
 
@@ -536,7 +536,7 @@ end
 function getindex(h::Dict{K,V}, key) where {K,V}
     index = ht_keyindex(h, key)
     if index < 0
-        error("KeyError: key not found")
+        throw(KeyError(string(key)))
     end
     _vals = h.vals
     return _vals[index]
@@ -608,7 +608,7 @@ end
 function pop!(h::Dict{K,V}, key) where {K,V}
     index = ht_keyindex(h, key)
     if index < 0
-        error("KeyError: key not found")
+        throw(KeyError(string(key)))
     end
     _vals = h.vals
     val = _vals[index]
@@ -660,17 +660,60 @@ struct KeySet{K} <: AbstractSet{K}
     dict
 end
 
-struct ValueIterator
+struct ValueIterator{V}
     dict
 end
 
 KeySet(h::Dict{K,V}) where {K,V} = KeySet{K}(h)
-ValueIterator(h::Dict{K,V}) where {K,V} = ValueIterator(h)
+ValueIterator(h::Dict{K,V}) where {K,V} = ValueIterator{V}(h)
 
 length(v::KeySet{K}) where K = length(v.dict)
-length(v::ValueIterator) = length(v.dict)
+length(v::ValueIterator{V}) where V = length(v.dict)
 isempty(v::KeySet{K}) where K = isempty(v.dict)
-isempty(v::ValueIterator) = isempty(v.dict)
+isempty(v::ValueIterator{V}) where V = isempty(v.dict)
+
+eltype(::Type{KeySet{K}}) where K = K
+eltype(v::KeySet{K}) where K = K
+eltype(::Type{ValueIterator{V}}) where V = V
+eltype(v::ValueIterator{V}) where V = V
+IteratorEltype(::Type{KeySet{K}}) where K = HasEltype()
+IteratorEltype(v::KeySet{K}) where K = HasEltype()
+IteratorEltype(::Type{ValueIterator{V}}) where V = HasEltype()
+IteratorEltype(v::ValueIterator{V}) where V = HasEltype()
+IteratorSize(::Type{KeySet{K}}) where K = HasLength()
+IteratorSize(v::KeySet{K}) where K = HasLength()
+IteratorSize(::Type{ValueIterator{V}}) where V = HasLength()
+IteratorSize(v::ValueIterator{V}) where V = HasLength()
+
+show(io::IO, iter::Union{KeySet,ValueIterator}) = show(io, collect(iter))
+
+function sum(iter::Union{KeySet,ValueIterator}; dims=0, init=nothing)
+    if dims != 0
+        error("sum: dims must be 1 or 2 for matrices")
+    end
+    return _sum_iterable(iter, init)
+end
+
+function prod(iter::Union{KeySet,ValueIterator}; dims=0, init=nothing)
+    if dims != 0
+        error("prod: dims must be 1 or 2 for matrices")
+    end
+    return _prod_iterable(iter, init)
+end
+
+function minimum(iter::Union{KeySet,ValueIterator}; dims=0, init=nothing)
+    if dims != 0
+        error("minimum: dims must be 1 or 2 for matrices")
+    end
+    return _minimum_iterable(iter, init)
+end
+
+function maximum(iter::Union{KeySet,ValueIterator}; dims=0, init=nothing)
+    if dims != 0
+        error("maximum: dims must be 1 or 2 for matrices")
+    end
+    return _maximum_iterable(iter, init)
+end
 
 function iterate(v::KeySet{K}) where K
     y = iterate(v.dict)
@@ -684,13 +727,13 @@ function iterate(v::KeySet{K}, state) where K
     return (y[1].first, y[2])
 end
 
-function iterate(v::ValueIterator)
+function iterate(v::ValueIterator{V}) where V
     y = iterate(v.dict)
     y === nothing && return nothing
     return (y[1].second, y[2])
 end
 
-function iterate(v::ValueIterator, state)
+function iterate(v::ValueIterator{V}, state) where V
     y = iterate(v.dict, state)
     y === nothing && return nothing
     return (y[1].second, y[2])

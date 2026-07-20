@@ -570,11 +570,12 @@ fn test_if_statement_children() {
 
 #[test]
 fn test_function_definition_children() {
-    let node = parse_first("function foo(x) x end");
+    let source = "function foo(x) x end";
+    let node = parse_first(source);
     assert_eq!(node.kind, NodeKind::FunctionDefinition);
     // First child is the function name (Identifier)
     assert_eq!(node.children[0].kind, NodeKind::Identifier);
-    assert_eq!(node.children[0].text.as_deref(), Some("foo"));
+    assert_eq!(node.children[0].text_from_source(source), "foo");
     // Second child is parameter list
     assert_eq!(node.children[1].kind, NodeKind::ParameterList);
 }

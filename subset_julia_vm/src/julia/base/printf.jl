@@ -100,7 +100,7 @@ function _printf_one(minus::Bool, plus::Bool, space::Bool, zeroflag::Bool, alt::
         end
         return _printf_pad("", s, width, minus, false)
     elseif conv == 'c'
-        s = isa(arg, Char) ? string(arg) : string(Char(Int(arg)))
+        s = isa(arg, Char) ? string(arg) : string(_int_to_char(Int(arg)))
         return _printf_pad("", s, width, minus, false)
     else
         return string(arg)

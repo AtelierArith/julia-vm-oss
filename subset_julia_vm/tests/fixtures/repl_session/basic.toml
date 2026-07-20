@@ -1,0 +1,65 @@
+name = "repl_session_basic"
+description = "Basic persistent REPL session semantics shared by sjulia and upstream Julia."
+
+[[steps]]
+name = "arithmetic_sets_ans"
+input = "1 + 2"
+success = true
+stdout = ""
+display = "3"
+
+[[steps]]
+name = "ans_persists"
+input = "ans * 2"
+success = true
+stdout = ""
+display = "6"
+
+[[steps]]
+name = "assignment_returns_value"
+input = "x = 10"
+success = true
+stdout = ""
+display = "10"
+
+[[steps]]
+name = "stdout_and_value"
+input = """
+println(x)
+x + 5
+"""
+success = true
+stdout = "10\n"
+display = "15"
+
+[[steps]]
+name = "multiline_function_definition"
+input = """
+function inc8714(x)
+    x + 1
+end
+"""
+success = true
+stdout = ""
+display = "inc8714 (generic function with 1 method)"
+
+[[steps]]
+name = "function_call_after_definition"
+input = "inc8714(41)"
+success = true
+stdout = ""
+display = "42"
+
+[[steps]]
+name = "error_step"
+input = "missing8714 + 1"
+success = false
+stdout = ""
+error_contains = "UndefVarError"
+
+[[steps]]
+name = "recovers_after_error"
+input = "inc8714(1)"
+success = true
+stdout = ""
+display = "2"

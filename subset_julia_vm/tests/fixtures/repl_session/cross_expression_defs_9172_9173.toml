@@ -1,0 +1,50 @@
+name = "repl_session_cross_expression_defs"
+description = "REPL: a macro (Issue #9172) and a method (Issue #9173) defined in one top-level expression must be visible to later expressions on the same session. Regression for the REPL cross-expression definition-visibility bugs."
+
+# --- Issue #9172: a macro defined in one expression is usable in a later one ---
+[[steps]]
+name = "define_twice_macro"
+input = """
+macro twice(expr)
+    quote
+        $(esc(expr))
+        $(esc(expr))
+    end
+end;
+"""
+success = true
+stdout = ""
+
+[[steps]]
+name = "use_twice_macro_from_later_expression"
+input = '@twice println("Hi");'
+success = true
+stdout = "Hi\nHi\n"
+
+# --- Issue #9173: a later method definition must EXTEND, not replace, the
+#     generic function, so earlier methods remain callable ---
+[[steps]]
+name = "define_process_int_method"
+input = "process(x::Int64) = x * 2;"
+success = true
+stdout = ""
+
+[[steps]]
+name = "define_process_float_method"
+input = "process(x::Float64) = Int(x * 10);"
+success = true
+stdout = ""
+
+[[steps]]
+name = "call_process_int_still_works_after_float_method_added"
+input = "process(21)"
+success = true
+stdout = ""
+display = "42"
+
+[[steps]]
+name = "call_process_float_method"
+input = "process(2.0)"
+success = true
+stdout = ""
+display = "20"

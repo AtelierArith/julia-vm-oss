@@ -18,7 +18,7 @@
 # A stale allowlist entry (no longer matches) = non-fatal NOTE (remove it when
 # convenient); it does not weaken containment.
 #
-# Marker: the case-insensitive substring "interleav" under subset_julia_vm/src/vm.
+# Marker: the case-insensitive substring "interleav" under subset_julia_vm_vm/src/vm.
 # This is intentionally broad (matches comments too): a new file that even
 # *describes* interleaved Complex storage is a new specialization surface.
 #
@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VM_DIR="subset_julia_vm/src/vm"
+VM_DIR="subset_julia_vm_vm/src/vm"
 
 if [[ ! -d "$VM_DIR" ]]; then
     echo "ERROR: $VM_DIR not found. Run from the repository root." >&2
@@ -40,26 +40,18 @@ if [[ ! -d "$VM_DIR" ]]; then
 fi
 
 # ---- Allowlist: files permitted to carry interleaved-Complex specialization ---
-# Measured 2026-06-26 on main @ Issue #7876 (18 files). Keep sorted for review.
+# Measured 2026-07-09 on main @ Issue #9934 (10 files). Keep sorted for review.
 ALLOWLIST="
-subset_julia_vm/src/vm/broadcast.rs
-subset_julia_vm/src/vm/builtins_arrays.rs
-subset_julia_vm/src/vm/builtins_linalg.rs
-subset_julia_vm/src/vm/dynamic_ops/helpers.rs
-subset_julia_vm/src/vm/exec/array_basic.rs
-subset_julia_vm/src/vm/exec/array_index.rs
-subset_julia_vm/src/vm/exec/array_mutate.rs
-subset_julia_vm/src/vm/exec/struct_ops.rs
-subset_julia_vm/src/vm/matmul/multiply.rs
-subset_julia_vm/src/vm/matmul/scalar.rs
-subset_julia_vm/src/vm/value/array_data.rs
-subset_julia_vm/src/vm/value/array_element.rs
-subset_julia_vm/src/vm/value/array_value/access.rs
-subset_julia_vm/src/vm/value/array_value/mod.rs
-subset_julia_vm/src/vm/value/array_value/mutation.rs
-subset_julia_vm/src/vm/value/array_wrapper.rs
-subset_julia_vm/src/vm/value/memory_value.rs
-subset_julia_vm/src/vm/value/struct_instance.rs
+subset_julia_vm_vm/src/vm/broadcast.rs
+subset_julia_vm_vm/src/vm/builtins_arrays.rs
+subset_julia_vm_vm/src/vm/builtins_linalg.rs
+subset_julia_vm_vm/src/vm/dynamic_ops/helpers.rs
+subset_julia_vm_vm/src/vm/exec/array_basic.rs
+subset_julia_vm_vm/src/vm/exec/array_index.rs
+subset_julia_vm_vm/src/vm/exec/array_mutate.rs
+subset_julia_vm_vm/src/vm/exec/struct_ops.rs
+subset_julia_vm_vm/src/vm/matmul/multiply.rs
+subset_julia_vm_vm/src/vm/matmul/scalar.rs
 "
 
 is_allowlisted() {
@@ -130,5 +122,5 @@ if [[ "$stale" -gt 0 ]]; then
     exit 0
 fi
 
-echo "OK: interleaved-Complex specialization confined to the allowlist (18 files)."
+echo "OK: interleaved-Complex specialization confined to the allowlist (10 files)."
 exit 0

@@ -23,6 +23,12 @@ expected = true
 description = "Test task macros: @task, @async, @sync"
 
 [[tests]]
+name = "concurrency_task_scheduler_8989"
+file = "task_scheduler_8989.jl"
+expected = true
+description = "Task scheduler drains runnable @async work at wait/yield/channel safe points (Issue #8989)"
+
+[[tests]]
 name = "concurrency_sync_stmt_assign_local"
 file = "sync_stmt_assign_local.jl"
 expected = true
@@ -56,13 +62,13 @@ description = "Test Channel{T} parametric typed channels (Issue #3450)"
 name = "channel_blocking"
 file = "channel_blocking.jl"
 expected = true
-description = "Test cooperative blocking put!/take!/fetch via pending_puts queue (Issue #3451)"
+description = "Test continuation-backed blocking put!/take!/fetch and scheduler ordering (Issues #3451, #10349)"
 
 [[tests]]
 name = "concurrency_channel_bugfixes"
 file = "channel_bugfixes.jl"
 expected = true
-description = "Bug fixes: length counts pending_puts (#3454), producer exceptions propagate (#3455), isfull unbuffered (#3456)"
+description = "Channel continuation regressions: buffered blocking, producer exceptions, unbuffered isfull/rendezvous (#3454/#3455/#3456/#10349)"
 
 [[tests]]
 name = "concurrency_lock_macro"
@@ -87,3 +93,21 @@ name = "concurrency_sync_stmt_for_async"
 file = "sync_stmt_for_async.jl"
 expected = true
 description = "Statement-position @sync over a for-loop spawning @async collects + awaits every task (Issue #7831)"
+
+[[tests]]
+name = "concurrency_threads_single_thread_shim_8991"
+file = "threads_single_thread_shim_8991.jl"
+expected = true
+description = "Base.Threads single-thread compatibility shim: nthreads/threadid, @threads, @spawn, Atomic, SpinLock (Issue #8991)"
+
+[[tests]]
+name = "concurrency_threads_spinlock_bare_name_scope_10257"
+file = "threads_spinlock_bare_name_scope_10257.jl"
+expected = true
+description = "Threads' own lock/unlock/islocked resolve their bare l::SpinLock annotation to Threads.SpinLock, not sjulia's colliding top-level SpinLock, under a Base-cache-bypass recompile (Issue #10257)"
+
+[[tests]]
+name = "concurrency_channel_closure_doblock_10352_10353"
+file = "channel_closure_doblock_10352_10353.jl"
+expected = true
+description = "take!(::Channel) dispatches to the pure-Julia Channel method inside closures/@async bodies instead of the builtin IOBuffer take! (Issue #10352); do-block producer bodies may contain for statements and the typed Channel{T}(func, sz) producer constructor exists (Issue #10353). collect on a pending producer is Issue #11417"

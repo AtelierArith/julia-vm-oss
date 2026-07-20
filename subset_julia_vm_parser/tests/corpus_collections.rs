@@ -70,6 +70,16 @@ fn test_parenthesized_multiline_expression() {
     assert_root_child_kind("(\n    1 + 2\n)", NodeKind::ParenthesizedExpression);
 }
 
+#[test]
+fn test_parenthesized_statement_item_issue_8759() {
+    assert_parses("(global c = c + 1; 0)");
+    assert_parses("(print(io); return)");
+    assert_parses("rows < 2 && (print(io, \" ...\"); return)");
+    assert_parses(
+        "isempty(s) && return interpolate ? (Expr(:tuple,:()), last_arg) : ([], last_arg)",
+    );
+}
+
 // =============================================================================
 // Named Tuple
 // =============================================================================
@@ -127,8 +137,29 @@ fn test_vector_typed() {
 }
 
 #[test]
+fn test_additional_collection_gaps_issue_8759() {
+    assert_root_child_kind(
+        "_cat5b = [randn(3) ;; randn(3) ;; randn(3)]",
+        NodeKind::Assignment,
+    );
+    assert_root_child_kind(
+        "g = ((x + y) % 5 == 2 for x = 1:n1, y = 1:n2)",
+        NodeKind::Assignment,
+    );
+    assert_root_child_kind("push!(s, 1:2:10...)", NodeKind::CallExpression);
+}
+
+#[test]
 fn test_vector_typed_comprehension() {
     assert_root_child_kind("Float64[i / 10.0 for i in 1:10]", NodeKind::TypedExpression);
+}
+
+#[test]
+fn test_typed_comprehension_quote_body_newline_before_for_issue_8759() {
+    assert_root_child_kind(
+        "Expr[\n quote\n  x = y\n end\n for y in ys\n]",
+        NodeKind::TypedExpression,
+    );
 }
 
 // =============================================================================
@@ -223,6 +254,29 @@ fn test_typed_matrix_negative_element() {
 }
 
 #[test]
+fn test_typed_matrix_trailing_ncat_separator_issue_8759() {
+    assert_root_child_kind("Float32[4.0; 7.0;;]", NodeKind::TypedExpression);
+}
+
+#[test]
+fn test_matrix_row_trailing_ncat_separator_issue_8759() {
+    assert_root_child_kind("[v v; v v;;;]", NodeKind::MatrixExpression);
+    assert_root_child_kind("[v3 ;;; v1 v1]", NodeKind::MatrixExpression);
+    assert_root_child_kind("[1 1 ;;; 1 1 ;;;;]", NodeKind::MatrixExpression);
+}
+
+#[test]
+fn test_empty_ncat_issue_9046() {
+    assert_root_child_kind("[;]", NodeKind::VectorExpression);
+    assert_root_child_kind("[;;]", NodeKind::VectorExpression);
+    assert_root_child_kind("[;;;]", NodeKind::VectorExpression);
+    assert_parses("T[;]");
+    assert_parses("T[;;]");
+    assert_parses("[1, 2;]");
+    assert_parses("[ ;;\n;;\n]");
+}
+
+#[test]
 fn test_matrix_minus_inside_call_arg_is_not_new_element() {
     // The matrix-row context does not extend into a call's argument list: the
     // `-` inside `[f(1 -2) 3]` is ordinary binary subtraction, so the row has
@@ -230,6 +284,16 @@ fn test_matrix_minus_inside_call_arg_is_not_new_element() {
     // matrix-row flag being cleared on entering a call (Issue #7196).
     assert_eq!(matrix_row_lengths("[f(1 -2) 3]"), vec![2]);
     assert_eq!(matrix_row_lengths("[f(1 - 2) 3]"), vec![2]);
+}
+
+#[test]
+fn test_matrix_tuple_elements_space_before_paren_issue_9437() {
+    // In a matrix row, whitespace before `(` / `[` is an element separator,
+    // not a spaced call/index postfix. Adjacent `f(1)` remains a call.
+    assert_eq!(matrix_row_lengths("[(1, 2) (3, 4)]"), vec![2]);
+    assert_eq!(matrix_row_lengths("[f (1)]"), vec![2]);
+    assert_eq!(matrix_row_lengths("[f(1) 2]"), vec![2]);
+    assert_eq!(matrix_row_lengths("[[1] [2]]"), vec![2]);
 }
 
 // =============================================================================
@@ -249,6 +313,14 @@ fn test_comprehension_newline_before_for() {
 #[test]
 fn test_comprehension_expression() {
     assert_root_child_kind("[x^2 for x in 1:10]", NodeKind::ComprehensionExpression);
+}
+
+#[test]
+fn test_comprehension_macrocall_body() {
+    assert_root_child_kind(
+        r#"[@async @test String(recv(s)) == "hello" for s in (a, b)]"#,
+        NodeKind::ComprehensionExpression,
+    );
 }
 
 // Newlines inside `[...]` are insignificant, so a multi-line comprehension whose
@@ -344,6 +416,17 @@ fn test_generator_with_condition() {
 #[test]
 fn test_generator_newline_before_if() {
     assert_root_child_kind("(x for x in 1:10\n if x > 5)", NodeKind::Generator);
+}
+
+#[test]
+fn test_generator_line_continuation_after_in_issue_8753() {
+    assert_root_child_kind(
+        "(floor(Int, (tar - lo) * k2ln + lo + off) for (tar, off) in\n    ((minimum(target), -offset), (maximum(target), offset)))",
+        NodeKind::Generator,
+    );
+    assert_parses(
+        "f(floor(Int, tar) for (tar, off) in\n    ((minimum(target), -offset), (maximum(target), offset)))",
+    );
 }
 
 #[test]

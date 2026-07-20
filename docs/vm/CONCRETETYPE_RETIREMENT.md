@@ -71,6 +71,16 @@ simply larger than first anticipated, because the structured containers are
 complete**: the dual nullary representation is gone; what remains (§2.3) is
 optional polish with marginal benefit.
 
+`Memory{T}` is now a lattice carrier (Issue #9034, PR #9052): the tracking
+option was implemented, adding `ConcreteType::Memory { element, ndims }`
+mirroring `ConcreteType::Array`. `ValueType::Memory` / `MemoryOf(T)` map to that
+concrete lattice value instead of widening to `LatticeType::Top`, and
+`m::Memory{Int64}` parameter annotations resolve to `MemoryOf(I64)` in method
+tables. It reuses Array's aliasing / mutation join behavior (Memory is a flat
+1-D typed buffer). Residual gap: `Memory{T}(undef,n)` constructor and
+indexed-load *return* types still widen to `Any`, shared with `Array{T}(undef,n)`
+because parametric built-in constructors are not inferred (a separate follow-up).
+
 ## 2. Variant inventory (ground truth from `From<&ConcreteType> for CoreType`)
 
 Source: `compile/lattice/types.rs` (`impl From<&ConcreteType> for CoreType`).

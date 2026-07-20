@@ -2,7 +2,7 @@ using Test
 
 @testset "Memory{T} basic operations" begin
     # Construction and length
-    m = Memory{Int64}(5)
+    m = Memory{Int64}(undef, 5)
     @test length(m) == 5
     @test size(m) == (5,)
     @test size(m, 1) == 5
@@ -22,14 +22,14 @@ using Test
     @test m[5] == 50
 
     # fill!
-    m2 = Memory{Int64}(3)
+    m2 = Memory{Int64}(undef, 3)
     fill!(m2, 99)
     @test m2[1] == 99
     @test m2[2] == 99
     @test m2[3] == 99
 
     # copy
-    m3 = Memory{Int64}(3)
+    m3 = Memory{Int64}(undef, 3)
     m3[1] = 1
     m3[2] = 2
     m3[3] = 3
@@ -46,7 +46,7 @@ using Test
     @test m4[1] == 100
 
     # Zero-length memory
-    m7 = Memory{Int64}(0)
+    m7 = Memory{Int64}(undef, 0)
     @test length(m7) == 0
     @test size(m7) == (0,)
     @test ndims(m7) == 1

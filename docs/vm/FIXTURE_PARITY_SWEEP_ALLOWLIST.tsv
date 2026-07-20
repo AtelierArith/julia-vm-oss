@@ -1,0 +1,48 @@
+# Fixture upstream-parity sweep allowlist (Issue #10246 gate; drift backlog: Issue #10237)
+#
+# scripts/check_fixture_parity_sweep.sh runs every registered fixture of the
+# selected categories under both sjulia and upstream julia
+# (scripts/fixture_julia_parity.sh --red-green) and fails on any divergence
+# not listed here. This is a TWO-SIDED RATCHET:
+#   * a swept fixture that diverges and is NOT listed fails the gate
+#     (no new drifted fixture can land silently);
+#   * a listed fixture in a swept category that NO LONGER diverges fails as a
+#     stale entry — remove its row (the list must monotonically shrink as the
+#     drift backlog is fixed).
+#
+# classification: sjulia-bug   = fixture asserts sjulia's wrong behavior (fix the VM, then the fixture)
+#                 bad-fixture  = wrong / non-portable assertion (fix the fixture)
+#                 untriaged    = red under upstream julia 1.12.6; not yet triaged into the above
+#
+# Initial population: the Issue #10237 backlog (13 fixtures found during the
+# #9671 Phase 3 aggregation; types/types_supertype.jl has since been fixed and
+# is NOT listed) plus 13 additional drifted fixtures found by the first sweep
+# runs over ref/strings/macros/types/arithmetic/dispatch/closures/io
+# (2026-07-11), reported on Issue #10237.
+#
+# file	classification	issue	reason
+strings/replace_basic.jl	sjulia-bug	#10197	fixture asserts replace(count=0) replaces all; upstream count=0 replaces nothing (#10237)
+strings/sprintf.jl	untriaged	#10237	errors under upstream julia 1.12.6 (fixture drift backlog)
+strings/string_rsplit.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+strings/string_bytes2hex.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+strings/custom_str_macro.jl	untriaged	#10237	UndefVarError: @foo_str not defined in Main under upstream julia (found by sweep 2026-07-11)
+strings/int128_literal.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+strings/char_classification.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+strings/string_interpolation_bang.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+strings/sprintf_pair_no_structref_leak_4729.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+macros/test_allocation_macros.jl	untriaged	#10237	red under upstream julia 1.12.6 (fixture drift backlog)
+macros/nospecialize.jl	sjulia-bug	#10237	@nospecialize block value: upstream yields nothing, fixture asserts 42
+macros/quote_forward_generator_7572.jl	untriaged	#10237	final && chain short-circuits false under upstream (quote args shape differs; found by sweep 2026-07-11)
+macros/static_version_condition_7529.jl	untriaged	#10237	@static VERSION-conditional final value is false under upstream 1.12.6 (found by sweep 2026-07-11)
+macros/macro_eval_nested_quote_5978.jl	untriaged	#10237	eval(:(eval(ex))) raises UndefVarError: ex in Main under upstream (found by sweep 2026-07-11)
+types/array_dimension_params.jl	untriaged	#10237	errors under upstream julia 1.12.6 (fixture drift backlog)
+types/test_hash_pure_julia.jl	untriaged	#10237	2 of 12 hash tests fail under upstream julia 1.12.6
+arithmetic/float_pow_int_compensated_7308.jl	untriaged	#10237	@test throws under upstream julia 1.12.6 (found by sweep 2026-07-11)
+dispatch/global_const_function_access.jl	untriaged	#10237	test throws exception under upstream julia 1.12.6 (found by sweep 2026-07-11)
+dispatch/parametric_function_dispatch.jl	untriaged	#10237	red under upstream julia 1.12.6 (found by sweep 2026-07-11)
+dispatch/test_user_base_coexist.jl	bad-fixture	#10237	user min shadows Base.min without import; MethodError under upstream (found by sweep 2026-07-11)
+io/displaysize.jl	untriaged	#10237	displaysize test errors under upstream julia with piped stdout (found by sweep 2026-07-11)
+io/test_iocontext.jl	untriaged	#10237	UndefVarError: iocontext under upstream julia (found by sweep 2026-07-11)
+io/test_printstyled.jl	untriaged	#10237	red under upstream julia 1.12.6 (found by sweep 2026-07-11)
+io/test_iocontext_properties.jl	untriaged	#10237	exception outside @test under upstream julia (found by sweep 2026-07-11)
+io/test_iocontext_sprint.jl	untriaged	#10237	exception outside @test under upstream julia (found by sweep 2026-07-11)

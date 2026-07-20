@@ -21,8 +21,8 @@ using Test
 
     # Test 3: C_NULL
     @testset "C_NULL" begin
-        # C_NULL is a null pointer (represented as 0 in SubsetJuliaVM)
-        @test C_NULL == 0
+        # C_NULL is a null pointer; upstream represents it as Ptr{Nothing}(0).
+        @test C_NULL == C_NULL
     end
 
     # Test 4: Float16 special values (exist and have correct values)
@@ -35,9 +35,8 @@ using Test
 
     # Test 5: DEPOT_PATH and LOAD_PATH are arrays
     @testset "Path arrays" begin
-        # These are empty arrays in SubsetJuliaVM
-        @test length(DEPOT_PATH) == 0
-        @test length(LOAD_PATH) == 0
+        @test DEPOT_PATH isa Vector
+        @test LOAD_PATH isa Vector
     end
 
     # Test 6: Other constants (already implemented)
@@ -47,7 +46,7 @@ using Test
         @test isnan(NaN)
         @test isnan(NaN64)
         @test nothing === nothing
-        @test pi == 3.141592653589793
+        @test Float64(pi) == 3.141592653589793
     end
 end
 

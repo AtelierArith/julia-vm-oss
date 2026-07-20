@@ -5,9 +5,16 @@
 **/xcuserdata/
 *.xcuserstate
 
+# Xcode E2E driver derived data (scripts/ios_repl_e2e.sh)
+SubsetJuliaVMApp/.e2e-derived-data/
+
 # Build artifacts
 *.xcframework/
 SubsetJuliaVM.xcframework/
+
+# Precompiled VM bytecode for bundled iOS samples, generated next to each
+# sample .jl by ./build.sh (Issue #9945). Build artifacts — never commit.
+SubsetJuliaVMApp/**/*.sjvmbc
 
 # Rust build artifacts
 **/target/
@@ -17,11 +24,27 @@ SubsetJuliaVM.xcframework/
 # Tool configurations
 .serena/
 .superpowers/
+.worktrees/
 
 # Node.js
 node_modules/
 
+# Benchmark run artifacts (timings, stdout, binaries, report.md) written by
+# benchmarks/scripts/*.sh (Issue #9753). Already-tracked result files stay
+# tracked; force-add (`git add -f`) any new result that should be kept.
+benchmarks/results/
+
 *.so
 plans
-extern
+# extern/ package clones are not tracked (too large; ~1.3 GB).
+# MANIFEST.tsv IS tracked — it records the pinned version of each clone.
+# Reproduce the clones with: bash scripts/populate_extern.sh (Issue #9000)
+extern/*
+!extern/MANIFEST.tsv
 scripts/__pycache__/
+# tests/test_aot_gate_selection.py (Issue #11458 gate selector) leaves its
+# bytecode cache behind when premerge_gate/pytest runs it; an untracked
+# __pycache__ must not fail the gate's clean-tree check.
+tests/__pycache__/
+# Cross-build output from scripts/build_sjulia_pizero.sh (binaries to scp out).
+dist/

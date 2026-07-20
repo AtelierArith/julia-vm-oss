@@ -15,3 +15,75 @@ name = "loops_for_loop_typed_variable"
 file = "for_loop_typed_variable.jl"
 expected = "10\n15\n(6.0, Float64)\n6\n9.0\n"
 description = "A `::T` annotation on a single loop variable `for i::T in itr` types/converts each iterate value to T (Issue #8208), across range/`=`/array-iterable/cartesian forms"
+
+[[tests]]
+name = "loops_loop_union_phi_9123"
+file = "loop_union_phi_9123.jl"
+expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+description = "F64 (+,-,*,/) Union{Int64,Float64} call results use the small-union DynamicToF64 fast path and keep the accumulator slot F64 (Issue #9123); Union{Int64,Float64} <op> Int64 union-splits in inference so an empty-loop Int64 result stays Int64 rather than coercing to Float64 (Issue #9145)"
+
+[[tests]]
+name = "loops_accum_f64_slots_9126"
+file = "loops_accum_f64_slots_9126.jl"
+expected = "5050.0\n250.0\n4.0\n"
+description = "F64 accumulate loop bodies fuse to AddF64Slots / AddF64I64Slots superinstructions with results matching upstream Julia (Issue #9126)"
+
+[[tests]]
+name = "loops_typed_loop_call_specialize_i64_10439"
+file = "typed_loop_call_specialize_i64_10439.jl"
+expected = true
+description = "A loop-bodied untyped helper called from a typed loop inlines via TypedLoopOp::CallSpecializeI64Function and is bit-for-bit identical to the typed twin and upstream Julia across negative modulo / zero / Int64 overflow boundaries (Issue #10439)"
+
+[[tests]]
+name = "loops_typed_loop_call_specialize_f64_10491"
+file = "typed_loop_call_specialize_f64_10491.jl"
+expected = true
+description = "An untyped loop-bodied Float64 helper called from a typed nested loop inlines via TypedLoopOp::CallSpecializeF64Function (fused CallSpecializeF64Slots site, mixed-type frame-less callee) and matches the typed twin and upstream Julia across NaN/±Inf/signed-zero/rounding edge cases (Issue #10491)"
+
+[[tests]]
+name = "loops_typed_loop_uninit_local_bail_after_rand_10536"
+file = "loops_typed_loop_uninit_local_bail_after_rand_10536.jl"
+expected = true
+description = "A typed loop drawing rand() then reading a path-dependent loop local left uninitialized on every reachable path raises the matching UndefVarError without double-drawing rand() when caught (Issue #10536): the runtime-side side_effect_applied guard in run_typed_ops_core raises directly instead of bailing to a generic re-run once RandF64/IndexStore* has already applied"
+
+[[tests]]
+name = "loops_while_gcd_general_typed_loop_10310"
+file = "loops_while_gcd_general_typed_loop_10310.jl"
+expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+description = "Coprime-gcd while loop (while b != 0; (a,b) = (b, a % b); end) runs correctly through the general typed-loop path after the EuclideanModuloI64Function/EuclideanModuloI64LoopBlock special case was retired (Issue #10310), including the b==0-on-entry and a==0-on-entry edge cases"
+
+[[tests]]
+name = "loops_typed_array_read_10104"
+file = "loops_typed_array_read_10104.jl"
+expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+description = "Read-only 1-D array reductions (for i in 1:length(x); s += x[i]; end) run on the typed-loop native block via the read-only Vector{T} snapshot bridge, byte-identical to the interpreter across empty/F64/I64/dot/max/break/return and a catchable out-of-bounds BoundsError (Issue #10104)"
+
+[[tests]]
+name = "loops_slot_const_cmp_branch_10105"
+file = "loops_slot_const_cmp_branch_10105.jl"
+expected = true
+description = "Constant-bounded while-loop guards fuse to the JumpIfCmpI64SlotConst slot-vs-constant compare-and-branch superinstruction across all six comparison predicates, with results and typed-loop behavior identical to upstream Julia (Issue #10105)"
+
+[[tests]]
+name = "loops_string_typed_loop_10559"
+file = "loops_string_typed_loop_10559.jl"
+expected = true
+description = "String slot reads/writes inside a recognized typed loop (LoadStrSlot/StoreStrSlot/PushStrConst/ConcatStr/EqStr/StrLen) match upstream Julia for concatenation accumulation, String-param concatenation, string equality, and — critically — UTF-8/multi-byte inputs, where length() must be the codepoint count and not the byte count (Issue #10559)"
+
+[[tests]]
+name = "loops_typed_loop_call_typed_mixed_10542"
+file = "typed_loop_call_typed_mixed_10542.jl"
+expected = true
+description = "A direct-call site (Instr::Call/CallResolved/CallInbounds and CallResolvedI64Slots) inside a typed loop reaching a callee whose declared params/return are pure F64 (or pure I64) but whose body mixes in an I64 counter (or F64 local) now inlines natively via TypedLoopOp::CallTypedF64Function / CallTypedI64Function instead of rejecting the whole caller loop, matches upstream Julia including a non-commutative argument-order-sensitive check, and a genuinely mixed-declared-param-type callee (Int64 + Float64 params) still computes correctly via the interpreter frame path since the typed-loop recognizer structurally cannot fuse a mixed-type argument run (Issue #10542)"
+
+[[tests]]
+name = "loops_typed_loop_mixed_complex_i64_specialize_10567"
+file = "loops_typed_loop_mixed_complex_i64_specialize_10567.jl"
+expected = true
+description = "Issue #10567 (round 2): the typed-loop recognizer's narrow mixed-arg f(complex_arg, i64_arg) CallSpecialize op (TypedLoopOp::CallSpecializeComplexI64Function, fed by MaterializeComplexF64 and the narrow DynamicAdd/Sub/Mul-as-I64 accumulator recognition) accepts the mandel_count-shaped total += mandel_point(cr + ci*im, maxiter) loop natively. Exercises the accumulator recurrence with repeated calls (resolved-per-entry cache reuse), IEEE edge values (NaN/+-Inf/signed zero) through the unboxed fast path, an escape-boundary case returning/accumulating the whole Complex{Float64} value (not just Int64), and a three-argument call site the narrow two-argument recognizer must NOT accept, confirming the generic interpreter fallback still computes the correct answer."
+
+[[tests]]
+name = "loops_specialize_complex_square_add_edge_values_10799"
+file = "loops_specialize_complex_square_add_edge_values_10799.jl"
+expected = true
+description = "Issue #10799: the runtime specializer's rewritten ComplexF64 codegen for z*z+c / z^2+c / abs2(z) (reading a bare split-local var's (re, im) fields directly from persistent slots instead of spilling to fresh temps, so the shared peephole and typed-loop fuse_typed_loop_ops/fuse_complex_mul_add_assign passes fuse it like the static compiler's SROA'd output) computes correct results across IEEE edge values: interior point (never escapes), immediate escape, a boundary iteration count, signed zero, +/-Inf, NaN (abs2(NaN)>4.0 must stay false so the loop runs to maxiter, not crash or spuriously escape), and a general multi-iteration point — via both the z*z+c and z^2+c spellings, matching upstream julia exactly."

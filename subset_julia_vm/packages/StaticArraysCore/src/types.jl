@@ -12,7 +12,22 @@ struct SVector{N,T} <: StaticVector{N,T}
     data::Tuple
 end
 
-struct SMatrix{M,N,T} <: StaticMatrix{M,N,T}
+# `SMatrix{M,N,T,L}` mirrors upstream StaticArraysCore's canonical
+# four-parameter alias (`SMatrix{S1,S2,T,L} = SArray{Tuple{S1,S2},T,2,L}`),
+# with `L` the flat backing-tuple length, always equal to `M*N` (Issue
+# #11542, mirroring the #11432 fix applied to the bundled StaticArrays
+# package's own, independent `SMatrix` struct). The bundled package keeps
+# `SMatrix` as its own struct (rather than an `SArray` alias, Issue #7458),
+# so `L` is validated by `check_array_parameters` (see traits.jl) rather than
+# inherited from `SArray`'s inner constructor.
+#
+# Upstream keeps the 3-parameter (and narrower) spellings constructible via
+# incomplete parameterization: `SMatrix{M,N,T}` is `SMatrix{M,N,T,L} where L`
+# (a `UnionAll` with `L` free), so a field annotation, `convert` target, or
+# constructor call may drop `L` (or `T`, or `N`) and let it be inferred.
+# sjulia supports this generically once `L` is a declared struct parameter —
+# the `where {M,N,T}` methods below need no `L` themselves.
+struct SMatrix{M,N,T,L} <: StaticMatrix{M,N,T}
     data::Tuple
 end
 
@@ -39,15 +54,46 @@ macro SVector(ex)
 end
 
 function SMatrix(xs...)
-    return SMatrix{1, length(xs), typeof(xs[1])}(xs)
+    n = length(xs)
+    return SMatrix{1, n, typeof(xs[1]), n}(xs)
+end
+
+function SMatrix{M,N,T,L}(xs...) where {M,N,T,L}
+    check_array_parameters((M, N), 2, L)
+    # Single-tuple call `SMatrix{M,N,T,L}((a,b,...))` unwraps the flat tuple,
+    # stored column-major like upstream StaticArrays (Issue #8084). In
+    # practice sjulia's auto-generated default `(data::Tuple)` inner
+    # constructor intercepts most single-Tuple calls before this method runs
+    # at all (matching real Julia's own method specificity rules) — which is
+    # also why `check_array_parameters` above does not validate those calls;
+    # see Issue #11573. This unwrap stays as a defensive fallback for the
+    # cases that do reach here.
+    if length(xs) == 1 && xs[1] isa Tuple
+        return SMatrix{M,N,T,L}(xs[1])
+    end
+    return SMatrix{M,N,T,L}(xs)
 end
 
 function SMatrix{M,N,T}(xs...) where {M,N,T}
-    return SMatrix{M,N,T}(xs)
+    # `L` is always inferrable from the flat argument count (Issue #11542,
+    # mirroring #11432); `SMatrix{M,N,T,L}`'s own `check_array_parameters`
+    # call rejects a length that does not match `M*N`, mirroring upstream's
+    # `DimensionMismatch`.
+    # Workaround: pass `xs`/`xs[1]` as a single Tuple argument (Issue #11539)
+    # rather than re-splatting `xs...` forward — splatting a vararg collection
+    # into a runtime type-application curly whose trailing slot is a value
+    # expression fails to resolve the expression. (Issue #11539)
+    if length(xs) == 1 && xs[1] isa Tuple
+        return SMatrix{M,N,T,length(xs[1])}(xs[1])
+    end
+    return SMatrix{M,N,T,length(xs)}(xs)
 end
 
 function SMatrix{M,N}(xs...) where {M,N}
-    return SMatrix{M,N, typeof(xs[1])}(xs)
+    if length(xs) == 1 && xs[1] isa Tuple
+        return SMatrix{M,N, typeof(xs[1][1]), length(xs[1])}(xs[1])
+    end
+    return SMatrix{M,N, typeof(xs[1]), length(xs)}(xs)
 end
 
 macro SMatrix(ex)

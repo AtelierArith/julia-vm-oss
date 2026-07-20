@@ -68,16 +68,16 @@ fn test_child_by_field() {
 
 #[test]
 fn test_text_str() {
-    let root = parse_source("hello");
+    let source = "hello";
+    let root = parse_source(source);
     let children = root.named_children_vec();
 
-    // Find identifier and check text
+    // Find identifier and check text (recovered from `span`; `CstNode` no
+    // longer stores an owned `text` copy, Issue #10126).
     for child in children {
         if child.kind == NodeKind::Identifier {
-            // text_str returns Option<&str>
-            if let Some(text) = child.text_str() {
-                assert_eq!(text, "hello");
-            }
+            let text = child.text_from_source(source);
+            assert_eq!(text, "hello");
         }
     }
 }

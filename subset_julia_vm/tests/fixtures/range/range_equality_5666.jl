@@ -32,9 +32,12 @@ using Test
     @test (1:2:9) === (1:2:9)
     @test !((1:5) === (1:6))
     @test !((1:5) === (2:6))
+    @test !((1:1:5) === (1:5))
+    @test !((UInt8(1):UInt8(3)) === (1:3))
 
     # explicit step 1 still equals (== is element-wise)
     @test (1:1:5) == (1:5)
+    @test (UInt8(1):UInt8(3)) == (1:3)
 end
 
 true

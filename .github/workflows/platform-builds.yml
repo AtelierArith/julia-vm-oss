@@ -1,0 +1,244 @@
+name: Platform Builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ios_samples_e2e:
+        description: "Run the manual/monthly iOS sample E2E sweep and upload the report"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 18 * * 0'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  ios-simulator:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - name: Cache cargo registry and iOS build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-ios-sim-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-ios-sim-
+            ${{ runner.os }}-cargo-
+
+      - name: Build iOS simulator FFI library
+        run: cargo build --locked --release -p subset_julia_vm_ffi --target aarch64-apple-ios-sim
+
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and WASM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WASM package
+        run: wasm-pack build --locked --target web --profile web-release
+        working-directory: subset_julia_vm_web
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Android NDK cross-build (Issue #9002 — bit-rot detection for Android)
+  #
+  # Purpose: verify that the Rust VM library links for all four Android ABIs
+  # every week so build-script regressions or dependency changes that break
+  # the Android target are caught before they accumulate silently.
+  #
+  # Test execution is intentionally omitted: the objective is link-time
+  # bit-rot detection, not runtime correctness (no Android emulator is
+  # available on GitHub-hosted Linux runners without additional tooling).
+  #
+  # Prerequisites on the runner (set up in the steps below):
+  #   - Android NDK (set up via android-ndk action)
+  #   - cargo-ndk (installed from crates.io)
+  #   - Rust targets for Android ABIs (via rustup)
+  #
+  # Note: this job builds the host sjulia binary and precompiles Base/prelude
+  # caches, then embeds them into the cross-compiled Android libraries —
+  # matching mobile/scripts/build_android.sh.  It does NOT require a physical
+  # Android device or emulator.
+  # ──────────────────────────────────────────────────────────────────────────
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          add-to-path: false
+
+      - name: Install Rust toolchain with Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Cache cargo registry and Android build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build host sjulia (for cache generation)
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Generate prelude Program cache
+        run: target/release/sjulia --precompile-prelude target/prelude_program_cache.bin
+
+      - name: Generate Base bytecode cache
+        run: target/release/sjulia --precompile-base target/base_cache.bin
+
+      - name: Build Android FFI library (aarch64-linux-android)
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          SJULIA_BASE_CACHE: target/base_cache.bin
+          SJULIA_PRELUDE_PROGRAM_CACHE: target/prelude_program_cache.bin
+        run: cargo ndk -t arm64-v8a build --locked --release -p subset_julia_vm_ffi
+
+      - name: Build Android FFI library (armv7-linux-androideabi)
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          SJULIA_BASE_CACHE: target/base_cache.bin
+          SJULIA_PRELUDE_PROGRAM_CACHE: target/prelude_program_cache.bin
+        run: cargo ndk -t armeabi-v7a build --locked --release -p subset_julia_vm_ffi
+
+      - name: Build Android FFI library (x86_64-linux-android)
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          SJULIA_BASE_CACHE: target/base_cache.bin
+          SJULIA_PRELUDE_PROGRAM_CACHE: target/prelude_program_cache.bin
+        run: cargo ndk -t x86_64 build --locked --release -p subset_julia_vm_ffi
+
+      - name: Verify .so libraries were produced for all ABIs
+        run: |
+          ok=0
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            lib="target/*/release/libsubset_julia_vm.so"
+            found=$(find target -name "libsubset_julia_vm.so" -path "*$abi*" 2>/dev/null || true)
+            if [[ -n "$found" ]]; then
+              echo "OK [$abi]: $found"
+              ok=$(( ok + 1 ))
+            else
+              echo "MISSING .so for ABI: $abi"
+            fi
+          done
+          # We built 3 ABIs (skipping x86 which is rarely needed); expect 3 .so files.
+          if [[ "$ok" -ne 3 ]]; then
+            echo "ERROR: expected 3 Android .so files, found $ok"
+            exit 1
+          fi
+
+  ios-samples-e2e:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_ios_samples_e2e
+    runs-on: macos-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - name: Build and install iOS app
+        run: scripts/ios_repl_e2e.sh --build --code '1 + 1' --wait 1 --screenshot /tmp/ios-e2e-bootstrap.png
+
+      - name: Run iOS sample E2E sweep
+        run: |
+          mkdir -p artifacts/ios-samples
+          uv run scripts/ios_samples_e2e.py --out-dir artifacts/ios-samples --launch
+
+      - name: Summarize iOS sample E2E report
+        if: always()
+        run: |
+          if [ -f artifacts/ios-samples/report.txt ]; then
+            python3 scripts/ios_e2e_report.py --summary artifacts/ios-samples/report.txt \
+              | tee artifacts/ios-samples/summary.env
+            bash scripts/north_star_report.sh \
+              --skip ns1,ns2,ns4,ns5,ns6 \
+              --ns3-report artifacts/ios-samples/report.txt \
+              --date "$(date -u +%F)"
+          else
+            echo "::warning::ios sample report was not produced"
+          fi
+
+      - name: Upload iOS sample E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-samples-e2e
+          path: |
+            artifacts/ios-samples/
+            benchmarks/results/north_star/
+            /tmp/ios-e2e-bootstrap.png

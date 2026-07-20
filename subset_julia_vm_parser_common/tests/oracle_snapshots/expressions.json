@@ -1,0 +1,3605 @@
+[
+  {
+    "name": "Assignments",
+    "source": "a = b\ntup = 1, 2, 3\ncar, cdr... = list\n\na × b = a * b\nc &= d ÷= e\nxs .+= ys\n\nA[i] = new_value",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 95
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 5
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 2,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 4,
+                  "end": 5
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "b"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 6,
+              "end": 19
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 6,
+                  "end": 9
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "tup"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 10,
+                  "end": 11
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "OpenTuple",
+                "span": {
+                  "start": 12,
+                  "end": 19
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 15,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 18,
+                      "end": 19
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "3"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 20,
+              "end": 38
+            },
+            "children": [
+              {
+                "kind": "OpenTuple",
+                "span": {
+                  "start": 20,
+                  "end": 31
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 20,
+                      "end": 23
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "car"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "SplatExpression",
+                    "span": {
+                      "start": 25,
+                      "end": 31
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 25,
+                          "end": 28
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "cdr"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 32,
+                  "end": 33
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 34,
+                  "end": 38
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "list"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 40,
+              "end": 54
+            },
+            "children": [
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 40,
+                  "end": 46
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 40,
+                      "end": 41
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 42,
+                      "end": 44
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "×"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 45,
+                      "end": 46
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 47,
+                  "end": 48
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 49,
+                  "end": 54
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 49,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 51,
+                      "end": 52
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "*"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 53,
+                      "end": 54
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 55,
+              "end": 67
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 55,
+                  "end": 56
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "c"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 57,
+                  "end": 59
+                },
+                "children": [],
+                "value": {
+                  "Operator": "&="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Assignment",
+                "span": {
+                  "start": 60,
+                  "end": 67
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 60,
+                      "end": 61
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "d"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 62,
+                      "end": 65
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "÷="
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 66,
+                      "end": 67
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "e"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 68,
+              "end": 77
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 68,
+                  "end": 70
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 71,
+                  "end": 74
+                },
+                "children": [],
+                "value": {
+                  "Operator": ".+="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 75,
+                  "end": 77
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "ys"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 79,
+              "end": 95
+            },
+            "children": [
+              {
+                "kind": "IndexExpression",
+                "span": {
+                  "start": 79,
+                  "end": 83
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 79,
+                      "end": 80
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "A"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "VectorExpression",
+                    "span": {
+                      "start": 80,
+                      "end": 83
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 81,
+                          "end": 82
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "i"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 84,
+                  "end": 85
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 86,
+                  "end": 95
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "new_value"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Assignments - Short functions",
+    "source": "id(x) = x\nadd(x, y) = x + y\nid(x::T)::T where {T} = x",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 53
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 9
+            },
+            "children": [
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 0,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 0,
+                      "end": 2
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "id"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 2,
+                      "end": 5
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 3,
+                          "end": 4
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 6,
+                  "end": 7
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 8,
+                  "end": 9
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 10,
+              "end": 27
+            },
+            "children": [
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 10,
+                  "end": 19
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 10,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "add"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 13,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 14,
+                          "end": 15
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 17,
+                          "end": 18
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 20,
+                  "end": 21
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 22,
+                  "end": 27
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 22,
+                      "end": 23
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 24,
+                      "end": 25
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "+"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 26,
+                      "end": 27
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 28,
+              "end": 53
+            },
+            "children": [
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 28,
+                  "end": 49
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 28,
+                      "end": 36
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 28,
+                          "end": 30
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "id"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 30,
+                          "end": 36
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 31,
+                              "end": 35
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 31,
+                                  "end": 32
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 32,
+                                  "end": 34
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 34,
+                                  "end": 35
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 34,
+                                      "end": 35
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "T"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 36,
+                      "end": 38
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 38,
+                      "end": 49
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 38,
+                          "end": 49
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 38,
+                              "end": 39
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 46,
+                              "end": 49
+                            },
+                            "children": [
+                              {
+                                "kind": "BraceExpression",
+                                "span": {
+                                  "start": 46,
+                                  "end": 49
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 47,
+                                      "end": 48
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "T"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 50,
+                  "end": 51
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 52,
+                  "end": 53
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Type declarations",
+    "source": "x::T\nx::Vector{T} where T",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 25
+        },
+        "children": [
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Operator": "::"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Type",
+                "span": {
+                  "start": 3,
+                  "end": 4
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 3,
+                      "end": 4
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "T"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 5,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 5,
+                  "end": 6
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 6,
+                  "end": 8
+                },
+                "children": [],
+                "value": {
+                  "Operator": "::"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Type",
+                "span": {
+                  "start": 8,
+                  "end": 25
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 8,
+                      "end": 25
+                    },
+                    "children": [
+                      {
+                        "kind": "ParametrizedExpression",
+                        "span": {
+                          "start": 8,
+                          "end": 17
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 8,
+                              "end": 14
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Vector"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BraceExpression",
+                            "span": {
+                              "start": 14,
+                              "end": 17
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 15,
+                                  "end": 16
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "T"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Type",
+                        "span": {
+                          "start": 24,
+                          "end": 25
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 24,
+                              "end": 25
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Type declarations - Precedence",
+    "source": "a::One + b::Two\na + b::Two",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 26
+        },
+        "children": [
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 0,
+              "end": 15
+            },
+            "children": [
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 0,
+                  "end": 6
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 0,
+                      "end": 1
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 1,
+                      "end": 3
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 3,
+                      "end": 6
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 3,
+                          "end": 6
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "One"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 7,
+                  "end": 8
+                },
+                "children": [],
+                "value": {
+                  "Operator": "+"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 9,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 9,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 10,
+                      "end": 12
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 12,
+                      "end": 15
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 12,
+                          "end": 15
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Two"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 16,
+              "end": 26
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 16,
+                  "end": 17
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 18,
+                  "end": 19
+                },
+                "children": [],
+                "value": {
+                  "Operator": "+"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 20,
+                  "end": 26
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 20,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 21,
+                      "end": 23
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 23,
+                      "end": 26
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 23,
+                          "end": 26
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Two"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Arrow function expressions",
+    "source": "x -> x ^ 2\n(x) -> x + 1\n(x, y, z) -> 2 * x + y - z\n() -> (sleep(0.1); i += 1; l)\nforeach(c -> c.queued = true, cells)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 117
+        },
+        "children": [
+          {
+            "kind": "LambdaExpression",
+            "span": {
+              "start": 0,
+              "end": 10
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 5,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 5,
+                      "end": 6
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 7,
+                      "end": 8
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "^"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 9,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LambdaExpression",
+            "span": {
+              "start": 11,
+              "end": 23
+            },
+            "children": [
+              {
+                "kind": "TupleExpression",
+                "span": {
+                  "start": 11,
+                  "end": 14
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 18,
+                  "end": 23
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 18,
+                      "end": 19
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 20,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "+"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 22,
+                      "end": 23
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LambdaExpression",
+            "span": {
+              "start": 24,
+              "end": 50
+            },
+            "children": [
+              {
+                "kind": "TupleExpression",
+                "span": {
+                  "start": 24,
+                  "end": 33
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 25,
+                      "end": 26
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 28,
+                      "end": 29
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 31,
+                      "end": 32
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "z"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 37,
+                  "end": 50
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 37,
+                      "end": 46
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 37,
+                          "end": 42
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 37,
+                              "end": 38
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "2"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 39,
+                              "end": 40
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "*"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 41,
+                              "end": 42
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 43,
+                          "end": 44
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 45,
+                          "end": 46
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 47,
+                      "end": 48
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "-"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 49,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "z"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LambdaExpression",
+            "span": {
+              "start": 51,
+              "end": 80
+            },
+            "children": [
+              {
+                "kind": "TupleExpression",
+                "span": {
+                  "start": 51,
+                  "end": 53
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 57,
+                  "end": 80
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 58,
+                      "end": 68
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 58,
+                          "end": 63
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "sleep"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 63,
+                          "end": 68
+                        },
+                        "children": [
+                          {
+                            "kind": "FloatLiteral",
+                            "span": {
+                              "start": 64,
+                              "end": 67
+                            },
+                            "children": [],
+                            "value": {
+                              "FloatLiteral": "0.1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Assignment",
+                    "span": {
+                      "start": 70,
+                      "end": 76
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 70,
+                          "end": 71
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "i"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 72,
+                          "end": 74
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 75,
+                          "end": 76
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 78,
+                      "end": 79
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "l"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 81,
+              "end": 117
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 81,
+                  "end": 88
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "foreach"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 88,
+                  "end": 117
+                },
+                "children": [
+                  {
+                    "kind": "LambdaExpression",
+                    "span": {
+                      "start": 89,
+                      "end": 109
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 89,
+                          "end": 90
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "c"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Assignment",
+                        "span": {
+                          "start": 94,
+                          "end": 109
+                        },
+                        "children": [
+                          {
+                            "kind": "FieldExpression",
+                            "span": {
+                              "start": 94,
+                              "end": 102
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 94,
+                                  "end": 95
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "c"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Field",
+                                "span": {
+                                  "start": 96,
+                                  "end": 102
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 96,
+                                      "end": 102
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "queued"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 103,
+                              "end": 104
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BooleanLiteral",
+                            "span": {
+                              "start": 105,
+                              "end": 109
+                            },
+                            "children": [],
+                            "value": {
+                              "Keyword": "true"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 111,
+                      "end": 116
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "cells"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Juxtaposition expressions - Coefficients",
+    "source": "1__1 # Not an integer\n2π\n2v[i]\n3f(x)\n4df.a\n5u\"kg\"",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 50
+        },
+        "children": [
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "1"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 1,
+                  "end": 4
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "__1"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 5,
+              "end": 21
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 22,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 22,
+                  "end": 23
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "2"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 23,
+                  "end": 25
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "π"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 26,
+              "end": 31
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 26,
+                  "end": 27
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "2"
+                },
+                "flags": []
+              },
+              {
+                "kind": "IndexExpression",
+                "span": {
+                  "start": 27,
+                  "end": 31
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 27,
+                      "end": 28
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "v"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "VectorExpression",
+                    "span": {
+                      "start": 28,
+                      "end": 31
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 29,
+                          "end": 30
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "i"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 32,
+              "end": 37
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 32,
+                  "end": 33
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "3"
+                },
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 33,
+                  "end": 37
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 33,
+                      "end": 34
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 34,
+                      "end": 37
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 35,
+                          "end": 36
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 38,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 38,
+                  "end": 39
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "4"
+                },
+                "flags": []
+              },
+              {
+                "kind": "FieldExpression",
+                "span": {
+                  "start": 39,
+                  "end": 43
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 39,
+                      "end": 41
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "df"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Field",
+                    "span": {
+                      "start": 42,
+                      "end": 43
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 42,
+                          "end": 43
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 44,
+              "end": 50
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 44,
+                  "end": 45
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "5"
+                },
+                "flags": []
+              },
+              {
+                "kind": "NsStringExpression",
+                "span": {
+                  "start": 45,
+                  "end": 50
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 45,
+                      "end": 46
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "u"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "StringFragment",
+                    "span": {
+                      "start": 47,
+                      "end": 49
+                    },
+                    "children": [],
+                    "value": {
+                      "StringFragment": "kg"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Juxtaposition expressions - Monomials # FIXME",
+    "source": "## Not parsed with the correct precedence\n\n2x^2 - .3x\n1.5x^2 - .5x\n2^2x\n2(x-1)^2 - 3(x-1)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 89
+        },
+        "children": [
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 0,
+              "end": 41
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 43,
+              "end": 53
+            },
+            "children": [
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 43,
+                  "end": 47
+                },
+                "children": [
+                  {
+                    "kind": "JuxtapositionExpression",
+                    "span": {
+                      "start": 43,
+                      "end": 45
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 43,
+                          "end": 44
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 44,
+                          "end": 45
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 45,
+                      "end": 46
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "^"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 46,
+                      "end": 47
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 48,
+                  "end": 49
+                },
+                "children": [],
+                "value": {
+                  "Operator": "-"
+                },
+                "flags": []
+              },
+              {
+                "kind": "JuxtapositionExpression",
+                "span": {
+                  "start": 50,
+                  "end": 53
+                },
+                "children": [
+                  {
+                    "kind": "FloatLiteral",
+                    "span": {
+                      "start": 50,
+                      "end": 52
+                    },
+                    "children": [],
+                    "value": {
+                      "FloatLiteral": ".3"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 52,
+                      "end": 53
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 54,
+              "end": 66
+            },
+            "children": [
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 54,
+                  "end": 60
+                },
+                "children": [
+                  {
+                    "kind": "JuxtapositionExpression",
+                    "span": {
+                      "start": 54,
+                      "end": 58
+                    },
+                    "children": [
+                      {
+                        "kind": "FloatLiteral",
+                        "span": {
+                          "start": 54,
+                          "end": 57
+                        },
+                        "children": [],
+                        "value": {
+                          "FloatLiteral": "1.5"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 57,
+                          "end": 58
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 58,
+                      "end": 59
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "^"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 59,
+                      "end": 60
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 61,
+                  "end": 62
+                },
+                "children": [],
+                "value": {
+                  "Operator": "-"
+                },
+                "flags": []
+              },
+              {
+                "kind": "JuxtapositionExpression",
+                "span": {
+                  "start": 63,
+                  "end": 66
+                },
+                "children": [
+                  {
+                    "kind": "FloatLiteral",
+                    "span": {
+                      "start": 63,
+                      "end": 65
+                    },
+                    "children": [],
+                    "value": {
+                      "FloatLiteral": ".5"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 65,
+                      "end": 66
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 67,
+              "end": 71
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 67,
+                  "end": 68
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "2"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 68,
+                  "end": 69
+                },
+                "children": [],
+                "value": {
+                  "Operator": "^"
+                },
+                "flags": []
+              },
+              {
+                "kind": "JuxtapositionExpression",
+                "span": {
+                  "start": 69,
+                  "end": 71
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 69,
+                      "end": 70
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 70,
+                      "end": 71
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 72,
+              "end": 89
+            },
+            "children": [
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 72,
+                  "end": 80
+                },
+                "children": [
+                  {
+                    "kind": "JuxtapositionExpression",
+                    "span": {
+                      "start": 72,
+                      "end": 78
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 72,
+                          "end": 73
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "ParenExpression",
+                        "span": {
+                          "start": 73,
+                          "end": 78
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 74,
+                              "end": 77
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 74,
+                                  "end": 75
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 75,
+                                  "end": 76
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "-"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 76,
+                                  "end": 77
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "1"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 78,
+                      "end": 79
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "^"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 79,
+                      "end": 80
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 81,
+                  "end": 82
+                },
+                "children": [],
+                "value": {
+                  "Operator": "-"
+                },
+                "flags": []
+              },
+              {
+                "kind": "JuxtapositionExpression",
+                "span": {
+                  "start": 83,
+                  "end": 89
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 83,
+                      "end": 84
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "3"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "ParenExpression",
+                    "span": {
+                      "start": 84,
+                      "end": 89
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 85,
+                          "end": 88
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 85,
+                              "end": 86
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 86,
+                              "end": 87
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "-"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 87,
+                              "end": 88
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Juxtaposition expressions - Primary LHS",
+    "source": "x'x\nf()g()h()\nA'B:C'D",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 21
+        },
+        "children": [
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 0,
+              "end": 3
+            },
+            "children": [
+              {
+                "kind": "AdjointExpression",
+                "span": {
+                  "start": 0,
+                  "end": 2
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 0,
+                      "end": 1
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 2,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "JuxtapositionExpression",
+            "span": {
+              "start": 4,
+              "end": 13
+            },
+            "children": [
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 4,
+                  "end": 7
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 4,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 5,
+                      "end": 7
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 7,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 7,
+                      "end": 8
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "g"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 8,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 10,
+                  "end": 13
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 10,
+                      "end": 11
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "h"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 11,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 14,
+              "end": 21
+            },
+            "children": [
+              {
+                "kind": "JuxtapositionExpression",
+                "span": {
+                  "start": 14,
+                  "end": 17
+                },
+                "children": [
+                  {
+                    "kind": "AdjointExpression",
+                    "span": {
+                      "start": 14,
+                      "end": 16
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 14,
+                          "end": 15
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "A"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 16,
+                      "end": 17
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "B"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 17,
+                  "end": 18
+                },
+                "children": [],
+                "value": {
+                  "Operator": ":"
+                },
+                "flags": []
+              },
+              {
+                "kind": "JuxtapositionExpression",
+                "span": {
+                  "start": 18,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "AdjointExpression",
+                    "span": {
+                      "start": 18,
+                      "end": 20
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 18,
+                          "end": 19
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "C"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 20,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "D"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Ternary operator",
+    "source": "x = batch_size == 1 ?\n  rand(10) :\n  rand(10, batch_size)\n\ny -> y ? x : 10",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 74
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 57
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 2,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "TernaryExpression",
+                "span": {
+                  "start": 4,
+                  "end": 57
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 4,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 4,
+                          "end": 14
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "batch_size"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 15,
+                          "end": 17
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "=="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 18,
+                          "end": 19
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 24,
+                      "end": 32
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 24,
+                          "end": 28
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "rand"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 28,
+                          "end": 32
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 29,
+                              "end": 31
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "10"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 37,
+                      "end": 57
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 37,
+                          "end": 41
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "rand"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 41,
+                          "end": 57
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 42,
+                              "end": 44
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "10"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 46,
+                              "end": 56
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "batch_size"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LambdaExpression",
+            "span": {
+              "start": 59,
+              "end": 74
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 59,
+                  "end": 60
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "y"
+                },
+                "flags": []
+              },
+              {
+                "kind": "TernaryExpression",
+                "span": {
+                  "start": 64,
+                  "end": 74
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 64,
+                      "end": 65
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 68,
+                      "end": 69
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 72,
+                      "end": 74
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "10"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  }
+]

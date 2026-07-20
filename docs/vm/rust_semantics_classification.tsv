@@ -1,0 +1,505 @@
+# Rust-side semantics classification (Issue #8672, parent #8648).
+# Categories: intrinsic (RUST_BOUNDARY_JUSTIFICATION.md conditions 1-3) |
+#   perf-measured (condition 4 with recorded benchmark) |
+#   perf-pending  (condition 4 candidate, benchmark 計測待ち) |
+#   migratable    (Julia-expressible; pure-julia-migration backlog) |
+#   pure-julia-first (public name already owned by a Pure Julia definition; Rust is fallback).
+# Joined into scripts/inventory_rust_semantics.sh output. Keep sorted by kind, then variant.
+kind	key	category	evidence
+builtin	Abspath	migratable	pure path-string manipulation over a `pwd()` primitive; upstream base/path.jl is pure Julia
+builtin	All	pure-julia-first	Pure Julia definition owns the public name (base/reduce.jl); Rust handler is a dispatch fallback / fast path
+builtin	_Allocatedinline	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	AllocUndefAny	intrinsic	condition 3: array storage allocation primitive (typed `alloc_undef_*` family)
+builtin	AllocUndefBool	intrinsic	condition 3: array storage allocation primitive (typed `alloc_undef_*` family)
+builtin	AllocUndefF64	intrinsic	condition 3: array storage allocation primitive (typed `alloc_undef_*` family)
+builtin	AllocUndefI64	intrinsic	condition 3: array storage allocation primitive (typed `alloc_undef_*` family)
+builtin	Any	pure-julia-first	Pure Julia definition owns the public name (base/reduce.jl); Rust handler is a dispatch fallback / fast path
+builtin	Append	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Backtrace	intrinsic	condition 1 (RUST_BOUNDARY §1): VM call-stack introspection accessible only via Rust runtime state; no Julia-level equivalent (Issue #9098)
+builtin	BigFloat	intrinsic	condition 2 (RUST_BOUNDARY §5): MPFR-equivalent arbitrary-precision backend (Rust bigdecimal/rug analog)
+builtin	BigFloatDefaultPrecision	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	BigFloatGetExp	intrinsic	underscored BigFloat/MPFR exponent primitive; public exponent/frexp/significand wrappers are Pure Julia (Issue #9286)
+builtin	BigFloatNextfloat	intrinsic	underscored BigFloat/MPFR one-ULP stepping primitive; public nextfloat/prevfloat wrappers are Pure Julia (Issue #9280)
+builtin	BigFloatPrecision	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	BigFloatRounding	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	BigFloatScale2	intrinsic	underscored BigFloat/MPFR exact scale-by-power-of-two primitive; public frexp/significand wrappers are Pure Julia (Issue #9286)
+builtin	BigFloatSignbit	intrinsic	underscored BigFloat sign-bit primitive backed by VM BigFloat representation; public signbit wrapper is Pure Julia (Issue #9287)
+builtin	BigInt	intrinsic	condition 2 (RUST_BOUNDARY §5): GMP-equivalent arbitrary-precision backend
+builtin	Bitreverse	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Bool	pure-julia-first	Bool BuiltinId was removed earlier; public Bool(x::Real) is pure Julia in base/bool.jl (Issue #8777 scope already complete for Bool)
+builtin	BroadcastBinaryArith	perf-measured	condition 4: no-JIT broadcast fast path dispatches once and runs numeric/complex binary arithmetic over array storage (Issue #8797)
+builtin	BroadcastTypedKernel	perf-measured	condition 4: no-JIT broadcast fast path avoids per-element interpreted dispatch/boxing/frames (Issue #8797)
+builtin	Bswap	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Cd	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Ceil	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	CeilDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	CeilSigDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	CatchBacktrace	intrinsic	condition 1 (RUST_BOUNDARY §1): VM exception-path backtrace accessible only via Rust runtime state; no Julia-level equivalent (Issue #9098)
+builtin	CharToInt	pure-julia-first	Public `Int(c::Char)` lives in base/strings/basic.jl and calls internal `_char_to_int`; Rust remains the Char storage bitcast boundary (Issue #8780)
+builtin	Cholesky	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	Close	pure-julia-first	Pure Julia definition owns the public name (base/channels.jl); Rust handler is a dispatch fallback / fast path
+builtin	Codeunit	intrinsic	condition 3: byte-level access into VM-owned String storage (upstream bottoms at pointerref intrinsics)
+builtin	CodeUnits	pure-julia-first	Public `codeunits(s)` returns a Pure Julia `CodeUnits` wrapper over `ncodeunits`/`codeunit`; Rust `CodeUnits` is no longer publicly routed (Issue #8780)
+builtin	ComplexScaleTpRange	intrinsic	condition 3: operates on VM-native TwicePrecision range internals that Pure Julia cannot access directly (Issue #9659)
+builtin	Compose	pure-julia-first	Public `compose`/`∘` methods live in base/operators.jl and call the internal `_compose` boundary; remaining Rust carrier is a fallback/runtime callable representation (Issue #8779)
+builtin	ComposeEffects	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	ComposeExceptionType	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Cond	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	Convert	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Count	pure-julia-first	Pure Julia definition owns the public name (base/genericmemory.jl); Rust handler is a dispatch fallback / fast path
+builtin	Countlines	migratable	pure Julia over `eachline`/`read` primitives; upstream base/io.jl is pure Julia
+builtin	CountOnes	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Cp	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	_DatatypeAlignment	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Deepcopy	pure-julia-first	Public `deepcopy` lives in base/deepcopy.jl and calls internal `_deepcopy`; Rust recursively copies VM heap/ref/memory cells that Pure Julia cannot directly access yet (Issue #8779)
+builtin	DeleteAt	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Det	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictDelete	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictEmpty	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictGet	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictGetBang	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictGetkey	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictHasKey	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictKeys	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictMergeBang	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictPairs	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictPop	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictSet	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	DictValues	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	Displaysize	pure-julia-first	Pure Julia definition owns the public name (base/io.jl); Rust handler is a dispatch fallback / fast path
+builtin	EmitDisplayArtifact	intrinsic	condition 1/3: host display artifact bridge and VM display sink are external runtime state (Issue #9262)
+builtin	Eachline	pure-julia-first	Pure Julia definition owns the public name (base/io.jl); Rust handler is a dispatch fallback / fast path
+builtin	Egal	intrinsic	condition 3: `===` is `jl_egal` (C) in upstream (julia/src/builtins.c); object identity needs VM layout access
+builtin	Eigen	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	Eigvals	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	_Eltype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Eltype	pure-julia-first	Pure Julia definition owns the public name (base/abstractarray.jl); Rust handler is a dispatch fallback / fast path
+builtin	EndsWithRegex	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Eof	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Esc	intrinsic	condition 3: macro hygiene marker consumed by the Rust lowering pipeline
+builtin	Eval	intrinsic	condition 3: `eval` executes lowering/compiler on VM internal state
+builtin	EvalDefinedCall	intrinsic	condition 3: compiler-internal trampoline body for a runtime-`eval`-defined method (Issue #8647), never routed from Julia source
+builtin	EvalFile	pure-julia-first	Pure Julia definition owns the public name (base/meta.jl); Rust handler is a dispatch fallback / fast path
+builtin	ExprNew	intrinsic	condition 3: `Expr` construction is the `_expr` C builtin in upstream (julia/src/builtins.c)
+builtin	ExprNewWithSplat	intrinsic	condition 3: `Expr` construction is the `_expr` C builtin in upstream
+builtin	_Fieldnames	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_Fieldoffset	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_Fieldtypes	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Filesize	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Flush	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): IO stream flush boundary
+builtin	Float16	intrinsic	underscored `_to_float16` conversion boundary; public Float16(x) is a Pure Julia wrapper (Issue #8777)
+builtin	Float32	intrinsic	underscored `_to_float32` conversion boundary; public Float32(x) is a Pure Julia wrapper (Issue #8777)
+builtin	Float64	pure-julia-first	Pure Julia definition owns the public name (internal/prelude_aot.jl); Rust handler is a dispatch fallback / fast path
+builtin	FloatConv	pure-julia-first	Pure Julia definition owns the public name (base/complex.jl); Rust handler is a dispatch fallback / fast path
+builtin	Floor	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	FloorDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	FloorSigDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	Fma	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_FunctionName	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	GeneratedEval	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Gensym	intrinsic	condition 3: symbol-table/counter state in the VM (upstream jl_gensym, C)
+builtin	_Getfield	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Getfield	intrinsic	condition 3: `getfield` is a C builtin in upstream (julia/src/builtins.c); field layout access
+builtin	GetIndex	pure-julia-first	Pure Julia definition owns the public name (base/abstractarray.jl); Rust handler is a dispatch fallback / fast path
+builtin	GetZeroSubnormals	intrinsic	condition 1: reads hardware FP control state
+builtin	GlobalRefNew	intrinsic	condition 3: GlobalRef is a VM AST node type (upstream boot.jl `new`)
+builtin	_Hash	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Hash	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	HasMethod	intrinsic	condition 3: method table query (upstream jl_method_exists path)
+builtin	Homedir	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	In	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	IncludeDependency	intrinsic	condition 3: loading/precompile machinery touches VM internal state (upstream base/loading.jl + jl_)
+builtin	IncludeString	pure-julia-first	Pure Julia definition owns the public name (base/meta.jl); Rust handler is a dispatch fallback / fast path
+builtin	Insert	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Int128	intrinsic	underscored `_to_int128` conversion boundary; public Int128(x) is a Pure Julia wrapper (Issue #8777)
+builtin	Int16	intrinsic	underscored `_to_int16` conversion boundary; public Int16(x) is a Pure Julia wrapper (Issue #8777)
+builtin	Int32	intrinsic	underscored `_to_int32` conversion boundary; public Int32(x) is a Pure Julia wrapper (Issue #8777)
+builtin	Int64	pure-julia-first	Pure Julia definition owns the public name (internal/prelude_aot.jl); Rust handler is a dispatch fallback / fast path
+builtin	Int8	intrinsic	underscored `_to_int8` conversion boundary; public Int8(x) is a Pure Julia wrapper (Issue #8777)
+builtin	IntToChar	pure-julia-first	Public `Char(x::Integer)` lives in base/strings/basic.jl and calls internal `_int_to_char`; Rust remains the codepoint-to-Char storage boundary (Issue #8780)
+builtin	Inv	pure-julia-first	Pure Julia definition owns the public name (base/gmp.jl); Rust handler is a dispatch fallback / fast path
+builtin	IOBufferFromString	migratable	upstream IOBuffer is pure Julia over Memory (base/iobuffer.jl); Memory backing exists in sjulia
+builtin	IOBufferNew	migratable	upstream IOBuffer is pure Julia over Memory (base/iobuffer.jl); Memory backing exists in sjulia
+builtin	IOPrint	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	IOWrite	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Isa	intrinsic	condition 3: `isa` is a C builtin in upstream; VM type check
+builtin	_Isabstracttype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Isbitstype	intrinsic	condition 3: type layout metadata query (upstream datatype layout, C)
+builtin	_Isconcretetype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	IsdefinedModuleBinding	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Isdir	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Isequal	pure-julia-first	Pure Julia definition owns the public name (base/abstractarray.jl); Rust handler is a dispatch fallback / fast path
+builtin	IsExported	intrinsic	condition 3: module binding table reflection (upstream `jl_module_exports_p`, C)
+builtin	Isfile	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Isless	pure-julia-first	Pure Julia definition owns the public name (base/missing.jl); Rust handler is a dispatch fallback / fast path
+builtin	Islink	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	_Ismutabletype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Isopen	pure-julia-first	Pure Julia definition owns the public name (base/channels.jl); Rust handler is a dispatch fallback / fast path
+builtin	Ispath	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	_Isprimitivetype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	IsPublic	intrinsic	condition 3: module binding table reflection (upstream C)
+builtin	_Isstructtype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Isunordered	pure-julia-first	Pure Julia definition owns the public name (base/missing.jl); Rust handler is a dispatch fallback / fast path
+builtin	IsvalidIndex	pure-julia-first	Pure Julia definition owns the public name (base/strings/basic.jl); Rust handler is a dispatch fallback / fast path
+builtin	Iterate	pure-julia-first	Pure Julia definition owns the public name (base/channels.jl); Rust handler is a dispatch fallback / fast path
+builtin	Keytype	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	Ldiv	intrinsic	condition 2 (RUST_BOUNDARY §4 LinearAlgebra): dense solve is a BLAS/LAPACK-equivalent external-kernel boundary
+builtin	LeadingZeros	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Length	pure-julia-first	Pure Julia definition owns the public name (base/abstractarray.jl); Rust handler is a dispatch fallback / fast path
+builtin	LineNumberNodeNew	intrinsic	condition 3: LineNumberNode is a VM AST node type
+builtin	LinRange	pure-julia-first	Pure Julia definition owns the public name (base/range.jl); Rust handler is a dispatch fallback / fast path
+builtin	LinspaceF64	intrinsic	underscored range-construction primitive for typed Float64 linspace storage; public range APIs are Pure Julia wrappers
+builtin	Lu	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	MacroExpand	intrinsic	condition 3: macroexpansion runs the Rust lowering pipeline
+builtin	MacroExpandBang	intrinsic	condition 3: macroexpansion runs the Rust lowering pipeline
+builtin	_MakeTupleType	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MarkBitArray	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MarkBitVector	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MemoryRefGet	intrinsic	condition 3: `memoryrefget` is a C builtin/intrinsic in upstream; GC-managed memory access
+builtin	MemoryRefNew	intrinsic	condition 3: `memoryref` is a C builtin in upstream (julia/src/builtins.c); GC-managed memory access
+builtin	MemoryRefOffset	intrinsic	condition 3: `memoryrefoffset` is a C builtin/intrinsic in upstream
+builtin	MemoryRefParent	intrinsic	condition 3: `memoryrefparent` is a C builtin/intrinsic in upstream
+builtin	MemoryRefSet	intrinsic	condition 3: `memoryrefset!` is a C builtin/intrinsic in upstream; GC-managed memory access
+builtin	MetaIsBinaryOperator	intrinsic	condition 3: queries operator tables owned by the Rust parser (subset_julia_vm_parser)
+builtin	MetaIsExpr	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MetaIsIdentifier	intrinsic	condition 3: queries identifier rules owned by the Rust parser
+builtin	MetaIsOperator	intrinsic	condition 3: queries operator tables owned by the Rust parser
+builtin	MetaIsPostfixOperator	intrinsic	condition 3: queries operator tables owned by the Rust parser
+builtin	MetaIsUnaryOperator	intrinsic	condition 3: queries operator tables owned by the Rust parser
+builtin	MetaLower	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MetaParse	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MetaParseAt	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	MetaQuot	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_MethodsByFtype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Mkdir	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Mkpath	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	_ModuleName	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Mtime	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Mv	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Names	intrinsic	condition 3: module binding table reflection (upstream jl_module_names, C)
+builtin	Ncodeunits	intrinsic	condition 3: String byte length from VM-owned storage (upstream `Core.sizeof` builtin)
+builtin	Ndims	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	NegAny	intrinsic	underscored `_neg_any` internal dynamic-negation fallback; public unary `-` methods are Pure Julia or typed instrs (Issue #8777)
+builtin	NonMissingType	pure-julia-first	Public `nonmissingtype` lives in base/missing.jl and calls internal `_nonmissingtype`; Rust remains a type-lattice boundary until `typesplit` is represented in Julia (Issue #8779)
+builtin	Normpath	migratable	pure string manipulation, no OS query; upstream base/path.jl is pure Julia
+builtin	NotEgal	intrinsic	underscored `_not_egal` fallback for identity non-equality; public `!==` routes through Pure Julia/operator lowering over `===` (Issue #8777)
+builtin	Objectid	intrinsic	condition 3: object identity hash needs VM object layout (upstream jl_object_id, C)
+builtin	Occursin	pure-julia-first	Pure Julia definition owns the public name (base/strings/search.jl); Rust handler is a dispatch fallback / fast path
+builtin	One	pure-julia-first	Pure Julia definition owns the public name (base/complex.jl); Rust handler is a dispatch fallback / fast path
+builtin	Ones	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	OnesF64	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	OnesI64	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Open	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Pop	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	PopFirst	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Precompile	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Prepend	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Print	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	PrintfFmtFloat	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Println	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Position	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): IO stream position query boundary
+builtin	Promote	pure-julia-first	Pure Julia definition owns the public name (base/promotion.jl); Rust handler is a dispatch fallback / fast path
+builtin	Push	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	PushFirst	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Pwd	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Qr	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	QuoteNodeNew	intrinsic	condition 3: QuoteNode is a VM AST node type
+builtin	Rand	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state/entropy is a VM-shared external resource
+builtin	RandInt	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state/entropy is a VM-shared external resource
+builtin	Randn	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state/entropy is a VM-shared external resource
+builtin	RangeCollect	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	RangeNew	pure-julia-first	Pure Julia definition owns the public name (base/range.jl); Rust handler is a dispatch fallback / fast path
+builtin	RangeStep	intrinsic	internal `_range_step` extracts the VM Range carrier's typed step for Pure Julia range wrappers (Issue #9933)
+builtin	Rank	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	Readdir	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	ReadCharIo	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): IO stream read boundary — filesystem/stream access
+builtin	ReadFile	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Readline	migratable	upstream readline is pure Julia (base/io.jl) over stream read primitives
+builtin	ReadlineIo	migratable	upstream readline is pure Julia (base/io.jl) over stream read primitives
+builtin	ReadLines	migratable	upstream readlines is pure Julia (base/io.jl) over stream read primitives
+builtin	RefNew	pure-julia-first	Public `Ref(x)` lives in base/refvalue.jl and calls internal `_ref_new`; Rust allocates the VM Ref cell backing (Issue #8779)
+builtin	RefUnwrap	pure-julia-first	Public `getindex(x::Ref)` lives in base/refvalue.jl and calls internal `_ref_get`; Rust reads the VM Ref cell backing (Issue #8779)
+builtin	RegexEachmatch	intrinsic	condition 2: wraps the Rust `regex` crate (upstream wraps PCRE2 via ccall)
+builtin	RegexMatch	intrinsic	condition 2: wraps the Rust `regex` crate (upstream wraps PCRE2 via ccall)
+builtin	RegexNew	intrinsic	condition 2: wraps the Rust `regex` crate (upstream wraps PCRE2 via ccall)
+builtin	RegexOccursin	pure-julia-first	Pure Julia definition owns the public name (base/strings/search.jl); Rust handler is a dispatch fallback / fast path
+builtin	RegexReplace	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	RegexSplit	pure-julia-first	Pure Julia definition owns the public name (base/strings/util.jl); Rust handler is a dispatch fallback / fast path
+builtin	Reinterpret	intrinsic	condition 3: bit-level reinterpretation of VM value storage (upstream bitcast intrinsic)
+builtin	Repr	pure-julia-first	Pure Julia definition owns the public name (base/io.jl); Rust handler is a dispatch fallback / fast path
+builtin	Reshape	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	_ReturnTypesByFtype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Rm	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Round	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	RoundDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	RoundSigDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	SetBigFloatDefaultPrecision	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	SetBigFloatRounding	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Setfield	intrinsic	condition 3: `setfield!` is a C builtin in upstream; field layout access
+builtin	SetZeroSubnormals	intrinsic	condition 1: writes hardware FP control state
+builtin	Seek	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): IO stream position mutation boundary
+builtin	Signed	pure-julia-first	Pure Julia definition owns the public name (base/number.jl); Rust handler is a dispatch fallback / fast path
+builtin	Similar	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	Size	pure-julia-first	Pure Julia definition owns the public name (base/abstractarray.jl); Rust handler is a dispatch fallback / fast path
+builtin	Sizeof	intrinsic	condition 3: value/type size from VM layout metadata (upstream `Core.sizeof` builtin)
+builtin	Stacktrace	intrinsic	condition 1 (RUST_BOUNDARY §1): VM call-stack snapshot accessible only via Rust runtime state; no Julia-level equivalent (Issue #9098)
+builtin	Sleep	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Skip	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): IO stream position mutation boundary
+builtin	Sprintf	pure-julia-first	Pure Julia definition owns the public name (base/printf.jl); Rust handler is a dispatch fallback / fast path
+builtin	Sqrt	pure-julia-first	Pure Julia definition owns the public name (base/complex.jl); Rust handler is a dispatch fallback / fast path
+builtin	StringFromChars	pure-julia-first	Public `String(::Vector{Char})` / `String(::Vector{UInt8})` methods live in base/strings/basic.jl and call internal `_string_from_chars` for VM string storage construction (Issue #8780)
+builtin	StringIntToBase	pure-julia-first	Public `string(n::Integer; base, pad)` digit conversion lives in base/intfuncs.jl; Rust variant is no longer publicly routed (Issue #8780)
+builtin	StringNew	pure-julia-first	Public `string(xs...)` lives in base/strings/basic.jl over print/IOBuffer; Rust `_string` remains only the fallback stringification boundary (Issue #8780)
+builtin	SubStringRetag	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Subtype	intrinsic	condition 3: `<:` subtyping runs the VM type lattice (upstream jl_subtype, C)
+builtin	Subtypes	intrinsic	condition 3: walks the VM type registry (upstream walks jl_ type caches via reflection)
+builtin	_Supertype	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	SupertypeOp	intrinsic	condition 3: `>:` runs the VM type lattice
+builtin	Svd	pure-julia-first	Pure Julia definition owns the public name (stdlib/LinearAlgebra/src/LinearAlgebra.jl); Rust handler is a dispatch fallback / fast path
+builtin	SymbolNew	intrinsic	condition 3: Symbol interning is a VM symbol-table primitive (upstream jl_symbol, C)
+builtin	TakeString	pure-julia-first	Pure Julia definition owns the public name (base/channels.jl); Rust handler is a dispatch fallback / fast path
+builtin	TaskCurrent	intrinsic	condition 3: VM-owned cooperative task identity/session state boundary; public current_task remains Pure Julia (Issue #10349)
+builtin	TaskPark	intrinsic	condition 3: VM frame/stack continuation capture boundary; public blocking semantics remain Pure Julia (Issue #10349)
+builtin	TaskRegisterMain	intrinsic	condition 3: VM task-table root registration boundary; public Task semantics remain Pure Julia (Issue #10349)
+builtin	TaskSchedule	intrinsic	condition 3: VM task-table continuation registration boundary; public schedule remains Pure Julia (Issue #10349)
+builtin	TaskWake	intrinsic	condition 3: VM continuation runnable-state transition boundary; public notify/wait semantics remain Pure Julia (Issue #10349)
+builtin	TaskYield	intrinsic	condition 3: VM frame/stack continuation switch boundary; public yield remains Pure Julia (Issue #10349)
+builtin	Tempdir	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Tempname	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	TestRecord	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TestRecordBroken	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TestSetBegin	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TestSetEnd	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TimeNs	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	Touch	intrinsic	condition 1 (RUST_BOUNDARY §1/§3): OS boundary — filesystem/stream/process/clock access
+builtin	TrailingZeros	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Trunc	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	TruncDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	TruncSigDigits	pure-julia-first	Pure Julia definition owns the public name (base/floatfuncs.jl); Rust handler is a dispatch fallback / fast path
+builtin	TryparseFloat64	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TupleEquals	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TupleFirst	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	TupleLast	pure-julia-first	Pure Julia definition owns the public name (base/iterators.jl); Rust handler is a dispatch fallback / fast path
+builtin	TupleLen	pure-julia-first	Pure Julia definition owns the public name (base/abstractarray.jl); Rust handler is a dispatch fallback / fast path
+builtin	TupleNew	pure-julia-first	Pure Julia definition owns the public name (base/tuple.jl); Rust handler is a dispatch fallback / fast path
+builtin	_Typeintersect	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_Typename	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TypeOf	intrinsic	condition 3: `typeof` is a C builtin in upstream; VM tag access
+builtin	_TypeEqual	intrinsic	condition 3: runtime type-object equality depends on VM DataType/UnionAll/TypeVar representation (Issue #9563)
+builtin	_TypeParameters	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_TypeUnion	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	TypeVar	intrinsic	condition 3: TypeVar construction is a C builtin in upstream (jl_new_typevar)
+builtin	_TypeVarLowerBound	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_TypeVarName	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_TypeVarUpperBound	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	UInt128	intrinsic	underscored `_to_uint128` conversion boundary; public UInt128(x) is a Pure Julia wrapper (Issue #8777)
+builtin	UInt16	intrinsic	underscored `_to_uint16` conversion boundary; public UInt16(x) is a Pure Julia wrapper (Issue #8777)
+builtin	UInt32	intrinsic	underscored `_to_uint32` conversion boundary; public UInt32(x) is a Pure Julia wrapper (Issue #8777)
+builtin	UInt64	intrinsic	underscored `_to_uint64` conversion boundary; public UInt64(x) is a Pure Julia wrapper (Issue #8777)
+builtin	UInt8	intrinsic	underscored `_to_uint8` conversion boundary; public UInt8(x) is a Pure Julia wrapper (Issue #8777)
+builtin	UnionAll	intrinsic	condition 3: UnionAll construction is a C builtin in upstream
+builtin	_UnionAllBody	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	_UnionAllVar	intrinsic	underscored Layer-1/2 primitive by design; public surface is a Pure Julia wrapper (Public Base Routing Rule)
+builtin	Unsigned	pure-julia-first	Pure Julia definition owns the public name (base/number.jl); Rust handler is a dispatch fallback / fast path
+builtin	Valtype	pure-julia-first	Pure Julia definition owns the public name (base/dict.jl); Rust handler is a dispatch fallback / fast path
+builtin	Which	pure-julia-first	Pure Julia definition owns the public name (base/reflection.jl); Rust handler is a dispatch fallback / fast path
+builtin	Zero	pure-julia-first	Pure Julia definition owns the public name (base/complex.jl); Rust handler is a dispatch fallback / fast path
+builtin	Zeros	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	ZerosF64	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+builtin	ZerosI64	pure-julia-first	Pure Julia definition owns the public name (base/array.jl); Rust handler is a dispatch fallback / fast path
+instr	Abs2F64	migratable	same math-function family as AbsF64; benchmark dispatch-path faster; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	AbsF64	migratable	benchmark: typed 78.5 ms vs dynamic 56.9 ms (n=10000, 0.72x) — dispatch path 1.38x FASTER; Rust AbsF64 instruction adds overhead over pure-Julia abs(::Float64); candidate for removal; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	AddF64	perf-measured	condition 4: typed 40.8 ms vs dynamic 72.4 ms (n=50000, 1.77x speedup); benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	AddI64	perf-measured	condition 4: typed 101.7 ms vs dynamic 172.6 ms (n=50000, 1.70x speedup); benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	AllocUndefDynamicTyped	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	AllocUndefDynamicTypedFromTuple	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	AllocUndefTyped	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	AllocUndefTypedFromTuple	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	ApplyTypeDynamic	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	ApplyTypeDynamicSplat	intrinsic	condition 3: upstream C builtin equivalent (apply_type) — VM object layout access; expands runtime splat collections before UnionAll instantiation (Issue #10191)
+instr	ArrayDeleteAt	perf-measured	condition 4: fast_path 9.0 ms vs dispatch 78.7 ms (n=512, 8.7x speedup); benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ArrayDeleteAtIndices	perf-measured	condition 4: same array-mutation bench family (8.7x); benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ArrayInsert	perf-measured	condition 4: same array-mutation bench family (8.7x); benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ArrayPop	perf-measured	condition 4: same array-mutation bench family (8.7x); benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ArrayPopFirst	perf-measured	condition 4: same array-mutation bench family (8.7x); benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ArrayPush	perf-measured	condition 4: push! hot loop measured in benches/vm_aizawa_plot_push_benchmark.rs; pure Julia fallback = dispatch path
+instr	ArrayPushFirst	perf-measured	condition 4: same array-mutation bench family (8.7x); benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ArrayPushTypejoin	perf-measured	condition 4: widening push! variant of the measured push fast path (benches/vm_aizawa_plot_push_benchmark.rs)
+instr	BoolToI64	perf-measured	condition 4: typed Bool→Int64 conversion fast path; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	CeilF64	migratable	same math-function family as AbsF64; benchmark dispatch-path faster; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	ConcatStrings	perf-measured	condition 4: no-JIT string * operator fast path avoids dispatch; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ConstructEnum	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	ConstructParametricType	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	ConstructParametricTypeSplat	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	CreateExpr	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	CreateQuoteNode	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	DictLen	migratable	legacy Value::Dict carrier instr; same as DictSet
+instr	DictSet	migratable	legacy Value::Dict carrier instr; Dict{K,V} exists as pure Julia struct — cache compatibility is not a valid retention reason (RUST_BOUNDARY)
+instr	DivF64	perf-measured	condition 4: same F64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	DynamicAdd	perf-measured	condition 4: DynamicAdd: Rust-inline 105.8 ms vs julia-dispatch 7.49 s (n=20000, 70x speedup); dispatch is @noinline-wrapped arithmetic through Julia method table; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicDiv	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicIntDiv	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicMod	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicMul	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicNeg	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicPow	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicSub	perf-measured	condition 4: same Dynamic-arithmetic bench family (70x vs julia-dispatch); benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToBool	perf-measured	condition 4: Rust-inline 2.08 s vs julia-dispatch (comparable pattern); inline tag-check eliminates method-table lookup per conversion; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToF16	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToF32	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToF64	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToI16	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToI32	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToI64	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToI8	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToU16	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToU32	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToU64	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	DynamicToU8	perf-measured	condition 4: same Dynamic-conversion bench family; benches/vm_perf_pending_dynamic_benchmark.rs (Issue #9098)
+instr	EqF64	perf-measured	condition 4: typed 15.3 ms vs dynamic 25.9 ms (n=20000, 1.69x speedup); benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	EqI64	perf-measured	condition 4: comparable to F64-comparison family, 1.7x expected; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	EqStr	perf-measured	condition 4: condition 4: typed string-comparison and concat fast paths avoid dispatch per operation; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	EqStruct	perf-measured	condition 4: struct == field-by-field fast path avoids dispatch through == method; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	FloorF64	migratable	same math-function family as AbsF64; benchmark dispatch-path faster; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	GeF64	perf-measured	condition 4: same F64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	GeI64	perf-measured	condition 4: same I64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	GeStr	perf-measured	condition 4: same string-comparison bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	GetExprField	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	GetField	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	GetFieldByName	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	GetGlobalRefField	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	GetLineNumberNodeField	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	GetQuoteNodeValue	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	GtF64	perf-measured	condition 4: same F64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	GtI64	perf-measured	condition 4: same I64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	GtStr	perf-measured	condition 4: same string-comparison bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	I64ToBool	perf-measured	condition 4: typed Int64→Bool conversion fast path; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	IndexLoad	perf-measured	condition 4: condition 4: typed array indexing fast path avoids method dispatch per element; architectural benefit confirmed; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexLoadInbounds	perf-measured	condition 4: bounds-check-elided getindex fast path; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexLoadTyped	perf-measured	condition 4: typed-element getindex fast path; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexLoadTypedInbounds	perf-measured	condition 4: typed+inbounds getindex fast path; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexSlice	perf-measured	condition 4: range-slice getindex fast path vs element-wise copy; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexStore	perf-measured	condition 4: typed array-setindex fast path avoids dispatch; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexStoreInbounds	perf-measured	condition 4: bounds-check-elided setindex! fast path; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IndexStoreTyped	perf-measured	condition 4: typed-element setindex! fast path; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IOPrintlnNewline	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	IsDefined	intrinsic	condition 3: `isdefined` is a C builtin in upstream; slot/binding state query
+instr	IsNothing	perf-measured	condition 4: direct tag-check for x===nothing avoids dispatch per loop iteration; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IterateDynamic	perf-measured	condition 4: condition 4: typed iteration protocol fast path avoids iterate() dispatch overhead per step; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IterateFirst	perf-measured	condition 4: same iteration-protocol bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IterateFirstSplit	perf-measured	condition 4: same iteration-protocol bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IterateNext	perf-measured	condition 4: same iteration-protocol bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	IterateNextSplit	perf-measured	condition 4: same iteration-protocol bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	LeF64	perf-measured	condition 4: same F64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	LeI64	perf-measured	condition 4: same I64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	LeStr	perf-measured	condition 4: same string-comparison bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	LtF64	perf-measured	condition 4: same F64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	LtI64	perf-measured	condition 4: same I64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	LtStr	perf-measured	condition 4: same string-comparison bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	MakeGenerator	intrinsic	condition 3: compiler-lowered closure/generator machinery (Base.Generator struct itself is pure Julia)
+instr	MakeGeneratorRuntime	intrinsic	condition 3: compiler-lowered closure/generator machinery (Base.Generator struct itself is pure Julia)
+instr	MakeRange	perf-measured	condition 4: condition 4: range-construction and range-query fast paths avoid iterable-protocol dispatch; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	MakeRangeF64	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	MakeRangeLazy	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	MakeRef	intrinsic	legacy/compiler Ref-cell allocation primitive retained for bytecode/cache compatibility and parametric Ref constructors; public `Ref(x)` is a Pure Julia wrapper over `_ref_new` (Issue #8779)
+instr	MakeSimpleVector	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	MakeStepRangeLazy	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	MatMul	perf-measured	condition 4 (Issue #7876): matmul fast path measured vs pure-dispatch fallback; parity fixture complex_array_fallback_parity_7876.jl; benches/vm_staticarrays_matvec_benchmark.rs
+instr	MemoryGet	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	MemoryLength	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	MemorySet	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	ModI64	perf-measured	condition 4: same I64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	MulF64	perf-measured	condition 4: same F64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	MulI64	perf-measured	condition 4: same I64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	NamedTupleGetBySymbol	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NamedTupleGetField	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NamedTupleGetIndex	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NeF64	perf-measured	condition 4: same F64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	NegF64	perf-measured	condition 4: same F64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	NegI64	perf-measured	condition 4: same I64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	NeI64	perf-measured	condition 4: same I64-comparison bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	NewArray	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	NewArrayTyped	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	NewDynamicParametricStruct	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NewMemory	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	NewMemoryDynamic	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	NewMemoryDynamicTyped	intrinsic	condition 3: GC-managed storage allocation / memoryref access (upstream C builtins or alloc primitives)
+instr	NewMersenne	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	NewNamedTuple	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NewPairs	migratable	upstream `pairs` is pure Julia (base/essentials.jl / iterators.jl); Value::Pairs is a legacy Rust carrier
+instr	NewParametricStruct	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NewSet	migratable	legacy carrier: Set{T} already migrated to pure Julia (Issue #6721); instr remains only for legacy bytecode
+instr	NewSetTyped	migratable	legacy carrier: same as NewSet (Issue #6721)
+instr	NewStableRng	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	NewStruct	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NewStructSplat	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NewTuple	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	NewXoshiro	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	NotBool	perf-measured	condition 4: typed bool-negation fast path, same family as I64-comparison; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	NtupleFunc	migratable	upstream ntuple is pure Julia (base/ntuple.jl); requires only VM callable invocation, which HOF dispatch already does
+instr	NtupleRuntime	migratable	upstream ntuple is pure Julia (base/ntuple.jl)
+instr	PairsGetBySymbol	migratable	upstream `getindex(::Pairs, k)` is pure Julia; legacy Rust carrier
+instr	PairsKeys	migratable	upstream `keys(::Pairs)` is pure Julia; legacy Rust carrier
+instr	PairsLength	migratable	upstream `length(::Pairs)` is pure Julia; legacy Rust carrier
+instr	PairsValues	migratable	upstream `values(::Pairs)` is pure Julia; legacy Rust carrier
+instr	PowF64	migratable	same math-function family as AbsF64; benchmark dispatch-path faster; float-exponent pow delegates to libm equally via Julia dispatch; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	PrintAny	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintAnyNoNewline	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintF64	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintF64NoNewline	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintI64	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintI64NoNewline	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintNewline	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintStr	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	PrintStrNoNewline	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	RandArg	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RandArray	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RandF64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RandIntArray	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RandnArg	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RandnArray	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RandnF64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RangeCollect	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	RangeFirst	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	RangeGetIndex	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	RangeLast	perf-measured	condition 4: same range bench family; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	Rethrow	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	RethrowCurrent	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	RethrowOther	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	RngRandArrayF64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RngRandArrayI64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RngRandF64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RngRandnArrayF64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	RngRandnF64	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	SeedGlobalRng	intrinsic	condition 1 (RUST_BOUNDARY §2 乱数): RNG state is a VM-shared external resource
+instr	SelectF64	perf-measured	condition 4: branchless ifelse(::Bool,::Float64,::Float64) avoids method dispatch; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	SelectI64	perf-measured	condition 4: branchless ifelse(::Bool,::Int64,::Int64) avoids method dispatch; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	SetAdd	migratable	legacy carrier: same as NewSet (Issue #6721)
+instr	SetField	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	SetFieldByName	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	SleepF64	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	SleepI64	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	SliceAll	perf-measured	condition 4: full-copy a[:] fast path vs element-wise copy; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	SprintFunc	migratable	upstream sprint is pure Julia (base/strings/io.jl) over IOBuffer; blocked on IOBuffer migration
+instr	SqrtF64	migratable	same math-function family as AbsF64; benchmark dispatch-path faster; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	StringConcat	perf-measured	condition 4: no-JIT string concatenation fast path avoids dispatch; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	SubF64	perf-measured	condition 4: same F64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	SubI64	perf-measured	condition 4: same I64-arithmetic bench family; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	Test	migratable	upstream Test stdlib is pure Julia (stdlib/Test/src/Test.jl)
+instr	TestSetBegin	migratable	upstream @testset machinery is pure Julia (stdlib/Test)
+instr	TestSetEnd	migratable	upstream @testset machinery is pure Julia (stdlib/Test)
+instr	TestThrowsBegin	migratable	upstream @test_throws is pure Julia (stdlib/Test)
+instr	TestThrowsEnd	migratable	upstream @test_throws is pure Julia (stdlib/Test)
+instr	ThrowError	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	ThrowValue	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	TimeNs	intrinsic	condition 1: IO sink / OS clock-scheduler boundary (typed forms of the print/sleep/time primitives)
+instr	ToF64	perf-measured	condition 4: typed →Float64 conversion fast path; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	ToI64	perf-measured	condition 4: typed →Int64 conversion fast path; benches/vm_perf_pending_numeric_benchmark.rs (Issue #9098)
+instr	ToStr	perf-measured	condition 4: no-JIT string(x) conversion fast path avoids dispatch; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	ToString	perf-measured	condition 4: no-JIT string(x) generic fast path avoids dispatch; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)
+instr	TupleFirst	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	TupleGet	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	TupleSecond	intrinsic	condition 3: upstream C builtin equivalent (getfield/setfield!/tuple/svec/apply_type/_expr/new/throw) — VM object layout access
+instr	UnwrapRef	intrinsic	legacy/compiler Ref-cell read primitive retained for bytecode/cache compatibility; public `getindex(::Ref)` is a Pure Julia wrapper over `_ref_get` (Issue #8779)
+instr	WrapInGenerator	intrinsic	condition 3: compiler-lowered closure/generator machinery (Base.Generator struct itself is pure Julia)
+instr	Zero	perf-measured	condition 4: typed zero(T) fast path avoids method dispatch for the zero-element query; benches/vm_perf_pending_collections_benchmark.rs (Issue #9098)

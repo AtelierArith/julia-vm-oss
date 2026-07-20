@@ -1,8 +1,7 @@
 module Generic
 
-export Partition, YoungTableau
+using ..AbstractAlgebra: Partition, YoungTableau
 
-const Partition = AbstractAlgebra.Partition
-const YoungTableau = AbstractAlgebra.YoungTableau
+export Partition, YoungTableau
 
 end # module Generic

@@ -127,6 +127,18 @@ function view(A::Vector{T}, indices::UnitRange) where T
     return SubArray{T,1,Vector{T},Tuple{UnitRange{Int64}},true}(A, (indices,), offset, len)
 end
 
+function view(A::Vector{T}, indices::Vector{Int64}) where T
+    len = length(indices)
+    for i in 1:len
+        idx = indices[i]
+        if idx < 1 || idx > length(A)
+            error("BoundsError: attempt to create view outside parent bounds")
+        end
+    end
+
+    return SubArray{T,1,Vector{T},Tuple{Vector{Int64}},false}(A, (indices,), 0, len)
+end
+
 function view(r::AbstractRange, indices::UnitRange)
     return r[indices]
 end
@@ -169,26 +181,26 @@ end
 
 function view(A::Matrix{T}, rows::UnitRange, cols::UnitRange) where T
     len = _matrix_range_view_len(A, rows, cols)
-    return SubArray{T,2,typeof(A),Tuple{UnitRange{Int64},UnitRange{Int64}},false}(A, (rows, cols), 0, len)
+    return SubArray{T,2,Matrix{T},Tuple{UnitRange{Int64},UnitRange{Int64}},false}(A, (rows, cols), 0, len)
 end
 
 function view(A::Matrix{T}, rows::UnitRange, cols::typeof(:)) where T
-    col_indices = Slice(OneTo(size(A, 2)))
+    col_indices = Slice(1:size(A, 2))
     len = _matrix_range_view_len(A, rows, col_indices)
-    return SubArray{T,2,typeof(A),Tuple{UnitRange{Int64},Slice{OneTo}},false}(A, (rows, col_indices), 0, len)
+    return SubArray{T,2,Matrix{T},Tuple{UnitRange{Int64},Slice{UnitRange{Int64}}},false}(A, (rows, col_indices), 0, len)
 end
 
 function view(A::Matrix{T}, rows::typeof(:), cols::UnitRange) where T
-    row_indices = Slice(OneTo(size(A, 1)))
+    row_indices = Slice(1:size(A, 1))
     len = _matrix_range_view_len(A, row_indices, cols)
-    return SubArray{T,2,typeof(A),Tuple{Slice{OneTo},UnitRange{Int64}},true}(A, (row_indices, cols), 0, len)
+    return SubArray{T,2,Matrix{T},Tuple{Slice{UnitRange{Int64}},UnitRange{Int64}},true}(A, (row_indices, cols), 0, len)
 end
 
 function view(A::Matrix{T}, rows::typeof(:), cols::typeof(:)) where T
-    row_indices = Slice(OneTo(size(A, 1)))
-    col_indices = Slice(OneTo(size(A, 2)))
+    row_indices = Slice(1:size(A, 1))
+    col_indices = Slice(1:size(A, 2))
     len = _matrix_range_view_len(A, row_indices, col_indices)
-    return SubArray{T,2,typeof(A),Tuple{Slice{OneTo},Slice{OneTo}},true}(A, (row_indices, col_indices), 0, len)
+    return SubArray{T,2,Matrix{T},Tuple{Slice{UnitRange{Int64}},Slice{UnitRange{Int64}}},true}(A, (row_indices, col_indices), 0, len)
 end
 
 # Dimension-dropping matrix views: a scalar Int index keeps the parent
@@ -202,30 +214,30 @@ function view(A::Matrix{T}, row::Int64, cols::UnitRange) where T
     if row < 1 || row > size(A, 1) || first(cols) < 1 || last(cols) > size(A, 2)
         error("BoundsError: attempt to create view outside parent bounds")
     end
-    return SubArray{T,1,typeof(A),Tuple{Int64,UnitRange{Int64}},true}(A, (row, cols), 0, length(cols))
+    return SubArray{T,1,Matrix{T},Tuple{Int64,UnitRange{Int64}},true}(A, (row, cols), 0, length(cols))
 end
 
 function view(A::Matrix{T}, row::Int64, cols::typeof(:)) where T
     if row < 1 || row > size(A, 1)
         error("BoundsError: attempt to create view outside parent bounds")
     end
-    col_indices = Slice(OneTo(size(A, 2)))
-    return SubArray{T,1,typeof(A),Tuple{Int64,Slice{OneTo}},true}(A, (row, col_indices), 0, size(A, 2))
+    col_indices = Slice(1:size(A, 2))
+    return SubArray{T,1,Matrix{T},Tuple{Int64,Slice{UnitRange{Int64}}},true}(A, (row, col_indices), 0, size(A, 2))
 end
 
 function view(A::Matrix{T}, rows::UnitRange, col::Int64) where T
     if col < 1 || col > size(A, 2) || first(rows) < 1 || last(rows) > size(A, 1)
         error("BoundsError: attempt to create view outside parent bounds")
     end
-    return SubArray{T,1,typeof(A),Tuple{UnitRange{Int64},Int64},true}(A, (rows, col), 0, length(rows))
+    return SubArray{T,1,Matrix{T},Tuple{UnitRange{Int64},Int64},true}(A, (rows, col), 0, length(rows))
 end
 
 function view(A::Matrix{T}, rows::typeof(:), col::Int64) where T
     if col < 1 || col > size(A, 2)
         error("BoundsError: attempt to create view outside parent bounds")
     end
-    row_indices = Slice(OneTo(size(A, 1)))
-    return SubArray{T,1,typeof(A),Tuple{Slice{OneTo},Int64},true}(A, (row_indices, col), 0, size(A, 1))
+    row_indices = Slice(1:size(A, 1))
+    return SubArray{T,1,Matrix{T},Tuple{Slice{UnitRange{Int64}},Int64},true}(A, (row_indices, col), 0, size(A, 1))
 end
 
 # 3-D range view (Issue #5137). The shared column-major
@@ -458,7 +470,7 @@ function _subarray_linear_load(v, i)
     end
     nd = length(v.indices)
     if nd == 1
-        return v.parent[v.offset + i]
+        return v.parent[v.indices[1][i]]
     elseif nd == 2
         # Column-major linear -> (row, col), then index the parent through the
         # per-dimension indices (the same mapping the 2D Cartesian getindex uses).
@@ -525,7 +537,7 @@ function _subarray_linear_store!(v, x, i)
     end
     nd = length(v.indices)
     if nd == 1
-        setindex!(v.parent, x, v.offset + i)
+        setindex!(v.parent, x, v.indices[1][i])
     elseif nd == 2
         nrows = length(v.indices[1])
         row = mod(i - 1, nrows) + 1

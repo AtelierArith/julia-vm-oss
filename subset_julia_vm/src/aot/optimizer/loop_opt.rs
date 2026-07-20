@@ -539,6 +539,9 @@ impl AotLoopOptimizer {
                 value: self.substitute_var_in_expr(expr, var, value),
             },
             AotStmt::Expr(expr) => AotStmt::Expr(self.substitute_var_in_expr(expr, var, value)),
+            AotStmt::ValueCarrier(expr) => {
+                AotStmt::ValueCarrier(self.substitute_var_in_expr(expr, var, value))
+            }
             AotStmt::Return(Some(expr)) => {
                 AotStmt::Return(Some(self.substitute_var_in_expr(expr, var, value)))
             }

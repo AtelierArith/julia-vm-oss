@@ -1,0 +1,41 @@
+metric	module	baseline	reason
+direct_vmerror_err	subset_julia_vm_vm/src/register_vm.rs	34	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/broadcast.rs	2	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_arrays.rs	32	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_collections.rs	12	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_dicts.rs	9	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_exec.rs	16	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_io.rs	52	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_linalg.rs	33	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_macro	152	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_math.rs	5	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_numeric.rs	11	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_reflection	49	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_strings.rs	22	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_types.rs	15	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/builtins_types_conversion.rs	27	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/convert.rs	32	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/dispatch.rs	1	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/dynamic_ops	48	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/exec	361	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/hof_exec	8	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/intrinsics_exec.rs	15	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/matmul	14	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/mod.rs	4	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/stack_ops.rs	16	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/state.rs	1	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/tests.rs	10	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/type_ops	163	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/util.rs	3	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+direct_vmerror_err	subset_julia_vm_vm/src/vm/value	102	direct Err(VmError) bypasses span attachment unless caller recovers instruction span
+ffi_compile_without_span	subset_julia_vm_ffi/src/detailed.rs	4	FFI compile error conversion lacks a span parameter
+ffi_empty_span	subset_julia_vm_ffi/src/error.rs	3	FFI exports an empty CSpan for some error kinds
+ffi_runtime_without_span	subset_julia_vm_ffi/src/detailed.rs	2	FFI runtime error conversion lacks a span parameter
+spanned_from_error_constructor	subset_julia_vm_vm/src/vm/error.rs	1	constructor permits SpannedVmError without span
+spanned_from_vmerror_impl	subset_julia_vm_vm/src/vm/error.rs	1	From<VmError> permits implicit SpannedVmError without span
+vmerror_map_err	subset_julia_vm_vm/src/vm/builtins_macro	2	map_err constructs VmError before any span-bearing builder
+vmerror_map_err	subset_julia_vm_vm/src/vm/convert.rs	3	map_err constructs VmError before any span-bearing builder
+vmerror_map_err	subset_julia_vm_vm/src/vm/exec	7	map_err constructs VmError before any span-bearing builder
+vmerror_map_err	subset_julia_vm_vm/src/vm/intrinsics_exec.rs	1	map_err constructs VmError before any span-bearing builder
+vmerror_map_err	subset_julia_vm_vm/src/vm/type_ops	69	map_err constructs VmError before any span-bearing builder
+vmerror_map_err	subset_julia_vm_vm/src/vm/value	1	map_err constructs VmError before any span-bearing builder

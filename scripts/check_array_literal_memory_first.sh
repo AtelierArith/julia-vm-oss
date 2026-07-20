@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-target="subset_julia_vm/src/vm/exec/array_basic.rs"
+target="subset_julia_vm_vm/src/vm/exec/array_basic.rs"
 errors=0
 
 if rg -n 'ArrayData::[A-Za-z0-9_]+\(Vec::with_capacity' "$target"; then

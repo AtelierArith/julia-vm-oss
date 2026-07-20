@@ -1,0 +1,16 @@
+file	classification	issue	pattern
+int	unsupported-feature	#8866	newline-separated second iterator in loop-form @testset
+int	unsupported-feature	#8867	broadcast shift operator .<<
+operators	unsupported-feature	#8759	import Base.< operator suffix path
+operators	unsupported-feature	#8759	Unicode operator/function-composition tokens in function/import position
+operators	unsupported-feature	#8866	newline-separated multi-iterator @testset loops
+bool	scope-out		target file absent from this upstream Julia checkout
+char	unsupported-feature	#8870	extended Unicode Char escape literals
+rational	unsupported-feature	#8871	typed-call coefficient syntax before im
+dict	unsupported-feature	#8872	multi-target indexed assignment
+dict	unsupported-feature	#8870	extended escape Char literals
+dict	unsupported-feature	#8874	destructuring do-block arguments
+dict	unsupported-feature	#8759	dotted operator in function/import position
+sets	unsupported-feature	#8759	Unicode set operator calls in parser expression position
+sets	unsupported-feature	#8873	pair arrow expression inside ternary branch
+sets	unsupported-feature	#8866	newline-separated multi-iterator loops

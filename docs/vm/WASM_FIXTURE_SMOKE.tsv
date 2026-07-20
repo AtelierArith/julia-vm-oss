@@ -1,0 +1,44 @@
+name	fixture	expected	reason
+arithmetic_basic	arithmetic/basic.jl	true	arithmetic baseline
+arithmetic_precedence	arithmetic/precedence.jl	true	operator precedence
+arithmetic_power	arithmetic/power.jl	true	power operator coverage
+arithmetic_max_min_variadic	arithmetic/max_min_variadic.jl	true	variadic numeric reducers
+arithmetic_compound_mod_intdiv	arithmetic/compound_mod_intdiv.jl	true	integer division and remainder
+bool_numeric_coverage	bool/test_bool_numeric_coverage.jl	true	bool numeric operations
+bool_type_predicates	bool/type_predicates.jl	true	bool type predicates
+bool_bitwise	bool/bitwise_bool_8197.jl	true	bool bitwise operators
+bool_pow_typeof	bool/pow_typeof.jl	true	bool power result types
+comparison_bool_equality	comparison/bool_equality.jl	true	bool equality comparisons
+comparison_chained	comparison/chained_comparison.jl	true	chained comparison semantics
+comparison_mixed_int_float_exact	comparison/mixed_int_float_exact_8187.jl	true	mixed integer and float comparison
+control_flow_if_basic	control_flow/if_basic.jl	true	if expression baseline
+control_flow_if_else	control_flow/if_else.jl	true	if/else expression baseline
+control_flow_for_loop_sum	control_flow/for_loop_sum.jl	true	for loop baseline
+control_flow_while_loop	control_flow/while_loop.jl	true	while loop baseline
+control_flow_reassign_in_if	control_flow/reassign_in_if.jl	true	branch reassignment
+closures_basic	closures/basic_closure.jl	true	closure baseline
+closures_nested	closures/test_nested_closure.jl	true	nested closure capture
+closures_shadowing	closures/test_shadowing.jl	true	closure shadowing behavior
+dict_pure_minimal	dict/test_pure_julia_dict_minimal.jl	true	minimal Dict construction and lookup
+dict_iteration	dict/dict_iteration.jl	true	Dict iteration
+dict_keys_values_pairs_types	dict/keys_values_pairs_types.jl	true	Dict views and pair typing
+strings_ascii_basic	strings/ascii_basic.jl	true	ASCII string baseline
+strings_contains	strings/contains.jl	true	string contains
+strings_startswith	strings/startswith_basic.jl	true	string prefix check
+strings_endswith	strings/endswith_basic.jl	true	string suffix check
+strings_repeat	strings/repeat.jl	true	string repetition
+strings_join	strings/join_basic.jl	true	string join
+iteration_range_forloop	iteration/range_forloop.jl	true	range iteration
+iteration_array_forloop	iteration/array_forloop.jl	true	array iteration
+iteration_tuple_forloop	iteration/tuple_forloop.jl	true	tuple iteration
+iteration_enumerate_basic	iteration/enumerate_basic.jl	true	enumerate iteration
+iteration_zip_basic	iteration/zip_basic.jl	true	zip iteration
+array_indexing	array/indexing.jl	true	array indexing baseline
+array_sum	array/sum.jl	true	array sum
+array_comprehension	array/comprehension.jl	true	array comprehension
+range_oneto_basic	range/oneto_basic.jl	true	OneTo range baseline
+range_explicit_step	range/range_explicit_step_5667.jl	true	explicit step range
+tuple_equality	tuple/equality.jl	true	tuple equality
+tuple_first_basic	tuple/first_basic.jl	true	tuple first
+tuple_last_basic	tuple/last_basic.jl	true	tuple last
+tuple_reverse_basic	tuple/reverse_basic.jl	true	tuple reverse

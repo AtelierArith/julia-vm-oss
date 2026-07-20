@@ -1,6 +1,9 @@
 # Issue #3768: subtypes(T) must include user-defined direct children.
+# `subtypes` lives in InteractiveUtils upstream (sjulia also exposes it there);
+# import it so the fixture runs under upstream julia too (Issue #10237).
 
 using Test
+using InteractiveUtils
 
 abstract type ReflectionRoot3768 end
 abstract type ReflectionMid3768 <: ReflectionRoot3768 end

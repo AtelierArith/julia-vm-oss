@@ -52,8 +52,8 @@ hash(x::Float64) = _hash(x == -0.0 ? 0.0 : x)
 hash(x::Float32) = _hash(Float64(x == Float32(-0.0) ? Float32(0.0) : x))
 hash(x::Float16) = _hash(Float64(x))
 
-# Bool hashes should be consistent with integer hashes
-# isequal(true, 1) is false in Julia, so hash(true) != hash(1) is OK
+# Bool hashes must be consistent with integer hashes because
+# isequal(true, 1) and isequal(false, 0) are true.
 hash(x::Bool) = _hash(x)
 
 # Nothing and Missing have distinct hashes

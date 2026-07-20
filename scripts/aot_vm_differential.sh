@@ -15,22 +15,25 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo_target_dir.sh"
+cargo_target_dir="$(resolve_cargo_target_dir "$ROOT")"
+export CARGO_TARGET_DIR="$cargo_target_dir"
+JULIARS_BIN="${JULIARS_BIN:-$cargo_target_dir/release/juliars}"
+SJULIA_BIN="${SJULIA_BIN:-$cargo_target_dir/release/sjulia}"
+export JULIARS_BIN SJULIA_BIN
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: bash scripts/aot_vm_differential.sh <fixture.jl> [...]" >&2
     exit 2
 fi
 
-juliars_bin="$ROOT/target/release/juliars"
-sjulia_bin="$ROOT/target/release/sjulia"
-
-if [[ ! -x "$juliars_bin" ]]; then
+if [[ ! -x "$JULIARS_BIN" ]]; then
     echo "ERROR: juliars binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features aot --bin juliars" >&2
     exit 2
 fi
 
-if [[ ! -x "$sjulia_bin" ]]; then
+if [[ ! -x "$SJULIA_BIN" ]]; then
     echo "ERROR: sjulia binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features repl --bin sjulia" >&2
     exit 2
@@ -53,7 +56,7 @@ for fixture in "$@"; do
     aot_out="$tmp_dir/aot.out"
     vm_out="$tmp_dir/vm.out"
 
-    if ! timeout 1800 "$juliars_bin" "$fixture" -o "$generated_rs" --emit-binary "$aot_bin" >"$tmp_dir/juliars.out" 2>&1; then
+    if ! timeout 1800 "$JULIARS_BIN" "$fixture" -o "$generated_rs" --emit-binary "$aot_bin" >"$tmp_dir/juliars.out" 2>&1; then
         echo "ERROR: juliars failed for $fixture" >&2
         tail -40 "$tmp_dir/juliars.out" >&2
         exit 1
@@ -65,7 +68,7 @@ for fixture in "$@"; do
         exit 1
     fi
 
-    if ! timeout 120 "$sjulia_bin" "$fixture" >"$vm_out" 2>&1; then
+    if ! timeout 120 "$SJULIA_BIN" "$fixture" >"$vm_out" 2>&1; then
         echo "ERROR: sjulia VM failed for $fixture" >&2
         tail -40 "$vm_out" >&2
         exit 1

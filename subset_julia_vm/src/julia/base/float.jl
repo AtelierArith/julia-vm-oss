@@ -8,6 +8,12 @@
 # Floating-Point Arithmetic
 # =============================================================================
 
+# Fixed-width public constructors are pure Julia wrappers over the VM's
+# underscored conversion boundaries (Issue #8777). Float64 remains on the
+# existing boundary for now because it is outside this migration slice.
+Float16(x) = _to_float16(x)
+Float32(x) = _to_float32(x)
+
 # Unary minus
 function Base.:(-)(x::Float64)
     neg_float(x)
@@ -34,7 +40,17 @@ function Base.:(/)(x::Float64, y::Float64)
 end
 
 # Power
+# Upstream `^(x::Float64, y::Float64)` (base/math.jl) throws a `DomainError` when a
+# negative base is raised to a non-integer exponent (the result would be complex),
+# rather than returning `NaN`. Mirror that check before the intrinsic so
+# `(-8.0)^(1/3)` / `(-8.0)^(1//3)` raise instead of silently yielding NaN
+# (Issue #9344). `x < 0.0` excludes `-0.0`; `isfinite(y)` lets `Inf`/`NaN` exponents
+# fall through (upstream returns `Inf`/`NaN` there); `y != trunc(y)` is the
+# non-integer test.
 function Base.:(^)(x::Float64, y::Float64)
+    if x < 0.0 && isfinite(y) && y != trunc(y)
+        throw(DomainError(x, "Exponentiation yielding a complex result requires a complex argument.\nReplace x^y with (x+0im)^y, Complex(x)^y, or similar."))
+    end
     pow_float(x, y)
 end
 
@@ -55,10 +71,10 @@ end
 # Scope: deliberately restricted to the concrete `Int64` (the literal integer
 # type, which is what `x .^ 2`, `x .+ 2`, … produce). `BigInt` must NOT be
 # intercepted — `Float64 ∘ BigInt` promotes to `BigFloat`, not `Float64` — and
-# `::Integer` would wrongly capture it (sjulia also has no `BitInteger` union
-# usable in dispatch). Other integer widths (`Int32`, `Int128`, `Bool`, unsigned)
-# stay on the correct promote() fallback; they are far rarer in numeric broadcasts
-# and keeping them off these methods also preserves `Bool` strong-zero semantics.
+# `::Integer` would wrongly capture it. Other integer widths (`Int32`, `Int128`,
+# `Bool`, unsigned) stay on the correct promote() fallback; they are far rarer
+# in numeric broadcasts and keeping them off these methods also preserves `Bool`
+# strong-zero semantics.
 Base.:(+)(x::Float64, y::Int64) = add_float(x, Float64(y))
 Base.:(+)(x::Int64, y::Float64) = add_float(Float64(x), y)
 Base.:(-)(x::Float64, y::Int64) = sub_float(x, Float64(y))
@@ -151,6 +167,22 @@ function signbit(x::Float64)
     end
 end
 
+# signbit for Float32/Float16 - checks if the sign bit is set.
+# Based on Julia's base/floatfuncs.jl:16-17
+#   signbit(x::Float32) = signbit(bitcast(Int32, x))
+#   signbit(x::Float16) = signbit(bitcast(Int16, x))
+# The narrow floats need a bit-level method: the generic sign-comparison
+# signbit(x) in number.jl cannot see the sign bit of -0.0f0 / Float16(-0.0)
+# (both compare == 0), so it wrongly returns false (Issue #9529).
+# reinterpret to the matching signed-int width, then the integer signbit.
+function signbit(x::Float32)
+    return signbit(reinterpret(Int32, x))
+end
+
+function signbit(x::Float16)
+    return signbit(reinterpret(Int16, x))
+end
+
 # abs for Float64 - uses abs_float intrinsic
 # Based on Julia's base/float.jl:698
 function abs(x::Float64)
@@ -186,8 +218,14 @@ function Base.:(/)(x::Float32, y::Float32)
     Float32(div_float(Float64(x), Float64(y)))
 end
 
-# Power for Float32
+# Power for Float32. Mirrors the negative-base / non-integer-exponent DomainError
+# of the Float64 method above (upstream `^(x::T, y::T) where T<:Union{Float16,Float32}`
+# throws for `x < 0` with a fractional exponent) so `(-8.0f0)^(1f0/3)` raises rather
+# than returning NaN (Issue #9344).
 function Base.:(^)(x::Float32, y::Float32)
+    if x < 0.0f0 && isfinite(y) && y != trunc(y)
+        throw(DomainError(x, "Exponentiation yielding a complex result requires a complex argument.\nReplace x^y with (x+0im)^y, Complex(x)^y, or similar."))
+    end
     Float32(pow_float(Float64(x), Float64(y)))
 end
 

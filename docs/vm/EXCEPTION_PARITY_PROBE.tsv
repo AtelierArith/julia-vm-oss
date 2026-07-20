@@ -1,0 +1,47 @@
+id	category	related_issue	julia_exit	julia_catchable	julia_exc_type	sjulia_exit	sjulia_catchable	sjulia_exc_type	type_match	catchable_match	note	julia_health	sjulia_health
+undef_var_read	undefined-var		1	yes	UndefVarError	1	yes	UndefVarError	yes	yes	-	ok	ok
+undef_var_call	undefined-var		1	yes	UndefVarError	1	yes	UndefVarError	yes	yes	-	ok	ok
+method_error_type_mismatch	dispatch		1	yes	MethodError	1	yes	MethodError	yes	yes	-	ok	ok
+method_error_arity	dispatch		1	yes	MethodError	1	yes	MethodError	yes	yes	-	ok	ok
+method_error_noncallable	dispatch		1	yes	MethodError	1	yes	MethodError	yes	yes	a bare numeric literal directly before '(' is multiplication in Julia (e.g. `2(3) == 6`), not a call -- use a variable to force a true non-callable-value call	ok	ok
+bounds_error_vector_high	collections		1	yes	BoundsError	1	yes	BoundsError	yes	yes	-	ok	ok
+bounds_error_vector_negative	collections		1	yes	BoundsError	1	yes	BoundsError	yes	yes	-	ok	ok
+bounds_error_string	strings		1	yes	BoundsError	1	yes	BoundsError	yes	yes	-	ok	ok
+string_index_error	strings		1	yes	StringIndexError	1	yes	StringIndexError	yes	yes	multi-byte codeunit index	ok	ok
+divide_error_int	numeric		1	yes	DivideError	1	yes	DivideError	yes	yes	-	ok	ok
+divide_error_rem	numeric		1	yes	DivideError	1	yes	DivideError	yes	yes	-	ok	ok
+inexact_error_int_conv	numeric		1	yes	InexactError	1	yes	InexactError	yes	yes	-	ok	ok
+inexact_error_uint	numeric		1	yes	InexactError	1	yes	InexactError	yes	yes	-	ok	ok
+domain_error_sqrt	numeric		1	yes	DomainError	1	yes	DomainError	yes	yes	-	ok	ok
+argument_error_negative_size	collections		1	yes	ArgumentError	1	yes	ArgumentError	yes	yes	-	ok	ok
+argument_error_string_repeat	strings		1	yes	ArgumentError	1	yes	ArgumentError	yes	yes	-	ok	ok
+key_error_dict	collections		1	yes	KeyError	1	yes	KeyError	yes	yes	-	ok	ok
+type_error_typeassert	typesystem		1	yes	TypeError	1	yes	TypeError	yes	yes	-	ok	ok
+undef_keyword_error	kwargs		1	yes	UndefKeywordError	1	yes	UndefKeywordError	yes	yes	-	ok	ok
+method_error_unknown_kwarg	kwargs		1	yes	MethodError	1	yes	MethodError	yes	yes	-	ok	ok
+field_error_undefined	structs		1	yes	FieldError	1	yes	FieldError	yes	yes	-	ok	ok
+immutable_field_assign	structs	#10511 (closed)	1	yes	ErrorException	1	yes	ErrorException	yes	yes	-	ok	ok
+getfield_module_bogus	reflection	#10318 (closed)	1	yes	UndefVarError	1	yes	UndefVarError	yes	yes	-	ok	ok
+memory_undef_ctor	memory	#10737 (closed)	1	yes	MethodError	1	yes	MethodError	yes	yes	-	ok	ok
+sqrt_string	numeric	#10481 (closed)	1	yes	MethodError	1	yes	MethodError	yes	yes	-	ok	ok
+abs2_string_silent	numeric	#10602 (closed)	1	yes	MethodError	1	yes	MethodError	yes	yes	expect: silent wrong result in sjulia, not an exception at all	ok	ok
+conj_string_fallback	numeric	#11522 (open)	1	yes	MethodError	1	yes	MethodError	yes	yes	generic-fallback sweep regression sentinel	ok	ok
+isreal_string_fallback	numeric	#11522 (open)	1	yes	MethodError	1	yes	MethodError	yes	yes	generic-fallback sweep regression sentinel	ok	ok
+flipsign_string_fallback	numeric	#11525 (open)	1	yes	MethodError	1	yes	MethodError	yes	yes	generic-fallback sweep regression sentinel	ok	ok
+real_string_fallback	numeric	#11797 (open)	1	yes	MethodError	1	yes	MethodError	yes	yes	generic-fallback sweep regression sentinel	ok	ok
+signbit_string_fallback	numeric	#11797 (open)	1	yes	MethodError	1	yes	MethodError	yes	yes	generic-fallback sweep regression sentinel	ok	ok
+abs_string_fallback	numeric	#11797 (open)	1	yes	MethodError	1	yes	MethodError	yes	yes	generic-fallback sweep regression sentinel	ok	ok
+map_dispatch_failure	hof	#10406 (closed)	1	yes	MethodError	1	yes	MethodError	yes	yes	exact MWE from Issue #10406 (closed) -- regression sentinel	ok	ok
+parametric_ctor_nonconvertible	structs	#10593 (closed)	1	yes	MethodError	1	yes	MethodError	yes	yes	-	ok	ok
+regex_match_oob	regex	#10736 (closed)	1	yes	ErrorException	1	yes	ErrorException	yes	yes	-	ok	ok
+regex_findnext_negative	regex	#10736 (closed)	1	yes	InexactError	1	yes	InexactError	yes	yes	-	ok	ok
+substitution_string_length	strings	#10735 (closed)	0	no-exception-raised		0	no-exception-raised		yes	yes	expect: spurious error in sjulia where upstream succeeds	ok	ok
+convert_failure	conversion		1	yes	MethodError	1	yes	MethodError	yes	yes	same TypeError-vs-MethodError class Issue #10481 closed for sqrt(::String) -- confirms the fix did not generalize into a funnel	ok	ok
+domain_error_log_silent	numeric	#11559 (open)	1	yes	DomainError	0	no-exception-raised		no	no	upstream: DomainError; sjulia returns NaN silently (Issue #11559)	ok	ok
+typed_local_reassign_no_enforcement	typesystem	#11794 (open)	1	yes	MethodError	0	no-exception-raised		no	no	upstream converts on typed-local reassignment (fails -> MethodError); sjulia observed to skip the convert/check entirely	ok	ok
+iterate_noniterable	iteration		0	no-exception-raised		0	no-exception-raised		yes	yes	-	ok	ok
+assertion_error	control_flow		1	yes	AssertionError	1	yes	AssertionError	yes	yes	-	ok	ok
+stack_overflow	control_flow		1	yes	StackOverflowError	1	yes	StackOverflowError	yes	yes	unbounded self-recursion; run under `timeout`	ok	ok
+undef_ref_error	arrays	#11390 (open)	1	yes	UndefRefError	0	no-exception-raised		no	no	-	ok	ok
+parse_error_dangling_op	parse		1	n/a-parse-time		1	n/a-parse-time		n/a	n/a	parse-time (bare only); catchability is structurally 'no' on both sides	ok	ok
+parse_error_unmatched_paren	parse		1	n/a-parse-time		1	n/a-parse-time		n/a	n/a	parse-time (bare only); catchability is structurally 'no' on both sides	ok	ok

@@ -1,5 +1,8 @@
 //! Index expression parsers
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::ParseResult;
 use crate::node_kind::NodeKind;
@@ -18,15 +21,27 @@ impl<'a> Parser<'a> {
         // (Issue #7196), while `a[i, j]` indexing is unaffected.
         let saved_space_sensitive = std::mem::replace(&mut self.macro_arg_space_sensitive, false);
         let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, false);
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, false);
         let saved_in_ternary_then = std::mem::replace(&mut self.in_ternary_then, false);
-        let result = self.parse_index_expression_inner(object);
+        self.grouping_depth += 1;
+        let saved_end_symbol_depth = self.end_symbol_depth;
+        let result = self.with_end_symbol_depth(saved_end_symbol_depth + 1, |parser| {
+            parser.parse_index_expression_inner(object, saved_end_symbol_depth)
+        });
+        self.grouping_depth -= 1;
         self.macro_arg_space_sensitive = saved_space_sensitive;
         self.in_matrix_row = saved_in_matrix_row;
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
         self.in_ternary_then = saved_in_ternary_then;
         result
     }
 
-    fn parse_index_expression_inner(&mut self, object: CstNode) -> ParseResult<CstNode> {
+    fn parse_index_expression_inner(
+        &mut self,
+        object: CstNode,
+        saved_end_symbol_depth: usize,
+    ) -> ParseResult<CstNode> {
         let start = object.span.start;
         let bracket_token = self.expect(Token::LBracket)?;
         let bracket_start = bracket_token.span.start;
@@ -43,7 +58,8 @@ impl<'a> Parser<'a> {
         // Lowering decides whether the left side is a type name and should become
         // a typed empty array (`T[]`).
         if self.check(&Token::RBracket) {
-            let end_token = self.advance().unwrap();
+            let end_token =
+                self.advance_checked("RBracket token already matched by check() above")?;
             let span = self.source_map.span(start, end_token.span.end);
             return Ok(CstNode::with_children(
                 NodeKind::IndexExpression,
@@ -52,19 +68,50 @@ impl<'a> Parser<'a> {
             ));
         }
 
+        if self.check(&Token::Semicolon) {
+            // Once the bracket is known to be a cat expression, `end` falls
+            // back to the surrounding dynamic context. At top level that
+            // rejects `a[; end]`; nested inside another ref it remains valid.
+            return self.with_end_symbol_depth(saved_end_symbol_depth, |parser| {
+                let ncat = parser.parse_empty_ncat_rest(bracket_start, Token::RBracket)?;
+                let span = parser.source_map.span(start, ncat.span.end);
+                Ok(CstNode::with_children(
+                    NodeKind::TypedExpression,
+                    span,
+                    vec![object, ncat],
+                ))
+            });
+        }
+
         // Parse first element. As with `[...]` literals, a `T[...]`/`a[...]`
         // bracket may be a typed matrix/`hcat` row, so the first element parses
         // in the whitespace-sensitive matrix-row context: `Float64[0.20 -0.26]`
         // is two elements, and `a[i +j]` is typed-hcat (matching upstream),
         // while `a[i + j]` and `a[i, j]` are ordinary indexing (Issue #7196).
         let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, true);
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, true);
         let first = self.parse_expression()?;
         self.in_matrix_row = saved_in_matrix_row;
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
+
+        if self.check(&Token::Newline) && self.peek_next() == Some(Token::KwFor) {
+            self.advance();
+        }
 
         // Check what follows to determine the type
-        if self.check(&Token::KwFor) {
+        if self.check(&Token::KwFor)
+            || (self.check(&Token::Newline) && self.peek_non_newline_token() == Some(Token::KwFor))
+        {
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
             // Typed comprehension: Type[expr for x in iter]
-            let comprehension = self.parse_comprehension_rest(bracket_start, first)?;
+            // The element expression was parsed with ref-style `end`, but
+            // iteration specifications are outside that scope in upstream.
+            let comprehension = self.with_end_symbol_depth(0, |parser| {
+                parser.parse_comprehension_rest(bracket_start, first)
+            })?;
             let span = self.source_map.span(start, comprehension.span.end);
             Ok(CstNode::with_children(
                 NodeKind::TypedExpression,
@@ -110,7 +157,8 @@ impl<'a> Parser<'a> {
             ))
         } else if self.check(&Token::RBracket) {
             // Single element: obj[i] or Type[expr]
-            let end_token = self.advance().unwrap();
+            let end_token =
+                self.advance_checked("RBracket token already matched by check() above")?;
             let span = self.source_map.span(start, end_token.span.end);
             Ok(CstNode::with_children(
                 NodeKind::IndexExpression,
@@ -137,10 +185,14 @@ impl<'a> Parser<'a> {
         } else if self.check(&Token::Semicolon) || self.check(&Token::Newline) {
             // Matrix-like: Type[a b; c d] or Type[a\n b]
             // First element is already parsed, now parse rest as matrix
-            self.parse_typed_matrix_rest(start, object, first)
+            self.with_end_symbol_depth(saved_end_symbol_depth, |parser| {
+                parser.parse_typed_matrix_rest(start, object, first)
+            })
         } else {
             // Could be matrix row: Type[a b c]
-            self.parse_typed_matrix_row_rest(start, object, first)
+            self.with_end_symbol_depth(saved_end_symbol_depth, |parser| {
+                parser.parse_typed_matrix_row_rest(start, object, first)
+            })
         }
     }
 
@@ -167,29 +219,34 @@ impl<'a> Parser<'a> {
         }
         self.in_matrix_row = saved_in_matrix_row;
 
-        let first_row_span = self.source_map.span(
-            first_row_elements[0].span.start,
-            first_row_elements.last().unwrap().span.end,
-        );
+        let (first_row_start, first_row_end) = self.span_bounds(
+            &first_row_elements,
+            "typed matrix's first row always pushes the leading element above",
+        )?;
+        let first_row_span = self.source_map.span(first_row_start, first_row_end);
         let first_row =
             CstNode::with_children(NodeKind::MatrixRow, first_row_span, first_row_elements);
 
         let mut rows = vec![first_row];
 
-        // Parse additional rows
+        // Parse additional rows. Each separator run's semicolon count (its
+        // dimension level) is preserved as `Semicolon` leaves interleaved
+        // with the `MatrixRow` children, exactly like the untyped `[...]`
+        // literal, so `Type[1 2; 3 4;;; 5 6; 7 8]` lowers to a genuine
+        // `Array{Type,3}` instead of collapsing to a `Matrix` (Issue #10190).
+        // Untyped matrix parsing already accepts trailing higher-dimensional
+        // separators such as `[1; 2;;]`; typed literals need the same
+        // syntax-level leniency for `T[1; 2;;]` (Issue #8759) — a trailing
+        // run with no following row is simply dropped by the `RBracket`
+        // check below.
         while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
-            self.advance(); // consume ; or newline
-
-            // Skip additional newlines
-            while self.check(&Token::Newline) {
-                self.advance();
-            }
+            let continuation = self.consume_row_separator_run(&mut rows)?;
 
             if self.check(&Token::RBracket) {
                 break;
             }
 
-            rows.push(self.parse_matrix_row()?);
+            self.push_matrix_row(&mut rows, continuation)?;
         }
 
         let end_token = self.expect(Token::RBracket)?;
@@ -227,25 +284,26 @@ impl<'a> Parser<'a> {
 
         // If we hit semicolon or newline, there are more rows
         if self.check(&Token::Semicolon) || self.check(&Token::Newline) {
-            let first_row_span = self
-                .source_map
-                .span(elements[0].span.start, elements.last().unwrap().span.end);
+            let (elements_start, elements_end) = self.span_bounds(
+                &elements,
+                "typed matrix row-rest always pushes the leading element above",
+            )?;
+            let first_row_span = self.source_map.span(elements_start, elements_end);
             let first_row = CstNode::with_children(NodeKind::MatrixRow, first_row_span, elements);
 
             let mut rows = vec![first_row];
 
+            // See `parse_typed_matrix_rest` above: preserve each separator
+            // run's semicolon count so N-dimensional typed literals lower
+            // correctly (Issue #10190).
             while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
-                self.advance();
-
-                while self.check(&Token::Newline) {
-                    self.advance();
-                }
+                let continuation = self.consume_row_separator_run(&mut rows)?;
 
                 if self.check(&Token::RBracket) {
                     break;
                 }
 
-                rows.push(self.parse_matrix_row()?);
+                self.push_matrix_row(&mut rows, continuation)?;
             }
 
             let end_token = self.expect(Token::RBracket)?;
@@ -261,9 +319,11 @@ impl<'a> Parser<'a> {
         } else {
             // Single row matrix: Type[a b c]
             let end_token = self.expect(Token::RBracket)?;
-            let row_span = self
-                .source_map
-                .span(elements[0].span.start, elements.last().unwrap().span.end);
+            let (elements_start, elements_end) = self.span_bounds(
+                &elements,
+                "typed matrix row-rest always pushes the leading element above",
+            )?;
+            let row_span = self.source_map.span(elements_start, elements_end);
             let row = CstNode::with_children(NodeKind::MatrixRow, row_span, elements);
             let matrix_span = self.source_map.span(matrix_start, end_token.span.end);
             let matrix = CstNode::with_children(NodeKind::MatrixExpression, matrix_span, vec![row]);

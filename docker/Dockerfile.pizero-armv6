@@ -1,0 +1,110 @@
+# syntax=docker/dockerfile:1.7
+#
+# Build a STATIC ARMv6 `sjulia` binary for the original Raspberry Pi Zero /
+# Zero W (BCM2835 / ARM1176JZF-S — ARMv6 + VFPv2 hardfloat).
+#
+# Why a static musl build:
+#   * The Pi Zero 1 is ARMv6. A Debian/Ubuntu `armhf` binary is ARMv7-baseline
+#     and will SIGILL on it — so the ARMv7 image (Dockerfile.raspberrypi32) is
+#     NOT usable here.
+#   * We cross-compile for `arm-unknown-linux-musleabihf` (ARMv6 + VFPv2, musl,
+#     `crt-static`). The result is fully static: it runs on any ARMv6 Linux
+#     regardless of the Pi's OS / glibc version — just `scp` and run.
+#
+# The messense/rust-musl-cross toolchain image is arm64-native, so on Apple
+# Silicon / arm64 hosts this cross-compile runs at NATIVE speed (no QEMU).
+#
+# The final binary EMBEDS the prelude + Base caches, so the first run on the Pi
+# Zero starts fast instead of compiling Base from source on a single ARMv6 core.
+# The caches are produced by running the cross-built ARMv6 binary itself under
+# qemu, so they are arch-correct for the target.
+#
+# Build + extract with scripts/build_sjulia_pizero.sh, or directly:
+#   docker buildx build -f docker/Dockerfile.pizero-armv6 \
+#     --target export --output type=local,dest=dist/pizero .
+# -> produces dist/pizero/sjulia
+
+ARG MUSL_IMAGE=messense/rust-musl-cross:arm-musleabihf
+FROM ${MUSL_IMAGE} AS build
+
+ENV CARGO_TERM_COLOR=always \
+    CARGO_NET_RETRY=10
+
+# Pin Rust codegen to the ARM1176JZF-S — the exact Pi Zero 1 / Pi 1 core (ARMv6,
+# VFPv2, Thumb-1). WITHOUT this, rustc's default for arm-unknown-linux-musleabihf
+# emits VFPv3 / Thumb-2 instructions that SIGILL on the ARM1176 (verified via the
+# ELF `Tag_FP_arch`/`Tag_THUMB_ISA_use` attributes). musl itself is already built
+# ARMv5TE+VFPv2, so pinning the Rust side makes the whole binary Pi-Zero-safe.
+# This env only supplies rustflags; the messense linker (`~/.cargo/config.toml`
+# `[target...] linker=`) is untouched, and it sets no rustflags for this target.
+ENV CARGO_TARGET_ARM_UNKNOWN_LINUX_MUSLEABIHF_RUSTFLAGS="-C target-cpu=arm1176jzf-s"
+
+WORKDIR /work/ailujsoi
+
+COPY . .
+
+# 1. First cross-compile — used only to generate the caches. Fully static for
+#    ARMv6 musl hardfloat; the messense image preconfigures the linker. (Kept
+#    before the apt step so its layer cache is not invalidated by qemu install.)
+RUN cargo build --release \
+        --target arm-unknown-linux-musleabihf \
+        --bin sjulia --features repl
+
+# qemu-arm-static lets us RUN the freshly cross-built ARMv6 binary during the
+# build (to generate the caches below) without depending on host binfmt state.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends qemu-user-static \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Generate the prelude + Base caches by RUNNING the ARMv6 binary under qemu.
+#    Producing them with the exact target binary keeps them arch-correct. The
+#    Base precompile is the slow step under emulation, but it is a one-time build
+#    cost that buys a fast first start on the device.
+RUN BIN=target/arm-unknown-linux-musleabihf/release/sjulia \
+    && qemu-arm-static "$BIN" --precompile-prelude /work/ailujsoi/target/prelude_program_cache.bin \
+    && qemu-arm-static "$BIN" --precompile-base    /work/ailujsoi/target/base_cache.bin \
+    && ls -lh /work/ailujsoi/target/prelude_program_cache.bin /work/ailujsoi/target/base_cache.bin
+
+# 3. Rebuild with the caches EMBEDDED. SJULIA_*_CACHE are read at build time and
+#    baked into the binary as `&'static [u8]`, so the shipped binary carries the
+#    parsed prelude Program and the compiled Base bytecode.
+RUN SJULIA_PRELUDE_PROGRAM_CACHE=/work/ailujsoi/target/prelude_program_cache.bin \
+    SJULIA_BASE_CACHE=/work/ailujsoi/target/base_cache.bin \
+    cargo build --release \
+        --target arm-unknown-linux-musleabihf \
+        --bin sjulia --features repl
+
+# Strip to shrink the binary for the Pi's SD card / limited RAM (best-effort:
+# don't fail the build if the toolchain names its strip differently).
+RUN BIN=target/arm-unknown-linux-musleabihf/release/sjulia \
+    && (arm-unknown-linux-musleabihf-strip "$BIN" 2>/dev/null \
+        || arm-linux-musleabihf-strip "$BIN" 2>/dev/null \
+        || strip "$BIN" 2>/dev/null || true) \
+    && file "$BIN" \
+    && ls -lh "$BIN"
+
+# ARM1176-compatibility guard. The Pi Zero 1 is ARMv6 — a v7+ binary would
+# SIGILL, so fail hard on that. The `-C target-cpu=arm1176jzf-s` pin above keeps
+# *our* Rust codegen at ARMv6 / VFPv2 / Thumb-1; musl is ARMv5TE / VFPv2. The
+# merged binary may still be TAGGED `Tag_FP_arch: VFPv3` / `Thumb-2` because the
+# precompiled `rust-std` distributes with that attribute — but this is a
+# conservative label, not actual VFPv3-only instruction use: the binary runs
+# correctly on an emulated ARM1176 core (`qemu-arm -cpu arm1176`, verified). So we
+# report the FP/Thumb tags for information but do NOT fail on them.
+RUN BIN=target/arm-unknown-linux-musleabihf/release/sjulia \
+    && READELF="$(command -v arm-unknown-linux-musleabihf-readelf || command -v aarch64-linux-gnu-readelf || command -v readelf)" \
+    && ATTRS="$("$READELF" -A "$BIN")" \
+    && echo "$ATTRS" | grep -E "Tag_(CPU_arch|FP_arch|THUMB_ISA_use):" \
+    && if echo "$ATTRS" | grep -qE "Tag_CPU_arch: v(7|8)"; then \
+         echo "FATAL: binary is ARMv7+ — will SIGILL on the ARM1176 Pi Zero 1"; exit 1; \
+       fi \
+    && echo "OK: Tag_CPU_arch is ARMv6 — compatible with Raspberry Pi Zero 1 (ARM1176)"
+
+# Embedded-cache smoke: run the final binary under qemu so a bad or incompatible
+# embedded cache fails the build here rather than on the device.
+RUN qemu-arm-static target/arm-unknown-linux-musleabihf/release/sjulia \
+        -e 'println("embedded-cache ok: ", 1 + 2)'
+
+# Export stage: only the binary, so `--output type=local` writes a lone file.
+FROM scratch AS export
+COPY --from=build /work/ailujsoi/target/arm-unknown-linux-musleabihf/release/sjulia /sjulia

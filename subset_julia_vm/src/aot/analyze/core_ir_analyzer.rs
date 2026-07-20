@@ -277,7 +277,9 @@ impl CoreIrAnalyzer {
             Stmt::Expr { expr, .. } => {
                 self.collect_calls_in_expr(expr, calls);
             }
-            Stmt::Assign { value, .. } | Stmt::AddAssign { value, .. } => {
+            Stmt::Assign { value, .. }
+            | Stmt::AddAssign { value, .. }
+            | Stmt::DestructuringAssign { value, .. } => {
                 self.collect_calls_in_expr(value, calls);
             }
             Stmt::If {
@@ -334,7 +336,7 @@ impl CoreIrAnalyzer {
                 kwargs,
                 ..
             } => {
-                calls.insert(function.clone());
+                calls.insert(function.to_string());
                 for arg in args {
                     self.collect_calls_in_expr(arg, calls);
                 }
@@ -386,7 +388,7 @@ impl CoreIrAnalyzer {
                 self.collect_calls_in_expr(else_expr, calls);
             }
             Expr::FunctionRef { name, .. } => {
-                calls.insert(name.clone());
+                calls.insert(name.to_string());
             }
             Expr::Builtin { args, .. } => {
                 for arg in args {
@@ -462,7 +464,9 @@ impl CoreIrAnalyzer {
     fn find_first_call_in_stmt(&self, stmt: &Stmt) -> Option<String> {
         match stmt {
             Stmt::Expr { expr, .. } => self.find_first_call_in_expr(expr),
-            Stmt::Assign { value, .. } => self.find_first_call_in_expr(value),
+            Stmt::Assign { value, .. } | Stmt::DestructuringAssign { value, .. } => {
+                self.find_first_call_in_expr(value)
+            }
             _ => None,
         }
     }
@@ -470,7 +474,7 @@ impl CoreIrAnalyzer {
     /// Find the first function call in an expression
     fn find_first_call_in_expr(&self, expr: &Expr) -> Option<String> {
         match expr {
-            Expr::Call { function, .. } => Some(function.clone()),
+            Expr::Call { function, .. } => Some(function.to_string()),
             Expr::ModuleCall {
                 module, function, ..
             } => Some(format!("{}.{}", module, function)),

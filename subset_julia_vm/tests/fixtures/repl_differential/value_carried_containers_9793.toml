@@ -1,0 +1,216 @@
+name = "repl_differential_value_carried_containers_9793"
+description = """
+Value-carried-container corpus for Issue #9793. The #9786 regression showed that
+a NamedTuple global assigned in one eval and consumed in a later eval can route
+through different VM helper arms under the Persistent model than it does under
+Legacy. These rows pin the shared shape for Tuple, NamedTuple, and Pair
+operations: define the container in one eval, then consume it via destructure,
+positional index, first/last, collect, sum, and positional splat in later evals.
+"""
+
+[[steps]]
+name = "reset_before_tuple"
+action = "reset"
+
+[[steps]]
+name = "tuple_global_def"
+input = "vc_tuple_9793 = (1, 2)"
+expect_success = true
+expect_type = "Tuple"
+
+[[steps]]
+name = "tuple_cross_eval_destructure"
+input = "vc_tuple_a_9793, vc_tuple_b_9793 = vc_tuple_9793"
+expect_success = true
+
+[[steps]]
+name = "tuple_destructure_values"
+input = "vc_tuple_a_9793 + vc_tuple_b_9793"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "tuple_cross_eval_index"
+input = "vc_tuple_9793[1]"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "tuple_cross_eval_first"
+input = "first(vc_tuple_9793)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "tuple_cross_eval_last"
+input = "last(vc_tuple_9793)"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "tuple_cross_eval_collect"
+input = "collect(vc_tuple_9793)"
+expect_success = true
+expect_type = "Array{Int64, 1}"
+
+[[steps]]
+name = "tuple_cross_eval_sum"
+input = "sum(vc_tuple_9793)"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "tuple_splat_function_def"
+input = "vc_add_tuple_9793(x, y) = x + y"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "tuple_cross_eval_positional_splat"
+input = "vc_add_tuple_9793(vc_tuple_9793...)"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "reset_before_namedtuple"
+action = "reset"
+
+[[steps]]
+name = "namedtuple_global_def"
+input = "vc_namedtuple_9793 = (a = 1, b = 2)"
+expect_success = true
+expect_type = "NamedTuple"
+
+[[steps]]
+name = "namedtuple_cross_eval_destructure"
+input = "vc_nt_a_9793, vc_nt_b_9793 = vc_namedtuple_9793"
+expect_success = true
+
+[[steps]]
+name = "namedtuple_destructure_values"
+input = "vc_nt_a_9793 + vc_nt_b_9793"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "namedtuple_cross_eval_index"
+input = "vc_namedtuple_9793[1]"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "namedtuple_cross_eval_first"
+input = "first(vc_namedtuple_9793)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "namedtuple_cross_eval_last"
+input = "last(vc_namedtuple_9793)"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "namedtuple_cross_eval_collect"
+input = "collect(vc_namedtuple_9793)"
+expect_success = true
+expect_type = "Array{Int64, 1}"
+
+[[steps]]
+name = "namedtuple_cross_eval_sum"
+input = "sum(vc_namedtuple_9793)"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "namedtuple_splat_function_def"
+input = "vc_add_nt_9793(x, y) = x + y"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "namedtuple_cross_eval_positional_splat"
+input = "vc_add_nt_9793(vc_namedtuple_9793...)"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "reset_before_pair"
+action = "reset"
+
+[[steps]]
+name = "pair_global_def"
+input = "vc_pair_9793 = Pair(1, 2)"
+expect_success = true
+expect_type = "Pair"
+
+[[steps]]
+name = "pair_cross_eval_destructure"
+input = "vc_pair_a_9793, vc_pair_b_9793 = vc_pair_9793"
+expect_success = true
+
+[[steps]]
+name = "pair_destructure_values"
+input = "vc_pair_a_9793 + vc_pair_b_9793"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "pair_cross_eval_index"
+input = "vc_pair_9793[1]"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "pair_cross_eval_first"
+input = "first(vc_pair_9793)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "pair_cross_eval_last"
+input = "last(vc_pair_9793)"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "pair_cross_eval_collect"
+input = "collect(vc_pair_9793)"
+expect_success = true
+expect_type = "Array{Int64, 1}"
+
+[[steps]]
+name = "pair_cross_eval_sum"
+input = "sum(vc_pair_9793)"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "pair_splat_function_def"
+input = "vc_add_pair_9793(x, y) = x + y"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "pair_cross_eval_positional_splat"
+input = "vc_add_pair_9793(vc_pair_9793...)"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"

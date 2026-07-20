@@ -9,9 +9,9 @@
 set -euo pipefail
 
 targets=(
-    "subset_julia_vm/src/vm/builtins_arrays.rs"
-    "subset_julia_vm/src/vm/exec/array_basic.rs"
-    "subset_julia_vm/src/vm/exec/rng.rs"
+    "subset_julia_vm_vm/src/vm/builtins_arrays.rs"
+    "subset_julia_vm_vm/src/vm/exec/array_basic.rs"
+    "subset_julia_vm_vm/src/vm/exec/rng.rs"
 )
 errors=0
 
@@ -35,7 +35,7 @@ for target in "${targets[@]}"; do
     fi
 done
 
-if rg -n 'ArrayValue::from_f64\(' subset_julia_vm/src/vm/exec/rng.rs; then
+if rg -n 'ArrayValue::from_f64\(' subset_julia_vm_vm/src/vm/exec/rng.rs; then
     echo "ERROR: RNG array-producing instructions must use ArrayValue::memory_first_from_f64."
     errors=$((errors + 1))
 fi

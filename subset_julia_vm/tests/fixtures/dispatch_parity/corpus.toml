@@ -1,0 +1,394 @@
+# Dispatch parity corpus (Issue #8547, parent #8438).
+#
+# Each group defines a small method table where every method returns a unique
+# string marker, plus call cases. The harness runs each group both under
+# upstream `julia` and through sjulia's compiler+VM and compares which method
+# won (behavior-level `which`). `expected` records the upstream Julia answer;
+# the sentinel "MethodError" means the call must throw a MethodError (either
+# "no method matching" or an ambiguity error — upstream reports both as
+# MethodError).
+#
+# Optional per-case key `allow_mismatch = NNNN` (GitHub issue number) marks a
+# known sjulia divergence: the harness prints it as a warning instead of
+# failing. Allowlisted cases that start matching again fail the test so stale
+# entries get removed.
+#
+# Function/type names carry the 8547 suffix to avoid clobbering Base bindings
+# (see memory of Issue #8079: same-name user methods can shadow Base entries
+# in the shared bare-name table).
+
+# ---------------------------------------------------------------------------
+# Group 1: diagonal `where T` methods vs untyped fallback
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "diagonal_where"
+definitions = """
+dpdiag8547(x::T, y::T) where {T} = "diag_same"
+dpdiag8547(x, y) = "diag_fallback"
+dpdiagnum8547(x::T, y::T) where {T<:Number} = "diag_number"
+dpdiagnum8547(x::T, y::T) where {T} = "diag_any"
+"""
+
+[[groups.cases]]
+name = "diag_int_int"
+call = "dpdiag8547(1, 2)"
+expected = "diag_same"
+
+[[groups.cases]]
+name = "diag_int_float"
+call = "dpdiag8547(1, 2.0)"
+expected = "diag_fallback"
+
+[[groups.cases]]
+name = "diag_float_float"
+call = "dpdiag8547(1.0, 2.0)"
+expected = "diag_same"
+
+[[groups.cases]]
+name = "diag_str_str"
+call = "dpdiag8547(\"a\", \"b\")"
+expected = "diag_same"
+
+[[groups.cases]]
+name = "diag_int_str"
+call = "dpdiag8547(1, \"x\")"
+expected = "diag_fallback"
+
+[[groups.cases]]
+name = "diag_bounded_beats_unbounded"
+call = "dpdiagnum8547(1, 2)"
+expected = "diag_number"
+
+[[groups.cases]]
+name = "diag_unbounded_for_nonnumber"
+call = "dpdiagnum8547(\"a\", \"b\")"
+expected = "diag_any"
+
+# ---------------------------------------------------------------------------
+# Group 2: bounded `where T<:Number` / `T<:Integer` ranking
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "bounded_where"
+definitions = """
+dpbound8547(x::T) where {T<:Number} = "bound_number"
+dpbound8547(x::T) where {T<:Integer} = "bound_integer"
+dpbound8547(x) = "bound_any"
+"""
+
+[[groups.cases]]
+name = "bound_int"
+call = "dpbound8547(1)"
+expected = "bound_integer"
+
+[[groups.cases]]
+name = "bound_bool"
+call = "dpbound8547(true)"
+expected = "bound_integer"
+
+[[groups.cases]]
+name = "bound_float"
+call = "dpbound8547(1.5)"
+expected = "bound_number"
+
+[[groups.cases]]
+name = "bound_str"
+call = "dpbound8547(\"s\")"
+expected = "bound_any"
+
+# ---------------------------------------------------------------------------
+# Group 3: typed varargs `f(xs::T...) where T`
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "typed_varargs"
+definitions = """
+dpvar8547(xs::T...) where {T} = "vararg_diag"
+dpvar8547(xs...) = "vararg_any"
+dpvar8547(x::Int, y::Int) = "pair_int"
+"""
+
+[[groups.cases]]
+name = "var_two_int_fixed_arity_wins"
+call = "dpvar8547(1, 2)"
+expected = "pair_int"
+
+[[groups.cases]]
+name = "var_three_int_diag"
+call = "dpvar8547(1, 2, 3)"
+expected = "vararg_diag"
+
+[[groups.cases]]
+name = "var_mixed_falls_back"
+call = "dpvar8547(1, 2.0, 3)"
+expected = "vararg_any"
+
+[[groups.cases]]
+name = "var_two_float_diag"
+call = "dpvar8547(1.0, 2.0)"
+expected = "vararg_diag"
+
+[[groups.cases]]
+name = "var_one_int_diag"
+call = "dpvar8547(1)"
+expected = "vararg_diag"
+
+[[groups.cases]]
+name = "var_zero_args_diag"
+call = "dpvar8547()"
+expected = "vararg_diag"
+
+# ---------------------------------------------------------------------------
+# Group 4: keyword-forwarding fallbacks (Issue #8407)
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "keyword_forwarding"
+definitions = """
+dpkw8547(x::Int) = "kw_int"
+dpkw8547(xs...; kws...) = "kw_fallback"
+dpkwb8547(x::Number; scale = 1) = "kw2_number"
+dpkwb8547(x) = "kw2_any"
+"""
+
+[[groups.cases]]
+name = "kw_positional_int"
+call = "dpkw8547(1)"
+expected = "kw_int"
+
+[[groups.cases]]
+name = "kw_positional_float"
+call = "dpkw8547(1.5)"
+expected = "kw_fallback"
+
+[[groups.cases]]
+name = "kw_float_with_kwarg"
+call = "dpkw8547(1.5; opt = 1)"
+expected = "kw_fallback"
+
+[[groups.cases]]
+name = "kw_int_with_kwarg_selects_fallback"
+call = "dpkw8547(1; opt = 1)"
+expected = "kw_fallback"
+
+[[groups.cases]]
+name = "kw_number_with_declared_kwarg"
+call = "dpkwb8547(2; scale = 3)"
+expected = "kw2_number"
+
+[[groups.cases]]
+name = "kw_any_without_kwarg"
+call = "dpkwb8547(\"s\")"
+expected = "kw2_any"
+
+# `dpkwb8547(x)` accepts no kwargs and the Number method does not match, so
+# upstream throws a MethodError for the keyword call.
+[[groups.cases]]
+name = "kw_any_with_kwarg_errors"
+call = "dpkwb8547(\"s\"; scale = 3)"
+expected = "MethodError"
+
+# ---------------------------------------------------------------------------
+# Group 5: Type{T} singletons
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "type_singletons"
+definitions = """
+dptype8547(::Type{Int}) = "type_int"
+dptype8547(::Type{T}) where {T<:Real} = "type_real"
+dptype8547(::Type) = "type_type"
+dptype8547(x) = "type_value"
+"""
+
+[[groups.cases]]
+name = "type_exact_int"
+call = "dptype8547(Int)"
+expected = "type_int"
+
+[[groups.cases]]
+name = "type_float_bounded"
+call = "dptype8547(Float64)"
+expected = "type_real"
+
+[[groups.cases]]
+name = "type_string_bare_type"
+call = "dptype8547(String)"
+expected = "type_type"
+
+[[groups.cases]]
+name = "type_value_not_type"
+call = "dptype8547(1)"
+expected = "type_value"
+
+[[groups.cases]]
+name = "type_abstract_real"
+call = "dptype8547(Integer)"
+expected = "type_real"
+
+# ---------------------------------------------------------------------------
+# Group 6: Union arguments
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "union_arguments"
+definitions = """
+dpunion8547(x::Union{Int,String}) = "union_is"
+dpunion8547(x::Number) = "union_number"
+dpunion8547(x) = "union_any"
+dpuniontwo8547(x::Union{Int,Float64}) = "u2_union"
+dpuniontwo8547(x::Int) = "u2_int"
+"""
+
+# Upstream specificity ranks Union{Int64,String} above Number for Int64.
+[[groups.cases]]
+name = "union_int_prefers_union"
+call = "dpunion8547(1)"
+expected = "union_is"
+
+[[groups.cases]]
+name = "union_str"
+call = "dpunion8547(\"s\")"
+expected = "union_is"
+
+[[groups.cases]]
+name = "union_float_number"
+call = "dpunion8547(1.5)"
+expected = "union_number"
+
+[[groups.cases]]
+name = "union_symbol_any"
+call = "dpunion8547(:sym)"
+expected = "union_any"
+
+[[groups.cases]]
+name = "union_concrete_beats_union"
+call = "dpuniontwo8547(1)"
+expected = "u2_int"
+
+[[groups.cases]]
+name = "union_float_member"
+call = "dpuniontwo8547(2.5)"
+expected = "u2_union"
+
+# ---------------------------------------------------------------------------
+# Group 7: ambiguity
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "ambiguity"
+definitions = """
+dpamb8547(x::Int, y) = "amb_int_any"
+dpamb8547(x, y::Int) = "amb_any_int"
+dpambtie8547(x::Int, y) = "amb2_int_any"
+dpambtie8547(x, y::Int) = "amb2_any_int"
+dpambtie8547(x::Int, y::Int) = "amb2_both"
+"""
+
+# Upstream raises "MethodError: dpamb8547(::Int64, ::Int64) is ambiguous".
+[[groups.cases]]
+name = "amb_int_int_is_ambiguous"
+call = "dpamb8547(1, 2)"
+expected = "MethodError"
+
+[[groups.cases]]
+name = "amb_int_str"
+call = "dpamb8547(1, \"s\")"
+expected = "amb_int_any"
+
+[[groups.cases]]
+name = "amb_str_int"
+call = "dpamb8547(\"s\", 1)"
+expected = "amb_any_int"
+
+[[groups.cases]]
+name = "amb_tiebreaker_method"
+call = "dpambtie8547(1, 2)"
+expected = "amb2_both"
+
+# ---------------------------------------------------------------------------
+# Group 8: abstract hierarchy and parametric struct dispatch
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "struct_hierarchy"
+definitions = """
+abstract type DPAnimal8547 end
+struct DPDog8547 <: DPAnimal8547 end
+struct DPBox8547{T}
+    v::T
+end
+dppet8547(a::DPAnimal8547) = "pet_animal"
+dppet8547(d::DPDog8547) = "pet_dog"
+dpbox8547(b::DPBox8547{Int}) = "box_int"
+dpbox8547(b::DPBox8547{T}) where {T<:Real} = "box_real"
+dpbox8547(b::DPBox8547) = "box_any"
+"""
+
+[[groups.cases]]
+name = "struct_concrete_beats_abstract"
+call = "dppet8547(DPDog8547())"
+expected = "pet_dog"
+
+[[groups.cases]]
+name = "struct_box_exact_param"
+call = "dpbox8547(DPBox8547(1))"
+expected = "box_int"
+
+[[groups.cases]]
+name = "struct_box_bounded_param"
+call = "dpbox8547(DPBox8547(1.5))"
+expected = "box_real"
+
+[[groups.cases]]
+name = "struct_box_unconstrained"
+call = "dpbox8547(DPBox8547(\"s\"))"
+expected = "box_any"
+
+# ---------------------------------------------------------------------------
+# Group 9: no matching method
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "no_method"
+definitions = """
+dpnone8547(x::Int) = "none_int"
+"""
+
+[[groups.cases]]
+name = "no_method_errors"
+call = "dpnone8547(\"s\")"
+expected = "MethodError"
+
+# ---------------------------------------------------------------------------
+# Group 10: negative MethodError oracle for loose-match prevention (Issue #9567)
+# ---------------------------------------------------------------------------
+[[groups]]
+name = "negative_methoderror_9567"
+definitions = """
+dpnegvec9567(xs::Vector{Number}) = "vec_number"
+dpnegabstract9567(x::AbstractMatrix) = "matrix"
+dpnegdiag9567(x::T, y::T) where {T<:Integer} = "same_integer"
+dpnegkw9567(x::Number; scale = 1) = "kw_number"
+dpnegkw9567(x) = "kw_any"
+"""
+
+# Vector is invariant: Vector{Int64} is not a subtype of Vector{Number}.
+[[groups.cases]]
+name = "neg_vector_invariance_methoderror_9567"
+call = "dpnegvec9567([1, 2, 3])"
+expected = "MethodError"
+
+# A function singleton is not an AbstractMatrix.
+[[groups.cases]]
+name = "neg_abstract_function_not_matrix_9567"
+call = "dpnegabstract9567(sin)"
+expected = "MethodError"
+
+# Diagonal variables require one concrete T; mixed concrete integer types fail.
+[[groups.cases]]
+name = "neg_diagonal_mixed_methoderror_9567"
+call = "dpnegdiag9567(1, true)"
+expected = "MethodError"
+
+# The fallback accepts the value but not the keyword, so the keyword call fails.
+# The stricter no-candidate keyword shape is tracked separately by Issue #9709.
+[[groups.cases]]
+name = "neg_keyword_no_match_methoderror_9567"
+call = "dpnegkw9567(\"s\"; scale = 2)"
+expected = "MethodError"
+
+# Arity-mismatch no-method calls still compile-error before try/catch today;
+# Issue #9710 tracks that stricter negative cell separately.

@@ -1,5 +1,5 @@
 use super::*;
-use crate::vm::Value;
+use subset_julia_vm_bytecode::Value;
 
 /// Run a test closure on a thread with 16 MB stack to avoid stack overflow
 /// in debug builds. REPL eval involves deep recursion through parse → lower
@@ -12,6 +12,71 @@ fn run_with_large_stack<F: FnOnce() + Send + 'static>(f: F) {
     if let Err(e) = handler.join() {
         std::panic::resume_unwind(e);
     }
+}
+
+// Issue #9229: a push!-based `@animate` animation snapshots the *cumulative* path
+// in every frame, so its `Animation` global holds O(frames^2) points (~500k for the
+// stock 9000-step / `every 80` Aizawa sample). `inject_globals` reconstructed each
+// persisted global as an AST init expression on every subsequent eval, turning
+// that half-million-leaf value into a giant `Expr` tree and transiently allocating
+// multiple GB before OOM-aborting the iOS REPL. Such globals are now value-carried
+// (the struct heap is transplanted
+// regardless), so the second eval no longer rebuilds the literal. This test drives
+// the exact three-eval sequence and asserts the animation survives across evals
+// while producing the compact (not O(frames^2)) Plotly animation artifact.
+#[test]
+fn test_repl_large_animation_global_survives_without_literal_reconstruction_9229() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        let setup = session.eval("using Plots");
+        assert!(setup.success, "using Plots failed: {:?}", setup.error);
+
+        // Enough frames to exceed MAX_PERSISTED_GLOBAL_LITERAL_LEAVES (65_536): with
+        // `every 80` the cumulative point count is ~O(frames^2); 9000 iters ≈ 500k.
+        let prelude = r#"
+mutable struct P9229
+    x::Float64
+    y::Float64
+end
+step9229!(s::P9229) = (s.x += 0.01; s.y += 0.02; s)
+p = P9229(0.0, 0.0)
+plt = plot(1, legend=false)
+anim = @animate for i in 1:9000
+    step9229!(p); push!(plt, p.x, p.y)
+end every 80
+"#;
+        let r = session.eval(prelude);
+        assert!(r.success, "prelude failed: {:?}", r.error);
+
+        // Second eval: previously this rebuilt `anim` (500k leaves) into an `Expr`
+        // literal and OOM-aborted. It must now be cheap and keep `anim` intact.
+        let len = session.eval("length(anim.frames)");
+        assert!(len.success, "length(anim.frames) failed: {:?}", len.error);
+        // 9000 iters sampled `every 80` => ~113 frames; assert the animation survived
+        // intact (not dropped/empty) rather than hardcoding the exact off-by-one count.
+        assert!(
+            len.value
+                .as_ref()
+                .is_some_and(|v| matches!(v, Value::I64(n) if *n >= 100)),
+            "animation must survive across evals with all frames intact, got {:?}",
+            len.value
+        );
+
+        // Third eval: `gif(anim)` still renders, and the artifact must use the
+        // compact growing-path schema (Issue #9206) rather than O(frames^2) native
+        // frames.
+        let g = session.eval("gif(anim)");
+        assert!(g.success, "gif(anim) failed: {:?}", g.error);
+        let artifact = g
+            .display_artifacts
+            .last()
+            .expect("gif(anim) should produce a Plotly animation artifact");
+        assert_eq!(artifact.mime, "application/vnd.plotly+json");
+        assert!(
+            artifact.data.contains("framesCompact"),
+            "growing-path animation should use the compact schema, not per-frame data"
+        );
+    });
 }
 
 #[test]
@@ -105,6 +170,203 @@ fn test_repl_value_display_uses_user_show_7168() {
 }
 
 #[test]
+fn test_repl_hard_scope_live_transaction_preserves_struct_global_once_9784() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        let definition = session.eval("mutable struct Box9784; value::Int; end");
+        assert!(
+            definition.success,
+            "definition failed: {:?}",
+            definition.error
+        );
+        let binding = session.eval("box9784 = Box9784(41)");
+        assert!(binding.success, "binding failed: {:?}", binding.error);
+
+        let fallback = session.eval("let force_full_9784 = 0; force_full_9784; end");
+        assert!(fallback.success, "fallback failed: {:?}", fallback.error);
+        assert_eq!(
+            session.last_vm_build_nanos(),
+            Some(0),
+            "hard-scope eval must reuse the live VM transaction"
+        );
+        let reconstructed_boxes = session
+            .get_struct_heap()
+            .iter()
+            .filter(|instance| instance.struct_name.as_ref() == "Box9784")
+            .count();
+        assert_eq!(
+            reconstructed_boxes, 1,
+            "the persisted struct global must be reconstructed exactly once"
+        );
+
+        let read = session.eval("box9784.value");
+        assert!(read.success, "field read failed: {:?}", read.error);
+        assert!(matches!(read.value, Some(Value::I64(41))));
+    });
+}
+
+#[test]
+fn test_repl_module_redefinition_resets_const_state_10232() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        let definition = session.eval(
+            r#"
+module M10232
+    const xs = Int[]
+    bump() = (push!(xs, 1); length(xs))
+end
+"#,
+        );
+        assert!(
+            definition.success,
+            "definition failed: {:?}",
+            definition.error
+        );
+
+        let first = session.eval("M10232.bump()");
+        assert!(first.success, "first bump failed: {:?}", first.error);
+        assert!(matches!(first.value, Some(Value::I64(1))));
+
+        let second = session.eval("M10232.bump()");
+        assert!(second.success, "second bump failed: {:?}", second.error);
+        assert!(matches!(second.value, Some(Value::I64(2))));
+
+        let redefinition = session.eval(
+            r#"
+module M10232
+    const xs = Int[]
+    bump() = (push!(xs, 1); length(xs))
+end
+"#,
+        );
+        assert!(
+            redefinition.success,
+            "redefinition failed: {:?}",
+            redefinition.error
+        );
+        assert_ne!(
+            session.last_vm_build_nanos(),
+            Some(0),
+            "module redefinition must force a fresh full recompile"
+        );
+
+        let after_redefinition = session.eval("M10232.bump()");
+        assert!(
+            after_redefinition.success,
+            "post-redefinition bump failed: {:?}",
+            after_redefinition.error
+        );
+        assert!(
+            matches!(after_redefinition.value, Some(Value::I64(1))),
+            "redefined module must start from a fresh const array, got {:?}",
+            after_redefinition.value
+        );
+
+        let len = session.eval("length(M10232.xs)");
+        assert!(len.success, "length(M10232.xs) failed: {:?}", len.error);
+        assert!(
+            matches!(len.value, Some(Value::I64(1))),
+            "module const array should contain only the post-redefinition push, got {:?}",
+            len.value
+        );
+    });
+}
+
+#[test]
+fn test_repl_hard_scope_live_transaction_preserves_struct_global_shapes_9784() {
+    run_with_large_stack(|| {
+        fn run_hard_scope_transaction(session: &mut REPLSession) {
+            let fallback = session.eval("let force_full_9784 = 0; force_full_9784; end");
+            assert!(fallback.success, "fallback failed: {:?}", fallback.error);
+            assert_eq!(
+                session.last_vm_build_nanos(),
+                Some(0),
+                "hard-scope eval must reuse the live VM transaction"
+            );
+        }
+
+        let mut numeric = REPLSession::new(1);
+        assert!(numeric.eval("complex9784 = Complex(3, 4)").success);
+        assert!(numeric.eval("rational9784 = 3 // 5").success);
+        run_hard_scope_transaction(&mut numeric);
+        let numeric_read = numeric.eval(
+            "real(complex9784) + imag(complex9784) + numerator(rational9784) + denominator(rational9784)",
+        );
+        assert!(
+            numeric_read.success,
+            "Complex/Rational read failed: {:?}",
+            numeric_read.error
+        );
+        assert!(matches!(numeric_read.value, Some(Value::I64(15))));
+
+        let mut nested_empty = REPLSession::new(2);
+        assert!(
+            nested_empty
+                .eval("struct Nested9784; groups; end; nested9784 = Nested9784([Int[]])")
+                .success
+        );
+        run_hard_scope_transaction(&mut nested_empty);
+        let nested_mutation = nested_empty.eval("push!(nested9784.groups[1], 7)");
+        assert!(
+            nested_mutation.success,
+            "nested empty array mutation failed: {:?}",
+            nested_mutation.error
+        );
+        let nested_read = nested_empty.eval("nested9784.groups[1][1]");
+        assert!(
+            nested_read.success,
+            "nested empty array read failed: {:?}",
+            nested_read.error
+        );
+        assert!(
+            matches!(nested_read.value, Some(Value::I64(7))),
+            "expected nested value 7::Int64, got {:?}",
+            nested_read.value
+        );
+
+        let mut struct_array = REPLSession::new(3);
+        assert!(
+            struct_array
+                .eval("struct Point9784; x::Int; end; points9784 = [Point9784(10), Point9784(20)]",)
+                .success
+        );
+        run_hard_scope_transaction(&mut struct_array);
+        let array_read = struct_array.eval("points9784[1].x + points9784[2].x");
+        assert!(
+            array_read.success,
+            "array-of-structs read failed: {:?}",
+            array_read.error
+        );
+        assert!(matches!(array_read.value, Some(Value::I64(30))));
+
+        let mut non_reconstructible = REPLSession::new(4);
+        assert!(
+            non_reconstructible
+                .eval("struct PairHolder9784; data; tag; end")
+                .success
+        );
+        assert!(
+            non_reconstructible
+                .eval("makeholder9784(; kw...) = PairHolder9784(kw, 9)")
+                .success
+        );
+        assert!(
+            non_reconstructible
+                .eval("holder9784 = makeholder9784()")
+                .success
+        );
+        run_hard_scope_transaction(&mut non_reconstructible);
+        let carried_read = non_reconstructible.eval("holder9784.tag");
+        assert!(
+            carried_read.success,
+            "non-reconstructible carried field read failed: {:?}",
+            carried_read.error
+        );
+        assert!(matches!(carried_read.value, Some(Value::I64(9))));
+    });
+}
+
+#[test]
 fn test_repl_empty_array_persists_across_evals_7151() {
     // Regression (Issue #7151): an empty array global (`ps = []`, `Int[]`, ...)
     // was stored in REPLGlobals but never re-injected (value_to_init_expr returns
@@ -127,6 +389,34 @@ fn test_repl_empty_array_persists_across_evals_7151() {
                 r2.value
             );
         }
+    });
+}
+
+#[test]
+fn test_repl_nested_empty_int_array_keeps_element_type_after_live_transaction_10581() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        let setup =
+            session.eval("struct Nested10581; groups; end; nested10581 = Nested10581([Int[]])");
+        assert!(setup.success, "setup failed: {:?}", setup.error);
+
+        let fallback = session.eval("let force_full_10581 = 0; force_full_10581; end");
+        assert!(fallback.success, "fallback failed: {:?}", fallback.error);
+        assert_eq!(
+            session.last_vm_build_nanos(),
+            Some(0),
+            "hard-scope eval must reuse the live VM transaction"
+        );
+
+        let mutation = session.eval("push!(nested10581.groups[1], 7)");
+        assert!(mutation.success, "mutation failed: {:?}", mutation.error);
+        let read = session.eval("nested10581.groups[1][1]");
+        assert!(read.success, "read failed: {:?}", read.error);
+        assert!(
+            matches!(read.value, Some(Value::I64(7))),
+            "expected nested value 7::Int64, got {:?}",
+            read.value
+        );
     });
 }
 
@@ -238,6 +528,52 @@ fn test_repl_session_variable_persistence() {
             "Expected Some(Value::I64(15)), got {:?}",
             result.value
         );
+    });
+}
+
+#[test]
+fn test_repl_parametric_struct_prefix_recreates_exact_instance_10129() {
+    // Regression for Issue #10129: `resolve_global_types()` uses the O(1)
+    // family-prefix index to recreate a persisted REPL global's exact
+    // parametric struct type whenever that exact instance has no entry in this
+    // eval's freshly rebuilt struct_table. This drives a
+    // session where the second eval's source only re-instantiates a
+    // DIFFERENT concrete instantiation (`Box10129{Float64}`) of the same
+    // parametric struct, so the persisted global `b`'s exact recorded type
+    // (`Box10129{Int64}`) is guaranteed to miss the exact-match branch and
+    // exercise the prefix fallback.
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+
+        let setup = session.eval(
+            r#"
+struct Box10129{T}
+    v::T
+end
+b = Box10129(1)
+"#,
+        );
+        assert!(
+            setup.success,
+            "struct + global setup failed: {:?}",
+            setup.error
+        );
+
+        let next = session.eval(
+            r#"
+struct Box10129{T}
+    v::T
+end
+c = Box10129(1.5)
+typeof(b) == Box10129{Int64} && b.v == 1 && typeof(c) == Box10129{Float64}
+"#,
+        );
+        assert!(
+            next.success,
+            "persisted parametric-struct global failed to resolve: {:?}",
+            next.error
+        );
+        assert!(matches!(next.value, Some(Value::Bool(true))));
     });
 }
 
@@ -373,7 +709,7 @@ fn test_repl_import_only_inputs_are_silent_6000() {
                 "`{src}` should not display package-load internals in the REPL"
             );
             assert!(
-                result.display_artifact.is_none(),
+                result.display_artifacts.is_empty(),
                 "`{src}` should not attach a display artifact"
             );
         }
@@ -389,7 +725,7 @@ fn test_repl_import_only_inputs_are_silent_6000() {
         let result = session.eval("plot(sin)");
         assert!(result.success, "Plots import did not persist");
         assert!(
-            result.display_artifact.is_some(),
+            !result.display_artifacts.is_empty(),
             "Plots import should still enable plot artifacts"
         );
     });
@@ -418,8 +754,8 @@ fn test_repl_plotbang_appends_across_evals() {
         let r = session.eval("plot!(cos)");
         assert!(r.success, "plot!(cos) failed: {:?}", r.error);
         let artifact = r
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("plot!(cos) should produce a Plotly display artifact");
         let line_traces = artifact.data.matches(r#""mode":"lines""#).count();
         assert_eq!(
@@ -486,8 +822,8 @@ fn test_repl_plotbang_3d_appends_across_evals() {
         let r = session.eval("scatter!(cos.(t), sin.(t), t)");
         assert!(r.success, "3D scatter! failed: {:?}", r.error);
         let artifact = r
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("3D scatter! should produce a Plotly display artifact");
         let traces_3d = artifact.data.matches(r#""type":"scatter3d""#).count();
         assert_eq!(
@@ -525,8 +861,8 @@ fn test_repl_plotbang_3d_appends_across_evals_with_t_redefined() {
         let r = session.eval("scatter!(cos.(t), sin.(t), t)");
         assert!(r.success, "3D scatter! failed: {:?}", r.error);
         let artifact = r
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("3D scatter! should produce a Plotly display artifact");
         let traces_3d = artifact.data.matches(r#""type":"scatter3d""#).count();
         assert_eq!(
@@ -588,9 +924,9 @@ fn test_repl_session_ans_after_assignment() {
 #[test]
 fn test_repl_eval_initializes_compile_cache() {
     run_with_large_stack(|| {
-        crate::compile::cache::clear_cache();
+        crate::compile::host_support::clear_compile_cache();
         assert!(
-            !crate::compile::cache::is_cache_initialized(),
+            !crate::compile::host_support::is_compile_cache_initialized(),
             "cache should start empty for this test"
         );
 
@@ -598,11 +934,11 @@ fn test_repl_eval_initializes_compile_cache() {
         let result = session.eval("1 + 1");
         assert!(result.success, "eval should succeed: {:?}", result.error);
         assert!(
-            crate::compile::cache::is_cache_initialized(),
+            crate::compile::host_support::is_compile_cache_initialized(),
             "REPL eval should initialize compile cache to avoid full Base recompilation"
         );
 
-        crate::compile::cache::clear_cache();
+        crate::compile::host_support::clear_compile_cache();
     });
 }
 
@@ -711,6 +1047,37 @@ fn test_repl_session_reset() {
         assert!(
             names.contains(&"y".to_string()),
             "y should be in variable names"
+        );
+    });
+}
+
+#[test]
+fn test_repl_reset_clears_global_type_hint_shadowing_builtin_9193() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+
+        // Shadow the Base generic `first` with a plain global, matching what
+        // `intermediate/plots_torus.jl` does with its loop flag.
+        let result = session.eval("first = true");
+        assert!(result.success, "shadowing assignment should succeed");
+
+        // reset() must make the session behave like a brand-new one: it clears
+        // `globals`, but previously left `global_types`/`global_struct_names`
+        // (the compiler's per-session type hints) populated, so `first` kept
+        // resolving as an (now-empty) global-variable slot instead of the
+        // builtin generic function (Issue #9193).
+        session.reset();
+
+        let result = session.eval("first([1, 2, 3])");
+        assert!(
+            result.success,
+            "first([1,2,3]) must resolve to the builtin after reset(), got: {:?}",
+            result.error
+        );
+        assert!(
+            matches!(result.value, Some(Value::I64(1))),
+            "Expected Some(Value::I64(1)), got {:?}",
+            result.value
         );
     });
 }
@@ -1739,8 +2106,8 @@ fn test_repl_plot_returns_plotly_artifact() {
         assert!(result.success, "`plot(sin)` failed: {:?}", result.error);
 
         let artifact = result
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("expected Plotly display artifact for plot(sin)");
         assert_eq!(artifact.mime, "application/vnd.plotly+json");
         assert!(
@@ -1769,8 +2136,8 @@ fn test_repl_plot_renders_2d_axes_layout() {
         assert!(result.success, "`plot(x, y)` failed: {:?}", result.error);
 
         let artifact = result
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("expected Plotly display artifact for plot(x, y)");
         assert_eq!(artifact.mime, "application/vnd.plotly+json");
         assert!(
@@ -1804,8 +2171,8 @@ fn test_repl_scatter_with_range_x() {
         );
 
         let artifact = result
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("expected Plotly artifact for scatter with Range x");
         assert_eq!(artifact.mime, "application/vnd.plotly+json");
         assert!(
@@ -1829,8 +2196,8 @@ fn test_repl_scatter_renders_markers() {
         assert!(result.success, "`scatter(sin)` failed: {:?}", result.error);
 
         let artifact = result
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("expected Plotly display artifact for scatter(sin)");
         assert_eq!(artifact.mime, "application/vnd.plotly+json");
         assert!(
@@ -1893,8 +2260,8 @@ fn test_repl_surface_matrix_range_globals_returns_plotly_artifact_5987() {
             result.error
         );
         let artifact = result
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("expected Plotly artifact for REPL surface");
         assert_eq!(artifact.mime, "application/vnd.plotly+json");
         assert!(
@@ -1938,8 +2305,8 @@ fn test_repl_surface_inline_lambda_returns_plotly_artifact_6122() {
             result.value
         );
         let artifact = result
-            .display_artifact
-            .as_ref()
+            .display_artifacts
+            .last()
             .expect("expected Plotly artifact for inline-lambda surface");
         assert_eq!(artifact.mime, "application/vnd.plotly+json");
         assert!(
@@ -1951,9 +2318,9 @@ fn test_repl_surface_inline_lambda_returns_plotly_artifact_6122() {
 }
 
 // Issue #5163: Complex globals must persist across REPL evaluations through the
-// same generic struct-persistence path Rational uses (StructRef -> struct_instances
-// -> struct_instance_to_literal), NOT a Complex-specific (f64, f64) slot. These
-// round-trip tests define a Complex global in one eval and read it back in the next.
+// same generic StructRef reconstruction path Rational uses, NOT a Complex-specific
+// (f64, f64) slot. These round-trip tests define a Complex global in one eval and
+// read it back in the next.
 
 #[test]
 fn test_repl_complex_f64_global_persistence_5163() {
@@ -2040,7 +2407,7 @@ fn test_repl_complex_int_global_persistence_5163() {
             result.error
         );
         assert!(
-            matches!(result.value, Some(Value::Str(ref s)) if s == "Complex{Int64}"),
+            matches!(result.value, Some(Value::Str(ref s)) if s.as_ref() == "Complex{Int64}"),
             "Expected typeof(zi) == Complex{{Int64}}, got {:?}",
             result.value
         );
@@ -2080,7 +2447,7 @@ fn test_repl_complex_f32_global_persistence_5163() {
         );
         // typeof renders via the ComplexF32 alias like upstream Julia (Issue #5704).
         assert!(
-            matches!(result.value, Some(Value::Str(ref s)) if s == "ComplexF32"),
+            matches!(result.value, Some(Value::Str(ref s)) if s.as_ref() == "ComplexF32"),
             "Expected typeof(z32) displayed as ComplexF32, got {:?}",
             result.value
         );
@@ -2147,7 +2514,7 @@ fn test_repl_complex_global_reassignment_replaces_element_type_5163() {
         );
         // typeof renders via the ComplexF32 alias like upstream Julia (Issue #5704).
         assert!(
-            matches!(result.value, Some(Value::Str(ref s)) if s == "ComplexF32"),
+            matches!(result.value, Some(Value::Str(ref s)) if s.as_ref() == "ComplexF32"),
             "Expected typeof(z) displayed as ComplexF32 after reassignment, got {:?}",
             result.value
         );
@@ -2268,6 +2635,54 @@ fn test_repl_function_valued_globals_persist() {
 }
 
 #[test]
+fn test_repl_captured_closure_global_persists_without_poisoning_session_9436() {
+    run_with_large_stack(|| {
+        let mut s = REPLSession::new(0);
+
+        let def = s.eval("makeadder9436(n) = x -> x + n");
+        assert!(def.success, "factory definition failed: {:?}", def.error);
+
+        let bind = s.eval("add5_9436 = makeadder9436(5)");
+        assert!(
+            bind.success,
+            "captured closure binding failed: {:?}",
+            bind.error
+        );
+
+        let call = s.eval("add5_9436(1)");
+        assert!(
+            call.success,
+            "captured closure call failed: {:?}",
+            call.error
+        );
+        assert!(
+            matches!(call.value, Some(Value::I64(6))),
+            "captured closure call should match Julia, got {:?}",
+            call.value
+        );
+
+        let arithmetic = s.eval("1 + 1");
+        assert!(
+            arithmetic.success,
+            "session was poisoned after closure call: {:?}",
+            arithmetic.error
+        );
+        assert!(
+            matches!(arithmetic.value, Some(Value::I64(2))),
+            "arithmetic after closure call returned {:?}",
+            arithmetic.value
+        );
+
+        let using = s.eval("using Printf");
+        assert!(
+            using.success,
+            "import after closure call should still work: {:?}",
+            using.error
+        );
+    });
+}
+
+#[test]
 fn test_repl_value_carried_global_with_pairs_field_persists_8260() {
     // Issue #8260: a global whose value CANNOT be reconstructed as an init
     // expression (a struct carrying a `Base.Pairs` kwargs container — the shape of
@@ -2336,6 +2751,335 @@ fn test_repl_odeproblem_global_persists_8260() {
             sol.success && sol.error.is_none(),
             "solve(prob) after round-trip failed (#8260): {:?}",
             sol.error
+        );
+    });
+}
+
+/// Issue #9156 fix guard: the REPL now descends into `LetBlock` bodies when
+/// extracting persistence candidates (so a macro-expanded `begin` block such as
+/// Symbolics `@variables x y` persists its escaped globals). This test locks that
+/// the descent does NOT re-open #8972 — a `let`-local write must not overwrite an
+/// existing global across evals. Pure integers keep it package-free and fast.
+#[test]
+fn test_repl_let_local_does_not_overwrite_global_8972_after_9156_descent() {
+    run_with_large_stack(|| {
+        let mut s = REPLSession::new(0);
+
+        // Seed a global, then shadow it inside a `let` block (which lowers to the
+        // same empty-binding LetBlock as a `begin` block).
+        assert!(s.eval("x = 16").success);
+        let let_block = s.eval("let\n    x = 99\n    x\nend");
+        assert!(let_block.success, "let block failed: {:?}", let_block.error);
+        assert!(
+            matches!(let_block.value, Some(Value::I64(99))),
+            "let block should evaluate to its local 99, got {:?}",
+            let_block.value
+        );
+
+        // The outer global must be UNCHANGED (16), not the let-local 99 (#8972).
+        let after = s.eval("x");
+        assert!(
+            matches!(after.value, Some(Value::I64(16))),
+            "let-local x=99 leaked onto the global (#8972 regression): {:?}",
+            after.value
+        );
+    });
+}
+
+/// Issue #11028: REPL inputs are lowered as independent fragments, so their
+/// byte spans and initial definition ordinals both restart. The session must
+/// rebase the current fragment after prior definitions before it merges the
+/// separately stored function/struct vectors.
+#[test]
+fn test_repl_bare_constructor_last_definition_wins_across_evals_11028() {
+    run_with_large_stack(|| {
+        let mut inner_then_outer = REPLSession::new(0);
+        assert!(inner_then_outer
+            .eval(
+                "struct ReplInnerThenOuter11028\n    x::Int\n    ReplInnerThenOuter11028(x::Int) = new(x + 1)\nend",
+            )
+            .success);
+        assert!(
+            inner_then_outer
+                .eval("ReplInnerThenOuter11028(x::Int) = :outer")
+                .success
+        );
+        let later_outer = inner_then_outer.eval("ReplInnerThenOuter11028(10) === :outer");
+        assert!(
+            matches!(later_outer.value, Some(Value::Bool(true))),
+            "later REPL outer constructor did not win: {later_outer:?}"
+        );
+
+        let mut outer_then_inner = REPLSession::new(0);
+        assert!(
+            outer_then_inner
+                .eval("ReplOuterThenInner11028(x::Int) = :outer")
+                .success
+        );
+        assert!(outer_then_inner
+            .eval(
+                "struct ReplOuterThenInner11028\n    x::Int\n    ReplOuterThenInner11028(x::Int) = new(x + 1)\nend",
+            )
+            .success);
+        let later_inner = outer_then_inner.eval("ReplOuterThenInner11028(10).x == 11");
+        assert!(
+            matches!(later_inner.value, Some(Value::Bool(true))),
+            "later REPL inner constructor did not win: {later_inner:?}"
+        );
+    });
+}
+
+/// Issue #9701: a user-defined `abstract type` must persist across evals in
+/// BOTH eval models, exactly like structs. Before the fix,
+/// `store_definitions`/`merge_definitions` accumulated structs but NOT
+/// `program.abstract_types`, so the abstract type's binding was dropped after
+/// the eval that defined it: `d isa Animal` raised UndefVarError and
+/// `f(a::Animal)` dispatch raised MethodError, while upstream `julia`
+/// succeeds. Drives the issue's exact MWE, one input per eval.
+#[test]
+fn test_repl_abstract_type_persists_across_evals_9701() {
+    run_with_large_stack(|| {
+        let model = "Persistent";
+        {
+            let mut session = REPLSession::new(0);
+
+            let r = session.eval("abstract type Animal9701 end");
+            assert!(
+                r.success,
+                "{model:?}: abstract type def failed: {:?}",
+                r.error
+            );
+
+            let r = session.eval("struct Dog9701 <: Animal9701\n    x::Int\nend");
+            assert!(
+                r.success,
+                "{model:?}: struct subtyping prior-eval abstract type failed: {:?}",
+                r.error
+            );
+
+            let r = session.eval("d9701 = Dog9701(3)");
+            assert!(r.success, "{model:?}: construction failed: {:?}", r.error);
+
+            // The core regression: the abstract type NAME must still resolve as
+            // a Type value on a later eval (was UndefVarError before the fix).
+            let r = session.eval("d9701 isa Animal9701");
+            assert!(
+                r.success,
+                "{model:?}: `d isa Animal` failed (abstract type binding dropped, #9701): {:?}",
+                r.error
+            );
+            assert!(
+                matches!(r.value, Some(Value::Bool(true))),
+                "{model:?}: `d isa Animal` must be true, got {:?}",
+                r.value
+            );
+
+            let r = session.eval("d9701.x");
+            assert!(
+                matches!(r.value, Some(Value::I64(3))),
+                "{model:?}: field access failed, got {:?}",
+                r.value
+            );
+
+            let r = session.eval("f9701(a::Animal9701) = 111");
+            assert!(
+                r.success,
+                "{model:?}: method on prior-eval abstract type failed: {:?}",
+                r.error
+            );
+
+            // Was MethodError before the fix: the merged program no longer knew
+            // `Animal9701`, so `f9701(::Animal9701)` could not match a Dog9701.
+            let r = session.eval("f9701(d9701)");
+            assert!(
+                r.success,
+                "{model:?}: dispatch through prior-eval abstract type failed (#9701): {:?}",
+                r.error
+            );
+            assert!(
+                matches!(r.value, Some(Value::I64(111))),
+                "{model:?}: f(d) must be 111, got {:?}",
+                r.value
+            );
+        }
+    });
+}
+
+/// Issue #9701 (same family): user-defined `primitive type` and `@enum`
+/// definitions must also persist across evals in both eval models — they are
+/// accumulated and re-merged symmetrically with structs.
+#[test]
+fn test_repl_primitive_type_and_enum_persist_across_evals_9701() {
+    run_with_large_stack(|| {
+        let model = "Persistent";
+        {
+            let mut session = REPLSession::new(0);
+
+            // Primitive type: the name must stay bound and reflective queries
+            // must keep working on later evals.
+            let r = session.eval("primitive type Byte9701 8 end");
+            assert!(
+                r.success,
+                "{model:?}: primitive type def failed: {:?}",
+                r.error
+            );
+            let r = session.eval("sizeof(Byte9701)");
+            assert!(
+                r.success,
+                "{model:?}: sizeof(prior-eval primitive type) failed (#9701): {:?}",
+                r.error
+            );
+            assert!(
+                matches!(r.value, Some(Value::I64(1))),
+                "{model:?}: sizeof(Byte9701) must be 1, got {:?}",
+                r.value
+            );
+            let r = session.eval("isprimitivetype(Byte9701)");
+            assert!(
+                matches!(r.value, Some(Value::Bool(true))),
+                "{model:?}: isprimitivetype(Byte9701) must be true, got {:?}",
+                r.value
+            );
+
+            // Enum: the enum type and its members must stay bound across evals.
+            let r = session.eval("@enum Color9701 red9701 green9701 blue9701");
+            assert!(r.success, "{model:?}: @enum def failed: {:?}", r.error);
+            let r = session.eval("c9701 = green9701");
+            assert!(
+                r.success,
+                "{model:?}: prior-eval enum member binding failed (#9701): {:?}",
+                r.error
+            );
+            let r = session.eval("c9701 isa Color9701");
+            assert!(
+                r.success,
+                "{model:?}: `c isa Color` failed (enum type binding dropped, #9701): {:?}",
+                r.error
+            );
+            assert!(
+                matches!(r.value, Some(Value::Bool(true))),
+                "{model:?}: `c isa Color` must be true, got {:?}",
+                r.value
+            );
+            let r = session.eval("Int(c9701)");
+            assert!(
+                matches!(r.value, Some(Value::I64(1))),
+                "{model:?}: Int(green9701) must be 1, got {:?}",
+                r.value
+            );
+        }
+    });
+}
+
+/// Issue #9701: reset() drops accumulated abstract/primitive/enum type
+/// definitions like every other definition kind — after reset the name must be
+/// gone ("reset == fresh session").
+#[test]
+fn test_repl_reset_clears_abstract_type_definitions_9701() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        assert!(session.eval("abstract type Gone9701 end").success);
+        assert!(matches!(
+            session.eval("Nothing <: Any && true").value,
+            Some(Value::Bool(true))
+        ));
+        session.reset();
+        let r = session.eval("Int64 <: Gone9701");
+        assert!(
+            !r.success,
+            "Gone9701 must be undefined after reset(), got success with {:?}",
+            r.value
+        );
+    });
+}
+
+/// Issue #9701 (codex review on PR #10248): injected persisted-global inits
+/// must land AFTER the session's replayed prior-enum definitions but BEFORE
+/// every statement of the CURRENT input — including a current-input `@enum`.
+/// Counting "leading EnumDef statements" also skipped past a current-input
+/// `@enum`, so in `@enum Color red green; c = green` with a carried `green`
+/// global the init `green = 99` executed BETWEEN this eval's enum registration
+/// and `c = green`, binding the stale carried value 99 to `c`.
+///
+/// Upstream julia 1.12 REJECTS the collision itself ("cannot declare
+/// Main.green constant; it was already declared global"), so there is no
+/// upstream success golden here; this pins the production ordering invariant:
+/// An enum member cannot overwrite a value-carried global. The declaration
+/// publishes its type before raising the upstream-shaped collision error, and
+/// the existing value remains intact (Issue #11652).
+#[test]
+fn test_repl_current_input_enum_member_preserves_carried_global_11652() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        assert!(session.eval("greeno9701 = 99").success);
+        let collision = session.eval("@enum Coloro9701 redo9701 greeno9701");
+        assert!(
+            !collision.success
+                && collision
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("cannot declare Main.greeno9701 constant")),
+            "Persistent: expected enum/global collision, got {:?}",
+            collision.error
+        );
+
+        let observed = session.eval("(greeno9701, isdefined(Main, :Coloro9701))");
+        assert!(
+            observed.success,
+            "Persistent: follow-up failed: {:?}",
+            observed.error
+        );
+        assert!(
+            matches!(
+                observed.value,
+                Some(Value::Tuple(ref values))
+                    if matches!(values.elements.as_slice(), [Value::I64(99), Value::Bool(true)])
+            ),
+            "Persistent: existing global must survive and enum type must remain published, got {:?}",
+            observed.value
+        );
+    });
+}
+
+#[test]
+fn test_repl_persisted_import_precedes_later_conflict_11176() {
+    run_with_large_stack(|| {
+        let mut session = REPLSession::new(0);
+        assert!(
+            session
+                .eval(
+                    "module FirstImport11176; export imported11176; imported11176() = :first; end"
+                )
+                .success
+        );
+        assert!(
+            session
+                .eval(
+                    "module LaterImport11176; export imported11176; imported11176() = :later; end"
+                )
+                .success
+        );
+        assert!(
+            session
+                .eval("import .FirstImport11176: imported11176")
+                .success
+        );
+        assert!(
+            session
+                .eval("import .LaterImport11176: imported11176")
+                .success
+        );
+
+        let result = session.eval("imported11176()");
+        assert!(
+            result.success,
+            "persisted import lookup failed: {:?}",
+            result.error
+        );
+        assert!(
+            matches!(result.value, Some(Value::Symbol(ref name)) if name.as_str() == "first"),
+            "the older persisted import must remain the first owner, got {:?}",
+            result.value
         );
     });
 }

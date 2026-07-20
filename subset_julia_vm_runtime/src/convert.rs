@@ -4,6 +4,8 @@
 
 // SAFETY: i64→u32 cast is guarded by `if *v < 0 || *v > 0x10FFFF` check above.
 #![allow(clippy::cast_sign_loss)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::value::Value;
@@ -148,15 +150,17 @@ pub fn to_char(value: &Value) -> RuntimeResult<char> {
                 })
             }
         }
-        Value::Str(s) => {
-            if s.len() == 1 {
-                Ok(s.chars().next().unwrap())
-            } else {
-                Err(RuntimeError::argument_error(
-                    "string must have exactly one character",
-                ))
-            }
-        }
+        // Guarded: `s.len() == 1` (byte length) implies exactly one
+        // single-byte `char`, so `.next()` always yields `Some` here — but
+        // that is not type-enforced, so route through `ok_or_else` instead
+        // of an unchecked unwrap (Issue #10908 Phase 3 of #10869).
+        Value::Str(s) if s.len() == 1 => s
+            .chars()
+            .next()
+            .ok_or_else(|| RuntimeError::argument_error("string must have exactly one character")),
+        Value::Str(_) => Err(RuntimeError::argument_error(
+            "string must have exactly one character",
+        )),
         _ => Err(RuntimeError::type_error(format!(
             "cannot convert {} to Char",
             value.type_name()
@@ -209,6 +213,7 @@ pub fn widen(value: &Value) -> Value {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

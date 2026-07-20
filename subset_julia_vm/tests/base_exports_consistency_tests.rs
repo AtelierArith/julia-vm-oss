@@ -42,20 +42,26 @@ fn base_exports_do_not_exceed_upstream() {
     let subset_exports_path = manifest_dir.join("src/julia/base/exports.jl");
     let upstream_exports_path = manifest_dir.join("../julia/base/exports.jl");
 
-    let subset_exports = match parse_exports(&subset_exports_path) {
-        Some(e) => e,
-        None => panic!(
-            "SubsetJuliaVM exports.jl not found at {:?}",
-            subset_exports_path
-        ),
-    };
+    let subset_exports = parse_exports(&subset_exports_path)
+        .unwrap_or_else(|| panic!("SubsetJuliaVM exports.jl not found at {subset_exports_path:?}"));
 
     let upstream_exports = match parse_exports(&upstream_exports_path) {
         Some(e) => e,
         None => {
-            // julia submodule not checked out (e.g. worktree or CI without submodules)
+            // julia submodule not checked out (e.g. worktree or CI without
+            // submodules). Gate contexts export SJULIA_REQUIRE_CORPUS=1 so a
+            // missing corpus FAILS instead of silently false-greening the
+            // upstream comparison (Issue #10946).
+            if std::env::var_os("SJULIA_REQUIRE_CORPUS").is_some() {
+                panic!(
+                    "base_exports_do_not_exceed_upstream: upstream exports.jl \
+                     not found at {upstream_exports_path:?} and \
+                     SJULIA_REQUIRE_CORPUS is set (gate context). Initialize \
+                     the julia submodule or symlink it into this worktree."
+                );
+            }
             eprintln!(
-                "Skipping: upstream julia/base/exports.jl not found at {:?}",
+                "SKIP: upstream julia/base/exports.jl not found at {:?}",
                 upstream_exports_path
             );
             return;

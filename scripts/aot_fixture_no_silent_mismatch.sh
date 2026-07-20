@@ -12,10 +12,17 @@
 # Requirements:
 #   cargo build --release -p subset_julia_vm --features aot --bin juliars
 #   cargo build --release -p subset_julia_vm --features repl --bin sjulia
+# Binaries default under CARGO_TARGET_DIR; JULIARS_BIN/SJULIA_BIN override them.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo_target_dir.sh"
+cargo_target_dir="$(resolve_cargo_target_dir "$ROOT")"
+export CARGO_TARGET_DIR="$cargo_target_dir"
+JULIARS_BIN="${JULIARS_BIN:-$cargo_target_dir/release/juliars}"
+SJULIA_BIN="${SJULIA_BIN:-$cargo_target_dir/release/sjulia}"
+export JULIARS_BIN SJULIA_BIN
 
 usage() {
     cat >&2 <<'EOF'
@@ -35,16 +42,13 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     exit 0
 fi
 
-juliars_bin="$ROOT/target/release/juliars"
-sjulia_bin="$ROOT/target/release/sjulia"
-
-if [[ ! -x "$juliars_bin" ]]; then
+if [[ ! -x "$JULIARS_BIN" ]]; then
     echo "ERROR: juliars binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features aot --bin juliars" >&2
     exit 2
 fi
 
-if [[ ! -x "$sjulia_bin" ]]; then
+if [[ ! -x "$SJULIA_BIN" ]]; then
     echo "ERROR: sjulia binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features repl --bin sjulia" >&2
     exit 2
@@ -107,7 +111,7 @@ run_juliars_binary() {
     local log="$4"
 
     set +e
-    timeout 1800 "$juliars_bin" "$fixture" -o "$generated_rs" --emit-binary "$aot_bin" >"$log" 2>&1
+    timeout 1800 "$JULIARS_BIN" "$fixture" -o "$generated_rs" --emit-binary "$aot_bin" >"$log" 2>&1
     local status=$?
     set -e
     return "$status"
@@ -155,7 +159,7 @@ for fixture in "${fixtures[@]}"; do
     generated_rs="$work_dir/generated.rs"
     aot_bin="$work_dir/fixture_bin"
 
-    if ! timeout 120 "$sjulia_bin" "$fixture" >"$vm_stdout" 2>&1; then
+    if ! timeout 120 "$SJULIA_BIN" "$fixture" >"$vm_stdout" 2>&1; then
         skipped_vm=$((skipped_vm + 1))
         echo "SKIP: $display does not pass under release sjulia"
         continue
@@ -205,7 +209,7 @@ for fixture in "${fixtures[@]}"; do
     wrapper_rs="$work_dir/wrapper.rs"
     wrapper_bin="$work_dir/wrapper_bin"
 
-    if ! timeout 120 "$sjulia_bin" "$wrapper" >"$wrapper_vm_stdout" 2>&1; then
+    if ! timeout 120 "$SJULIA_BIN" "$wrapper" >"$wrapper_vm_stdout" 2>&1; then
         echo "ERROR: final-value wrapper failed under release sjulia for $display" >&2
         tail -40 "$wrapper_vm_stdout" >&2
         exit 1

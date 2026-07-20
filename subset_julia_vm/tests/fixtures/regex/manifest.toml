@@ -1,4 +1,10 @@
 [[tests]]
+name = "regex_collect_eachmatch_10198"
+file = "regex_collect_eachmatch_10198.jl"
+expected = true
+description = "Issue #10198: collect(eachmatch(re, s)) materializes the RegexMatch elements instead of erroring 'expected numeric value, got RegexMatch'. Also covers collect over an Any-vector of non-numeric boxed values (Regex/Function) — the general setindex! verbatim-store fix. Verified against upstream julia 1.12."
+
+[[tests]]
 name = "regex_literal"
 file = "regex_literal.jl"
 expected = true
@@ -21,6 +27,12 @@ name = "regex_eachmatch"
 file = "eachmatch.jl"
 expected = true
 description = "Test eachmatch function with Regex"
+
+[[tests]]
+name = "regex_eachmatch_overlap_10199"
+file = "regex_eachmatch_overlap_10199.jl"
+expected = true
+description = "eachmatch(re, s; overlap=true) restarts one char past each match start, yielding overlapping matches (Issue #10199)"
 
 [[tests]]
 name = "regex_match_user_method_7502"
@@ -68,4 +80,101 @@ description = "Flag-suffixed regex literals r\"...\"i / r\"...\"ims now parse (I
 name = "regex_count_findall_6749"
 file = "regex_count_findall_6749.jl"
 expected = true
-description = "Pure-Julia public regex search wrappers count(::Regex, s) and findall(::Regex, s) (Issue #6749). Built on top of the eachmatch engine boundary (Rust regex crate) in base/strings/search.jl, completing the public search API alongside the existing occursin(::Regex). count returns the number of non-overlapping matches; findall returns Vector{UnitRange{Int64}} of byte ranges (m.offset : m.offset + ncodeunits(m.match) - 1). Covers ASCII and unicode haystacks and the empty-match/no-match cases; values verified against upstream julia 1.12. (eltype is not asserted: sjulia degrades empty Vector{UnitRange{Int64}} to Vector{Any} after push!, tracked by #6768.)"
+description = "Pure-Julia public regex search wrappers count(::Regex, s) and findall(::Regex, s) (Issue #6749). Built on top of the eachmatch engine boundary (fancy-regex since Issue #8992) in base/strings/search.jl, completing the public search API alongside the existing occursin(::Regex). count returns the number of non-overlapping matches; findall returns Vector{UnitRange{Int64}} of byte ranges (m.offset : m.offset + ncodeunits(m.match) - 1). Covers ASCII and unicode haystacks and the empty-match/no-match cases; values verified against upstream julia 1.12. (eltype is not asserted: sjulia degrades empty Vector{UnitRange{Int64}} to Vector{Any} after push!, tracked by #6768.)"
+
+[[tests]]
+name = "regex_findfirst_findnext_10177"
+file = "regex_findfirst_findnext_10177.jl"
+expected = true
+description = "Pure-Julia public regex search wrappers findfirst(::Regex, s) and findnext(::Regex, s, i) (Issue #10177), returning the 1-based byte UnitRange of the next match or nothing. Built on the new `_regex_findnext` builtin (positional fancy_regex captures_from_pos, the sjulia analog of upstream's PCRE.exec(re, str, idx-1)) in base/strings/search.jl, completing the public search API alongside findall(::Regex, s) (#6749). The full-string positional search preserves overlapping matches and `^`/`\\b`/lookbehind context. findlast(::Regex, s) is intentionally NOT defined (upstream itself throws MethodError). Covers ASCII/unicode haystacks, captures, empty/no-match, out-of-range BoundsError; all values verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_backref_lookaround_8992"
+file = "regex_backref_lookaround_8992.jl"
+expected = true
+description = "Regex engine supports PCRE-style backreferences and lookaround used by upstream Julia: `(a)\\1`, positive/negative lookahead, and positive/negative lookbehind (Issue #8992)."
+
+[[tests]]
+name = "regex_unicode_fold_props_10080"
+file = "regex_unicode_fold_props_10080.jl"
+expected = true
+description = "PCRE2-vs-fancy-regex parity (Issue #10080): Unicode case-insensitive folding (é/Ω/σ/Kelvin K; no full ß->ss fold), \\p{L}/\\p{Lu}/\\p{Greek}/\\P{L} property classes, and Unicode-aware \\b/\\w. Verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_atomic_possessive_conditional_10080"
+file = "regex_atomic_possessive_conditional_10080.jl"
+expected = true
+description = "PCRE2-vs-fancy-regex parity (Issue #10080): backtracking-control constructs supported by both engines — atomic groups (?>...), possessive quantifiers a*+/a++/\\d++, \\K keep-out, and conditional groups (?(1)yes|no). Verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_anchors_inline_flags_10080"
+file = "regex_anchors_inline_flags_10080.jl"
+expected = true
+description = "PCRE2-vs-fancy-regex parity (Issue #10080): \\A/\\z/\\Z/\\G anchors, inline flags (?i)/(?i:...)/(?s)/(?m) including mid-pattern switches, the x (extended) flag, and (?#...) comment groups. Verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_replace_empty_advance_10080"
+file = "regex_replace_empty_advance_10080.jl"
+expected = true
+description = "PCRE2-vs-fancy-regex parity (Issue #10080): replace() zero-width-match advancement (r\"\" and r\"x*\" step one character per empty match) and positive count kwarg. count=0 excluded (Issue #10197); s\"...\" capture refs excluded (Issue #10174)."
+
+[[tests]]
+name = "regex_eachmatch_classes_10080"
+file = "regex_eachmatch_classes_10080.jl"
+expected = true
+description = "PCRE2-vs-fancy-regex parity (Issue #10080): eachmatch zero-width iteration and non-overlapping offsets, \\R/\\N classes and \\xHH escape, lazy and counted quantifiers. Excluded known gaps: \\h/\\H (Issue #10203), \\v (#10180), overlap=true (#10199), collect(eachmatch) (#10198)."
+
+[[tests]]
+name = "regex_replace_surface_10174"
+file = "regex_replace_surface_10174.jl"
+expected = true
+description = "replace() upstream parity (Issues #10174/#10175/#10197): SubstitutionString capture-reference expansion (\\1..\\9, \\g<name>, \\0), Function replacement values called per match, multi-pair replace(s, p1, p2, ...) applied simultaneously for String and Regex patterns, and count=0 returning the string unchanged."
+
+[[tests]]
+name = "regex_escape_classes_10179"
+file = "regex_escape_classes_10179.jl"
+expected = true
+description = "PCRE2 escape-class parity at Regex construction (Issues #10179/#10180/#10203): octal \\ddd / \\o{...} / \\cX control escapes, \\v/\\V vertical-whitespace class, \\h/\\H horizontal-whitespace class (incl. inside [...] and nested-negated complements), while genuine back references are preserved. Verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_recursion_reject_10181"
+file = "regex_recursion_reject_10181.jl"
+expected = true
+description = "Issue #10181: PCRE2 pattern-recursion / subroutine-call constructs — (?R), (?0), numbered/relative (?n)/(?+n)/(?-n), and named (?&name)/(?P>name) — are rejected at Regex construction with a clear 'recursion is not supported' error instead of fancy-regex silently mis-matching (?R) or failing (?1) opaquely. NOTE: deliberate sjulia-vs-upstream DIVERGENCE (upstream julia/PCRE2 supports these), so skip_julia_test = true; look-alikes ((?:), (?i), atomic (?>), lookaround, named captures, conditionals, comments) still compile."
+skip_julia_test = true
+
+[[tests]]
+name = "regex_split_10176"
+file = "regex_split_10176.jl"
+expected = true
+description = "split(s, ::Regex; limit, keepempty) dispatch (Issue #10176): regex-delimited split reaches the RegexSplit builtin, mirroring upstream SplitIterator semantics (limit / keepempty, SubString{String} results incl. UTF-8). rsplit(::Regex) excluded — upstream julia 1.12 itself MethodErrors on it. Verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_match_surface_10173_10182"
+file = "regex_match_surface_10173_10182.jl"
+expected = true
+description = "RegexMatch/Regex surface parity (Issues #10173, #10182): m.captures::Vector{Union{Nothing,SubString{String}}} and m.offsets::Vector{Int}; upstream show form RegexMatch(\"a\", 1=\"a\", 2=nothing) with named groups keyed by name; integer/Symbol/String capture indexing, keys/haskey, and Regex field access r.pattern. Verified against upstream julia 1.12."
+
+[[tests]]
+name = "regex_constructor_3arg_match_10178"
+file = "regex_constructor_3arg_match_10178.jl"
+expected = true
+description = "Regex(pattern[, flags]) constructor callable as a function (dynamic pattern building) and 3-arg match(re, s, start) offset search from a 1-based byte index (Issue #10178)."
+
+[[tests]]
+name = "regex_replace_literal_string_10721"
+file = "replace_literal_string_10721.jl"
+expected = true
+description = "replace with a plain String replacement keeps $-sequences literal (only SubstitutionString expands capture refs); engine replacement syntax no longer leaks through _regex_replace (Issue #10721)"
+
+[[tests]]
+name = "regex_substitution_string_abstractstring_10735"
+file = "substitution_string_abstractstring_10735.jl"
+expected = true
+description = "SubstitutionString behaves as an AbstractString outside replace: ==/length/ncodeunits/codeunit/isvalid/iterate/getindex/hash/String/eltype forward to the wrapped string, and the replace machinery stays unperturbed via the CallDynamic builtin dispatch-miss fallback (Issue #10735)"
+
+[[tests]]
+name = "regex_match_findnext_index_errors_10736"
+file = "match_findnext_index_errors_10736.jl"
+expected = true
+description = "3-arg match with start past ncodeunits(s)+1 raises ErrorException (PCRE bad offset) and regex findnext with i < 1 raises InexactError, matching upstream instead of returning nothing; boundary offsets stay valid (Issue #10736)"

@@ -1,0 +1,1566 @@
+name = "repl_differential_migration_seams_9199"
+description = """
+Migration-seam corpus for the REPL eval-model epic (Issue #9199, Slice 2). Drives \
+the exact seams the persistent-VM migration will touch — scalar/global defs, \
+method (re)definition across evals, structs + field access, using/import + macro \
+persistence, error cases + recovery, display forms, reset() dropping state, and \
+(isolated last) closures. Both sides run the current model today (self-comparison); \
+S3+ flips side B to the persistent model and this same corpus catches divergence. \
+Goldens authored from sjulia output (REPL_DIFF_DUMP=1); refresh them the same way \
+after a deliberate behavior change. S3+ appends steps here as constructs cut over. \
+S4 appended the module/using-import once-initialization seam: `using`/`import` a \
+stdlib across evals, `using` twice, redefine a global after import, call-driven \
+mutable module state (non-diverging), and module `__init__` once-init (the reviewed \
+models_diverge rows where Legacy re-runs `__init__` every eval and Persistent runs \
+it once, matching upstream). \
+LV5b (#9723) appended the per-module-kind seam: submodule references, module-level \
+struct construction + struct-array const mutation, and module redefinition state \
+reset (upstream semantics, Issue #10232). \
+Display goldens are only asserted for concrete scalars (Int/Float/Bool/String) — \
+container/struct/closure displays are internal Debug reprs (type_id / lambda \
+counters) and are pinned via `type` + `success` instead.
+"""
+
+# --- scalar / global defs + arithmetic + display forms --------------------
+[[steps]]
+name = "scalar_int_def"
+input = "a9199 = 21"
+expect_success = true
+expect_display = "21"
+expect_type = "Int64"
+
+[[steps]]
+name = "scalar_float_def"
+input = "b9199 = 2.5"
+expect_success = true
+expect_display = "2.5"
+expect_type = "Float64"
+
+[[steps]]
+name = "mixed_arith_promotes"
+input = "a9199 + b9199"
+expect_success = true
+expect_display = "23.5"
+expect_type = "Float64"
+
+[[steps]]
+name = "string_def"
+input = "s9199 = \"hi\""
+expect_success = true
+expect_display = "\"hi\""
+expect_type = "String"
+
+[[steps]]
+name = "string_concat"
+input = "s9199 * \" there\""
+expect_success = true
+expect_display = "\"hi there\""
+expect_type = "String"
+
+[[steps]]
+name = "bool_expr"
+input = "a9199 > 10"
+expect_success = true
+expect_display = "true"
+expect_type = "Bool"
+
+[[steps]]
+name = "char_def"
+input = "c9199 = 'x'"
+expect_success = true
+expect_type = "Char"
+
+[[steps]]
+name = "array_display"
+input = "[1, 2, 3]"
+expect_success = true
+expect_type = "Array{Int64, 1}"
+
+[[steps]]
+name = "tuple_display"
+input = "(1, a9199)"
+expect_success = true
+expect_type = "Tuple"
+
+# --- method definition + extension across evals (#9173) -------------------
+[[steps]]
+name = "func_short_def"
+input = "inc9199(x) = x + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "func_call"
+input = "inc9199(a9199)"
+expect_success = true
+expect_display = "22"
+expect_type = "Int64"
+
+[[steps]]
+name = "method_extend_two_arg"
+input = "inc9199(x, y) = x + y"
+expect_success = true
+
+[[steps]]
+name = "method_extend_call"
+input = "inc9199(2, 3)"
+expect_success = true
+expect_display = "5"
+expect_type = "Int64"
+
+[[steps]]
+name = "original_method_preserved"
+input = "inc9199(10)"
+expect_success = true
+expect_display = "11"
+expect_type = "Int64"
+
+# --- structs + field access -----------------------------------------------
+[[steps]]
+name = "struct_def"
+input = """
+struct Pt9199
+    x::Int
+    y::Int
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "struct_instance"
+input = "p9199 = Pt9199(3, 4)"
+expect_success = true
+expect_type = "Pt9199"
+
+[[steps]]
+name = "struct_field_access"
+input = "p9199.x + p9199.y"
+expect_success = true
+expect_display = "7"
+expect_type = "Int64"
+
+# --- live runtime error + committed mutation recovery (#9784) -------------
+[[steps]]
+name = "runtime_error_mutation_seed_9784"
+input = "error_mutation_9784 = 1"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "runtime_error_after_mutation_9784"
+input = "error_mutation_9784 = 41; error(\"after mutation\")"
+expect_success = false
+expect_error_contains = "after mutation"
+
+[[steps]]
+name = "mutation_before_runtime_error_persists_9784"
+input = "error_mutation_9784"
+expect_success = true
+expect_display = "41"
+expect_type = "Int64"
+
+# --- using / import + macro persistence across evals (#9172) --------------
+[[steps]]
+name = "using_printf"
+input = "using Printf"
+expect_success = true
+
+[[steps]]
+name = "macro_use_across_eval"
+input = "@sprintf(\"%03d\", a9199)"
+expect_success = true
+expect_display = "\"021\""
+expect_type = "String"
+
+# --- suppression (`;`) + ans ----------------------------------------------
+[[steps]]
+name = "semicolon_suppresses_display"
+input = "a9199 + 1;"
+expect_success = true
+
+[[steps]]
+name = "ans_updates_after_suppression"
+input = "ans"
+expect_success = true
+expect_display = "22"
+expect_type = "Int64"
+
+# --- error cases + recovery -----------------------------------------------
+[[steps]]
+name = "error_undefvar"
+input = "zzz9199 + 1"
+expect_success = false
+expect_error_contains = "UndefVarError"
+
+[[steps]]
+name = "session_recovers_after_error"
+input = "a9199 + 1"
+expect_success = true
+expect_display = "22"
+expect_type = "Int64"
+
+[[steps]]
+name = "error_bounds"
+input = "[1, 2, 3][10]"
+expect_success = false
+expect_error_contains = "BoundsError"
+
+# --- reset() drops all state ----------------------------------------------
+[[steps]]
+name = "reset_session"
+action = "reset"
+
+[[steps]]
+name = "global_gone_after_reset"
+input = "a9199"
+expect_success = false
+expect_error_contains = "UndefVarError"
+
+[[steps]]
+name = "fresh_def_after_reset"
+input = "w9199 = 7"
+expect_success = true
+expect_display = "7"
+expect_type = "Int64"
+
+# --- closures (ISOLATED LAST): captured closure globals (#9436 / #8260) -------
+# Persisting a captured-closure global across evals used to be the headline
+# Legacy limitation: reverse injection rebuilt the closure as a bare FunctionRef
+# and lost factory-local captures such as `n`. Captured closures now decline
+# FunctionRef reconstruction and use the same seed_globals value-carry fallback
+# as other non-source-reconstructible values, so Legacy and Persistent both keep
+# the closure environment intact (see docs/vm/ADR_REPL_EVAL_MODEL.md,
+# #9199 / #9436 / #8260).
+[[steps]]
+name = "reset_before_closures"
+action = "reset"
+
+[[steps]]
+name = "closure_factory_def"
+input = "makeadder9199(n) = x -> x + n"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "closure_bind"
+input = "add5_9199 = makeadder9199(5)"
+expect_success = true
+expect_type = "Closure"
+
+[[steps]]
+name = "closure_call_across_eval_helps_9436"
+input = "add5_9199(10)"
+expect_success = true
+expect_display = "15"
+expect_type = "Int64"
+
+# ============================================================================
+# S4 (Issue #9199): module / using-import once-initialization.
+#
+# Under the PERSISTENT model a user module is realized ONCE: its `__init__` side
+# effects fire on the eval that defines it and are suppressed on every subsequent
+# accumulate-and-recompile pass, matching upstream `run_module_init` (a module's
+# `__init__` runs once per realization — julia/base/loading.jl). Under LEGACY the
+# whole accumulated program re-runs each eval, so `__init__` re-fires — the
+# observably-wrong per-eval re-run this slice fixes. `using`/`import` of stdlib
+# packages, macro persistence, and call-driven mutable module state stay identical
+# across both models (differentially non-diverging). Package `using X` modules are
+# NEVER suppressed (their `__init__` establishes per-VM state that must re-run in
+# each eval's fresh VM) — they route through the legacy re-run path under both
+# models. See docs/vm/ADR_REPL_EVAL_MODEL.md (#9199 S4 / #8994 / #5296).
+# ============================================================================
+
+[[steps]]
+name = "s4_reset_before_modules"
+action = "reset"
+
+# --- using / import a stdlib across multiple evals (non-diverging) ---------
+[[steps]]
+name = "s4_using_linalg"
+input = "using LinearAlgebra"
+expect_success = true
+
+[[steps]]
+name = "s4_linalg_det_across_eval"
+input = "det([1.0 2.0; 3.0 4.0])"
+expect_success = true
+# Float display omitted (Rust `-2.0`→`-2` vs Julia formatting); the A==B
+# cross-check + type pin the behavior.
+expect_type = "Float64"
+
+[[steps]]
+name = "s4_linalg_dot_across_eval"
+input = "dot([1, 2, 3], [4, 5, 6])"
+expect_success = true
+expect_display = "32"
+expect_type = "Int64"
+
+# --- `using` the same package twice is idempotent (non-diverging) ----------
+[[steps]]
+name = "s4_using_printf_first"
+input = "using Printf"
+expect_success = true
+
+[[steps]]
+name = "s4_using_printf_again"
+input = "using Printf"
+expect_success = true
+
+[[steps]]
+name = "s4_printf_after_double_using"
+input = "@sprintf(\"%d\", 5)"
+expect_success = true
+expect_display = "\"5\""
+expect_type = "String"
+
+# --- redefine a global after an import (import + globals coexist) ----------
+[[steps]]
+name = "s4_global_after_import"
+input = "gg9199 = 10"
+expect_success = true
+expect_display = "10"
+expect_type = "Int64"
+
+[[steps]]
+name = "s4_redefine_global_after_import"
+input = "gg9199 = 20"
+expect_success = true
+expect_display = "20"
+expect_type = "Int64"
+
+[[steps]]
+name = "s4_printf_reads_redefined_global"
+input = "@sprintf(\"%03d\", gg9199)"
+expect_success = true
+expect_display = "\"020\""
+expect_type = "String"
+
+# --- call-driven mutable module state (no __init__): identical across models
+# A module const array mutated by a *called function* (not by init) is persisted
+# by `restore_module_globals` under BOTH models — non-diverging (Issue #5296). S4
+# only suppresses `__init__` re-runs, never the module body's const bindings.
+[[steps]]
+name = "s4_reset_before_mutable_module"
+action = "reset"
+
+[[steps]]
+name = "s4_mutable_module_def"
+input = """
+module Log9199
+    const entries = Int[]
+    bump() = (push!(entries, length(entries) + 1); length(entries))
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "s4_mutable_module_bump1"
+input = "Log9199.bump()"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "s4_mutable_module_bump2"
+input = "Log9199.bump()"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "s4_mutable_module_len"
+input = "length(Log9199.entries)"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+# --- module __init__ once-init: THE S4 divergence (value observable) -------
+# Persistent: `Mi9199.__init__` (push!es to `seen`) runs ONCE at the definition
+# eval, so `cnt()` stays 1 — matching upstream. Legacy re-runs the program every
+# eval, so __init__ re-fires and `cnt()` grows 2, 3, … . Reviewed models_diverge
+# cutover row (ADR: pin Persistent's upstream-correct behavior).
+[[steps]]
+name = "s4_reset_before_init_module"
+action = "reset"
+
+[[steps]]
+name = "s4_init_module_def"
+input = """
+module Mi9199
+    const seen = Int[]
+    function __init__()
+        push!(seen, 1)
+    end
+    cnt() = length(seen)
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "s4_init_module_cnt_first"
+input = "Mi9199.cnt()"
+models_diverge = true
+# Legacy: __init__ re-ran once more this eval, so seen == [1, 1].
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+# Persistent: __init__ ran only at the definition eval — matches upstream.
+expect_success_persistent = true
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+[[steps]]
+name = "s4_init_module_cnt_second"
+input = "Mi9199.cnt()"
+models_diverge = true
+# Legacy keeps re-running __init__: seen grows again.
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+# Persistent stays at the once-initialized value.
+expect_success_persistent = true
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+# --- module __init__ once-init: stdout observable --------------------------
+# A module whose __init__ prints: the definition eval prints in BOTH models
+# (non-diverging). The later `f()` calls diverge in stdout ONLY — Legacy re-prints
+# every eval, Persistent stays silent (init already ran). Asserted via
+# `expect_stdout_persistent` (Issue #9199 S4).
+[[steps]]
+name = "s4_reset_before_print_module"
+action = "reset"
+
+[[steps]]
+name = "s4_print_module_def"
+input = """
+module Mp9199
+    function __init__()
+        println("mp-init")
+    end
+    f() = 1
+end
+"""
+expect_success = true
+expect_stdout = "mp-init\n"
+
+[[steps]]
+name = "s4_print_module_f_first"
+input = "Mp9199.f()"
+models_diverge = true
+# Legacy re-runs the module body + __init__, so it prints again.
+expect_success = true
+expect_stdout = "mp-init\n"
+expect_display = "1"
+expect_type = "Int64"
+# Persistent: __init__ suppressed after realization — no re-print.
+expect_success_persistent = true
+expect_stdout_persistent = ""
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+[[steps]]
+name = "s4_print_module_f_second"
+input = "Mp9199.f()"
+models_diverge = true
+expect_success = true
+expect_stdout = "mp-init\n"
+expect_display = "1"
+expect_type = "Int64"
+expect_success_persistent = true
+expect_stdout_persistent = ""
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+# --- reset() re-arms module init (S4 exit criterion: reset = fresh session) -
+# After reset the session has realized no modules, so redefining the module runs
+# its __init__ again under Persistent (the re-definition prints in both models);
+# the post-reset `f()` call is again suppressed under Persistent only.
+[[steps]]
+name = "s4_reset_rearms_init"
+action = "reset"
+
+[[steps]]
+name = "s4_print_module_redef_after_reset"
+input = """
+module Mp9199
+    function __init__()
+        println("mp-init")
+    end
+    f() = 1
+end
+"""
+expect_success = true
+expect_stdout = "mp-init\n"
+
+[[steps]]
+name = "s4_print_module_f_after_reset"
+input = "Mp9199.f()"
+models_diverge = true
+expect_success = true
+expect_stdout = "mp-init\n"
+expect_display = "1"
+expect_type = "Int64"
+expect_success_persistent = true
+expect_stdout_persistent = ""
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+# ============================================================================
+# S5 (Issue #9199): cross-eval definition dependencies under the INPUT-DELTA
+# model. Under Persistent, ordinary append-only definitions advance the live
+# compiler snapshot, but a newly defined binding that repairs a prior caller's
+# baked `ThrowUndefVarError` takes the full recompile path. That rebuild resolves
+# cross-eval forward references and mutual recursion before later expression
+# deltas reuse the corrected functions. These rows exercise both and must stay
+# Legacy ≡ Persistent: the observable result MUST match a full recompile.
+# Values verified against
+# upstream julia (51 / true / true / 210 / 11 / 12). See docs/vm/ADR_REPL_EVAL_MODEL.md (§S5).
+# ============================================================================
+
+[[steps]]
+name = "s5_reset_before_xeval"
+action = "reset"
+
+# forward reference: the caller is defined an eval BEFORE its callee exists
+[[steps]]
+name = "s5_forward_caller_def"
+input = "xcaller9199(x) = xcallee9199(x) + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_forward_callee_def"
+input = "xcallee9199(x) = x * 10"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_forward_call"
+input = "xcaller9199(5)"
+expect_success = true
+expect_display = "51"
+expect_type = "Int64"
+
+# mutual recursion defined across two evals (myeven references myodd first)
+[[steps]]
+name = "s5_mutual_even_def"
+input = "myeven9199(n) = n == 0 ? true : myodd9199(n - 1)"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_mutual_odd_def"
+input = "myodd9199(n) = n == 0 ? false : myeven9199(n - 1)"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_mutual_even_call"
+input = "myeven9199(10)"
+expect_success = true
+expect_display = "true"
+expect_type = "Bool"
+
+[[steps]]
+name = "s5_mutual_odd_call"
+input = "myodd9199(7)"
+expect_success = true
+expect_display = "true"
+expect_type = "Bool"
+
+# a method that calls an earlier-defined method (callee defined first)
+[[steps]]
+name = "s5_base_def"
+input = "xbase9199(x) = x + 100"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_derived_def"
+input = "xderived9199(x) = xbase9199(x) * 2"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_derived_call"
+input = "xderived9199(5)"
+expect_success = true
+expect_display = "210"
+expect_type = "Int64"
+
+# redefinition across evals: same signature => delta-UNSAFE => full recompile
+[[steps]]
+name = "s5_redef_def1"
+input = "xredef9199(x) = x + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s5_redef_call1"
+input = "xredef9199(10)"
+expect_success = true
+expect_display = "11"
+expect_type = "Int64"
+
+[[steps]]
+name = "s5_redef_def2"
+input = "xredef9199(x) = x + 2"
+expect_success = true
+
+[[steps]]
+name = "s5_redef_call2"
+input = "xredef9199(10)"
+expect_success = true
+expect_display = "12"
+expect_type = "Int64"
+
+# ============================================================================
+# S6 (Issue #9199): world-age / precise-invalidation of method redefinition
+# across evals, and the reachability boundary vs the script-mode dual #9400.
+#
+# WHAT IS REACHABLE TODAY (these rows, all Legacy ≡ Persistent AND matching
+# upstream `julia`): a method redefined in eval N is visible from eval N+1's
+# call sites but is NOT retroactively applied to eval N's already-run code — the
+# upstream world-age invariant (`julia/src/gf.c`: a call sees only methods
+# defined in worlds ≤ its own; a redefinition bumps the world counter). In the
+# REPL this holds for free because the EVAL BOUNDARY is the world boundary: the
+# earlier eval's call already ran (and its global result is fixed) before the
+# later eval redefines, and the later eval re-resolves against the current
+# method table. Both models agree because both realize cross-eval visibility the
+# same way (full recompile on a definition eval — S5 routes DEFINITIONS to the
+# full path; #9197 S6 / PR #9485 is the runtime per-name backedge invalidation
+# the future live-VM slice will use to make this a world-counter fact instead of
+# a recompile artifact). Verified against upstream julia:
+#   scenA 11/110 · scenB 21/1001 · scenC 0/0/100/100.
+#
+# NOW REACHABLE FOR DIRECT TOP-LEVEL CALLS (the `s6_intra_eval_9400` row):
+# source-visible top-level dispatch fixes the direct #9400 script-mode dual.
+# A same-signature redefinition placed textually between two direct calls in one
+# eval now yields upstream's 12 under both models. Calls that enter an
+# earlier-defined function body still need runtime world propagation; see #9650.
+# See docs/vm/ADR_REPL_EVAL_MODEL.md (§S6) and Issues #9400 / #8452 / #9197.
+# ============================================================================
+
+[[steps]]
+name = "s6_reset_before_worldage"
+action = "reset"
+
+# --- scenA: redefine a method between two evals, call it in both -----------
+[[steps]]
+name = "s6_redef_between_def"
+input = "waf6_9199(x) = x + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s6_redef_between_call_before"
+input = "waf6_9199(10)"
+expect_success = true
+expect_display = "11"
+expect_type = "Int64"
+
+[[steps]]
+name = "s6_redef_between_redef"
+input = "waf6_9199(x) = x + 100"
+expect_success = true
+
+[[steps]]
+name = "s6_redef_between_call_after"
+input = "waf6_9199(10)"
+expect_success = true
+expect_display = "110"
+expect_type = "Int64"
+
+# --- scenB: caller defined once; its earlier-defined callee is redefined ----
+# The caller `wbh` is NOT recompiled at the callee's redefinition eval by the
+# user, yet a later call re-resolves `wbg` in the current world (upstream: the
+# running `wbh` in eval N+2 sees the redefined `wbg`).
+[[steps]]
+name = "s6_caller_callee_base_def"
+input = "wbg6_9199(x) = x * 2"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s6_caller_callee_caller_def"
+input = "wbh6_9199(x) = wbg6_9199(x) + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s6_caller_callee_call_before"
+input = "wbh6_9199(10)"
+expect_success = true
+expect_display = "21"
+expect_type = "Int64"
+
+[[steps]]
+name = "s6_caller_callee_redef_base"
+input = "wbg6_9199(x) = x * 100"
+expect_success = true
+
+[[steps]]
+name = "s6_caller_callee_call_after"
+input = "wbh6_9199(10)"
+expect_success = true
+expect_display = "1001"
+expect_type = "Int64"
+
+# --- scenC: mutual recursion, redefine one method across evals --------------
+[[steps]]
+name = "s6_reset_before_mutual"
+action = "reset"
+
+[[steps]]
+name = "s6_mutual_even_def"
+input = "wce6_9199(n) = n == 0 ? 0 : wco6_9199(n - 1)"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s6_mutual_odd_def"
+input = "wco6_9199(n) = n == 0 ? 1 : wce6_9199(n - 1)"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "s6_mutual_even_call_before"
+input = "wce6_9199(4)"
+expect_success = true
+expect_display = "0"
+expect_type = "Int64"
+
+[[steps]]
+name = "s6_mutual_odd_call_before"
+input = "wco6_9199(3)"
+expect_success = true
+expect_display = "0"
+expect_type = "Int64"
+
+[[steps]]
+name = "s6_mutual_even_redef"
+input = "wce6_9199(n) = n == 0 ? 100 : wco6_9199(n - 1)"
+expect_success = true
+
+[[steps]]
+name = "s6_mutual_even_call_after"
+input = "wce6_9199(4)"
+expect_success = true
+expect_display = "100"
+expect_type = "Int64"
+
+# the redefined base case propagates through the (un-redefined) odd method too
+[[steps]]
+name = "s6_mutual_odd_call_after"
+input = "wco6_9199(3)"
+expect_success = true
+expect_display = "100"
+expect_type = "Int64"
+
+# --- direct intra-eval / script-mode dual #9400 -----------------------------
+# Single eval, redefinition textually between two direct calls. Both models now
+# return upstream's 12 (ra=1, rb=2). Function-body propagation remains #9650.
+[[steps]]
+name = "s6_reset_before_intra_eval"
+action = "reset"
+
+[[steps]]
+name = "s6_intra_eval_9400"
+input = """
+wd6_9199() = 1
+ra9199 = wd6_9199()
+wd6_9199() = 2
+rb9199 = wd6_9199()
+ra9199 * 10 + rb9199
+"""
+expect_success = true
+expect_display = "12"
+expect_type = "Int64"
+
+# --- LV2 (Issue #9199): live-append delta path -----------------------------
+# Under Persistent these steps run on ONE live VM (relocatable delta main spliced
+# in place); Legacy rebuilds the world each eval. The corpus pins Legacy ≡
+# Persistent for the exact cases the live path covers: many prior globals, a
+# reassignment landing on the CORRECT live frame-0 slot (the slot-collision bug
+# the LV1 note called out), a brand-new global growing frame-0 after many evals,
+# and read-modify-write accumulation across evals.
+[[steps]]
+name = "lv2_reset_before_globals"
+action = "reset"
+
+[[steps]]
+name = "lv2_g1"
+input = "lv2a = 1"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_g2"
+input = "lv2b = 2"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_g3"
+input = "lv2c = 3"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_g4"
+input = "lv2d = 4"
+expect_success = true
+expect_display = "4"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_g5"
+input = "lv2e = 5"
+expect_success = true
+expect_display = "5"
+expect_type = "Int64"
+
+# Pure expression reading several live globals.
+[[steps]]
+name = "lv2_expr_reads_globals"
+input = "lv2a + lv2b + lv2c + lv2d + lv2e"
+expect_success = true
+expect_display = "15"
+expect_type = "Int64"
+
+# Reassign a MIDDLE global — must land on its own live slot, not collide.
+[[steps]]
+name = "lv2_reassign_middle_global"
+input = "lv2c = 42"
+expect_success = true
+expect_display = "42"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_reassigned_reads_back"
+input = "lv2c"
+expect_success = true
+expect_display = "42"
+expect_type = "Int64"
+
+# Every OTHER global is untouched by the reassignment.
+[[steps]]
+name = "lv2_neighbors_intact"
+input = "lv2a + lv2b + lv2d + lv2e"
+expect_success = true
+expect_display = "12"
+expect_type = "Int64"
+
+# A brand-new global bound after many evals grows frame-0 and reads a prior one.
+[[steps]]
+name = "lv2_new_global_after_many"
+input = "lv2f = lv2a + lv2c"
+expect_success = true
+expect_display = "43"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_new_global_reads_back"
+input = "lv2f"
+expect_success = true
+expect_display = "43"
+expect_type = "Int64"
+
+# Read-modify-write accumulation on the same live slot across evals.
+[[steps]]
+name = "lv2_rmw_init"
+input = "lv2acc = 0"
+expect_success = true
+expect_display = "0"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_rmw_1"
+input = "lv2acc = lv2acc + 10"
+expect_success = true
+expect_display = "10"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_rmw_2"
+input = "lv2acc = lv2acc + 10"
+expect_success = true
+expect_display = "20"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv2_rmw_reads_back"
+input = "lv2acc"
+expect_success = true
+expect_display = "20"
+expect_type = "Int64"
+
+# Float + string globals on the live VM, exercising typed-slot seeding. Displays
+# asserted via `type` + `success` only — the exact float/string REPL echo format
+# is pinned by the reused repl_session corpora, and Legacy≡Persistent is enforced
+# regardless (the point of this row is that the live path reads the prior value).
+[[steps]]
+name = "lv2_float_global"
+input = "lv2fl = 1.5"
+expect_success = true
+expect_type = "Float64"
+
+[[steps]]
+name = "lv2_float_reassign_uses_prior"
+input = "lv2fl = lv2fl + 2.5"
+expect_success = true
+expect_type = "Float64"
+
+[[steps]]
+name = "lv2_string_global"
+input = "lv2s = \"live\""
+expect_success = true
+expect_type = "String"
+
+[[steps]]
+name = "lv2_string_concat_prior"
+input = "lv2s * \"-vm\""
+expect_success = true
+expect_type = "String"
+
+# --- HOF / closure deltas fall OUT of the live-append fast path -------------
+# Issue #9199 review r3535721788: `ntuple(i -> i, 2)` / `sprint(io -> …)` /
+# `map(x -> …)` / an immediately-invoked closure each LIFT a fresh function, so
+# they are ineligible for the live path and take the full/fresh recompile. The
+# live-append eligibility gate `user_main_calls_only_existing_functions` also
+# rejects the emitted `NtupleFunc`/`SprintFunc`/`IterateDynamic`/`CreateClosure`
+# opcodes (defense-in-depth against a future loosening of the outer gate). Both
+# models must produce identical results — the A==B cross-check is the guard that
+# the fallback is observationally correct.
+[[steps]]
+name = "lv2_hof_ntuple_lambda"
+input = "ntuple(i -> i, 2)"
+expect_success = true
+expect_type = "Tuple"
+
+[[steps]]
+name = "lv2_hof_sprint_lambda"
+input = "sprint(io -> print(io, \"x\"))"
+expect_success = true
+expect_display = "\"x\""
+expect_type = "String"
+
+[[steps]]
+name = "lv2_hof_map_lambda"
+input = "map(x -> x + 1, [1, 2])"
+expect_success = true
+expect_type = "Array{Int64, 1}"
+
+[[steps]]
+name = "lv2_closure_iife"
+input = "(() -> 41)()"
+expect_success = true
+expect_display = "41"
+expect_type = "Int64"
+
+# --- LV3: compiled new-generic definitions on the live VM ------------------
+# Issue #9199 LV3: under Persistent a brand-new generic function DEFINITION is
+# compiled and APPENDED to the held live VM (world bump + #9197 precise
+# invalidation) instead of recompiling the accumulated program. These rows pin
+# Legacy≡Persistent for: a definition + call, a body calling a Base function, a
+# same-eval cross reference, a cross-eval forward reference (caller defined
+# before callee), and a redefinition (world-age not retroactive). Verified
+# against upstream `julia`.
+[[steps]]
+name = "lv3_warm"
+input = "lv3w9199 = 7"
+expect_success = true
+
+[[steps]]
+name = "lv3_new_generic_def"
+input = "lv3inc9199(x) = x + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "lv3_new_generic_call"
+input = "lv3inc9199(41)"
+expect_success = true
+expect_display = "42"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv3_base_call_def"
+input = "lv3sqrt9199(x) = sqrt(x) + 1.0"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "lv3_base_call_call"
+input = "lv3sqrt9199(15.0)"
+expect_success = true
+expect_display = "4.872983346207417"
+expect_type = "Float64"
+
+[[steps]]
+name = "lv3_same_batch_def"
+input = "lv3g9199(x) = x + 1\nlv3h9199(x) = lv3g9199(x) * 10"
+expect_success = true
+
+[[steps]]
+name = "lv3_same_batch_call"
+input = "lv3h9199(4)"
+expect_success = true
+expect_display = "50"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv3_forward_caller_def"
+input = "lv3fc9199(x) = lv3fce9199(x) + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "lv3_forward_callee_def"
+input = "lv3fce9199(x) = x * 10"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "lv3_forward_call"
+input = "lv3fc9199(3)"
+expect_success = true
+expect_display = "31"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv3_redef_def1"
+input = "lv3rd9199(x) = x + 1"
+expect_success = true
+expect_type = "Function"
+
+[[steps]]
+name = "lv3_redef_saved"
+input = "lv3rdsaved9199 = lv3rd9199(10)"
+expect_success = true
+
+[[steps]]
+name = "lv3_redef_def2"
+input = "lv3rd9199(x) = x + 100"
+expect_success = true
+
+[[steps]]
+name = "lv3_redef_new_call"
+input = "lv3rd9199(10)"
+expect_success = true
+expect_display = "110"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv3_redef_saved_unchanged"
+input = "lv3rdsaved9199"
+expect_success = true
+expect_display = "11"
+expect_type = "Int64"
+
+# --- LV4: compiled new-struct definitions on the live VM -------------------
+# Issue #9199 LV4: under Persistent a brand-new NON-parametric struct DEFINITION
+# is compiled and its type registries APPENDED to the held live VM
+# (`Vm::install_appended_types` — aligned `type_id`, a coarse dispatch-cache
+# retire) instead of recompiling the accumulated program. These rows pin
+# Legacy≡Persistent for: a struct def + construct + field access across evals, a
+# same-eval def+construct+use (the type is installed before the appended main's
+# `NewStruct`), a mutable struct, and a redefinition with a wider layout. All
+# goldens verified against upstream `julia` 1.12 (which — since 1.12 — also allows
+# the struct redefinition). Abstract / primitive / enum type definitions now
+# PERSIST across evals (session accumulation + re-merge, symmetric with structs —
+# Issue #9701; pinned by the `t9701_*` rows below); their live-VM type-registry
+# append is still LV4b (they take the full recompile path; see the ADR
+# §"### LV4 — LANDED").
+[[steps]]
+name = "lv4_warm"
+input = "lv4w9199 = 3"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv4_struct_def"
+input = "struct Lv4Pt9199\n  x::Int\n  y::Int\nend"
+expect_success = true
+
+[[steps]]
+name = "lv4_struct_construct"
+input = "lv4p9199 = Lv4Pt9199(3, 4)"
+expect_success = true
+expect_type = "Lv4Pt9199"
+
+[[steps]]
+name = "lv4_struct_field_x"
+input = "lv4p9199.x"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv4_struct_field_sum"
+input = "lv4p9199.x + lv4p9199.y"
+expect_success = true
+expect_display = "7"
+expect_type = "Int64"
+
+# Same-eval def + construct + use: the type is installed on the live VM BEFORE the
+# appended main runs its `NewStruct`, so the aligned type_id resolves in one eval.
+[[steps]]
+name = "lv4_same_eval_def_use"
+input = "struct Lv4Q9199\n  v::Int\nend\nlv4q9199 = Lv4Q9199(9)\nlv4q9199.v * 2"
+expect_success = true
+expect_display = "18"
+expect_type = "Int64"
+
+# A mutable struct: field mutation across the same eval.
+[[steps]]
+name = "lv4_mutable_def_use"
+input = "mutable struct Lv4M9199\n  n::Int\nend\nlv4m9199 = Lv4M9199(1)\nlv4m9199.n = 42\nlv4m9199.n"
+expect_success = true
+expect_display = "42"
+expect_type = "Int64"
+
+# Redefinition with a WIDER layout: NOT a brand-new type ⇒ routes to the full
+# recompile (not the live type-append), and the new 2-field layout takes effect.
+# Matches upstream `julia` 1.12 (5 then 6).
+[[steps]]
+name = "lv4_redef_def1"
+input = "struct Lv4R9199\n  a::Int\nend"
+expect_success = true
+
+[[steps]]
+name = "lv4_redef_use1"
+input = "Lv4R9199(5).a"
+expect_success = true
+expect_display = "5"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv4_redef_def2"
+input = "struct Lv4R9199\n  a::Int\n  b::Int\nend"
+expect_success = true
+
+[[steps]]
+name = "lv4_redef_use2"
+input = "Lv4R9199(5, 6).b"
+expect_success = true
+expect_display = "6"
+expect_type = "Int64"
+
+# --- LV5 (Issue #9199): simple user module realized once on the LIVE VM --------
+# A simple `module M … end` (functions + const bindings) is realized on the eval
+# that DEFINES it (full recompile, which parks that VM); every later eval that
+# only REFERENCES the module re-enters the parked VM, so the module's mutable
+# const state persists IN the VM across evals — the structural close of #5296 for
+# this subset, without `restore_module_globals`. Observationally identical across
+# both models (Legacy fakes the same state via the restore machinery), verified
+# against upstream `julia`.
+[[steps]]
+name = "lv5_reset_before_module"
+action = "reset"
+
+[[steps]]
+name = "lv5_module_def"
+input = """
+module Lv5Log9199
+    const entries = Int[]
+    bump() = (push!(entries, length(entries) + 1); length(entries))
+    peek() = length(entries)
+end
+"""
+expect_success = true
+
+# Cross-eval mutable module state (the #5296 core): the second call sees the
+# first call's `push!`. Under Persistent this now runs on the live VM.
+[[steps]]
+name = "lv5_module_bump1"
+input = "Lv5Log9199.bump()"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5_module_bump2"
+input = "Lv5Log9199.bump()"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+# Module const read across evals resolves against the live module.
+[[steps]]
+name = "lv5_module_len"
+input = "length(Lv5Log9199.entries)"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+# A pure module function call across evals (no mutation) — identical both models.
+[[steps]]
+name = "lv5_module_peek"
+input = "Lv5Log9199.peek()"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+# --- LV5: module __init__ runs ONCE (the S4 divergence, now on the live path) --
+# Persistent realizes the module once, so `__init__` (which pushes to `seen`)
+# fires only at definition and `cnt()` stays 1 — matching upstream `julia`.
+# Legacy re-runs the whole program each eval, re-firing `__init__` → 2, 3, … .
+[[steps]]
+name = "lv5_reset_before_init_module"
+action = "reset"
+
+[[steps]]
+name = "lv5_init_module_def"
+input = """
+module Lv5Mi9199
+    const seen = Int[]
+    function __init__()
+        push!(seen, 1)
+    end
+    cnt() = length(seen)
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "lv5_init_module_cnt_first"
+input = "Lv5Mi9199.cnt()"
+models_diverge = true
+# Legacy re-ran __init__ this eval: seen == [1, 1].
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+# Persistent: __init__ ran only at the definition eval — matches upstream.
+expect_success_persistent = true
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+[[steps]]
+name = "lv5_init_module_cnt_second"
+input = "Lv5Mi9199.cnt()"
+models_diverge = true
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+expect_success_persistent = true
+expect_display_persistent = "1"
+expect_type_persistent = "Int64"
+
+# --- LV6 audit: product-surface completeness pins for the eventual flip ----
+# Added by the Issue #9199 LV6 differential-completeness audit (the flip to a
+# Persistent default is DEFERRED — see the audit note below). These rows pin two
+# constructs the ADR flagged as historically bug-prone under the Legacy value→expr
+# heuristic but NOT yet covered by the differential corpus: a TUPLE global assigned
+# once and read/indexed across LATER evals (#8243), and a MULTI-STATEMENT single
+# input that defines two globals then evaluates an expression, with both globals
+# read back across later evals. Both are Legacy ≡ Persistent AND match upstream
+# `julia` (verified: `(1,2,3)`/`2`/`4`; `30`/`10`/`40`). A tuple/heap-backed global
+# routes through the full recompile under Persistent, so parity holds by construction.
+#
+# NOTE (LV6 audit result): the full `cargo nextest run` audit (which the differential
+# corpus alone did not cover) found TWO Legacy≢Persistent divergences that BLOCK the
+# default flip — NamedTuple cross-eval destructure (#9786) and unbounded struct_heap
+# growth over long sessions (#9787). Those are NOT pinned here (they diverge; the
+# corpus asserts Legacy≡Persistent). They are tracked by their bug Issues + the
+# failing tests `test_repl_namedtuple_persistence` and
+# `repl_session_memory_stats_stay_bounded_over_1000_iterations_issue_8625` (which fail
+# under a Persistent default). The flip re-attempt lands once both are fixed.
+
+[[steps]]
+name = "lv6_reset_before_tuple_global"
+action = "reset"
+
+[[steps]]
+name = "lv6_tuple_global_def"
+input = "tg9199 = (1, 2, 3)"
+expect_success = true
+expect_type = "Tuple"
+
+[[steps]]
+name = "lv6_tuple_global_reads_back"
+input = "tg9199"
+expect_success = true
+expect_type = "Tuple"
+
+[[steps]]
+name = "lv6_tuple_global_index"
+input = "tg9199[2]"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv6_tuple_global_sum_across_eval"
+input = "tg9199[1] + tg9199[3]"
+expect_success = true
+expect_display = "4"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv6_reset_before_multistmt"
+action = "reset"
+
+[[steps]]
+name = "lv6_multistmt_two_globals_and_expr"
+input = "mm1_9199 = 10; mm2_9199 = 20; mm1_9199 + mm2_9199"
+expect_success = true
+expect_display = "30"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv6_multistmt_global1_reads_back"
+input = "mm1_9199"
+expect_success = true
+expect_display = "10"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv6_multistmt_global2_reads_back"
+input = "mm2_9199 * 2"
+expect_success = true
+expect_display = "40"
+expect_type = "Int64"
+
+# --- LV5b (Issue #9723): submodule / typed / redefined module kinds ----------
+# Submodule-bearing and typed (module-level struct / abstract type) user modules
+# are live-path eligible under Persistent since #9723 (the carried surface
+# resolves `M.Sub.f` / `M.SomeType`; the compiled prefix already holds the
+# qualified type defs); module REDEFINITION resets module state, matching
+# upstream `julia` (the new module starts from its own initializers). All steps
+# are observationally identical across both models; goldens verified against
+# upstream `julia` 1.12.
+[[steps]]
+name = "lv5b_reset_before_submodule"
+action = "reset"
+
+[[steps]]
+name = "lv5b_submodule_def"
+input = """
+module Lv5bOuter9723
+    const rlog9723 = Int[]
+    module Lv5bInner9723
+        const xs = Int[]
+        bump() = (push!(xs, 10); length(xs))
+    end
+    record() = (push!(rlog9723, 1); length(rlog9723))
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "lv5b_submodule_bump1"
+input = "Lv5bOuter9723.Lv5bInner9723.bump()"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_submodule_bump2"
+input = "Lv5bOuter9723.Lv5bInner9723.bump()"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_submodule_parent_record"
+input = "Lv5bOuter9723.record()"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_submodule_len"
+input = "length(Lv5bOuter9723.Lv5bInner9723.xs)"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+# --- LV5b: module-level struct + mutable struct-array const ------------------
+[[steps]]
+name = "lv5b_reset_before_typed_module"
+action = "reset"
+
+[[steps]]
+name = "lv5b_typed_module_def"
+input = """
+module Lv5bTyped9723
+    struct Pt
+        x::Int
+    end
+    const cache = Pt[]
+    make(v) = (p = Pt(v); push!(cache, p); p)
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "lv5b_typed_make_x"
+input = "Lv5bTyped9723.make(7).x"
+expect_success = true
+expect_display = "7"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_typed_cache_len"
+input = "length(Lv5bTyped9723.cache)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_typed_construct"
+input = "Lv5bTyped9723.Pt(3).x"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+# --- LV5b: module redefinition resets state (upstream `julia` semantics) -----
+[[steps]]
+name = "lv5b_reset_before_redef"
+action = "reset"
+
+[[steps]]
+name = "lv5b_redef_module_def"
+input = """
+module Lv5bRdef9723
+    const xs = Int[]
+    bump() = (push!(xs, 1); length(xs))
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "lv5b_redef_bump1"
+input = "Lv5bRdef9723.bump()"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_redef_bump2"
+input = "Lv5bRdef9723.bump()"
+expect_success = true
+expect_display = "2"
+expect_type = "Int64"
+
+# Redefinition replaces the module binding: the new module starts from its OWN
+# initializers (`xs = Int[]`), so the next bump is 1 — upstream-verified.
+[[steps]]
+name = "lv5b_redef_module_redef"
+input = """
+module Lv5bRdef9723
+    const xs = Int[]
+    bump() = (push!(xs, 1); length(xs))
+end
+"""
+expect_success = true
+
+[[steps]]
+name = "lv5b_redef_bump_after"
+input = "Lv5bRdef9723.bump()"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "lv5b_redef_len_after"
+input = "length(Lv5bRdef9723.xs)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+# --- Issue #9701: abstract / primitive / enum type persistence across evals ----
+# `store_definitions`/`merge_definitions` now accumulate + re-fold
+# `program.abstract_types` / `primitive_types` / `enums` symmetrically with
+# structs, so a type defined in eval N stays bound in eval N+1 in BOTH models
+# (before the fix, `d isa Animal` raised UndefVarError and `f(a::Animal)`
+# dispatch raised MethodError, identically under Legacy and Persistent). Goldens
+# verified against upstream `julia` 1.12 (the issue's MWE table).
+[[steps]]
+name = "t9701_reset_before_abstract"
+action = "reset"
+
+[[steps]]
+name = "t9701_abstract_def"
+input = "abstract type Animal9701 end"
+expect_success = true
+
+[[steps]]
+name = "t9701_subtype_struct_def"
+input = "struct Pup9701 <: Animal9701\n    x::Int\nend"
+expect_success = true
+
+[[steps]]
+name = "t9701_construct"
+input = "d9701 = Pup9701(3)"
+expect_success = true
+expect_type = "Pup9701"
+
+[[steps]]
+name = "t9701_isa_prior_abstract"
+input = "d9701 isa Animal9701"
+expect_success = true
+expect_display = "true"
+expect_type = "Bool"
+
+[[steps]]
+name = "t9701_field_access"
+input = "d9701.x"
+expect_success = true
+expect_display = "3"
+expect_type = "Int64"
+
+[[steps]]
+name = "t9701_method_on_prior_abstract"
+input = "f9701(a::Animal9701) = 111"
+expect_success = true
+
+[[steps]]
+name = "t9701_dispatch_through_prior_abstract"
+input = "f9701(d9701)"
+expect_success = true
+expect_display = "111"
+expect_type = "Int64"
+
+[[steps]]
+name = "t9701_primitive_def"
+input = "primitive type Byte9701 8 end"
+expect_success = true
+
+[[steps]]
+name = "t9701_primitive_sizeof_across_eval"
+input = "sizeof(Byte9701)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"
+
+[[steps]]
+name = "t9701_enum_def"
+input = "@enum Color9701 red9701 green9701 blue9701"
+expect_success = true
+
+[[steps]]
+name = "t9701_enum_member_across_eval"
+input = "c9701 = green9701"
+expect_success = true
+
+[[steps]]
+name = "t9701_enum_isa_across_eval"
+input = "c9701 isa Color9701"
+expect_success = true
+expect_display = "true"
+expect_type = "Bool"
+
+[[steps]]
+name = "t9701_enum_int_across_eval"
+input = "Int(c9701)"
+expect_success = true
+expect_display = "1"
+expect_type = "Int64"

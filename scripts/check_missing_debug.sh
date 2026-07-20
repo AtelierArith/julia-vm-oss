@@ -43,7 +43,6 @@ KNOWN_EXCEPTIONS=(
 
 set -euo pipefail
 
-SRC_DIR="subset_julia_vm/src"
 VIOLATIONS=()
 
 is_exception() {
@@ -93,7 +92,7 @@ PYEOF
     )
     # Guard the splat: bash 3.2 with `set -u` errors on empty `${arr[@]}`.
     VIOLATIONS+=("${file_violations[@]+"${file_violations[@]}"}")
-done < <(find "$SRC_DIR/compile" "$SRC_DIR/aot" -name "*.rs" -type f 2>/dev/null | sort)
+done < <(find subset_julia_vm_compile/src/compile subset_julia_vm/src/aot -name "*.rs" -type f 2>/dev/null | sort)
 
 if [[ ${#VIOLATIONS[@]} -eq 0 ]]; then
     echo "check_missing_debug: OK — all public types in compile/ and aot/ derive Debug"

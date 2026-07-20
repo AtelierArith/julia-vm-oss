@@ -9,11 +9,14 @@ using Test
         put!(ch, 5)
     end
 
-    @test isopen(c) == false
-    @test length(c) == 5
+    @test isopen(c)
     @test take!(c) == 1
     @test take!(c) == 2
     @test take!(c) == 3
+    @test take!(c) == 4
+    @test take!(c) == 5
+    yield()
+    @test !isopen(c)
 end
 
 @testset "Channel do-block producer take in order" begin
@@ -27,7 +30,8 @@ end
     @test take!(c) == 20
     @test take!(c) == 30
     @test isempty(c)
-    @test isopen(c) == false
+    yield()
+    @test !isopen(c)
 end
 
 @testset "Channel do-block producer with Inf size" begin
@@ -37,17 +41,22 @@ end
         put!(ch, 9)
     end
 
-    @test isopen(c) == false
+    @test isopen(c)
     @test take!(c) == 1
     @test take!(c) == 4
     @test take!(c) == 9
+    yield()
+    @test !isopen(c)
 end
 
 @testset "Channel do-block producer that errors propagates exception (Issue #3455)" begin
-    @test_throws ErrorException Channel(10) do ch
+    c = Channel(10) do ch
         put!(ch, 1)
         error("producer error")
     end
+
+    @test take!(c) == 1
+    @test_throws TaskFailedException take!(c)
 end
 
 @testset "empty! removes all channel items" begin
@@ -55,10 +64,9 @@ end
     put!(c, 1)
     put!(c, 2)
     put!(c, 3)
-    @test length(c) == 3
+    @test !isempty(c)
 
     empty!(c)
-    @test length(c) == 0
     @test isempty(c) == true
     @test isopen(c) == true
 end

@@ -38,7 +38,7 @@ using Test
 
     # For ranges
     @test repr(1:5) == "1:5"
-    @test repr(1:2:10) == "1:2:10"
+    @test repr(1:2:10) == "1:2:9"
 end
 
 # Test that print to IOBuffer works correctly
@@ -47,30 +47,30 @@ end
     print(io, "hello")
     print(io, " ")
     print(io, "world")
-    @test take!(io) == "hello world"
+    @test String(take!(io)) == "hello world"
 
     io = IOBuffer()
     print(io, 42)
-    @test take!(io) == "42"
+    @test String(take!(io)) == "42"
 
     io = IOBuffer()
     print(io, 'a')
-    @test take!(io) == "a"  # No quotes for char
+    @test String(take!(io)) == "a"  # No quotes for char
 end
 
 # Test that show to IOBuffer works correctly
 @testset "show to IOBuffer" begin
     io = IOBuffer()
     show(io, "hello")
-    @test take!(io) == "\"hello\""  # With quotes
+    @test String(take!(io)) == "\"hello\""  # With quotes
 
     io = IOBuffer()
     show(io, 'a')
-    @test take!(io) == "'a'"  # With quotes
+    @test String(take!(io)) == "'a'"  # With quotes
 
     io = IOBuffer()
     show(io, 42)
-    @test take!(io) == "42"  # Same as print for numbers
+    @test String(take!(io)) == "42"  # Same as print for numbers
 end
 
 true

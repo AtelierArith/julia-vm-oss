@@ -1,0 +1,95 @@
+name = "repl_session_let_block_local_leak_9182"
+description = "Issue #9182: a brand-new local introduced in a top-level `let` block must NOT leak into a later REPL eval as a phantom global, even when the block body is more than a single immediately-returned assignment (e.g. a side-effecting `println` between the assignment and its use, which defeats the store-elimination fusion that incidentally hid the simplest case in #9157). Upstream Julia raises UndefVarError for the leaked name because `let` always introduces a scope. The fix filters the REPL's scope-blind `Vm::get_global` persistence by the compiler's `main_scope_names` snapshot (names still bound at main/module scope when compilation finished), so `let`/`@testset` locals unwound at block exit are excluded — while `begin`-block globals, plain top-level assignments, and `global` re-exports still persist."
+
+# The exact MWE from the issue report: a `let` body with a side-effecting
+# `println` between the assignment and the tail expression. The block still
+# evaluates correctly (prints 42, returns 43).
+[[steps]]
+name = "let_side_effect_body_eval"
+input = """
+let
+    ez = 42
+    println(ez)
+    ez + 1
+end
+"""
+success = true
+stdout = "42\n"
+display = "43"
+
+# The regression: `ez` is a `let`-local, so after the block it must be undefined.
+# Before the fix sjulia read the stale main-frame slot and returned 42.
+[[steps]]
+name = "let_local_does_not_leak_after_side_effect"
+input = "ez"
+success = false
+stdout = ""
+error_contains = "UndefVarError"
+
+# A REAL global assigned inside a `let` via `global` still persists — the fix
+# must not over-filter. `global gh = 7` binds `gh` at module scope; the block
+# returns `gh + gg` = 10.
+[[steps]]
+name = "let_with_global_declaration_eval"
+input = """
+let
+    gg = 3
+    global gh = 7
+    gh + gg
+end
+"""
+success = true
+stdout = ""
+display = "10"
+
+# The `global`-declared name persists across evals (matches upstream).
+[[steps]]
+name = "let_global_declaration_persists"
+input = "gh"
+success = true
+stdout = ""
+display = "7"
+
+# ...but the plain `let`-local sibling `gg` in that same block does NOT persist.
+[[steps]]
+name = "let_local_sibling_does_not_leak"
+input = "gg"
+success = false
+stdout = ""
+error_contains = "UndefVarError"
+
+# Guard against over-filtering the OTHER direction: a scope-less `begin` block's
+# global still persists (Issue #9157), and a plain top-level assignment still
+# persists — both stay in `main_scope_names`, so the scope filter leaves them.
+[[steps]]
+name = "begin_block_global_still_persists"
+input = """
+begin
+    bz = 5
+    bz + 1
+end
+"""
+success = true
+stdout = ""
+display = "6"
+
+[[steps]]
+name = "begin_block_global_readable"
+input = "bz"
+success = true
+stdout = ""
+display = "5"
+
+[[steps]]
+name = "plain_toplevel_global_eval"
+input = "qz = 11"
+success = true
+stdout = ""
+display = "11"
+
+[[steps]]
+name = "plain_toplevel_global_persists"
+input = "qz"
+success = true
+stdout = ""
+display = "11"

@@ -126,7 +126,7 @@ impl AotConstantFolder {
                 self.fold_count += folds;
                 folds
             }
-            AotStmt::Expr(expr) => {
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                 let (new_expr, folds) = self.fold_expr(expr);
                 if folds > 0 {
                     *expr = new_expr;

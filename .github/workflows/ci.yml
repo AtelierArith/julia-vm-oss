@@ -10,11 +10,14 @@ env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
+  # Long-session boundedness tests default to 100 iterations for local iteration.
+  # CI runs the full 1000-iteration stress version.
+  SJULIA_LONG_SESSION_ITERATIONS: "1000"
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +25,22 @@ jobs:
       - name: Install faster linker (lld)
         run: sudo apt-get update && sudo apt-get install -y lld
 
+      - name: Read Julia parity target series (PARITY_TARGET, Issue #8667)
+        id: parity
+        run: echo "series=$(grep -v '^[[:space:]]*#' PARITY_TARGET | grep -v '^[[:space:]]*$' | head -1 | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Julia (parity target series)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ steps.parity.outputs.series }}
+
       - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
 
       - name: Cache cargo registry and build
         uses: actions/cache@v4
@@ -40,16 +55,102 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build (default features)
-        run: cargo build
+        run: cargo build --locked
 
       - name: Build (AoT feature)
-        run: cargo build --features aot
+        run: cargo build --locked --features aot
 
-      - name: Run tests (default features)
-        run: timeout 300 cargo test
+      - name: Run tests with nextest (default features)
+        run: timeout 1800 cargo nextest run --locked --release
 
-      - name: Run tests (AoT feature — lib only)
-        run: timeout 300 cargo test --features aot --lib
+      - name: Run tests with nextest (AoT feature — lib only)
+        run: timeout 1800 cargo nextest run --locked --release --features aot --lib
+
+  fixture-julia-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Read Julia parity target series (PARITY_TARGET, Issue #8667)
+        id: parity
+        run: echo "series=$(grep -v '^[[:space:]]*#' PARITY_TARGET | grep -v '^[[:space:]]*$' | head -1 | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Julia (parity target series)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ steps.parity.outputs.series }}
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-fixture-parity-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-fixture-parity-
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Build release sjulia for fixture parity
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Run fixture Julia parity helper self-test
+        # Strict: CI must never run parity checks against a non-target Julia
+        # (PARITY_TARGET; Issue #8667).
+        run: bash scripts/test_fixture_julia_parity.sh
+        env:
+          SJULIA_PARITY_STRICT: "1"
+
+  benchmark-threshold:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and benchmark build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-benchmark-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-benchmark-
+            ${{ runner.os }}-cargo-
+
+      - name: Run calc_pi VM-only Criterion benchmark
+        run: |
+          cargo bench -p subset_julia_vm --bench calc_pi_benchmark -- \
+            vm_calc_pi/run_only/100 --warm-up-time 1 --measurement-time 2 --sample-size 10
+
+      - name: Check calc_pi benchmark threshold
+        run: |
+          python3 benchmarks/scripts/check_criterion_thresholds.py \
+            benchmarks/baselines/vm_calc_pi_thresholds.json target/criterion
 
   aot-gate:
     runs-on: ubuntu-latest
@@ -76,31 +177,27 @@ jobs:
           fi
 
           git diff --name-only "$base" "$head" | tee changed-files.txt
-          if grep -Eq '^(subset_julia_vm/src/aot/|subset_julia_vm/src/bin/aot.rs|subset_julia_vm/src/bin/juliars.rs|subset_julia_vm_runtime/|scripts/test_aot.sh|docs/aot/|\.github/workflows/ci\.yml)' changed-files.txt; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
+          python3 scripts/select_aot_gate.py --changed-files changed-files.txt --github-output "$GITHUB_OUTPUT"
 
       - name: Install faster linker (lld)
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.aot == 'true'
         run: sudo apt-get update && sudo apt-get install -y lld
 
       - uses: mozilla-actions/sccache-action@v0.0.9
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.aot == 'true'
 
       - name: Install Rust toolchain
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.aot == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
       - name: Install cargo-nextest
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.aot == 'true'
         uses: taiki-e/install-action@nextest
 
       - name: Cache cargo registry and AoT build
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.aot == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -114,11 +211,11 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Run AoT gate
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.aot == 'true'
         run: bash scripts/test_aot.sh
 
       - name: Skip AoT gate
-        if: steps.changes.outputs.run != 'true'
+        if: steps.changes.outputs.aot != 'true'
         run: echo "No AoT-relevant changes detected."
 
   no-cache-dispatch-inference:
@@ -158,11 +255,11 @@ jobs:
 
       - name: Run fresh-Base dispatch/inference fixture categories
         run: |
-          timeout 1800 cargo nextest run --release --test fixture_tests \
+          timeout 1800 cargo nextest run --locked --release --test fixture_tests \
             dispatch:: where_tests:: type_inference:: --no-fail-fast
 
       - name: Run fresh-Base type propagation integration tests
-        run: timeout 1800 cargo nextest run --release --test type_propagation_call_tests --no-fail-fast
+        run: timeout 1800 cargo nextest run --locked --release --test regression_dispatch_inference_tests -E 'test(type_propagation_call_tests)' --no-fail-fast
 
   fmt:
     runs-on: ubuntu-latest
@@ -207,10 +304,10 @@ jobs:
             ${{ runner.os }}-cargo-release-
 
       - name: Release build (default features)
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Release build (AoT feature)
-        run: cargo build --release --features aot
+        run: cargo build --locked --release --features aot
 
   code-audits:
     runs-on: ubuntu-latest
@@ -218,6 +315,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Initialize upstream Julia export manifest (Issue #11298)
+        run: git submodule update --init --depth 1 julia
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
 
       - name: Install shellcheck and python3
         run: sudo apt-get install -y shellcheck python3
@@ -227,20 +331,28 @@ jobs:
           shellcheck scripts/check_builtin_duplicates.sh
           shellcheck scripts/check_no_expect_in_bin.sh
           shellcheck scripts/check_no_panic_in_tests.sh
+          shellcheck scripts/check_panic_free_ratchet.sh
           shellcheck scripts/check_vmerror_classification.sh
           shellcheck scripts/check_missing_debug.sh
           shellcheck scripts/check_fixture_test_names.sh
+          shellcheck scripts/check_test_binary_budget.sh
+          shellcheck scripts/check_fixture_categories.sh
           shellcheck scripts/check_docs_vm_refs.sh
           shellcheck scripts/check_no_hardcoded_var_names_in_inference.sh
           shellcheck scripts/check_workarounds_documented.sh
+          shellcheck scripts/check_lambda_context_routing.sh
+          shellcheck scripts/check_constructor_identity_authority.sh
+          shellcheck scripts/check_python_audit_compatibility.sh
           shellcheck scripts/check_generated_files.sh
           shellcheck scripts/check_workarounds_sync.sh
           shellcheck scripts/check_call_handler_kwargs.sh
           shellcheck scripts/check_audit_scripts_bash3_compat.sh
           shellcheck scripts/check_div_specializations.sh
+          shellcheck scripts/check_promote_builtin_no_tuple_fallback.sh
           shellcheck scripts/check_base_routing_registry.sh
           shellcheck scripts/check_no_public_base_stdlib_routes.sh
           shellcheck scripts/check_no_new_domain_builtins.sh
+          shellcheck scripts/check_instr_wire_ids.sh
           shellcheck scripts/check_complex_interleaved_allowlist.sh
           shellcheck scripts/check_memory_to_array_ref_allowlist.sh
           shellcheck scripts/check_value_array_allowlist.sh
@@ -254,12 +366,53 @@ jobs:
           shellcheck scripts/check_collect_fallback_inventory.sh
           shellcheck scripts/check_binary_both_fallback_inventory.sh
           shellcheck scripts/check_plotly_bundle.sh
-          shellcheck scripts/check_format_value_resolves_structref.sh
           shellcheck scripts/check_native_value_ops_resolve_structref.sh
           shellcheck scripts/check_metaprogramming_roundtrip.sh
           shellcheck scripts/check_structural_debt_inventory.sh
+          shellcheck scripts/check_definition_order_merges.sh
+          shellcheck scripts/audit_base_cache_schema_fingerprint.sh
           shellcheck scripts/check_ffi_header_compiles.sh
           shellcheck scripts/check_ios_sample_catalog.sh
+          shellcheck scripts/check_sample_body_consistency.sh
+          shellcheck scripts/audit_julia_base_stubs.sh
+          shellcheck scripts/check_rust_semantics_ratchet.sh
+          shellcheck scripts/check_dispatch_determinism.sh
+          shellcheck scripts/check_cold_cached_nextest.sh
+          shellcheck scripts/check_cache_sensitive_fixture_lane.sh
+          shellcheck scripts/check_fixture_parity_sweep.sh
+          shellcheck scripts/check_error_span_ratchet.sh
+          shellcheck scripts/check_ffi_catch_unwind.sh
+          shellcheck scripts/check_ffi_abi_version.sh
+          shellcheck scripts/check_upstream_mirror_drift.sh
+          shellcheck scripts/check_unsafe_inventory.sh
+          shellcheck scripts/check_build_locked.sh
+          shellcheck scripts/check_vendored_drift.sh
+          shellcheck scripts/check_fixture_manifests.sh
+          shellcheck scripts/check_unregistered_fixtures.sh
+          shellcheck scripts/fixture_coverage_contract_selftest.sh
+          shellcheck scripts/check_codegraph_guidance_single_source.sh
+          shellcheck scripts/check_numeric_matrix_full_allowlist.sh
+          shellcheck scripts/check_julia_display_write_text_paths.sh
+          shellcheck scripts/check_compile_expr_local_shadow_guard.sh
+          shellcheck scripts/check_specializer_callee_guard.sh
+          shellcheck scripts/check_type_application_matrix.sh
+          shellcheck scripts/check_name_based_lookup.sh
+          shellcheck scripts/check_type_representation_string_reparse.sh
+          shellcheck scripts/check_rust_toolchain_contract.sh
+          shellcheck scripts/check_binding_provenance_authority.sh
+          shellcheck scripts/check_base_exports_subset.sh
+          shellcheck scripts/check_source_position_chronology.sh
+          shellcheck scripts/check_builtin_type_registry.sh
+          shellcheck scripts/check_struct_registry_first_match.sh
+          shellcheck scripts/check_math_router_exact_or_any.sh
+          shellcheck scripts/check_aot_gate_selection.sh
+          shellcheck scripts/check_constructor_return_identity.sh
+
+      - name: Check dispatch-path HashMap/HashSet iteration ratchet (Issue #8659)
+        run: bash scripts/check_dispatch_determinism.sh
+
+      - name: Check canonical AoT gate path selection (Issue #10866)
+        run: bash scripts/check_aot_gate_selection.sh
 
       - name: Check for duplicate BuiltinId handlers (Issue #3033)
         run: bash scripts/check_builtin_duplicates.sh
@@ -270,14 +423,35 @@ jobs:
       - name: Check test assertion style — no panic! in tests (Issue #3053, #3090, #3098)
         run: bash scripts/check_no_panic_in_tests.sh
 
+      - name: Check panic-free module ratchet (Issue #8706)
+        run: bash scripts/check_panic_free_ratchet.sh
+
       - name: Check VmError classification annotations (Issue #3078)
         run: bash scripts/check_vmerror_classification.sh
+
+      - name: Check error span-less path ratchet (Issue #8712)
+        run: bash scripts/check_error_span_ratchet.sh
 
       - name: Check public types derive Debug in compile/ and aot/ (Issue #3096, #3108)
         run: bash scripts/check_missing_debug.sh
 
       - name: Check for duplicate fixture test names across categories (Issue #3135)
         run: bash scripts/check_fixture_test_names.sh
+
+      - name: Check integration-test binary count stays within the allowlist (Issue #9671)
+        run: bash scripts/check_test_binary_budget.sh
+
+      - name: Check fixture category directories stay within the canonical allowlist (Issue #9671)
+        run: bash scripts/check_fixture_categories.sh
+
+      - name: Check fixture category manifests parse and register tests (Issue #9378)
+        run: bash scripts/check_fixture_manifests.sh
+
+      - name: Check every fixture .jl is registered, referenced, or allowlisted (Issue #9360)
+        run: bash scripts/check_unregistered_fixtures.sh
+
+      - name: Self-test literal and computed fixture-helper coverage contracts (Issue #11041)
+        run: bash scripts/fixture_coverage_contract_selftest.sh
 
       - name: Check docs/vm/ references in CLAUDE.md are not dangling (Issue #3118)
         run: bash scripts/check_docs_vm_refs.sh
@@ -287,6 +461,36 @@ jobs:
 
       - name: Check all Workaround comments have Issue links (Issue #3179)
         run: bash scripts/check_workarounds_documented.sh
+
+      - name: Check LambdaContext routing goes through the central authority (Issues #10936, #10965)
+        run: bash scripts/check_lambda_context_routing.sh
+
+      - name: Check constructor identity uses the table-owned authority (Issue #11043)
+        run: bash scripts/check_constructor_identity_authority.sh
+
+      - name: Check constructor returns use exact complete identity or remain dynamic (Issue #11436)
+        run: bash scripts/check_constructor_return_identity.sh
+
+      - name: Check typed binding provenance and declared-global key authority (Issue #11317)
+        run: bash scripts/check_binding_provenance_authority.sh
+
+      - name: Check SubsetJuliaVM Base exports remain within upstream Julia (Issue #11298)
+        run: bash scripts/check_base_exports_subset.sh
+
+      - name: Check lowering source chronology carries source identity (Issue #11100)
+        run: bash scripts/check_source_position_chronology.sh
+
+      - name: Check canonical builtin type registry projections (Issue #10954)
+        run: bash scripts/check_builtin_type_registry.sh
+
+      - name: Check struct-registry first-winner scans stay exact-or-Any (Issue #11436)
+        run: bash scripts/check_struct_registry_first_match.sh
+
+      - name: Check math-builtin routers keep exact-or-Any dispatch (Issue #11486)
+        run: bash scripts/check_math_router_exact_or_any.sh
+
+      - name: Check source-audit Python floor compatibility
+        run: bash scripts/check_python_audit_compatibility.sh
 
       - name: Check @generated files have Re-generate with comment and script (Issue #3175)
         run: bash scripts/check_generated_files.sh
@@ -303,6 +507,9 @@ jobs:
       - name: Check div specializations per integer width (Issue #3699)
         run: bash scripts/check_div_specializations.sh
 
+      - name: Check promote builtin has no tuple fallback (Issue #9896)
+        run: bash scripts/check_promote_builtin_no_tuple_fallback.sh
+
       - name: Check public Base fallback routing registry (Issue #3893)
         run: bash scripts/check_base_routing_registry.sh
 
@@ -311,6 +518,12 @@ jobs:
 
       - name: Check no new domain-logic Rust builtins (Issue #7878)
         run: bash scripts/check_no_new_domain_builtins.sh
+
+      - name: Check wire-ID table integrity for BuiltinOp/BuiltinId/Intrinsic (Issue #8628)
+        run: bash scripts/check_instr_wire_ids.sh
+
+      - name: Check Rust-only semantic surface ratchet (Issue #8673)
+        run: bash scripts/check_rust_semantics_ratchet.sh
 
       - name: Check Complex interleaved-array containment (Issue #7876)
         run: bash scripts/check_complex_interleaved_allowlist.sh
@@ -351,20 +564,79 @@ jobs:
       - name: Check bundled Plotly.js registers all VM trace types (Issue #6850)
         run: bash scripts/check_plotly_bundle.sh
 
-      - name: Check display formatting resolves StructRef values (Issue #4766)
-        run: bash scripts/check_format_value_resolves_structref.sh
-
       - name: Check native value ops resolve StructRef values (Issue #6694)
         run: bash scripts/check_native_value_ops_resolve_structref.sh
 
       - name: Check structural debt inventory ratchet (Issues #8327-#8337)
         run: bash scripts/check_structural_debt_inventory.sh
 
+      - name: Check definition-order fragment merge inventory (Issue #11036)
+        run: bash scripts/check_definition_order_merges.sh
+
+      - name: Check Base cache schema fingerprint snapshot (Issue #8444)
+        run: bash scripts/audit_base_cache_schema_fingerprint.sh
+
       - name: Check FFI C header completeness and C/C++ syntax (Issue #8455)
         run: bash scripts/check_ffi_header_compiles.sh
 
+      - name: Check FFI exports catch Rust panics (Issue #8707)
+        run: bash scripts/check_ffi_catch_unwind.sh
+
+      - name: Check C ABI version signature ratchet (Issue #9001)
+        run: bash scripts/check_ffi_abi_version.sh
+
+      - name: Check unsafe inventory comments and baseline (Issue #9004)
+        run: bash scripts/check_unsafe_inventory.sh
+
       - name: Check iOS sample catalog schema and README count (Issue #8457)
         run: bash scripts/check_ios_sample_catalog.sh
+
+      - name: Check sample body consistency across delivery surfaces (Issue #9278)
+        run: bash scripts/check_sample_body_consistency.sh
+
+      - name: Audit Pure Julia Base silent stubs (Issue #4703, #8459)
+        run: bash scripts/audit_julia_base_stubs.sh
+
+      - name: Check upstream mirror drift for swept Pure Julia files (Issue #9005)
+        run: bash scripts/check_upstream_mirror_drift.sh
+
+      - name: Check CI and build scripts use --locked for reproducible builds (Issue #9002)
+        run: bash scripts/check_build_locked.sh
+
+      - name: Check vendored astro-float-num drift against crates.io (Issue #9000)
+        # Queries crates.io for the latest astro-float-num and compares to our
+        # pinned vendor/astro-float-num version. Exits 1 on drift (human review
+        # required — see docs/vm/SUPPLY_CHAIN.md §3). Skips gracefully if network
+        # is unavailable. Full cargo audit / cargo deny run is in nightly-gates
+        # supply-chain job (requires advisory-db fetch; too slow for per-PR CI).
+        run: bash scripts/check_vendored_drift.sh
+
+      - name: Check CodeGraph guidance has a single source (Issue #9309)
+        run: bash scripts/check_codegraph_guidance_single_source.sh
+
+      - name: Check full numeric matrix allowlist stays empty (Issue #9849)
+        run: bash scripts/check_numeric_matrix_full_allowlist.sh
+
+      - name: Check display text paths avoid binary write for arbitrary values (Issue #10008)
+        run: bash scripts/check_julia_display_write_text_paths.sh
+
+      - name: Check compile-time bare-name fast paths respect local shadowing (Issue #10044)
+        run: bash scripts/check_compile_expr_local_shadow_guard.sh
+
+      - name: Check runtime specializer name-keyed fast paths run after the local-callee guard (Issue #10418)
+        run: bash scripts/check_specializer_callee_guard.sh
+
+      - name: Check name-based lookup debt does not grow (Issue #10279)
+        run: bash scripts/check_name_based_lookup.sh
+
+      - name: Check type-representation string reparse ratchet (Issue #10460)
+        run: bash scripts/check_type_representation_string_reparse.sh
+
+      - name: Check type-application opcode/route coverage matrix (Issue #10556)
+        run: bash scripts/check_type_application_matrix.sh
+
+      - name: Check Rust toolchain and Clippy lane contract (Issue #11253)
+        run: bash scripts/check_rust_toolchain_contract.sh
 
       - name: Verify all check_*.sh scripts are referenced in this workflow and docs (Issue #3112, #3114, #3775)
         run: |
@@ -430,8 +702,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Clippy (default features)
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Clippy (AoT feature)
-        run: cargo clippy --all-targets --features aot -- -D warnings
+      - name: Clippy (all mandatory feature lanes on current stable)
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: bash scripts/run_clippy_lanes.sh

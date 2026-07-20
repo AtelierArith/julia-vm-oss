@@ -1,8 +1,9 @@
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{CompiledProgram, FunctionInfo, Instr, Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::{CompiledProgram, FunctionInfo, I64Cmp, Instr, Value};
 
 fn compile_source(source: &str) -> CompiledProgram {
     let mut parser = Parser::new().expect("create parser");
@@ -47,9 +48,15 @@ branch_loop(1.0, 0)
             .any(|instr| matches!(instr, Instr::JumpIfNotLeF64(_))),
         "expected Float64 false branch fusion in branch-context &&: {body:?}"
     );
+    // The `y < 3` constant guard fuses its false branch. Since Issue #10105 the
+    // `LoadSlotI64; PushI64(3); JumpIfGeI64` triple further collapses into the
+    // slot-vs-constant `JumpIfCmpI64SlotConst(_, 3, Ge, _)` superinstruction;
+    // accept either fused form (both avoid Bool materialization).
     assert!(
-        body.iter()
-            .any(|instr| matches!(instr, Instr::JumpIfGeI64(_))),
+        body.iter().any(|instr| matches!(
+            instr,
+            Instr::JumpIfGeI64(_) | Instr::JumpIfCmpI64SlotConst(_, _, I64Cmp::Ge, _)
+        )),
         "expected Int64 false branch fusion in branch-context &&: {body:?}"
     );
     assert!(

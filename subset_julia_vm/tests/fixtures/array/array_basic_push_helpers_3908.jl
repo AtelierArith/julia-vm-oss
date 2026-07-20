@@ -1,5 +1,5 @@
 # Issue #3908 - exercise the routed NewArray / PushArrayValue / NewArrayTyped /
-# LoadArray paths in subset_julia_vm/src/vm/exec/array_basic.rs after their
+# LoadArray paths in subset_julia_vm_vm/src/vm/exec/array_basic.rs after their
 # Value::Array constructions were centralized through push_array_ref /
 # push_array_value / push_typed_array_value helpers. Behavior must remain
 # identical: element type, length, shape, contents, and the kind of array that

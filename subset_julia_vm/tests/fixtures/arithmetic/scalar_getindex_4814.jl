@@ -9,7 +9,7 @@
 # 1-element vector to dodge the scalar-indexing path; with scalar
 # `getindex` supported, that workaround can be simplified.
 #
-# Fix: in `subset_julia_vm/src/vm/exec/array_index.rs::IndexLoad`,
+# Fix: in `subset_julia_vm_vm/src/vm/exec/array_index.rs::IndexLoad`,
 # the fallthrough `other =>` arm now first checks
 # `is_scalar_indexable_value(&other)` — true for `Number` and
 # `AbstractChar` subtypes (matching upstream's type hierarchy) — and

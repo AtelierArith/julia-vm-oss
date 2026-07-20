@@ -2,13 +2,19 @@
 //!
 //! This module provides ergonomic Rust functions for programmatic use.
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cancel;
-use crate::compile::compile_with_cache;
+use crate::compile::host_support::compile_with_cache;
 use crate::ir::core::Program;
-use crate::pipeline::{parse_and_lower, PipelineError};
+use crate::pipeline::{
+    parse_and_lower, parse_and_lower_with_base_dir_mode, PipelineError, SoftScopeMode,
+};
 use crate::rng::StableRng;
-use crate::vm::value::StructInstance;
-use crate::vm::{Value, Vm};
+use crate::vm::Vm;
+use subset_julia_vm_bytecode::value::StructInstance;
+use subset_julia_vm_bytecode::Value;
 
 /// Compile and run Julia subset source (Rust string API).
 /// Returns the result as f64. Returns NaN on error.
@@ -37,6 +43,62 @@ pub fn compile_and_run_value(src: &str, seed: u64) -> Result<Value, String> {
     let mut vm = Vm::new_program(compiled, rng);
 
     vm.run().map_err(|e| format!("runtime error: {}", e))
+}
+
+/// Compile and run Julia subset source using **strict file-mode soft scope**
+/// (Issue #9210), as the non-interactive CLI (`sjulia file.jl` / `-e`) does.
+///
+/// A top-level `for`/`while` body assignment to an existing global binds a NEW
+/// local, so a read-before-write (`+=`) raises `UndefVarError` — matching
+/// `julia file.jl`. [`compile_and_run_value`] keeps the lenient (REPL/host)
+/// behaviour. Primarily used by regression tests for the file-vs-REPL split.
+pub fn compile_and_run_value_file_mode(src: &str, seed: u64) -> Result<Value, String> {
+    cancel::reset();
+
+    let program = match parse_and_lower_with_base_dir_mode(src, None, SoftScopeMode::Strict, None) {
+        Ok(p) => p,
+        Err(PipelineError::Parse(e)) => return Err(format!("parse error: {}", e)),
+        Err(PipelineError::Lower(e)) => return Err(format!("lower error: {:?}", e)),
+        Err(PipelineError::Load(e)) => return Err(format!("load error: {}", e)),
+    };
+
+    let compiled = match compile_with_cache(&program) {
+        Ok(c) => c,
+        Err(e) => return Err(format!("compile error: {:?}", e)),
+    };
+
+    let rng = StableRng::new(seed);
+    let mut vm = Vm::new_program(compiled, rng);
+
+    vm.run().map_err(|e| format!("runtime error: {}", e))
+}
+
+/// Compile and run Julia subset source under **strict file-mode soft scope**
+/// (Issue #9210 / #9283), returning the result as f64 (NaN on error). This is
+/// the `f64` analogue of [`compile_and_run_value_file_mode`] and the strict
+/// counterpart of [`compile_and_run_str`]; the bundled-sample harnesses use it so
+/// they validate the samples under the same soft scope the C ABI / WASM editor
+/// hosts now apply.
+pub fn compile_and_run_str_file_mode(src: &str, seed: u64) -> f64 {
+    cancel::reset();
+
+    let program = match parse_and_lower_with_base_dir_mode(src, None, SoftScopeMode::Strict, None) {
+        Ok(p) => p,
+        Err(_) => return f64::NAN,
+    };
+
+    let compiled = match compile_with_cache(&program) {
+        Ok(c) => c,
+        Err(_) => return f64::NAN,
+    };
+
+    let rng = StableRng::new(seed);
+    let mut vm = Vm::new_program(compiled, rng);
+
+    match vm.run() {
+        Ok(value) => value_to_f64(&value, vm.get_struct_heap()),
+        Err(_) => f64::NAN,
+    }
 }
 
 /// Compile and run using auto-detection (function or program).
@@ -164,11 +226,14 @@ pub fn analyze_type_stability_json(src: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{analyze_type_stability, analyze_type_stability_json, compile_and_run_value};
     use crate::compile::lattice::types::{ConcreteType, LatticeType};
     use crate::inference_core::{CorePrimitive, CoreType};
-    use crate::vm::Value;
+    use subset_julia_vm_bytecode::{Instr, RuntimeNominalDefInfo, Value};
+
+    include!("../tests/internal/runtime_nominal_template_11654_test.rs");
 
     #[test]
     fn type_stability_json_reports_inference_provenance() {
@@ -212,9 +277,11 @@ field_from_box_4291() = make_box_4291().x
             .find(|function| function.function_name == "make_box_4291")
             .expect("make_box_4291 report");
         assert!(make_box.is_stable(), "{make_box:?}");
+        // Issue #8544: the constructor return is now a first-class
+        // `PartialStruct` fact; its widened type must still be the struct.
         assert!(
             matches!(
-                &make_box.return_type,
+                &make_box.return_type.widen_partial_struct(),
                 LatticeType::Concrete(ConcreteType::Struct { name, .. }) if name == "TSBox4291"
             ),
             "{make_box:?}"
@@ -316,6 +383,7 @@ true
             &report,
             "ts_array_4291",
             ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+            None,
         );
         assert_report_tuple(
             &report,
@@ -329,11 +397,13 @@ true
             &report,
             "ts_generator_4291",
             ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+            Some(1),
         );
         assert_report_array(
             &report,
             "ts_closure_generator_4291",
             ConcreteType::Core(CoreType::Primitive(CorePrimitive::Int64)),
+            Some(1),
         );
         assert_report_concrete(
             &report,
@@ -389,6 +459,7 @@ true
         report: &crate::compile::type_stability::TypeStabilityAnalysisReport,
         name: &str,
         expected_element: ConcreteType,
+        expected_ndims: Option<usize>,
     ) {
         let function = report_for(report, name);
         assert!(function.is_stable(), "{function:?}");
@@ -396,7 +467,7 @@ true
             function.return_type,
             LatticeType::Concrete(ConcreteType::Array {
                 element: Box::new(expected_element),
-                ndims: None
+                ndims: expected_ndims
             })
         );
     }

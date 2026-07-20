@@ -11,3 +11,39 @@ name = "pair_operations"
 file = "pair_operations.jl"
 expected = true
 description = "Pair equality, nesting, different types (Issue #3123)"
+
+[[tests]]
+name = "pair_array_show_prefix_8814"
+file = "pair_array_show_prefix_8814.jl"
+expected = true
+description = "Array show treats Pair and NamedTuple element types with implicit components as bare, matching upstream typeinfo_implicit (Issue #8814)"
+
+[[tests]]
+name = "pair_iterator_operations_10476"
+file = "pair_iterator_operations_10476.jl"
+expected = true
+description = "Pair supports 2-element iterator-like last/collect/sum/splat operations matching upstream (Issue #10476)"
+
+[[tests]]
+name = "pair_diagonal_unionall_10635"
+file = "pair_diagonal_unionall_10635.jl"
+expected = true
+description = "Pair{T,T} where T preserves both invariant parameter slots for display and subtype checks (Issue #10635)"
+
+[[tests]]
+name = "pair_ternary_pair_arrow_8873"
+file = "ternary_pair_arrow_8873.jl"
+expected = true
+description = "Pair arrow expressions in ternary branches parse as Pair construction, not as an outer ternary parse error (Issue #8873)"
+
+[[tests]]
+name = "pair_typeof_carries_params_10577"
+file = "pair_typeof_carries_params_10577.jl"
+expected = true
+description = "typeof(::Pair) carries its concrete element parameters (Pair{Int64, Float64}) so parametric isa/<: queries on a Pair value resolve, including nested Pair (Issue #10577)"
+
+[[tests]]
+name = "pair_parametric_dispatch_exact_match_11551"
+file = "pair_parametric_dispatch_exact_match_11551.jl"
+expected = true
+description = "Two Pair{A,B} parametric methods dispatch to the exact runtime match instead of reporting ambiguity (Issue #11551)"

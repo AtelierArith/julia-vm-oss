@@ -215,7 +215,10 @@ impl AotInliner {
         visited: &mut HashSet<String>,
     ) -> bool {
         match stmt {
-            AotStmt::Let { value, .. } | AotStmt::Assign { value, .. } | AotStmt::Expr(value) => {
+            AotStmt::Let { value, .. }
+            | AotStmt::Assign { value, .. }
+            | AotStmt::Expr(value)
+            | AotStmt::ValueCarrier(value) => {
                 Self::expr_calls_function(target, value, program, visited)
             }
             AotStmt::CompoundAssign { value, .. } => {
@@ -381,7 +384,9 @@ impl AotInliner {
                 Self::expr_is_pure_with_known(value, pure_functions)
             }
             AotStmt::CompoundAssign { .. } => true, // Local mutation is ok
-            AotStmt::Expr(expr) => Self::expr_is_pure_with_known(expr, pure_functions),
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
+                Self::expr_is_pure_with_known(expr, pure_functions)
+            }
             AotStmt::Return(Some(expr)) => Self::expr_is_pure_with_known(expr, pure_functions),
             AotStmt::Return(None) => true,
             AotStmt::If {
@@ -627,6 +632,27 @@ impl AotInliner {
         total_inlined
     }
 
+    /// True when an inlined call's result expression, discarded in statement
+    /// position, has no effects: a variable read, a literal, or a numeric
+    /// `Convert` wrapper (from a return-type annotation) over one of those.
+    /// Such a result would codegen as a bare Rust path statement (Issue #10796).
+    fn inline_result_is_effect_free(expr: &AotExpr) -> bool {
+        match expr {
+            AotExpr::Var { .. }
+            | AotExpr::LitI64(_)
+            | AotExpr::LitI32(_)
+            | AotExpr::LitF64(_)
+            | AotExpr::LitF32(_)
+            | AotExpr::LitBool(_)
+            | AotExpr::LitStr(_)
+            | AotExpr::LitChar(_)
+            | AotExpr::LitNothing
+            | AotExpr::LitMissing => true,
+            AotExpr::Convert { value, .. } => Self::inline_result_is_effect_free(value),
+            _ => false,
+        }
+    }
+
     /// Try to inline a call in a statement
     fn try_inline_stmt(
         &mut self,
@@ -671,7 +697,24 @@ impl AotInliner {
                     self.try_inline_expr(expr, functions, depth)
                 {
                     let mut stmts = inlined_stmts;
-                    stmts.push(AotStmt::Expr(result_expr));
+                    // Statement position discards the value. An effect-free
+                    // result (the inlined body's accumulator variable or a
+                    // literal, possibly under a return-annotation Convert
+                    // wrapper) would codegen as a bare Rust path statement —
+                    // `_inline0_0_total;` — tripping `path_statements` under
+                    // `-D warnings` (Issue #10796). Drop it instead.
+                    if !Self::inline_result_is_effect_free(&result_expr) {
+                        stmts.push(AotStmt::Expr(result_expr));
+                    }
+                    return (stmts, count);
+                }
+            }
+            AotStmt::ValueCarrier(expr) => {
+                if let Some((inlined_stmts, result_expr, count)) =
+                    self.try_inline_expr(expr, functions, depth)
+                {
+                    let mut stmts = inlined_stmts;
+                    stmts.push(AotStmt::ValueCarrier(result_expr));
                     return (stmts, count);
                 }
             }
@@ -786,10 +829,11 @@ impl AotInliner {
                 _ => {
                     // For the last statement, if it's an expression, use it as result
                     if is_last {
-                        if let AotStmt::Expr(expr) = &renamed_stmt {
-                            result_expr = expr.clone();
-                        } else {
-                            stmts.push(renamed_stmt);
+                        match &renamed_stmt {
+                            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
+                                result_expr = expr.clone();
+                            }
+                            _ => stmts.push(renamed_stmt),
                         }
                     } else {
                         stmts.push(renamed_stmt);
@@ -834,6 +878,9 @@ impl AotInliner {
                 value: self.rename_variables_in_expr(value, rename_map),
             },
             AotStmt::Expr(expr) => AotStmt::Expr(self.rename_variables_in_expr(expr, rename_map)),
+            AotStmt::ValueCarrier(expr) => {
+                AotStmt::ValueCarrier(self.rename_variables_in_expr(expr, rename_map))
+            }
             AotStmt::Return(opt_expr) => AotStmt::Return(
                 opt_expr
                     .as_ref()
@@ -1135,6 +1182,49 @@ mod tests {
             result_ty: StaticType::I64,
         })));
         func
+    }
+
+    #[test]
+    fn statement_position_inline_drops_effect_free_result_issue_10796() {
+        // count_to-style callee: mutable accumulator, Convert-wrapped tail
+        // return (from the ::Int64 annotation). Inlined in statement position
+        // (value unused), the effect-free result must NOT be emitted as a
+        // bare path statement.
+        let mut func = AotFunction::new("acc".to_string(), vec![], StaticType::I64);
+        func.body.push(AotStmt::Let {
+            name: "total".to_string(),
+            ty: StaticType::I64,
+            value: AotExpr::LitI64(0),
+            is_mutable: true,
+        });
+        func.body.push(AotStmt::Return(Some(AotExpr::Convert {
+            value: Box::new(AotExpr::Var {
+                name: "total".to_string(),
+                ty: StaticType::I64,
+            }),
+            target_ty: StaticType::I64,
+        })));
+        let mut program = AotProgram::new();
+        program.add_function(func);
+        program.main.push(AotStmt::Expr(AotExpr::CallStatic {
+            function: "acc".to_string(),
+            args: vec![],
+            return_ty: StaticType::I64,
+            inline_policy: AotInlinePolicy::Always,
+        }));
+
+        let mut inliner = AotInliner::new(10);
+        let inlined = inliner.optimize_program(&mut program);
+        assert!(inlined > 0, "call was not inlined");
+        // No statement in main may be a bare effect-free Expr.
+        for stmt in &program.main {
+            if let AotStmt::Expr(expr) = stmt {
+                assert!(
+                    !AotInliner::inline_result_is_effect_free(expr),
+                    "bare effect-free path statement survived: {expr:?}"
+                );
+            }
+        }
     }
 
     #[test]

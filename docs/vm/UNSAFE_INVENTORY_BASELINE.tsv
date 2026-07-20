@@ -1,0 +1,85 @@
+fingerprint	path	line	kind	text
+5f78deb277462654	subset_julia_vm/src/aot/codegen/aot_codegen/mod.rs	80	unsafe_token	"""unsafe"","
+12510db3780d57ad	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	291	unsafe_fn	pub unsafe fn get_typed_function<F>(&self, name: &str) -> Option<F>
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2112	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2174	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2220	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2367	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2432	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2495	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2578	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2611	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2697	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2732	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2766	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2800	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2834	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2867	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2900	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	2964	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3046	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3083	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3125	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3203	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3276	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3365	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3442	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3613	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3722	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	3881	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4011	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4180	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4254	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4300	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4353	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4432	unsafe_block	unsafe {
+05a47197b2038a86	subset_julia_vm/src/aot/codegen/cranelift/mod.rs	4516	unsafe_block	unsafe {
+e66c0b4ec2f14851	subset_julia_vm/src/aot/mod.rs	908	unsafe_block	let main = unsafe {
+5189a171a55a04e1	subset_julia_vm/src/aot/mod.rs	3143	unsafe_block	unsafe {
+5189a171a55a04e1	subset_julia_vm/src/aot/mod.rs	3264	unsafe_block	unsafe {
+5189a171a55a04e1	subset_julia_vm/src/aot/mod.rs	3316	unsafe_block	unsafe {
+5189a171a55a04e1	subset_julia_vm/src/aot/mod.rs	3438	unsafe_block	unsafe {
+5189a171a55a04e1	subset_julia_vm/src/aot/mod.rs	3570	unsafe_block	unsafe {
+5189a171a55a04e1	subset_julia_vm/src/aot/mod.rs	3630	unsafe_block	unsafe {
+34649ad882f3b67b	subset_julia_vm_ffi/src/basic.rs	55	unsafe_block	let json = unsafe { CStr::from_ptr(json_ptr) }
+34649ad882f3b67b	subset_julia_vm_ffi/src/basic.rs	92	unsafe_block	let json = unsafe { CStr::from_ptr(json_ptr) }
+7e125f7ffc14e49b	subset_julia_vm_ffi/src/basic.rs	137	unsafe_block	let src = match unsafe { CStr::from_ptr(src_ptr) }.to_str() {
+757dd5ddad14648f	subset_julia_vm_ffi/src/basic.rs	167	unsafe_block	unsafe {
+7e125f7ffc14e49b	subset_julia_vm_ffi/src/basic.rs	199	unsafe_block	let src = match unsafe { CStr::from_ptr(src_ptr) }.to_str() {
+7e125f7ffc14e49b	subset_julia_vm_ffi/src/basic.rs	326	unsafe_block	let src = match unsafe { CStr::from_ptr(src_ptr) }.to_str() {
+efed9a6f251f4c3d	subset_julia_vm_ffi/src/detailed.rs	48	unsafe_block	let src = match unsafe { CStr::from_ptr(src_ptr) }.to_str() {
+efed9a6f251f4c3d	subset_julia_vm_ffi/src/detailed.rs	136	unsafe_block	let src = match unsafe { CStr::from_ptr(src_ptr) }.to_str() {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	247	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	274	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	308	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	345	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	402	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	421	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	443	unsafe_block	unsafe {
+8d09d63cdafd6ef6	subset_julia_vm_ffi/src/detailed.rs	465	unsafe_block	unsafe {
+aaa98c5b4750193e	subset_julia_vm_ffi/src/error.rs	249	unsafe_block	unsafe {
+74971c9d01f4aa2d	subset_julia_vm_ffi/src/error.rs	286	unsafe_block	unsafe { (*result).value_json as *const c_char }
+5f18b29aea921fa4	subset_julia_vm_ffi/src/error.rs	430	unsafe_block	unsafe { (*result).artifact_mime as *const c_char }
+2acab60971bc78c1	subset_julia_vm_ffi/src/error.rs	444	unsafe_block	unsafe { (*result).artifact_data as *const c_char }
+1adfb6764c8bb8ce	subset_julia_vm_ffi/src/error.rs	453	unsafe_block	let ptr = unsafe { (*result).value_json };
+46f0cf9008cb9c18	subset_julia_vm_ffi/src/error.rs	457	unsafe_block	let json = unsafe { CStr::from_ptr(ptr) }.to_str().ok()?;
+670df9ba0753c5d6	subset_julia_vm_ffi/src/repl_ffi.rs	95	unsafe_block	let src = match unsafe { CStr::from_ptr(src) }.to_str() {
+821525c33332e67b	subset_julia_vm_ffi/src/repl_ffi.rs	104	unsafe_block	let session = unsafe { &mut *session };
+821525c33332e67b	subset_julia_vm_ffi/src/repl_ffi.rs	171	unsafe_block	let session = unsafe { &mut *session };
+af534abdecf96ba3	subset_julia_vm_ffi/src/repl_ffi.rs	184	unsafe_block	unsafe {
+af534abdecf96ba3	subset_julia_vm_ffi/src/repl_ffi.rs	201	unsafe_block	unsafe {
+4a07be66be498989	subset_julia_vm_ffi/src/repl_ffi.rs	232	unsafe_block	unsafe { (*result).artifact_mime as *const c_char }
+4275a157b8afad51	subset_julia_vm_ffi/src/repl_ffi.rs	246	unsafe_block	unsafe { (*result).artifact_data as *const c_char }
+670df9ba0753c5d6	subset_julia_vm_ffi/src/repl_ffi.rs	263	unsafe_block	let src = match unsafe { CStr::from_ptr(src) }.to_str() {
+670df9ba0753c5d6	subset_julia_vm_ffi/src/repl_ffi.rs	361	unsafe_block	let src = match unsafe { CStr::from_ptr(src) }.to_str() {
+af534abdecf96ba3	subset_julia_vm_ffi/src/repl_ffi.rs	429	unsafe_block	unsafe {
+af534abdecf96ba3	subset_julia_vm_ffi/src/repl_ffi.rs	453	unsafe_block	unsafe {
+e48299d9e0c2a954	subset_julia_vm_ffi/src/repl_ffi.rs	485	unsafe_block	run_with_large_stack(|| unsafe {
+e48299d9e0c2a954	subset_julia_vm_ffi/src/repl_ffi.rs	518	unsafe_block	run_with_large_stack(|| unsafe {
+e48299d9e0c2a954	subset_julia_vm_ffi/src/repl_ffi.rs	566	unsafe_block	run_with_large_stack(|| unsafe {
+e48299d9e0c2a954	subset_julia_vm_ffi/src/repl_ffi.rs	593	unsafe_block	run_with_large_stack(|| unsafe {
+8fd6e082eda24a8f	subset_julia_vm_ffi/src/unicode_ffi.rs	28	unsafe_block	let latex = match unsafe { CStr::from_ptr(latex_ptr) }.to_str() {
+fb1a5af3c60048c7	subset_julia_vm_ffi/src/unicode_ffi.rs	56	unsafe_block	let prefix = match unsafe { CStr::from_ptr(prefix_ptr) }.to_str() {
+8301324a97f1e5a0	subset_julia_vm_ffi/src/unicode_ffi.rs	86	unsafe_block	let input = match unsafe { CStr::from_ptr(input_ptr) }.to_str() {
+9dcae6e644e97e34	subset_julia_vm_ffi/src/unicode_ffi.rs	111	unsafe_block	let unicode = match unsafe { CStr::from_ptr(unicode_ptr) }.to_str() {
+bcfed13b05a2c481	subset_julia_vm/build.rs	102	unsafe_token	"""unsafe"" => ""unsafe_tests"".to_string(),"

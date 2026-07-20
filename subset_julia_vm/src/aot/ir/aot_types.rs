@@ -224,7 +224,7 @@ impl AotProgram {
                     Self::collect_reachable_refs_in_expr(target, all_names, worklist)
                         | Self::collect_reachable_refs_in_expr(value, all_names, worklist)
                 }
-                AotStmt::Expr(expr) => {
+                AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                     Self::collect_reachable_refs_in_expr(expr, all_names, worklist)
                 }
                 AotStmt::Return(Some(expr)) => {
@@ -396,7 +396,9 @@ impl AotProgram {
             count += match stmt {
                 AotStmt::Let { value, .. } => Self::count_dynamic_in_expr(value),
                 AotStmt::Assign { value, .. } => Self::count_dynamic_in_expr(value),
-                AotStmt::Expr(expr) => Self::count_dynamic_in_expr(expr),
+                AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
+                    Self::count_dynamic_in_expr(expr)
+                }
                 AotStmt::Return(Some(expr)) => Self::count_dynamic_in_expr(expr),
                 AotStmt::If {
                     condition,
@@ -553,7 +555,7 @@ impl AotProgram {
                 AotStmt::Assign { value, .. } => {
                     Self::diagnose_dynamic_in_expr(value, location, diagnostics);
                 }
-                AotStmt::Expr(expr) => {
+                AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                     Self::diagnose_dynamic_in_expr(expr, location, diagnostics);
                 }
                 AotStmt::Return(Some(expr)) => {
@@ -1006,6 +1008,9 @@ pub enum AotStmt {
     },
     /// Expression statement
     Expr(AotExpr),
+    /// Semantic value of an expanded statement. Emitted only when this is the
+    /// enclosing block's value; discarded without codegen in statement position.
+    ValueCarrier(AotExpr),
     /// Return statement
     Return(Option<AotExpr>),
     /// If statement

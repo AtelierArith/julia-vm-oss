@@ -25,6 +25,12 @@ expected = true
 description = "IEEE 754 float arithmetic: Inf, NaN, isinf, isnan, isfinite (Issue #2847)"
 
 [[tests]]
+name = "error_overflow_arithmetic"
+file = "error_overflow_arithmetic.jl"
+expected = true
+description = "factorial(21) raises a catchable OverflowError (upstream message) instead of silently wrapping Int64; factorial(20) still succeeds (Issues #3046, #9326)"
+
+[[tests]]
 name = "error_try_finally"
 file = "error_try_finally.jl"
 expected = true
@@ -125,3 +131,58 @@ name = "error_custom_exception_showerror_8256"
 file = "custom_exception_showerror_8256.jl"
 expected = true
 description = "sprint(showerror, custom exception) dispatches to a package-defined Base.showerror extension (Issue #8256)"
+
+[[tests]]
+name = "error_runtime_exception_parity_8732_8744_8745_8747_8748"
+file = "runtime_exception_parity_8732_8744_8745_8747_8748.jl"
+expected = true
+description = "Rust-raised/runtime exception paths remain catchable and construct upstream-shaped exception values: empty pop! ArgumentError, required keyword UndefKeywordError, Dict missing-key KeyError, Julia 1.12 InexactError(func,args), and MethodError showerror no longer crashes (Issues #8732/#8744/#8745/#8747/#8748)."
+
+[[tests]]
+name = "error_out_of_memory_budget_8702"
+file = "out_of_memory_budget_8702.jl"
+expected = true
+description = "A known-size allocation that exceeds the VM memory budget raises a catchable OutOfMemoryError with upstream-shaped typeof/showerror (Issue #8702)."
+env = { SJULIA_MEMORY_BUDGET_BYTES = "4096" }
+
+[[tests]]
+name = "error_method_error"
+file = "error_method_error.jl"
+expected = true
+description = "MethodError is raised and catchable for undefined method dispatch. Registered while closing the fixture-coverage gap (Issue #9360)."
+
+[[tests]]
+name = "error_multiple_catch"
+file = "error_multiple_catch.jl"
+expected = true
+description = "Multiple sequential try/catch blocks each catch their own exception. Registered while closing the fixture-coverage gap (Issue #9360)."
+
+[[tests]]
+name = "error_stack_overflow"
+file = "error_stack_overflow.jl"
+expected = true
+description = "Unbounded / mutual recursion raises a CATCHABLE StackOverflowError (Issue #2918). This is a deliberate sjulia behavior: the bounded-recursion VM makes stack overflow catchable, unlike upstream julia where it corrupts state. Registered while closing the fixture-coverage gap (Issue #9360)."
+
+[[tests]]
+name = "error_string_index"
+file = "error_string_index.jl"
+expected = true
+description = "Out-of-bounds / invalid string indexing raises a catchable error. Registered while closing the fixture-coverage gap (Issue #9360)."
+
+[[tests]]
+name = "error_fielderror_parity_10212"
+file = "error_fielderror_parity_10212.jl"
+expected = true
+description = "Nonexistent-field access raises a catchable FieldError (Julia 1.12 shape) instead of TypeError for Expr/GlobalRef/QuoteNode/LineNumberNode/TypeVar, structs (getfield/dot/setfield!), NamedTuple, Ref, DataType, WeakRef, Array, RegexMatch, Generator, and Pairs; a missing module binding raises UndefVarError (Issues #10212/#10318)."
+
+[[tests]]
+name = "error_undefvar_module_scope_10318"
+file = "error_undefvar_module_scope_10318.jl"
+expected = true
+description = "Accessing a binding missing from a module (SomeModule.undefined, getfield, or dynamic dot) raises a catchable UndefVarError whose message keeps the module scope ('not defined in `Main.<Module>`'), matching upstream 1.12; e.var stays the bare Symbol and Main resolves to `Main` not `Main.Main` (Issue #10318)."
+
+[[tests]]
+name = "error_static_field_fielderror_10319"
+file = "error_static_field_fielderror_10319.jl"
+expected = true
+description = "Nonexistent-field access on a STATICALLY-known receiver type (a concrete struct, a DataType, or any other statically-typed primitive/tuple) defers to a catchable runtime FieldError instead of aborting compilation of the whole program, both for reads (dot access) and writes (field assignment on a mutable struct); valid field access on the same statically-known types keeps working (Issue #10319)."

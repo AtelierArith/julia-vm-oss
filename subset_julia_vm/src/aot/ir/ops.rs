@@ -268,6 +268,10 @@ pub enum AotBuiltinOp {
     Sign,
     Signbit,
     Copysign,
+    /// isless(a, b) — Julia's canonical total order over real numbers:
+    /// `<` for integers/Bool; for floats NaN sorts after everything and
+    /// -0.0 before 0.0 (upstream julia/base/float.jl `_fpint`), Issue #10131.
+    IsLess,
     // Integer math
     Div, // Integer division
     Mod, // Modulo (Euclidean)
@@ -424,13 +428,29 @@ impl AotBuiltinOp {
 
             // Type-preserving functions (return same type as input)
             AotBuiltinOp::Abs => arg_types.first().cloned().unwrap_or(StaticType::F64),
+            // min/max/clamp return the PROMOTED common numeric type
+            // (`min(Int64, Float64)` is `Float64`, Issue #10131); same-type
+            // calls keep their type, and Bool mixes follow the shared
+            // Bool-promotion rule below.
+            AotBuiltinOp::Min | AotBuiltinOp::Max | AotBuiltinOp::Clamp => {
+                if let Some(promoted) = StaticType::promote_numeric_args(arg_types) {
+                    promoted
+                } else if matches!(arg_types, [StaticType::Bool, StaticType::Bool, ..]) {
+                    StaticType::Bool
+                } else if arg_types.iter().any(|ty| matches!(ty, StaticType::Bool)) {
+                    arg_types
+                        .iter()
+                        .find(|ty| ty.is_integer() && !matches!(ty, StaticType::Bool))
+                        .cloned()
+                        .unwrap_or(StaticType::I64)
+                } else {
+                    arg_types.first().cloned().unwrap_or(StaticType::F64)
+                }
+            }
             AotBuiltinOp::Floor
             | AotBuiltinOp::Ceil
             | AotBuiltinOp::Round
             | AotBuiltinOp::Trunc
-            | AotBuiltinOp::Min
-            | AotBuiltinOp::Max
-            | AotBuiltinOp::Clamp
             | AotBuiltinOp::Sign
             | AotBuiltinOp::Copysign
             | AotBuiltinOp::Div
@@ -455,7 +475,8 @@ impl AotBuiltinOp {
             AotBuiltinOp::Isnan
             | AotBuiltinOp::Isinf
             | AotBuiltinOp::Isfinite
-            | AotBuiltinOp::Signbit => StaticType::Bool,
+            | AotBuiltinOp::Signbit
+            | AotBuiltinOp::IsLess => StaticType::Bool,
 
             // Array-returning functions
             AotBuiltinOp::Zeros | AotBuiltinOp::Ones => StaticType::Array {
@@ -670,6 +691,7 @@ impl AotBuiltinOp {
             "ceil" => Some(AotBuiltinOp::Ceil),
             "round" => Some(AotBuiltinOp::Round),
             "trunc" => Some(AotBuiltinOp::Trunc),
+            "isless" => Some(AotBuiltinOp::IsLess),
             "min" => Some(AotBuiltinOp::Min),
             "max" => Some(AotBuiltinOp::Max),
             "clamp" => Some(AotBuiltinOp::Clamp),
@@ -776,6 +798,7 @@ impl fmt::Display for AotBuiltinOp {
             AotBuiltinOp::Ceil => "ceil",
             AotBuiltinOp::Round => "round",
             AotBuiltinOp::Trunc => "trunc",
+            AotBuiltinOp::IsLess => "isless",
             AotBuiltinOp::Min => "min",
             AotBuiltinOp::Max => "max",
             AotBuiltinOp::Clamp => "clamp",

@@ -67,8 +67,8 @@ SJULIA_BASE_CACHE="$(pwd)/target/base_cache.bin" \
 
 - `subset_julia_vm/src/bin/sjulia.rs`
 - `subset_julia_vm/build.rs`
-- `subset_julia_vm/src/compile/precompile.rs`
-- `subset_julia_vm/src/compile/cache.rs`
+- `subset_julia_vm_compile/src/compile/precompile.rs`
+- `subset_julia_vm_compile/src/compile/cache.rs`
 
 ---
 

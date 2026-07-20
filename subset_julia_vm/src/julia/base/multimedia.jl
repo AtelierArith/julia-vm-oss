@@ -98,7 +98,7 @@ istextmime(MIME("image/png"))   # false
 ```
 """
 function istextmime(m::MIME{T}) where T
-    s = string(T)
+    s = _mime_param_string(T)
     # Text types start with "text/"
     if startswith(s, "text/")
         return true
@@ -166,7 +166,15 @@ end
 
 # Get the MIME type string from a MIME instance
 function _mime_string(m::MIME{T}) where T
-    return string(T)
+    return _mime_param_string(T)
+end
+
+function _mime_param_string(T)
+    s = string(T)
+    if startswith(s, "Symbol(\"") && endswith(s, "\")")
+        return s[9:length(s)-2]
+    end
+    return s
 end
 
 # =============================================================================
@@ -434,12 +442,19 @@ display("hello")   # Shows string
 See also: [`pushdisplay`](@ref), [`popdisplay`](@ref), [`show`](@ref).
 """
 function display(x)
-    # Note: In SubsetJuliaVM, global mutable state (displays array) is not
-    # yet accessible from functions. We always use stdout directly.
-    # In full Julia, this would iterate through the display stack.
-    #
-    # For now, we use println for simple output. The full show(io, MIME, x)
-    # dispatch will be implemented when array printing is fully working.
+    # Display-stack behavior (Issue #9262). In full Julia, `display(x)` walks the
+    # display stack top-to-bottom and renders `x` on the first backend that can.
+    # SubsetJuliaVM cannot keep a mutable `displays` array reachable from a
+    # prelude function, so the host's rich "graphical display" lives on the VM:
+    # under a graphical host (iOS/web REPL, Editor, `sjulia --emit-artifact`),
+    # `_display_artifact(x)` renders `x` (a Plot, animation, ...) into the host
+    # artifact channel and returns `true`. When no graphical display is active
+    # (plain CLI script / terminal REPL) or `x` is not a renderable artifact,
+    # it returns `false` and we fall back to text output on stdout — matching a
+    # headless Julia session whose display stack holds only a `TextDisplay`.
+    if _display_artifact(x)
+        return nothing
+    end
     println(x)
     return nothing
 end
@@ -542,23 +557,17 @@ end
 
 # Internal helper: display with MIME on AbstractDisplay (generic fallback)
 function _display_internal(d::AbstractDisplay, m::MIME, x)
-    # Note: In SubsetJuliaVM, IOBuffer is functional/immutable style.
-    # println(io, x) doesn't mutate io, so we can't easily redirect output
-    # to arbitrary IO streams. For now, we always use stdout.
+    # Arbitrary display IO routing is still limited; for now, use stdout.
     println(x)
 end
 
 # TextDisplay implementation: display as text/plain
 function _display_internal(d::TextDisplay, m::MIME, x)
-    # Note: SubsetJuliaVM's IOBuffer is functional style - write(io, x)
-    # returns a new IOBuffer. This makes redirecting output difficult.
-    # For stdout (the default), println works correctly.
-    # For other IO streams, this limitation means output goes to stdout.
+    # TextDisplay still routes through stdout; arbitrary display IO routing is
+    # tracked separately from the file-backed stream cursor subset.
     if d.io === stdout
         println(x)
     else
-        # Attempt to write to the io stream
-        # Due to immutable IOBuffer, this may not capture the output
         println(x)
     end
 end

@@ -1,21 +1,26 @@
 //! Helpers shared with host bindings. Not a stable public API.
 
 use serde_json::{json, Value as JsonValue};
+use subset_julia_vm_bytecode::value::{
+    is_native_array_value as bytecode_is_native_array_value, RustBigFloat, StructInstance, Value,
+};
 
 use crate::plotting::DisplayArtifact;
-use crate::vm::{StructInstance, Value};
 
 pub use crate::vm::apply_complex_float_aliases;
 
 pub fn is_native_array_value(value: &Value) -> bool {
-    crate::vm::value::is_native_array_value(value)
+    bytecode_is_native_array_value(value)
 }
 
 pub fn vm_format_value(value: &Value) -> String {
-    crate::vm::util::format_value(value)
+    // The FFI display path has no `struct_heap` access by design (Issue #8642):
+    // a bare `StructRef` reaching here renders as the benign placeholder rather
+    // than a resolved struct, so wrap without resolving.
+    crate::vm::util::format_value(&crate::vm::util::Resolved::assume_ffi_placeholder(value))
 }
 
-pub fn format_bigfloat_julia(value: &crate::vm::value::RustBigFloat) -> String {
+pub fn format_bigfloat_julia(value: &RustBigFloat) -> String {
     crate::vm::format_bigfloat_julia(value)
 }
 
@@ -29,7 +34,34 @@ pub fn legacy_numeric_result_value(value: &Value) -> f64 {
     }
 }
 
+/// Cap on the number of scalar leaves the host result-echo JSON may materialize.
+/// The Editor/REPL FFI (`compile_and_run_detailed` → `success_with_value`) turns the
+/// program's result value into this typed JSON so the host can display it as text.
+/// `gif(@animate ...)` returns an `AnimatedGif` whose `frames::Vector{Plot}` hold the
+/// *cumulative* path in every frame — O(frames²) points (~1M for the 9000-step /
+/// `every 40` Aizawa sample). Fully serializing that (every point as a JSON node WITH
+/// its own `display` string, plus a whole-value `display` at each level) transiently
+/// allocated ~4 GB and OOM-killed the iOS Editor (Issue #9237, follow-up to #9218).
+/// Values whose capped leaf estimate reaches this bound are echoed as a compact
+/// opaque summary instead;
+/// the plot itself still renders via the display artifact, which is bounded by the
+/// compact growing-path schema (Issue #9206). The estimate is O(bound), never O(data).
+const MAX_TYPED_VALUE_JSON_LEAVES: usize = 100_000;
+
 pub fn typed_value_json(value: &Value, struct_heap: &[StructInstance]) -> JsonValue {
+    let leaf_estimate =
+        crate::repl::value_literal_leaf_estimate(value, struct_heap, MAX_TYPED_VALUE_JSON_LEAVES);
+    if leaf_estimate >= MAX_TYPED_VALUE_JSON_LEAVES {
+        // Summarize instead of serializing every leaf. `display_type` is O(1) (just the
+        // runtime type name); crucially we do NOT call `display_value`/`vm_format_value`
+        // here, since `show`-ing the whole value would itself be O(data) (Issue #9218).
+        return json!({
+            "type": "opaque",
+            "julia_type": display_type(value),
+            "display": display_type(value),
+            "reason": "too-large",
+        });
+    }
     typed_value_json_inner(value, struct_heap, 0)
 }
 

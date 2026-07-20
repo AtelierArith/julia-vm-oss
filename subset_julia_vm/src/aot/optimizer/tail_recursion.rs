@@ -86,6 +86,7 @@ impl AotTailRecursionOptimizer {
                 | AotStmt::Assign { .. }
                 | AotStmt::CompoundAssign { .. }
                 | AotStmt::Expr(_)
+                | AotStmt::ValueCarrier(_)
                 | AotStmt::Return(None)
                 | AotStmt::Break
                 | AotStmt::Continue => {}

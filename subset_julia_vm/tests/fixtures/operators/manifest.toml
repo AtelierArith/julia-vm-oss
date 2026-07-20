@@ -299,3 +299,9 @@ name = "operators_short_circuit_type_narrow_restore_7546"
 file = "short_circuit_type_narrow_restore_7546.jl"
 expected = true
 description = "Type narrowings applied while compiling && RHS are restored before later expressions (Issue #7546)"
+
+[[tests]]
+name = "operators_custom_unicode_operator_call_10933"
+file = "custom_unicode_operator_call_10933.jl"
+expected = true
+description = "custom Unicode operators (⊗, ⊕) accepted in definition position are also valid ordinary call targets with the same method-table dispatch as named functions, incl. multi-method, multi-arg, splat, and Base Unicode comparison aliases in call position (Issue #10933), the infix spelling of the same operators (Issue #11023), the upstream-derived operator glyph set + suffixed operator names (⊛, ⊠, ⋆, ⊞, ⊗ᵢ) with per-class precedence (Issue #11083), and dotted broadcast operators keeping their base class (Issue #11110)"

@@ -1,0 +1,91 @@
+name = "repl_session_symbolics_matrix_9156"
+description = "Issue #9156: @variables globals persist across REPL evals; a matrix literal in a later eval reads them (was UndefVarError). Mirrors Samples/advanced/symbolics_linear_algebra.jl run line-by-line in the REPL tab."
+
+[[steps]]
+name = "using_symbolics"
+input = "using Symbolics"
+success = true
+stdout = ""
+
+[[steps]]
+name = "using_linear_algebra"
+input = "using LinearAlgebra"
+success = true
+stdout = ""
+
+# @variables returns [x, y]; suppress its (heap-index-bearing) vector display and
+# just assert the eval succeeds. The point under test is that x/y persist below.
+[[steps]]
+name = "declare_variables"
+input = "@variables x y;"
+success = true
+stdout = ""
+
+# The minimal #9156 repro: a bare reference to a variable bound by @variables in a
+# PREVIOUS eval. Before the fix this raised `UndefVarError: `x` not defined`.
+[[steps]]
+name = "bare_variable_read_persists"
+input = "x"
+success = true
+stdout = ""
+display = "x"
+
+# The exact line from the user's report: a matrix literal reading the persisted
+# symbolic globals. Suppressed so the assertion targets the persistence, not the
+# (separately-tracked) Matrix{Num} display form.
+[[steps]]
+name = "matrix_literal_reads_persisted_globals"
+input = "A = [x y; x x];"
+success = true
+stdout = ""
+
+[[steps]]
+name = "matrix_entry_1_1"
+input = "A[1, 1]"
+success = true
+stdout = ""
+display = "x"
+
+[[steps]]
+name = "matrix_entry_1_2"
+input = "A[1, 2]"
+success = true
+stdout = ""
+display = "y"
+
+[[steps]]
+name = "matrix_entry_2_1"
+input = "A[2, 1]"
+success = true
+stdout = ""
+display = "x"
+
+[[steps]]
+name = "matrix_entry_2_2"
+input = "A[2, 2]"
+success = true
+stdout = ""
+display = "x"
+
+# det over the persisted symbolic matrix — value parity with upstream julia
+# (Symbolics cofactor expansion): det([x y; x x]) = x^2 - x*y.
+[[steps]]
+name = "det_of_persisted_matrix"
+input = "det(A)"
+success = true
+stdout = ""
+display = "x^2 - x*y"
+
+# A third variable declared in yet another eval, then used together with x/y in a
+# 3x3 matrix — exercises multi-eval accumulation of symbolic globals.
+[[steps]]
+name = "declare_third_variable"
+input = "@variables z;"
+success = true
+stdout = ""
+
+[[steps]]
+name = "print_mixed_matrix"
+input = "println([x y z; z x y; y z x])"
+success = true
+stdout = "Symbolics.Num[x y z; z x y; y z x]\n"

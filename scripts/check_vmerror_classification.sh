@@ -25,11 +25,11 @@
 
 set -euo pipefail
 
-EXEC_DIR="subset_julia_vm/src/vm/exec"
+EXEC_DIR="subset_julia_vm_vm/src/vm/exec"
 
 # Current baseline of unannotated occurrences.
 # Reduce this as annotations are added. Set to 0 for strict enforcement.
-BASELINE=51
+BASELINE=49
 
 UNANNOTATED=()
 

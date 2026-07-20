@@ -25,6 +25,12 @@ expected = true
 description = "getindex(tuple, i) returns tuple element"
 
 [[tests]]
+name = "getindex_tuple_range_9600"
+file = "getindex_tuple_range_9600.jl"
+expected = true
+description = "Issue #9600: getindex(tuple, range) returns a tuple slice"
+
+[[tests]]
 name = "setindex_array_basic"
 file = "setindex_array_basic.jl"
 expected = true

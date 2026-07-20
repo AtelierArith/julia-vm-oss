@@ -166,3 +166,110 @@ name = "generator_empty_take_generator_5752"
 file = "empty_take_generator_5752.jl"
 expected = true
 description = "collect(Iterators.take(generator, 0)) (empty take of a generator) returns an empty array instead of erroring 'Unbound type parameter: T'; _collect_unknown_widen's empty path returns Vector{Union{}} directly (Issue #5752)"
+
+[[tests]]
+name = "generator_lazy_generator_body_9103"
+file = "lazy_generator_body_9103.jl"
+expected = true
+description = "A generator expression with an arbitrary (non-f(var)) body is LAZY: side effects fire at collect/iteration time (never at construction), g.iter keeps the original iterator, bodies inside function scopes and top-level let/@testset blocks capture enclosing locals, and consumers apply the mapping (collect/sum/first/maximum/minimum/prod/join/any/all/count/Tuple/comprehension/zip/iterate/for). map/reduce over a lazy generator fuse into a composed callable (Generator(f, Generator(g, it)) -> Generator(f∘g, it)); builtin-named functions work inside composed calls. Filtered non-trivial bodies are now lazy too (Issue #9127, ordering asserted in filtered_generator_lazy_9127.jl); consumer gaps documented in Issue #9128 (Issue #9103)"
+
+[[tests]]
+name = "generator_filtered_generator_lazy_9127"
+file = "filtered_generator_lazy_9127.jl"
+expected = true
+description = "A FILTERED generator with a non-trivial body, and a generator with a tuple-destructuring binding, are LAZY: side effects fire at collect/iteration time (recorded via a module-global log so the lifted body/predicate reference a global, not a captured local), never at construction. The lowering lifts the body into __gen_body_N and the filter predicate into __gen_pred_N (with a destructuring prologue for (a,b) bindings) so both compile onto the lazy FilteredFunctionIndex path; consumers (collect/sum/first/count) apply the mapping correctly. A Dict / KeySet / ValueIterator base (whose iterate is pure Julia) is materialized once at generator construction so collect/sum/first/count over `(k+v for (k,v) in dict)` work while the body mapping stays lazy. An empty FILTERED collect with a transparent predicate keeps its inferred eltype (`collect(x^2 for x in 1:4 if x>100)` -> `Int64[]`, not `Union{}[]`) because the runtime FilterMap finalizer threads the inferred element type when the compiler can prove the predicate shape. Filtered generators whose lifted body/predicate live in a function scope and/or CAPTURE an enclosing local are now lazy too (Issue #9271; ordering asserted in filtered_generator_function_scope_lazy_9271.jl)"
+
+[[tests]]
+name = "generator_filtered_generator_function_scope_lazy_9271"
+file = "filtered_generator_function_scope_lazy_9271.jl"
+expected = true
+description = "A FILTERED generator whose lifted body/predicate live in a FUNCTION SCOPE (so __gen_body_N / __gen_pred_N are locals) and/or CAPTURE an enclosing local is LAZY: side effects fire at collect/iteration time, never at construction (asserted via an explicit `constructed` log entry ordered before any `body ...`). Covers the capture case (filter `x > k` captures `k`), the zero-capture-but-function-scope case, lazy `for` iteration, non-collect consumers (sum/count/first), inferred eltype preservation for an all-filtered-out collect (`Int64[]`, not `Union{}[]`), and value correctness across shapes. The fix carries the map/predicate as a runtime-callable FilteredRuntimeValue pair (mirroring the unfiltered MakeGeneratorRuntime path from Issue #9103) instead of the bare-index FilteredFunctionIndex path that would drop the captured environment (Issue #9271)"
+
+[[tests]]
+name = "generator_filtered_generator_empty_user_predicate_10138"
+file = "filtered_generator_empty_user_predicate_10138.jl"
+expected = true
+description = "All-filtered generators whose predicate depends on a user function call collect to Vector{Union{}} and make sum(generator) throw ArgumentError, matching upstream empty-reduction semantics (Issue #10138). Static predicates such as x >= 4 and recognized Base predicates such as isodd(x) keep the inferred empty eltype (Vector{Int64}) so the earlier #9127 behavior remains limited to transparent predicates."
+
+[[tests]]
+name = "generator_filtered_generator_empty_sum_mapped_10618"
+file = "filtered_generator_empty_sum_mapped_10618.jl"
+expected = true
+description = "sum over an empty filtered generator with a non-identity mapped body raises ArgumentError, while an identity body keeps the additive identity and init still seeds the reduction (Issue #10618)."
+
+[[tests]]
+name = "generator_generator_trait_testset_lifted_body_10137"
+file = "generator_trait_testset_lifted_body_10137.jl"
+expected = true
+description = "Generator trait queries inside @testset and let bindings keep the lowered __gen_body_N callable bound in the hard local scope, so Base.IteratorSize((f(x) for x in xs)) returns HasShape instead of UndefVarError (Issue #10137)."
+
+[[tests]]
+name = "generator_float16_collect_eltype_9301"
+file = "float16_collect_eltype_9301.jl"
+expected = true
+description = "collect over a Float16-valued generator narrows the container element type to Float16 (Vector{Float16}), not Any, matching the Float32/Float64/Int/Bool producers. Float16 gains a dedicated ArrayElementType tag (boxed Any storage, mirroring Int128/UInt128) so typeof/eltype/collect, Vector{Float16}(undef, n), the typed literal Float16[...] (with convert(Float16, x) on Int elements), and dispatch on a bound Vector{Float16} all report Float16 (Issue #9301). Fix-forward (PR #9368) threads the same Float16 arm through the sibling element-type maps so the empty typed literal Float16[], the dot-broadcast constructor Float16.(xs), the range comprehension and map over a bound Float16 array all narrow to Vector{Float16} too. Every container-eltype check is folded into the final asserted value (not just println) so a regression in any sibling map flips the result to false. The inline-constructor comprehension body also yields Float16 element VALUES (Issue #9382), so both the container type and exact element values are asserted"
+
+[[tests]]
+name = "generator_filtered_generator_length_methoderror_9320"
+file = "filtered_generator_length_methoderror_9320.jl"
+expected = true
+description = "length(filtered generator) raises a MethodError instead of returning the UNFILTERED base length (Issue #9320). Upstream models `(x for x in it if p(x))` as `Generator(map, Iterators.Filter(p, it))` with `IteratorSize(::Type{<:Filter}) == SizeUnknown()`, so `length(::Filter)` is undefined and `length(g)` throws; sjulia previously delegated to the base iterator and returned 5 for `(x for x in 1:5 if x>2)`. Asserts the MethodError for named-predicate, array-base, and captured-predicate (runtime-callable) filtered generators, that an UNFILTERED generator keeps a well-defined length, and that collect/sum/for-iteration over filtered generators stay correct (they drive the iterate protocol, never `length`)"
+[[tests]]
+name = "generator_filtermap_exception_state_unwind_9319"
+file = "filtermap_exception_state_unwind_9319.jl"
+expected = true
+description = "An exception thrown inside a driven generator/HOF callable (filtered-generator FilterMap predicate or map body, or a plain map/Broadcast body) and caught by an ancestor try/catch must not leave a stale broadcast/generator driver behind. The VM re-enters such a driver keyed to the callable frame's depth; a leaked state was re-triggered by a later unrelated function returning at the same depth, silently re-running the stale __gen_body (phantom 'Division by zero' from a previous generator body, or a duplicated side effect). The fix unwinds the driven-callable state stacks (broadcast_states / generator_iterate_state / composed_call_state / sprint_state) to the handler's frame floor alongside the frame truncation in Vm::handle_error (and the register-trampoline Err unwind). Covers FilterMap map-body and predicate exceptions, plain Broadcast body exceptions, a try/catch inside the driven callable, a rethrow through the outer try, and a fresh collect after a caught exception (Issue #9319)"
+
+[[tests]]
+name = "generator_getindex_methoderror_9457"
+file = "getindex_methoderror_9457.jl"
+expected = true
+description = "Direct getindex on unfiltered and filtered Base.Generator values raises a catchable MethodError like upstream, while first/any/all/join/Tuple continue to consume generators through iterate (Issue #9457)"
+
+[[tests]]
+name = "generator_simple_desugar_9200"
+file = "simple_generator_desugar_9200.jl"
+expected = true
+description = "Issue #9200 S2: the SIMPLE generator form (f(x) for x in iter) — single scalar binding, unfiltered — is desugared in lowering to the upstream Base.Generator(func, iter) shape (julia-syntax.scm expand-generator / func-for-generator-ranges): body === var uses `identity`, otherwise the body is lifted into an anonymous function referenced by value. Verifies against upstream julia that this preserves every observable behavior: identity generators, mapped generators over range/array/tuple/Float ranges, collect over a generator whose iterator is itself a generator (generator fusion — the outer mapping applies to the inner generator's MAPPED values, not its base), laziness (side effects fire at iteration not construction), the source iterator evaluated once at construction, an error in the body firing at iteration, collect eltype preservation, and IteratorSize/length/size unchanged (post S1 / #9379). Filtered (S3), tuple-destructuring, product/multi-range and flatten (S4) forms stay on the existing MakeGenerator path"
+
+[[tests]]
+name = "generator_filtered_desugar_9200"
+file = "filtered_generator_desugar_9200.jl"
+expected = true
+description = "Issue #9200 S3: the FILTERED single-scalar-binding generator (f(x) for x in iter if p(x)) desugars in lowering to the upstream Base.Generator(f, Base.Iterators.Filter(p, iter)) shape (julia-syntax.scm expand-generator); the compiler collapses the Filter-valued iterator back onto the native lazy filtered-generator representation (FilteredFunctionIndex / MakeGeneratorRuntimeFiltered, #9127 / #9271) so laziness and every consumer stay identical. Verifies at parity with upstream julia: consumers (collect/sum/first/count/isempty/for + captured predicate) drive the iterate protocol; the TYPE-LEVEL Base.IteratorSize(typeof(filtered)) reports SizeUnknown() (the S1 leftover deferred by iterator_traits_9379.jl — typeof's iterator parameter is now Iterators.Filter with IteratorSize(::Type{<:Filter})==SizeUnknown()); length/size raise a MethodError while unfiltered stays well-defined; a filtered generator flowing into a SPECIALIZED counted-loop function iterates via the iterate protocol and returns the correct sum (Issue #9353); laziness (side effects and a body error fire at iteration, not construction); and an all-filtered-out collect preserves the inferred eltype (Int64[], Issue #9127)"
+
+[[tests]]
+name = "generator_iterator_traits_9379"
+file = "iterator_traits_9379.jl"
+expected = true
+description = "Base.IteratorSize / size of a generator match upstream at the VALUE level (Issue #9379, foundation slice of the #9200 generator-desugar epic). A filtered generator conceptually wraps Iterators.Filter (IteratorSize == SizeUnknown()), but sjulia collapses the filter into the native generator callable, so the trait is resolved via the SAME structural callable-variant check as length/isempty (#9320) — driven off the representation, not a type-name string. Asserts: IteratorSize(filtered) is SizeUnknown() (named/captured/array-base predicates), IteratorSize(unfiltered) is HasShape{1}, IteratorSize/IteratorEltype(typeof(unfiltered)) parity, value-level IteratorSize over vector/matrix/3-D array based generators preserves HasShape{N} (#9393), size(unfiltered over 1:5) == (5,) and over array bases preserves shape, size(filtered) and size(::Generator, dim) raise MethodError, length(filtered) MethodError (kept from #9320), and collect/sum consumers stay correct. The TYPE-LEVEL IteratorSize(typeof(filtered)) now reports SizeUnknown after the Filter-desugar slice #9200 S3."
+
+[[tests]]
+name = "generator_product_flatten_desugar_9200"
+file = "product_flatten_generator_desugar_9200.jl"
+expected = true
+description = "Issue #9200 S4: the PRODUCT (comma multi-binding `for x in a, y in b`) and FLATTEN (whitespace nested `for x in a for y in b`) generator forms desugar in lowering to the upstream julia-syntax.scm expand-generator shapes — Base.Generator(func, Iterators.product(a, b)) (func maps the product's destructured tuple) and Iterators.flatten(Generator(x -> Generator(y -> f(x,y), b), a)). Verified at parity with upstream julia: a comma product carries the product's N-D shape so collect yields a Matrix (2-D and 3-D, matching [f for x, y]); a flatten yields a Vector in column-major nesting order (including a dependent inner range); consumers (collect/sum/first/prod/for) drive the iterate protocol; a filter wraps the innermost iterator in an Iterators.Filter so a filtered product collapses to a SizeUnknown Vector and a filtered FLATTEN composes the S3 filtered-generator collapse per nesting level (fixes #9325, the previously-rejected `nested generators not supported` combination); and laziness holds for both forms (side effects fire at iteration in column-major order, not construction). The product UndefVarError on main is fixed by the desugar; the VM recovers the ProductIterator/Product shape in collect_iterator/materialize_generator_base_if_needed. Flatten-of-generators collect eltype (Vector{Any} vs julia Vector{Int64}) is a separate deferred gap and deliberately NOT asserted"
+
+[[tests]]
+name = "generator_float16_comprehension_value_9382"
+file = "float16_comprehension_value_9382.jl"
+expected = true
+description = "An inline Float16(x) constructor call (or any Float16-typed body expression) in a single-iterator comprehension body yields Float16 element VALUES, not Float64 (Issue #9382). The container tag was already Vector{Float16} (#9301 / PR #9368) but the body push matched F16 into the default `_` arm of the single-iterator comprehension's body_type dispatch, which coerced the value through compile_expr_as(F64); F16 now rides the same value-preserving boxed StoreAny/LoadAny push path as F32 and the other small numerics. Asserts typeof of an element and exact element values for the plain comprehension, the collect-ed generator, a Float16 arithmetic body, and a filtered comprehension, plus the Float32/Float64 analogues that were already correct (F64 keeps its dedicated typed push path)"
+
+[[tests]]
+name = "generator_trait_matrix_9566"
+file = "generator_trait_matrix_9566.jl"
+expected = true
+description = "Generated differential generator/iterator trait matrix for #9566: map/filter/flatten/product/zip/enumerate across typed array, range, and Any-mixed bases, asserting upstream trait/consumer results for non-skiplisted cells. Divergences are tracked in docs/vm/GENERATOR_TRAIT_MATRIX_SKIPLIST.tsv and ratcheted by scripts/check_generator_trait_matrix.sh."
+
+[[tests]]
+name = "generator_specializer_struct_iterate_9403"
+file = "specializer_struct_iterate_9403.jl"
+expected = true
+description = "Runtime specialization seeded by a simple Generator keeps later Flatten and custom struct iterators on the iterate protocol instead of emitting length/getindex counted loops (Issue #9403)"
+
+[[tests]]
+name = "generator_nested_filtered_generator_base_9405"
+file = "nested_filtered_generator_base_9405.jl"
+expected = true
+description = "A filtered generator can be used as the base iterator of another generator, map, and sum without projecting Base.Generator.f through the direct-callable field path. The synchronous collect boundary now drives the inner generator through its iterate protocol, so FilteredFunctionIndex / FilteredRuntimeValue predicate-map machinery works for nested bases (Issue #9405)."

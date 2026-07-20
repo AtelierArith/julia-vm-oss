@@ -2,6 +2,7 @@
 # Number - Number type predicates and operations
 # =============================================================================
 # Based on Julia's base/number.jl
+# upstream: julia/base/number.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-07-02)
 
 # iszero: check if value is zero
 function iszero(x)
@@ -42,152 +43,15 @@ end
 # `::Type{T} where {T<:Number}` form the dispatcher resolves.
 ndims(::Type{T}) where {T<:Number} = 0
 
-eltype(x::Bool) = Bool
-eltype(x::Int8) = Int8
-eltype(x::Int16) = Int16
-eltype(x::Int32) = Int32
-eltype(x::Int64) = Int64
-eltype(x::Int128) = Int128
-eltype(x::UInt8) = UInt8
-eltype(x::UInt16) = UInt16
-eltype(x::UInt32) = UInt32
-eltype(x::UInt64) = UInt64
-eltype(x::UInt128) = UInt128
-eltype(x::Float16) = Float16
-eltype(x::Float32) = Float32
-eltype(x::Float64) = Float64
-eltype(x::BigInt) = BigInt
-eltype(x::BigFloat) = BigFloat
-
-# zero(x): return zero with the same type as x
-# Based on Julia's base/number.jl
-function zero(x::Int64)
-    return Int64(0)
+# Upstream value forms delegate to the type form instead of enumerating every
+# primitive numeric width. `zero(::Type{T})` is defined in promotion.jl and
+# `one(::Type{T})` in complex.jl; dispatch resolves them after Base is loaded.
+function zero(x::T) where {T<:Number}
+    return zero(T)
 end
 
-function zero(x::Float64)
-    return 0.0
-end
-
-# Float32/Float16: type-preserving zero. Upstream `zero(x::Number)=oftype(x,0)`
-# (julia/base/number.jl:363) preserves the concrete type. Explicit methods
-# added so DIRECT and untyped calls keep the concrete float type rather than
-# widening to Float64 (Issue #5167, follow-up to #5076).
-function zero(x::Float32)
-    return Float32(0)
-end
-
-function zero(x::Float16)
-    return Float16(0)
-end
-
-function zero(x::BigInt)
-    return BigInt(0)
-end
-
-function zero(x::Int32)
-    return Int32(0)
-end
-
-function zero(x::Int16)
-    return Int16(0)
-end
-
-function zero(x::Int8)
-    return Int8(0)
-end
-
-# Unsigned integers: type-preserving zero (Issue #8220). Without these methods
-# `zero(0x05)` fell through to a generic that returned `Int64`, losing the
-# unsigned type (upstream returns the same UInt type as the argument).
-function zero(x::UInt8)
-    return UInt8(0)
-end
-
-function zero(x::UInt16)
-    return UInt16(0)
-end
-
-function zero(x::UInt32)
-    return UInt32(0)
-end
-
-function zero(x::UInt64)
-    return UInt64(0)
-end
-
-function zero(x::UInt128)
-    return UInt128(0)
-end
-
-function zero(x::Bool)
-    return false
-end
-
-# one(x): return one with the same type as x
-# Based on Julia's base/number.jl
-function one(x::Int64)
-    return Int64(1)
-end
-
-function one(x::Float64)
-    return 1.0
-end
-
-# Float32/Float16: type-preserving one. Upstream `one(x::T) where {T<:Number}
-# = one(T)` (julia/base/number.jl:406) preserves the concrete type. Without
-# these methods `one(2.0f0)` / `one(Float16(1))` errored NoMethodFound even
-# for DIRECT and untyped calls (Issue #5167, follow-up to #5076).
-function one(x::Float32)
-    return Float32(1)
-end
-
-function one(x::Float16)
-    return Float16(1)
-end
-
-function one(x::BigInt)
-    return BigInt(1)
-end
-
-function one(x::Int32)
-    return Int32(1)
-end
-
-function one(x::Int16)
-    return Int16(1)
-end
-
-function one(x::Int8)
-    return Int8(1)
-end
-
-# Unsigned integers: type-preserving one (Issue #8220). Without these methods
-# `one(0x05)` fell through to a generic that returned `Int64` (or errored
-# NoMethodFound in some static contexts), losing the unsigned type; upstream
-# returns the same UInt type as the argument.
-function one(x::UInt8)
-    return UInt8(1)
-end
-
-function one(x::UInt16)
-    return UInt16(1)
-end
-
-function one(x::UInt32)
-    return UInt32(1)
-end
-
-function one(x::UInt64)
-    return UInt64(1)
-end
-
-function one(x::UInt128)
-    return UInt128(1)
-end
-
-function one(x::Bool)
-    return true
+function one(x::T) where {T<:Number}
+    return one(T)
 end
 
 # identity: return the input unchanged
@@ -217,8 +81,9 @@ end
 
 # signbit: check if the sign bit is set (negative)
 # Based on Julia's base/number.jl:137
-# This is the generic fallback for Real numbers
-function signbit(x)
+# This is the generic fallback for Real numbers. Keep the dispatch boundary
+# explicit so `applicable(signbit, nonreal)` matches upstream (Issue #11797).
+function signbit(x::Real)
     return x < 0
 end
 
@@ -235,9 +100,10 @@ function ispositive(x)
 end
 
 # flipsign: flip sign of x if y is negative
-# Based on Julia's base/number.jl:249
-# Generic fallback for Real numbers
-function flipsign(x, y)
+# Based on Julia's base/number.jl:205.
+# The fallback is restricted to Real just like upstream; the old untyped
+# signature let String reach unary +/- and raised TypeError (Issue #11525).
+function flipsign(x::Real, y::Real)
     if signbit(y)
         return -x
     else
@@ -248,7 +114,7 @@ end
 # abs: absolute value for real numbers
 # Based on Julia's base/number.jl:208
 # Generic fallback using signbit (Complex version is in complex.jl)
-function abs(x)
+function abs(x::Real)
     if signbit(x)
         return -x
     else
@@ -258,7 +124,11 @@ end
 
 # abs2: squared absolute value for real numbers
 # Complex version is in complex.jl with abs2(z::Complex)
-function abs2(x)
+# Based on Julia's base/number.jl:189 (abs2(x::Real) = x*x).
+# Was an untyped `function abs2(x)`, so it silently matched non-numeric
+# args too: abs2("a") dispatched here and `"a" * "a"` string-concatenated
+# to "aa" instead of raising a MethodError like upstream (Issue #10602).
+function abs2(x::Real)
     return x * x
 end
 
@@ -268,8 +138,12 @@ end
 # (julia/base/complex.jl:88) is identity for reals, so a `return x` body
 # is correct. (complex.jl additionally provides the typed `real(x::Real)`
 # method.)
-function real(x)
+function real(x::Real)
     return x
+end
+
+function real(::Type{T}) where {T<:Real}
+    return T
 end
 
 # imag: NO untyped fallback here on purpose (Issue #5039).
@@ -285,7 +159,9 @@ end
 # INTENTIONAL_NOOP (Issue #4703): upstream `conj(x::Real) = x`
 # (julia/base/number.jl:273) is identity for reals, so a `return x` body
 # is correct.
-function conj(x)
+# The old untyped signature silently returned non-numeric inputs unchanged
+# instead of rejecting them at dispatch (Issue #11522).
+function conj(x::Real)
     return x
 end
 
@@ -296,7 +172,9 @@ end
 # INTENTIONAL_NOOP (Issue #4703): upstream `isreal(x::Real) = true`
 # (julia/base/complex.jl:147) returns the constant `true` for reals, so a
 # `return true` body is the correct semantics for the real fallback.
-function isreal(x)
+# The old untyped signature silently returned true for non-numeric inputs
+# instead of rejecting them at dispatch (Issue #11522).
+function isreal(x::Real)
     return true
 end
 
@@ -311,215 +189,98 @@ end
 # For AbstractFloat types: identity (preserves type)
 # For Integer types: convert to Float64
 
-# Identity for AbstractFloat types
-function float(::Type{Float64})
-    return Float64
+# Identity for AbstractFloat types; fixed-width integers widen to Float64,
+# while BigInt follows upstream's arbitrary-precision BigFloat path.
+function float(::Type{T}) where {T<:AbstractFloat}
+    return T
 end
 
-function float(::Type{Float32})
-    return Float32
-end
-
-function float(::Type{Float16})
-    return Float16
-end
-
-function float(x::Float64)
+function float(x::T) where {T<:AbstractFloat}
     return x
 end
 
-function float(x::Float32)
-    return x
+function float(::Type{T}) where {T<:Integer}
+    return T === BigInt ? BigFloat : Float64
 end
 
-function float(x::Float16)
-    return x
+function float(x::Integer)
+    return x isa BigInt ? BigFloat(x) : Float64(x)
 end
 
-# Integer types -> Float64
-function float(::Type{Int64})
-    return Float64
-end
-
-function float(::Type{Int32})
-    return Float64
-end
-
-function float(::Type{Int16})
-    return Float64
-end
-
-function float(::Type{Int8})
-    return Float64
-end
-
-function float(::Type{UInt64})
-    return Float64
-end
-
-function float(::Type{UInt32})
-    return Float64
-end
-
-function float(::Type{UInt16})
-    return Float64
-end
-
-function float(::Type{UInt8})
-    return Float64
-end
-
-function float(::Type{Bool})
-    return Float64
-end
-
-function float(x::Int64)
-    return Float64(x)
-end
-
-function float(x::Int32)
-    return Float64(x)
-end
-
-function float(x::Int16)
-    return Float64(x)
-end
-
-function float(x::Int8)
-    return Float64(x)
-end
-
-function float(x::Int128)
-    return Float64(x)
-end
-
-function float(x::UInt8)
-    return Float64(x)
-end
-
-function float(x::UInt16)
-    return Float64(x)
-end
-
-function float(x::UInt32)
-    return Float64(x)
-end
-
-function float(x::UInt64)
-    return Float64(x)
-end
-
-function float(x::UInt128)
-    return Float64(x)
-end
-
-# Bool -> Float64 (Issue #2722)
-function float(x::Bool)
-    return Float64(x)
+function float(::Type{T}) where {T<:Number}
+    return typeof(float(zero(T)))
 end
 
 # =============================================================================
-# signed / unsigned: bit-pattern reinterpretation between same-width
-# integer types (Issue #3727).
-#
-# Based on Julia's base/int.jl. signed(::Signed) and unsigned(::Unsigned)
-# are identities; the cross-sign methods reinterpret the bit pattern.
-# `BuiltinId::Signed` / `BuiltinId::Unsigned` remain as a fallback for types
-# not yet covered here, but in normal use these Pure Julia methods win.
+# signed / unsigned: bit-pattern reinterpretation between same-width integer
+# types (Issue #3727). Based on Julia's base/int.jl, but kept here because
+# number.jl loads before int.jl in bundled Base.
 # =============================================================================
 
-# signed: identity on already-signed integers
-function signed(x::Int8)
+function signed(::Type{Bool})
+    return Int
+end
+
+function signed(::Type{T}) where {T<:Signed}
+    return T
+end
+
+function signed(::Type{T}) where {T<:Unsigned}
+    if T === UInt8
+        return Int8
+    elseif T === UInt16
+        return Int16
+    elseif T === UInt32
+        return Int32
+    elseif T === UInt64
+        return Int64
+    else
+        return Int128
+    end
+end
+
+function signed(x::T) where {T<:Signed}
     return x
 end
 
-function signed(x::Int16)
-    return x
+function signed(x::T) where {T<:Unsigned}
+    return reinterpret(signed(T), x)
 end
 
-function signed(x::Int32)
-    return x
-end
-
-function signed(x::Int64)
-    return x
-end
-
-function signed(x::Int128)
-    return x
-end
-
-# signed: bit-reinterpret unsigned integers as signed
-function signed(x::UInt8)
-    return reinterpret(Int8, x)
-end
-
-function signed(x::UInt16)
-    return reinterpret(Int16, x)
-end
-
-function signed(x::UInt32)
-    return reinterpret(Int32, x)
-end
-
-function signed(x::UInt64)
-    return reinterpret(Int64, x)
-end
-
-function signed(x::UInt128)
-    return reinterpret(Int128, x)
-end
-
-# signed: Bool -> Int64 (Julia widens Bool to Int)
 function signed(x::Bool)
     return Int64(x)
 end
 
-# unsigned: identity on already-unsigned integers
-function unsigned(x::UInt8)
+function unsigned(::Type{Bool})
+    return UInt
+end
+
+function unsigned(::Type{T}) where {T<:Unsigned}
+    return T
+end
+
+function unsigned(::Type{T}) where {T<:Signed}
+    if T === Int8
+        return UInt8
+    elseif T === Int16
+        return UInt16
+    elseif T === Int32
+        return UInt32
+    elseif T === Int64
+        return UInt64
+    else
+        return UInt128
+    end
+end
+
+function unsigned(x::T) where {T<:Unsigned}
     return x
 end
 
-function unsigned(x::UInt16)
-    return x
+function unsigned(x::T) where {T<:Signed}
+    return reinterpret(unsigned(T), x)
 end
 
-function unsigned(x::UInt32)
-    return x
-end
-
-function unsigned(x::UInt64)
-    return x
-end
-
-function unsigned(x::UInt128)
-    return x
-end
-
-# unsigned: bit-reinterpret signed integers as unsigned
-function unsigned(x::Int8)
-    return reinterpret(UInt8, x)
-end
-
-function unsigned(x::Int16)
-    return reinterpret(UInt16, x)
-end
-
-function unsigned(x::Int32)
-    return reinterpret(UInt32, x)
-end
-
-function unsigned(x::Int64)
-    return reinterpret(UInt64, x)
-end
-
-function unsigned(x::Int128)
-    return reinterpret(UInt128, x)
-end
-
-# unsigned: Bool -> UInt64 (Julia widens Bool to UInt). Constructor
-# UInt64(::Bool) is not supported by the VM, so widen via Int64 first
-# and reinterpret.
 function unsigned(x::Bool)
     return reinterpret(UInt64, Int64(x))
 end

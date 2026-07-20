@@ -1,4 +1,7 @@
 # Test sprintf function
+# NOTE: `sprintf` is a SubsetJuliaVM extension — upstream Julia only provides
+# Printf.@sprintf. This fixture intentionally tests the extension and is
+# marked skip_julia_test in manifest.toml (Issue #10237).
 
 using Test
 

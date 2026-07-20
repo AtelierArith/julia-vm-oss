@@ -1,0 +1,41 @@
+[[tests]]
+name = "milestone62_numeric_type_functions_9840"
+file = "numeric_type_functions_9840.jl"
+expected = true
+description = "Type-level real, float, and complex functions preserve upstream numeric Type results (Issue #9840)"
+
+[[tests]]
+name = "milestone62_promote_type_reconcile_user_subtypes_9832_9833"
+file = "promote_type_reconcile_user_subtypes_9832_9833.jl"
+expected = true
+description = "promote_type reconciles opposite-direction rules and parametric numeric fallbacks for user subtypes (Issues #9832, #9833)"
+
+[[tests]]
+name = "milestone62_array_literal_numeric_eltypes_9743_9760_9762_9773_9780_9834"
+file = "array_literal_numeric_eltypes_9743_9760_9762_9773_9780_9834.jl"
+expected = true
+description = "Numeric array literals infer promoted eltypes for floats, rationals, irrational singletons, BigFloat, and integer Complex values (Issues #9743, #9760, #9762, #9773, #9780, #9834)"
+
+[[tests]]
+name = "milestone62_parametric_constructor_field_conversion_9829"
+file = "parametric_constructor_field_conversion_9829.jl"
+expected = true
+description = "Runtime-computed parametric constructors convert fields to declared type arguments (Issue #9829)"
+
+[[tests]]
+name = "milestone62_uint128_broadcast_memory_storage_9837"
+file = "uint128_broadcast_memory_storage_9837.jl"
+expected = true
+description = "UInt128 typed storage and broadcast power preserve UInt128 eltype and values (Issue #9837)"
+
+[[tests]]
+name = "milestone62_promote_op_complex_zip_comprehension_9835"
+file = "promote_op_complex_zip_comprehension_9835.jl"
+expected = true
+description = "Base.promote_op and zip comprehensions infer ComplexF64 for mixed Complex and real operands (Issue #9835)"
+
+[[tests]]
+name = "milestone62_complex_packed_boundary_and_scalar_mul_9725_9749"
+file = "complex_packed_boundary_and_scalar_mul_9725_9749.jl"
+expected = true
+description = "Packed Complex array mutation boundaries and real-scalar array multiplication keep logical Complex values (Issues #9725, #9749)"

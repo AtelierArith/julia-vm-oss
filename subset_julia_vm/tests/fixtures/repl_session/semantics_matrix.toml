@@ -1,0 +1,266 @@
+name = "repl_session_semantics_matrix"
+description = "REPL-specific soft-scope, ans, display suppression, multiline, error recovery, and redefinition behavior."
+
+[[steps]]
+name = "global_read_seed"
+input = "x = 10"
+success = true
+stdout = ""
+display = "10"
+
+[[steps]]
+name = "soft_scope_for_reads_global"
+input = """
+s = 0
+for i in 1:2
+    s += x + i
+end
+s
+"""
+success = true
+stdout = ""
+display = "23"
+
+[[steps]]
+name = "soft_scope_for_writes_existing_global"
+input = """
+for i in 1:2
+    x += i
+end
+x
+"""
+success = true
+stdout = ""
+display = "13"
+
+[[steps]]
+name = "soft_scope_while_writes_existing_global"
+input = """
+i = 1
+while i <= 2
+    x += i
+    i += 1
+end
+x
+"""
+success = true
+stdout = ""
+display = "16"
+
+[[steps]]
+name = "let_assignment_stays_local"
+input = """
+let
+    x = 99
+    x
+end
+"""
+success = true
+stdout = ""
+display = "99"
+
+[[steps]]
+name = "let_does_not_overwrite_global"
+input = "x"
+success = true
+stdout = ""
+display = "16"
+
+[[steps]]
+name = "function_assignment_stays_local"
+input = """
+function localwrite8715()
+    x = 2
+    x
+end
+"""
+success = true
+stdout = ""
+display = "localwrite8715 (generic function with 1 method)"
+
+[[steps]]
+name = "function_local_call"
+input = "localwrite8715()"
+success = true
+stdout = ""
+display = "2"
+
+[[steps]]
+name = "function_local_does_not_overwrite_global"
+input = "x"
+success = true
+stdout = ""
+display = "16"
+
+[[steps]]
+name = "explicit_global_write_in_function"
+input = """
+function globalwrite8715()
+    global x
+    x += 4
+    return x
+end
+"""
+success = true
+stdout = ""
+display = "globalwrite8715 (generic function with 1 method)"
+
+[[steps]]
+name = "explicit_global_write_call"
+input = "globalwrite8715()"
+success = true
+stdout = ""
+display = "20"
+
+[[steps]]
+name = "semicolon_suppresses_display"
+input = "x + 1;"
+success = true
+stdout = ""
+
+[[steps]]
+name = "semicolon_result_still_updates_ans"
+input = "ans"
+success = true
+stdout = ""
+display = "21"
+
+[[steps]]
+name = "automatic_show_for_plain_value"
+input = "x + 2"
+success = true
+stdout = ""
+display = "22"
+
+[[steps]]
+name = "multiline_input_after_matrix"
+input = """
+begin
+    a = 3
+    a + x
+end
+"""
+success = true
+stdout = ""
+display = "23"
+
+[[steps]]
+name = "error_recovery_matrix"
+input = "missing8715 + 1"
+success = false
+stdout = ""
+error_contains = "UndefVarError"
+
+[[steps]]
+name = "session_continues_after_error"
+input = "x + 3"
+success = true
+stdout = ""
+display = "23"
+
+[[steps]]
+name = "redefinition_first"
+input = """
+function redefine8715()
+    1
+end
+"""
+success = true
+stdout = ""
+display = "redefine8715 (generic function with 1 method)"
+
+[[steps]]
+name = "redefinition_first_call"
+input = "redefine8715()"
+success = true
+stdout = ""
+display = "1"
+
+[[steps]]
+name = "redefinition_second"
+input = """
+function redefine8715()
+    2
+end
+"""
+success = true
+stdout = ""
+display = "redefine8715 (generic function with 1 method)"
+
+[[steps]]
+name = "redefinition_second_call"
+input = "redefine8715()"
+success = true
+stdout = ""
+display = "2"
+
+# --- Issue #8976: implicit return from global add-assign tail ---
+# At this point x = 20 (from explicit_global_write_call step above).
+# globalwrite8715() set x=20. Nothing else changes x from there to here.
+
+[[steps]]
+name = "implicit_global_write_tail_8976_def"
+input = """
+function globalwrite_tail_8976()
+    global x
+    x += 4
+end
+"""
+success = true
+stdout = ""
+display = "globalwrite_tail_8976 (generic function with 1 method)"
+
+[[steps]]
+name = "implicit_global_write_tail_8976_call"
+input = "globalwrite_tail_8976()"
+success = true
+stdout = ""
+display = "24"
+
+[[steps]]
+name = "implicit_global_write_tail_8976_global_updated"
+input = "x"
+success = true
+stdout = ""
+display = "24"
+
+[[steps]]
+name = "local_add_assign_tail_8976_def"
+input = """
+function local_add_assign_tail_8976()
+    y8976 = 10
+    y8976 += 4
+end
+"""
+success = true
+stdout = ""
+display = "local_add_assign_tail_8976 (generic function with 1 method)"
+
+[[steps]]
+name = "local_add_assign_tail_8976_call"
+input = "local_add_assign_tail_8976()"
+success = true
+stdout = ""
+display = "14"
+
+# --- Issue #8977: begin block RHS assignment implicit return ---
+# x = 24 at this point.
+
+[[steps]]
+name = "begin_block_rhs_assign_8977"
+input = """
+y8977 = begin
+    a8977 = 3
+    a8977 + x
+end
+"""
+success = true
+stdout = ""
+display = "27"
+
+[[steps]]
+name = "begin_block_rhs_assign_8977_var"
+input = "y8977"
+success = true
+stdout = ""
+display = "27"

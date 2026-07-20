@@ -57,7 +57,7 @@ _do_show("f(3)", f(3))  # 文字列リテラルが直接埋め込まれる
 
 ### 技術的詳細
 
-**問題のあったコード**: `subset_julia_vm/src/lowering/stmt/macros.rs`
+**問題のあったコード**: `subset_julia_vm_lowering/src/lowering/stmt/macros.rs`
 
 複数文を持つマクロ本体を展開する際：
 1. 代入文 `Stmt::Assign` が `expanded_stmts` に追加されていた
@@ -70,8 +70,8 @@ _do_show("f(3)", f(3))  # 文字列リテラルが直接埋め込まれる
 
 ### 関連ファイル
 
-- `subset_julia_vm/src/lowering/stmt/macros.rs` - マクロ展開ロジック
-- `subset_julia_vm/src/lowering/expr/quote/main.rs` - クォート展開ロジック
+- `subset_julia_vm_lowering/src/lowering/stmt/macros.rs` - マクロ展開ロジック
+- `subset_julia_vm_lowering/src/lowering/expr/quote/main.rs` - クォート展開ロジック
 - `subset_julia_vm/src/julia/base/macros.jl` - `@show` マクロ定義
 
 ### 教訓
@@ -118,9 +118,9 @@ try ブロック内から `return` すると、値が正しく返されず `Noth
 
 ### 関連ファイル
 
-- `subset_julia_vm/src/compile/abstract_interp/engine/mod.rs` - Try 文の型推論
-- `subset_julia_vm/src/vm/mod.rs` - `pop_handlers_for_return` ヘルパー
-- `subset_julia_vm/src/vm/exec/return_ops.rs` - return 時のハンドラクリーンアップ
+- `subset_julia_vm_compile/src/compile/abstract_interp/engine/mod.rs` - Try 文の型推論
+- `subset_julia_vm_vm/src/vm/mod.rs` - `pop_handlers_for_return` ヘルパー
+- `subset_julia_vm_vm/src/vm/exec/return_ops.rs` - return 時のハンドラクリーンアップ
 
 ### 教訓
 

@@ -31,6 +31,12 @@ expected = true
 description = "Issues #5548/#5549: `global x` inside a function routes reads and writes to the module-level binding (read-modify-write, write-only, and compound assignment)"
 
 [[tests]]
+name = "scope_short_form_global_body_9817"
+file = "short_form_global_body_9817.jl"
+expected = true
+description = "Issue #9817: short-form function bodies lower `global x = value` and `global x += value` as value-producing global declarations, matching long-form function bodies"
+
+[[tests]]
 name = "scope_top_level_begin_rhs_assignments_7667"
 file = "top_level_begin_rhs_assignments_7667.jl"
 expected = true
@@ -41,3 +47,135 @@ name = "scope_testset_pi_shadow_5991"
 file = "testset_pi_shadow_5991.jl"
 expected = true
 description = "Issue #5991: a local variable named pi inside @testset shadows Base.pi for assignments and field access"
+
+[[tests]]
+name = "scope_fused_i64_global_slot_8598"
+file = "fused_i64_global_slot_8598.jl"
+expected = true
+description = "Issue #8598: fused Int64 arithmetic inside typed functions reads module-level globals stored in global slots"
+
+[[tests]]
+name = "scope_testset_hard_scope_loop_9312"
+file = "testset_hard_scope_loop_9312.jl"
+expected = true
+description = "Issue #9312: @testset wraps its body in a hard (local) scope (upstream Test.@testset let-wrap), so a for/while loop accumulating into a testset-body local updates that local instead of raising UndefVarError under file-mode soft-scope localization"
+
+[[tests]]
+name = "scope_let_hard_scope_no_leak_9313"
+file = "let_hard_scope_no_leak_9313.jl"
+expected = true
+description = "Issue #9313: a hard-scope let discards its body-local bindings at block exit and must not leak them into the module global scope. Covers a bare let body assignment, a let binding plus a body local, nested lets, a shadowed pre-existing global (restored, not discarded), a global declared inside a let (persists), and a closure returned from a value-position let that captures the let-local by value (still works after the local is discarded). Verified at parity with julia 1.12"
+
+[[tests]]
+name = "scope_testset_hard_scope_no_leak_9313"
+file = "testset_hard_scope_no_leak_9313.jl"
+expected = true
+description = "Issue #9313: a @testset body is a hard (local) scope; a body-local binding is discarded at block exit and must not leak into module scope, while an explicit global declared inside the testset persists. Verified at parity with julia 1.12"
+
+[[tests]]
+name = "scope_nested_loop_global_9493"
+file = "nested_loop_global_9493.jl"
+expected = true
+description = "Strict soft-scope honors a global declaration inside an inner nested loop and does not localize the name in the enclosing top-level loop nest (Issue #9493)"
+
+[[tests]]
+name = "scope_long_form_global_implicit_return_10023"
+file = "long_form_global_implicit_return_10023.jl"
+expected = true
+description = "Issue #10023: a long-form function whose last statement is `global x = value` returns the assigned value (not `nothing`), matching upstream Julia's assignment-expression-evaluates-to-its-value semantics. Covers I64/F64/Str/Tuple values, an explicit `return` after the global assignment, a plain (non-global) tail assignment, and a `global` assignment nested inside an `if`'s tail branches. Distinct from Issue #9817 (short-form bodies failing to lower `global` at all)"
+
+[[tests]]
+name = "scope_global_local_longform_function_10937"
+file = "global_local_longform_function_10937.jl"
+expected = true
+description = "Issue #10937 (via corpus ratchet Issue #10935): long-form `function` definitions as `global`/`local` declaration items — the julia/base bootstrap pattern. Covers `global function` inside a top-level `let` (module-scope method usable after the block), top-level `global function`, and `local function` inside a `let`. The let-local-capturing variant is deferred (see Issue #10937). Verified at parity with upstream julia"
+
+[[tests]]
+name = "scope_for_loop_induction_var_shadow_10903"
+file = "for_loop_induction_var_shadow_10903.jl"
+expected = true
+description = "Issues #10903/#10984: a `for`-loop induction variable that shares a name with an already-live outer local shadows it (fresh binding for the loop's lifetime) instead of leaking the loop's final value into the outer binding. Fixed via CoreCompiler::shadow_local_enter/shadow_local_exit plus matching restores in the whole-function slot-typing pre-scan (compile/inference.rs) and the abstract-interpretation return-type engine (compile/abstract_interp/engine/mod.rs). Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_comprehension_induction_var_shadow_10903"
+file = "comprehension_induction_var_shadow_10903.jl"
+expected = true
+description = "Issues #10903/#10984: a comprehension induction variable that shares a name with an already-live outer local shadows it instead of leaking the comprehension's final element value into the outer binding. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_for_loop_nested_same_name_10984"
+file = "for_loop_nested_same_name_10984.jl"
+expected = true
+description = "Issue #10984: nested `for` loops that both bind the same name each shadow independently — the outer local is restored after the inner loop, then again after the outer loop. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_foreach_tuple_induction_var_shadow_10984"
+file = "foreach_tuple_induction_var_shadow_10984.jl"
+expected = true
+description = "Issue #10984: a tuple-destructuring `for (a, b) in iterable` loop's induction variables shadow same-named outer locals, matching the single-variable for/foreach fix. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_for_loop_soft_scope_top_level_shadow_10984"
+file = "for_loop_soft_scope_top_level_shadow_10984.jl"
+expected = true
+description = "Issue #10984: the induction-variable shadow/restore fix also holds at top level (soft scope), not just inside a function body (hard scope) — a for-loop var shadows a pre-existing same-named top-level global. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_while_loop_no_induction_var_10984"
+file = "while_loop_no_induction_var_10984.jl"
+expected = true
+description = "Issue #10984 regression guard: `while` introduces no induction variable, so a pre-existing local read/written in the body is an ordinary reassignment (not shadowed) and keeps its final value after the loop. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_let_block_shadow_regression_10984"
+file = "let_block_shadow_regression_10984.jl"
+expected = true
+description = "Issue #10984 regression guard: pins the pre-existing, already-correct `let`-block shadow/restore behavior (Expr::LetBlock in compile/expr/mod.rs, the idiom CoreCompiler::shadow_local_enter/shadow_local_exit generalizes) so a future refactor of the shared shadow mechanism cannot regress it. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_comprehension_tuple_destructure_shadow_10984"
+file = "comprehension_tuple_destructure_shadow_10984.jl"
+expected = true
+description = "Issue #10984: a tuple-destructuring comprehension `[expr for (a, b) in iter]` (compile_tuple_destructuring_comprehension, a separate codegen path from the single-variable comprehension) shadows same-named outer locals instead of leaking. Found via advisor review after the initial #10984/#10903 fix landed; wired the same shadow_local_enter/exit pair around its single exit_label. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_sibling_foreach_same_name_zero_iter_first_10984"
+file = "sibling_foreach_same_name_zero_iter_first_10984.jl"
+expected = true
+description = "Issue #10984 regression guard: two sibling (not nested) for/foreach loops binding the same fresh induction-variable name, where the first loop's iterable is empty (zero runtime iterations), previously crashed with UndefVarError — shadow_local_enter mistook the first loop's compile-time-only 'initialized' residue for a genuine live outer value and tried to load a runtime slot that was never actually stored to. Reproduced live in channels.jl's _wake_all_channel_waiters (concurrency/channel_basic.jl's Channel close testset). Fixed by restoring all five CoreCompiler bookkeeping maps symmetrically to their pre-enter state on exit. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_shadow_runtime_guard_10984"
+file = "shadow_runtime_guard_10984.jl"
+expected = true
+description = "Issue #10984 codex-review hardening: the shadow save/restore is guarded by a runtime IsDefined check because compile-time bookkeeping cannot prove the outer slot is stored on every runtime path. Pins two previously-broken shapes: (1) nested same-name loops where the outer binding is a const-step for counter (registers a locals type but never initialized_locals) — the inner loop clobbered the live outer counter mid-iteration, sjulia (21, [12]) vs julia (63, [1, 2, 3]); (2) a conditionally-initialized outer local (if flag; x = ...; end) before a same-named loop in a non-slotized (try/catch) frame — the unguarded save load crashed with UndefVarError when flag == false. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_scoped_const_global_10943"
+file = "scoped_const_global_10943.jl"
+expected = true
+description = "Issue #10943: `const global c = 1` and `global const c = 1` lower to a real const global binding (both modifier orders, typed name, newline between modifiers, structured type alias through the scoped wrapper, and function-scope reads). Previously the nested global declaration was silently dropped and the binding stayed undefined. Verified at parity with julia 1.12"
+
+[[tests]]
+name = "scope_scoped_declaration_forms_10945"
+file = "scoped_declaration_forms_10945.jl"
+expected = true
+description = "Issues #10945/#11008/#11009: valid full-expression scoped declaration forms — short-form method definition after `global`, comma-list `= rhs` distribution (`global x, y = 1, 2`), parenthesized destructuring, ternary/nested-assignment/pair RHS tiers, typed initializer, bare multi-name declarations, and `local` comma-list distribution in a block. Verified at parity with julia 1.12"
+
+[[tests]]
+name = "scope_catch_var_overwrites_typed_local_10999"
+file = "catch_var_overwrites_typed_local_10999.jl"
+expected = true
+description = "Issue #10999: a `catch e` binding whose name collides with a differently-typed outer local (String/Int/Float64/parameter, nested try, used after the try) permanently overwrites that local with the caught exception — upstream does not shadow/restore the catch variable — instead of crashing with an internal type-freeze error. Fixed by binding the catch variable to Any in the whole-function slot-typing pre-scan (compile/inference.rs) and the abstract-interpretation return-type engine. Verified at parity with julia 1.12"
+
+[[tests]]
+name = "scope_try_clause_locals_11281"
+file = "try_clause_locals_11281.jl"
+expected = true
+description = "Issue #11281: try/catch/else/finally are independent hard scopes: fresh soft bindings, explicit local shadows, assignment expressions, named functions, and catch binders do not leak to sibling clauses or after supported normal/exceptional/return/break/continue exits; same-clause captures survive, enclosing locals (including #10999 catch-binder collisions) still update, and explicit globals persist. Unstructured @goto exits remain tracked by #11294. Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "scope_module_explicit_global_11312"
+file = "module_explicit_global_11312.jl"
+expected = true
+description = "Issue #11312: explicit global reads and writes inside module-owned functions and catch clauses resolve to the owning module binding instead of an unqualified Main binding. Verified at parity with julia 1.12.6"

@@ -69,15 +69,16 @@ Matrix multiplication for 2D arrays.
 """
 function Base.:*(A::AbstractMatrix, B::AbstractMatrix)
     if size(A, 2) != size(B, 1)
-        error("DimensionMismatch: A has $(size(A, 2)) columns, but B has $(size(B, 1)) rows")
+        throw(DimensionMismatch("A has $(size(A, 2)) columns, but B has $(size(B, 1)) rows"))
     end
     m = size(A, 1)
     n = size(B, 2)
     k = size(A, 2)
-    C = zeros(m, n)
+    T = promote_type(eltype(A), eltype(B))
+    C = zeros(T, m, n)
     for i in 1:m
         for j in 1:n
-            s = 0.0
+            s = zero(T)
             for p in 1:k
                 s = s + A[i, p] * B[p, j]
             end
@@ -96,11 +97,12 @@ function Base.:*(A::AbstractMatrix, x::AbstractVector)
     m = size(A, 1)
     n = size(A, 2)
     if n != length(x)
-        error("DimensionMismatch: A has $(n) columns, but x has $(length(x)) elements")
+        throw(DimensionMismatch("A has $(n) columns, but x has $(length(x)) elements"))
     end
-    y = zeros(m)
+    T = promote_type(eltype(A), eltype(x))
+    y = zeros(T, m)
     for i in 1:m
-        s = 0.0
+        s = zero(T)
         for j in 1:n
             s = s + A[i, j] * x[j]
         end
@@ -112,10 +114,11 @@ end
 function Base.:*(x::AbstractVector, A::AbstractMatrix)
     rows = length(x)
     if size(A, 1) != 1
-        error("DimensionMismatch: vector-matrix multiplication requires matrix first dimension 1")
+        throw(DimensionMismatch("vector-matrix multiplication requires matrix first dimension 1"))
     end
     cols = size(A, 2)
-    C = zeros(rows, cols)
+    T = promote_type(eltype(x), eltype(A))
+    C = zeros(T, rows, cols)
     for i in 1:rows
         for j in 1:cols
             C[i, j] = x[i] * A[1, j]
@@ -130,7 +133,7 @@ function Base.:*(A::Matrix{Float64}, x::Vector{Complex{Float64}})
     m = size(A, 1)
     n = size(A, 2)
     if n != length(x)
-        error("DimensionMismatch: A has $(n) columns, but x has $(length(x)) elements")
+        throw(DimensionMismatch("A has $(n) columns, but x has $(length(x)) elements"))
     end
     y = Vector{Complex{Float64}}(undef, m)
     for i in 1:m
@@ -158,7 +161,7 @@ For complex vectors, the first vector is conjugated.
 function dot(x::Array{Float64}, y::Array{Float64})
     n = length(x)
     if n != length(y)
-        error("DimensionMismatch: vectors must have same length")
+        throw(DimensionMismatch("vectors must have same length"))
     end
     s = 0.0
     for i in 1:n
@@ -171,7 +174,7 @@ end
 function dot(x::Array{Int64}, y::Array{Int64})
     n = length(x)
     if n != length(y)
-        error("DimensionMismatch: vectors must have same length")
+        throw(DimensionMismatch("vectors must have same length"))
     end
     s = 0
     for i in 1:n
@@ -185,7 +188,7 @@ end
 function dot(x::Array{Complex{Float64}}, y::Array{Complex{Float64}})
     n = length(x)
     if n != length(y)
-        error("DimensionMismatch: vectors must have same length")
+        throw(DimensionMismatch("vectors must have same length"))
     end
     s = Complex{Float64}(0.0, 0.0)
     for i in 1:n
@@ -203,7 +206,7 @@ end
 function dot(x, y)
     n = length(x)
     if n != length(y)
-        error("DimensionMismatch: vectors must have same length")
+        throw(DimensionMismatch("vectors must have same length"))
     end
     s = 0.0
     for i in 1:n
@@ -380,7 +383,7 @@ Returns a vector perpendicular to both x and y.
 """
 function cross(x, y)
     if length(x) != 3 || length(y) != 3
-        error("DimensionMismatch: cross product requires 3-element vectors")
+        throw(DimensionMismatch("cross product requires 3-element vectors"))
     end
     # cross(a, b) = [a2*b3 - a3*b2, a3*b1 - a1*b3, a1*b2 - a2*b1]
     c1 = x[2] * y[3] - x[3] * y[2]
@@ -602,7 +605,7 @@ function Base.size(D::Diagonal, dim::Int)
     elseif dim == 2
         return n
     else
-        error("DimensionMismatch: Diagonal matrix has 2 dimensions, got dim=$dim")
+        throw(DimensionMismatch("Diagonal matrix has 2 dimensions, got dim=$dim"))
     end
 end
 
@@ -632,7 +635,7 @@ function Base.:*(D::Diagonal, A)
     if ndims_A == 1
         # Diagonal * Vector: result[i] = D[i, i] * A[i]
         if length(A) != n
-            error("DimensionMismatch: Diagonal matrix has $n rows, but vector has $(length(A)) elements")
+            throw(DimensionMismatch("Diagonal matrix has $n rows, but vector has $(length(A)) elements"))
         end
         result = zeros(n)
         for i in 1:n
@@ -642,7 +645,7 @@ function Base.:*(D::Diagonal, A)
     elseif ndims_A == 2
         # Diagonal * Matrix: result[i, j] = D[i, i] * A[i, j]
         if size(A, 1) != n
-            error("DimensionMismatch: Diagonal matrix has $n rows, but A has $(size(A, 1)) rows")
+            throw(DimensionMismatch("Diagonal matrix has $n rows, but A has $(size(A, 1)) rows"))
         end
         ncols = size(A, 2)
         result = zeros(n, ncols)
@@ -654,7 +657,7 @@ function Base.:*(D::Diagonal, A)
         end
         return result
     else
-        error("DimensionMismatch: Diagonal * A requires A to be 1D or 2D, got $(ndims_A)D")
+        throw(DimensionMismatch("Diagonal * A requires A to be 1D or 2D, got $(ndims_A)D"))
     end
 end
 
@@ -666,7 +669,7 @@ function Base.:*(A, D::Diagonal)
     if ndims_A == 1
         # Vector * Diagonal: result[j] = A[j] * D[j, j]
         if length(A) != n
-            error("DimensionMismatch: Diagonal matrix has $n columns, but vector has $(length(A)) elements")
+            throw(DimensionMismatch("Diagonal matrix has $n columns, but vector has $(length(A)) elements"))
         end
         result = zeros(n)
         for j in 1:n
@@ -676,7 +679,7 @@ function Base.:*(A, D::Diagonal)
     elseif ndims_A == 2
         # Matrix * Diagonal: result[i, j] = A[i, j] * D[j, j]
         if size(A, 2) != n
-            error("DimensionMismatch: Diagonal matrix has $n columns, but A has $(size(A, 2)) columns")
+            throw(DimensionMismatch("Diagonal matrix has $n columns, but A has $(size(A, 2)) columns"))
         end
         nrows = size(A, 1)
         result = zeros(nrows, n)
@@ -687,7 +690,7 @@ function Base.:*(A, D::Diagonal)
         end
         return result
     else
-        error("DimensionMismatch: A * Diagonal requires A to be 1D or 2D, got $(ndims_A)D")
+        throw(DimensionMismatch("A * Diagonal requires A to be 1D or 2D, got $(ndims_A)D"))
     end
 end
 
@@ -696,7 +699,7 @@ function Base.:*(D1::Diagonal, D2::Diagonal)
     n1 = length(D1.diag)
     n2 = length(D2.diag)
     if n1 != n2
-        error("DimensionMismatch: Diagonal matrices have different sizes: $n1×$n1 and $n2×$n2")
+        throw(DimensionMismatch("Diagonal matrices have different sizes: $n1×$n1 and $n2×$n2"))
     end
     
     # Result: (D1 * D2)[i, j] = D1[i, i] * D2[i, j] = D1[i, i] * D2[i, i] if i == j, else 0
@@ -938,7 +941,7 @@ function _structured_size_dim(S, dim::Int64)
     elseif dim == 2
         return dims[2]
     end
-    error("DimensionMismatch: structured matrix has 2 dimensions")
+    throw(DimensionMismatch("structured matrix has 2 dimensions"))
 end
 
 function Base.size(S::Symmetric, dim::Int64)
@@ -1848,7 +1851,7 @@ end
 
 function _matrix_add(A, B)
     if size(A, 1) != size(B, 1) || size(A, 2) != size(B, 2)
-        error("DimensionMismatch: matrix sizes must match")
+        throw(DimensionMismatch("matrix sizes must match"))
     end
     C = zeros(size(A, 1), size(A, 2))
     for j in 1:size(A, 2)
@@ -1861,7 +1864,7 @@ end
 
 function _matrix_sub(A, B)
     if size(A, 1) != size(B, 1) || size(A, 2) != size(B, 2)
-        error("DimensionMismatch: matrix sizes must match")
+        throw(DimensionMismatch("matrix sizes must match"))
     end
     C = zeros(size(A, 1), size(A, 2))
     for j in 1:size(A, 2)
@@ -1880,7 +1883,7 @@ end
 
 function lowrankupdate!(C::Cholesky, v::AbstractVector)
     if size(C.L, 1) != length(v)
-        error("DimensionMismatch: updating vector must fit size of factorization")
+        throw(DimensionMismatch("updating vector must fit size of factorization"))
     end
     updated = cholesky(_matrix_add(C.L * C.U, _outer_product(v)))
     if updated isa Cholesky
@@ -1895,7 +1898,7 @@ end
 
 function lowrankdowndate!(C::Cholesky, v::AbstractVector)
     if size(C.L, 1) != length(v)
-        error("DimensionMismatch: updating vector must fit size of factorization")
+        throw(DimensionMismatch("updating vector must fit size of factorization"))
     end
     updated = cholesky(_matrix_sub(C.L * C.U, _outer_product(v)))
     if updated isa Cholesky
@@ -2036,7 +2039,16 @@ function sylvester(A::AbstractMatrix, B::AbstractMatrix, C::AbstractMatrix)
     m = size(A, 1)
     n = size(B, 1)
     if size(A, 2) != m || size(B, 2) != n || size(C, 1) != m || size(C, 2) != n
-        error("DimensionMismatch: sylvester expects square A/B and C sized like A rows by B rows")
+        throw(DimensionMismatch("sylvester expects square A/B and C sized like A rows by B rows"))
+    end
+    if isdiag(A) && isdiag(B)
+        X = zeros(m, n)
+        for j in 1:n
+            for i in 1:m
+                X[i, j] = (0.0 - C[i, j]) / (A[i, i] + B[j, j])
+            end
+        end
+        return X
     end
     K = _matrix_add(kron(_identity_matrix(n), A), kron(transpose(B), _identity_matrix(m)))
     rhs = -_colvec(C)
@@ -2682,7 +2694,7 @@ end
 
 function _check_transpose_dest(dest, src, name)
     if size(dest, 1) != size(src, 2) || size(dest, 2) != size(src, 1)
-        error("DimensionMismatch: $name destination has size $(size(dest)), expected ($(size(src, 2)), $(size(src, 1)))")
+        throw(DimensionMismatch("$name destination has size $(size(dest)), expected ($(size(src, 2)), $(size(src, 1)))"))
     end
 end
 
@@ -2726,7 +2738,7 @@ function transpose!(dest, src)
     _check_transpose_dest(dest, src, "transpose!")
     if dest === src
         if size(src, 1) != size(src, 2)
-            error("DimensionMismatch: transpose! with aliased source and destination requires a square matrix")
+            throw(DimensionMismatch("transpose! with aliased source and destination requires a square matrix"))
         end
         n = size(src, 1)
         for j in 1:n
@@ -2745,7 +2757,7 @@ function adjoint!(dest, src)
     _check_transpose_dest(dest, src, "adjoint!")
     if dest === src
         if size(src, 1) != size(src, 2)
-            error("DimensionMismatch: adjoint! with aliased source and destination requires a square matrix")
+            throw(DimensionMismatch("adjoint! with aliased source and destination requires a square matrix"))
         end
         n = size(src, 1)
         for i in 1:n
@@ -2779,7 +2791,7 @@ function copytrito!(dest, src, uplo)
             end
         end
     else
-        error("ArgumentError: uplo must be 'U' or 'L'")
+        throw(ArgumentError("uplo must be 'U' or 'L'"))
     end
     return dest
 end
@@ -3398,7 +3410,7 @@ function _blas_get(A, trans, i, j)
     elseif trans == 'C' || trans == 'c'
         return conj(A[j, i])
     end
-    error("ArgumentError: BLAS transpose flag must be 'N', 'T', or 'C'")
+    throw(ArgumentError("BLAS transpose flag must be 'N', 'T', or 'C'"))
 end
 
 function gemv!(trans, alpha, A, x, beta, y)

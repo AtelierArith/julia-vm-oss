@@ -9,6 +9,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BENCH_FILE="${BENCH_FILE:-$ROOT_DIR/benchmarks/vm_mandelbrot.jl}"
 SJULIA_BIN="${SJULIA_BIN:-$ROOT_DIR/target/release/sjulia}"
 RUNS="${RUNS:-5}"
+WARMUP_RUNS="${WARMUP_RUNS:-1}"
 RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/benchmarks/results/vm_mandelbrot_$(date +%Y%m%d_%H%M%S)}"
 
 mkdir -p "$RESULTS_DIR"
@@ -38,6 +39,11 @@ record_series() {
     shift
     local series_file="$RESULTS_DIR/${label}_times.txt"
     : >"$series_file"
+    for i in $(seq 1 "$WARMUP_RUNS"); do
+        local warmup_seconds
+        warmup_seconds="$(run_timed "${label}_warmup_${i}" "$@")"
+        printf "%s warmup %s: %ss (discarded)\n" "$label" "$i" "$warmup_seconds"
+    done
     for i in $(seq 1 "$RUNS"); do
         local seconds
         seconds="$(run_timed "${label}_${i}" "$@")"
@@ -65,6 +71,7 @@ summarize_series() {
 
 echo "Benchmark file: $BENCH_FILE"
 echo "Runs: $RUNS"
+echo "Warmup runs: $WARMUP_RUNS"
 echo "Results: $RESULTS_DIR"
 echo
 
@@ -105,6 +112,7 @@ record_series sjulia "$SJULIA_BIN" "$BENCH_FILE"
     echo "- Benchmark: \`$BENCH_FILE\`"
     echo "- Result: \`$EXPECTED_RESULT\`"
     echo "- Runs: $RUNS"
+    echo "- Warmup runs discarded per tier: $WARMUP_RUNS"
     echo
     echo "## Raw Times (seconds)"
     echo
@@ -115,6 +123,8 @@ record_series sjulia "$SJULIA_BIN" "$BENCH_FILE"
     cat "$RESULTS_DIR/sjulia_times.txt"
     echo
     echo "## Summary"
+    echo
+    echo "Warmup launches are excluded from these statistics."
     echo
     summarize_series "Julia" "julia" "$RESULTS_DIR/julia_times.txt"
     summarize_series "sjulia VM" "sjulia" "$RESULTS_DIR/sjulia_times.txt"

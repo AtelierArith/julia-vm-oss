@@ -1,5 +1,6 @@
 # RegexMatch field access: m.match, m.captures, m.offset, m.offsets
-# Issue #2116
+# Issue #2116; representation updated to upstream Vectors in Issue #10182
+# (m.captures::Vector{Union{Nothing,SubString{String}}}, m.offsets::Vector{Int}).
 
 using Test
 
@@ -8,20 +9,23 @@ using Test
     m = match(r"(\d+)", "abc123def")
     @test m.match == "123"
     @test m.offset == 4
-    @test m.captures == ("123",)
-    @test m.offsets == (4,)
+    @test m.captures == ["123"]
+    @test m.captures isa Vector
+    @test m.offsets == [4]
+    @test m.offsets isa Vector{Int}
 
     # Multiple capture groups
     m2 = match(r"(\w+)@(\w+)", "user@host")
     @test m2.match == "user@host"
-    @test m2.captures == ("user", "host")
+    @test m2.captures == ["user", "host"]
     @test m2.offset == 1
 
     # No capture groups
     m3 = match(r"\d+", "abc123def")
     @test m3.match == "123"
     @test m3.offset == 4
-    @test m3.captures == ()
+    @test m3.captures == []
+    @test isempty(m3.captures)
 
     # Match at beginning
     m4 = match(r"(\w+)", "hello world")

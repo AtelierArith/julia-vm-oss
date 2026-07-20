@@ -54,6 +54,25 @@ function copy(e::Expr)
 end
 
 # ============================================================================
+# Structural equality for AST nodes (Issue #9183)
+# ============================================================================
+# Based on Julia's base/expr.jl:
+#   ==(x::Expr, y::Expr) = x.head === y.head && isequal(x.args, y.args)
+#   ==(x::QuoteNode, y::QuoteNode) = isequal(x.value, y.value)
+# `Expr`/`QuoteNode` equality is field-structural, not identity: two quoted
+# expressions built independently (`:(x + 1) == :(x + 1)`) are `==`-equal even
+# though they are distinct objects. Without these methods a scalar `Expr == Expr`
+# fell through the binary compiler's numeric fast path and errored
+# `Cannot convert Expr to I64`.
+function ==(x::Expr, y::Expr)
+    return x.head === y.head && isequal(x.args, y.args)
+end
+
+function ==(x::QuoteNode, y::QuoteNode)
+    return isequal(x.value, y.value)
+end
+
+# ============================================================================
 # Pure Julia implementation of Meta functions (defined at top level for
 # Base function lookup, then re-exported through Meta module)
 # ============================================================================

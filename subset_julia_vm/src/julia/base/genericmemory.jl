@@ -7,7 +7,8 @@
 # It is a low-level fixed-size typed buffer used internally by Vector, Dict, etc.
 #
 # SubsetJuliaVM implementation: Memory{T} is a native Rust primitive type.
-# Constructor: Memory{T}(n) creates a typed buffer of length n.
+# Constructor: Memory{T}(undef, n) creates a typed buffer of length n
+# (single-arg Memory{T}(n) is a MethodError, matching upstream; Issue #10324).
 # Builtin support: length, getindex, setindex! are handled natively.
 #
 # This file provides Pure Julia functions that work on top of the native Memory type:
@@ -90,7 +91,7 @@ end
 
 function _memory_similar_dims(::Type{S}, dims::Tuple) where S
     if length(dims) == 1
-        return Memory{S}(dims[1])
+        return Memory{S}(undef, dims[1])
     end
     len = 1
     for d in dims
@@ -99,7 +100,7 @@ function _memory_similar_dims(::Type{S}, dims::Tuple) where S
         end
         len = len * d
     end
-    return wrap(Array, Memory{S}(len), dims)
+    return wrap(Array, Memory{S}(undef, len), dims)
 end
 
 function _memory_similar_vararg_dims(::Type{S}, d1::Int64, d2::Int64, dims::Tuple) where S
@@ -116,11 +117,11 @@ function _memory_similar_vararg_dims(::Type{S}, d1::Int64, d2::Int64, dims::Tupl
 end
 
 function similar(m::Memory{T}) where T
-    return Memory{T}(length(m))
+    return Memory{T}(undef, length(m))
 end
 
 function similar(m::Memory{T}, n::Int64) where T
-    return Memory{T}(n)
+    return Memory{T}(undef, n)
 end
 
 function similar(m::Memory{T}, d1::Int64, d2::Int64, dims::Int64...) where T
@@ -132,11 +133,11 @@ function similar(m::Memory{T}, dims::Tuple) where T
 end
 
 function similar(m::Memory{T}, ::Type{S}) where {T,S}
-    return Memory{S}(length(m))
+    return Memory{S}(undef, length(m))
 end
 
 function similar(m::Memory{T}, ::Type{S}, n::Int64) where {T,S}
-    return Memory{S}(n)
+    return Memory{S}(undef, n)
 end
 
 function similar(m::Memory{T}, ::Type{S}, d1::Int64, d2::Int64, dims::Int64...) where {T,S}
@@ -190,7 +191,7 @@ Create a shallow copy of `m`.
 """
 function copy(m::Memory{T}) where T
     n = length(m)
-    result = Memory{T}(n)
+    result = Memory{T}(undef, n)
     unsafe_copyto!(result, 1, m, 1, n)
     return result
 end

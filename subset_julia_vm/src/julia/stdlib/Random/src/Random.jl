@@ -14,7 +14,7 @@
 
 module Random
 
-export seed!, shuffle!, shuffle, randperm!, randperm, randcycle!, randcycle, randsubseq!, randsubseq
+export seed!, rand!, randn!, shuffle!, shuffle, randperm!, randperm, randcycle!, randcycle, randsubseq!, randsubseq
 
 # seed!(n) - Reseed the global random number generator
 # This function is implemented as a builtin and handled by compile_module_call.
@@ -33,6 +33,42 @@ export seed!, shuffle!, shuffle, randperm!, randperm, randcycle!, randcycle, ran
 # and convert to integer range.
 function _rand_int(n)
     return Int64(floor(rand() * n)) + 1
+end
+
+# =============================================================================
+# rand! / randn! - In-place random fills
+# =============================================================================
+# Based on Julia's stdlib/Random/src/Random.jl array machinery and
+# stdlib/Random/src/normal.jl randn! fallback.
+
+function rand!(rng::AbstractRNG, A)
+    T = eltype(A)
+    for i in eachindex(A)
+        A[i] = rand(rng, T)
+    end
+    return A
+end
+
+function rand!(A)
+    return rand!(Random.default_rng(), A)
+end
+
+function randn!(rng::AbstractRNG, A)
+    T = eltype(A)
+    if !(T <: AbstractFloat)
+        if length(A) == 0
+            return A
+        end
+        throw(MethodError(randn, (rng, T)))
+    end
+    for i in eachindex(A)
+        A[i] = convert(T, randn(rng))
+    end
+    return A
+end
+
+function randn!(A)
+    return randn!(Random.default_rng(), A)
 end
 
 # =============================================================================

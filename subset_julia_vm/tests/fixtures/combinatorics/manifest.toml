@@ -10,7 +10,7 @@ description = "isperm: check if array is a valid permutation (Issue #353)"
 name = "combinatorics_invperm"
 file = "invperm.jl"
 expected = true
-description = "invperm: compute inverse permutation (Issue #353)"
+description = "invperm: compute inverse permutation and preserve Int64 indices (Issues #353, #10089)"
 
 [[tests]]
 name = "combinatorics_factorial"

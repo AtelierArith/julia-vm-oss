@@ -1,6 +1,6 @@
 # Issue #4766 / #5038 (prevention sibling of #4757 / #4766 IOBuffer matrix /
 # #4774 container matrix): the `Symbol(x)` / `Symbol(args...)` display entry
-# point (`BuiltinId::SymbolNew`, `subset_julia_vm/src/vm/builtins_macro/mod.rs`)
+# point (`BuiltinId::SymbolNew`, `subset_julia_vm_vm/src/vm/builtins_macro/mod.rs`)
 # fed a raw popped Value to `format_value_print` WITHOUT first resolving
 # `Value::StructRef` against the struct heap, so `Symbol(::struct)` /
 # `Symbol(::Pair)` leaked the Rust debug `StructRef(heap_idx=N)` repr into the

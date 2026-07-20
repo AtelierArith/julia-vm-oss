@@ -1,0 +1,2066 @@
+[
+  {
+    "name": "Boolean literals",
+    "source": "true\nfalse",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 10
+        },
+        "children": [
+          {
+            "kind": "BooleanLiteral",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [],
+            "value": {
+              "Keyword": "true"
+            },
+            "flags": []
+          },
+          {
+            "kind": "BooleanLiteral",
+            "span": {
+              "start": 5,
+              "end": 10
+            },
+            "children": [],
+            "value": {
+              "Keyword": "false"
+            },
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Integer number literals",
+    "source": "0b01\n0o01234567\n0123456789\n123_456_789\n0x0123456789_abcdef_ABCDEF",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 65
+        },
+        "children": [
+          {
+            "kind": "IntegerLiteral",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [],
+            "value": {
+              "IntegerLiteral": "0b01"
+            },
+            "flags": []
+          },
+          {
+            "kind": "IntegerLiteral",
+            "span": {
+              "start": 5,
+              "end": 15
+            },
+            "children": [],
+            "value": {
+              "IntegerLiteral": "0o01234567"
+            },
+            "flags": []
+          },
+          {
+            "kind": "IntegerLiteral",
+            "span": {
+              "start": 16,
+              "end": 26
+            },
+            "children": [],
+            "value": {
+              "IntegerLiteral": "0123456789"
+            },
+            "flags": []
+          },
+          {
+            "kind": "IntegerLiteral",
+            "span": {
+              "start": 27,
+              "end": 38
+            },
+            "children": [],
+            "value": {
+              "IntegerLiteral": "123_456_789"
+            },
+            "flags": []
+          },
+          {
+            "kind": "IntegerLiteral",
+            "span": {
+              "start": 39,
+              "end": 65
+            },
+            "children": [],
+            "value": {
+              "IntegerLiteral": "0x0123456789_abcdef_ABCDEF"
+            },
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Float number literals",
+    "source": "0123456789.\n.0123456789\n0123456789.0123456789\n\n9e10\n9E-1\n9f10\n9f-1\n\n.1e10\n1.1e10\n1.e10\n\n0x0123456789_abcdef.ABCDEFp0\n0x0123456789_abcdef_ABCDEF.p-1\n0x.0123456789_abcdef_ABCDEFp1\n\n0x1.8P3\n0x0.0000000000000P+0\n0x.aP-1064",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 218
+        },
+        "children": [
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 0,
+              "end": 11
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0123456789."
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 12,
+              "end": 23
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": ".0123456789"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 24,
+              "end": 45
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0123456789.0123456789"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 47,
+              "end": 51
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "9e10"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 52,
+              "end": 56
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "9E-1"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 57,
+              "end": 61
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "9f10"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 62,
+              "end": 66
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "9f-1"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 68,
+              "end": 73
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": ".1e10"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 74,
+              "end": 80
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "1.1e10"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 81,
+              "end": 86
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "1.e10"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 88,
+              "end": 116
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0x0123456789_abcdef.ABCDEFp0"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 117,
+              "end": 147
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0x0123456789_abcdef_ABCDEF.p-1"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 148,
+              "end": 177
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0x.0123456789_abcdef_ABCDEFp1"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 179,
+              "end": 186
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0x1.8P3"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 187,
+              "end": 207
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0x0.0000000000000P+0"
+            },
+            "flags": []
+          },
+          {
+            "kind": "FloatLiteral",
+            "span": {
+              "start": 208,
+              "end": 218
+            },
+            "children": [],
+            "value": {
+              "FloatLiteral": "0x.aP-1064"
+            },
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Character literals",
+    "source": "' '\n'o'\n'\\t'\n'\\u0'\n'\\uffff'",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 27
+        },
+        "children": [
+          {
+            "kind": "CharacterLiteral",
+            "span": {
+              "start": 0,
+              "end": 3
+            },
+            "children": [],
+            "value": {
+              "CharacterLiteral": "' '"
+            },
+            "flags": []
+          },
+          {
+            "kind": "CharacterLiteral",
+            "span": {
+              "start": 4,
+              "end": 7
+            },
+            "children": [],
+            "value": {
+              "CharacterLiteral": "'o'"
+            },
+            "flags": []
+          },
+          {
+            "kind": "CharacterLiteral",
+            "span": {
+              "start": 8,
+              "end": 12
+            },
+            "children": [],
+            "value": {
+              "CharacterLiteral": "'\\t'"
+            },
+            "flags": []
+          },
+          {
+            "kind": "CharacterLiteral",
+            "span": {
+              "start": 13,
+              "end": 18
+            },
+            "children": [],
+            "value": {
+              "CharacterLiteral": "'\\u0'"
+            },
+            "flags": []
+          },
+          {
+            "kind": "CharacterLiteral",
+            "span": {
+              "start": 19,
+              "end": 27
+            },
+            "children": [],
+            "value": {
+              "CharacterLiteral": "'\\uffff'"
+            },
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "String literals",
+    "source": "\"\"\n\"foo\n bar\"",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 13
+        },
+        "children": [
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 0,
+              "end": 2
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 3,
+              "end": 13
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 4,
+                  "end": 12
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "foo\n bar"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "String literals - Escape sequences",
+    "source": "\"\\\"\"\n\"this is a \\\"string\\\".\"\n\"\\\\\" # I am a comment \"",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 52
+        },
+        "children": [
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\\""
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 5,
+              "end": 28
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 6,
+                  "end": 16
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "this is a "
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 16,
+                  "end": 18
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\\""
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 18,
+                  "end": 24
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "string"
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 24,
+                  "end": 26
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\\""
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 26,
+                  "end": 27
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "."
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 29,
+              "end": 33
+            },
+            "children": [
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 30,
+                  "end": 32
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\\\"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 34,
+              "end": 52
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "String literals - Interpolations",
+    "source": "band = \"Interpol\"\n\"$band is a cool band\"\n\"$(2*π) is a cool number\"\n\"cells interlinked within $(\"cells interlinked whithin $(\"cells interlinked whithin one stem\")\")\"",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 165
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 17
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 4
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "band"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 5,
+                  "end": 6
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringExpression",
+                "span": {
+                  "start": 7,
+                  "end": 17
+                },
+                "children": [
+                  {
+                    "kind": "StringFragment",
+                    "span": {
+                      "start": 8,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "StringFragment": "Interpol"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 18,
+              "end": 40
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 20,
+                  "end": 24
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "band"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 24,
+                  "end": 39
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": " is a cool band"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 41,
+              "end": 67
+            },
+            "children": [
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 43,
+                  "end": 49
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 44,
+                      "end": 48
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 44,
+                          "end": 45
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 45,
+                          "end": 46
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "*"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 46,
+                          "end": 48
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "π"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 49,
+                  "end": 66
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": " is a cool number"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 68,
+              "end": 165
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 69,
+                  "end": 94
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "cells interlinked within "
+                },
+                "flags": []
+              },
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 95,
+                  "end": 164
+                },
+                "children": [
+                  {
+                    "kind": "StringExpression",
+                    "span": {
+                      "start": 96,
+                      "end": 163
+                    },
+                    "children": [
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 97,
+                          "end": 123
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "cells interlinked whithin "
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "ParenExpression",
+                        "span": {
+                          "start": 124,
+                          "end": 162
+                        },
+                        "children": [
+                          {
+                            "kind": "StringExpression",
+                            "span": {
+                              "start": 125,
+                              "end": 161
+                            },
+                            "children": [
+                              {
+                                "kind": "StringFragment",
+                                "span": {
+                                  "start": 126,
+                                  "end": 160
+                                },
+                                "children": [],
+                                "value": {
+                                  "StringFragment": "cells interlinked whithin one stem"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "String literals - Assignment inside interpolation",
+    "source": "\"a $(b = c)\"",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 12
+        },
+        "children": [
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 0,
+              "end": 12
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "a "
+                },
+                "flags": []
+              },
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 4,
+                  "end": 11
+                },
+                "children": [
+                  {
+                    "kind": "Assignment",
+                    "span": {
+                      "start": 5,
+                      "end": 10
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 5,
+                          "end": 6
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 7,
+                          "end": 8
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "c"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "String literals - Triple quote delimiters",
+    "source": "\"\"\"\na \"quoted\" string\"\"\"\n\"\"\"a $name string\"\"\"\n\"\"\"a $(a + b) string\"\"\"\n\"\"\"a \\$name string\"\"\"",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 91
+        },
+        "children": [
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 0,
+              "end": 24
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 3,
+                  "end": 21
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\na \"quoted\" string"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 25,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 28,
+                  "end": 30
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "a "
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 31,
+                  "end": 35
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "name"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 35,
+                  "end": 42
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": " string"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 46,
+              "end": 69
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 49,
+                  "end": 51
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "a "
+                },
+                "flags": []
+              },
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 52,
+                  "end": 59
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 53,
+                      "end": 58
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 53,
+                          "end": 54
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 55,
+                          "end": 56
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 57,
+                          "end": 58
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 59,
+                  "end": 66
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": " string"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StringExpression",
+            "span": {
+              "start": 70,
+              "end": 91
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 73,
+                  "end": 75
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "a "
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 75,
+                  "end": 77
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\$"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 77,
+                  "end": 88
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "name string"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Non-standard string literals",
+    "source": "trailing_ws = r\"\\s+$\"\nversion = v\"1.0\"\ntext = md\"-- $(x) --\"\nK\"\\\\\"\nr\"fo*\"i",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 74
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 21
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 11
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "trailing_ws"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 12,
+                  "end": 13
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "NsStringExpression",
+                "span": {
+                  "start": 14,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "r"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "StringFragment",
+                    "span": {
+                      "start": 16,
+                      "end": 20
+                    },
+                    "children": [],
+                    "value": {
+                      "StringFragment": "\\s+$"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 22,
+              "end": 38
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 22,
+                  "end": 29
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "version"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 30,
+                  "end": 31
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "NsStringExpression",
+                "span": {
+                  "start": 32,
+                  "end": 38
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 32,
+                      "end": 33
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "v"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "StringFragment",
+                    "span": {
+                      "start": 34,
+                      "end": 37
+                    },
+                    "children": [],
+                    "value": {
+                      "StringFragment": "1.0"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 39,
+              "end": 60
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 39,
+                  "end": 43
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "text"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 44,
+                  "end": 45
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "NsStringExpression",
+                "span": {
+                  "start": 46,
+                  "end": 60
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 46,
+                      "end": 48
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "md"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "StringFragment",
+                    "span": {
+                      "start": 49,
+                      "end": 59
+                    },
+                    "children": [],
+                    "value": {
+                      "StringFragment": "-- $(x) --"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "NsStringExpression",
+            "span": {
+              "start": 61,
+              "end": 66
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 61,
+                  "end": 62
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "K"
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 63,
+                  "end": 65
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\\\"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "NsStringExpression",
+            "span": {
+              "start": 67,
+              "end": 74
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 67,
+                  "end": 68
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "r"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 69,
+                  "end": 72
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "fo*"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 73,
+                  "end": 74
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "i"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Command string literals",
+    "source": "`pwd`\nm`pwd`\n`cd $dir`\n`echo \\`cmd\\``\n```\necho \"\\033[31mred\\033[m\"\n```\n`foo $(a + b) bar`\n`foo \\$name bar`",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 106
+        },
+        "children": [
+          {
+            "kind": "CommandExpression",
+            "span": {
+              "start": 0,
+              "end": 5
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 1,
+                  "end": 4
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "pwd"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "NsCommandExpression",
+            "span": {
+              "start": 6,
+              "end": 12
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 6,
+                  "end": 7
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "m"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 8,
+                  "end": 11
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "pwd"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CommandExpression",
+            "span": {
+              "start": 13,
+              "end": 22
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 14,
+                  "end": 17
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "cd "
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 18,
+                  "end": 21
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "dir"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CommandExpression",
+            "span": {
+              "start": 23,
+              "end": 37
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 24,
+                  "end": 29
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "echo "
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 29,
+                  "end": 31
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\`"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 31,
+                  "end": 34
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "cmd"
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 34,
+                  "end": 36
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\`"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CommandExpression",
+            "span": {
+              "start": 38,
+              "end": 70
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 41,
+                  "end": 48
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\necho \""
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 48,
+                  "end": 52
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\033"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 52,
+                  "end": 59
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "[31mred"
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 59,
+                  "end": 63
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\033"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 63,
+                  "end": 67
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "[m\"\n"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CommandExpression",
+            "span": {
+              "start": 71,
+              "end": 89
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 72,
+                  "end": 76
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "foo "
+                },
+                "flags": []
+              },
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 77,
+                  "end": 84
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 78,
+                      "end": 83
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 78,
+                          "end": 79
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 80,
+                          "end": 81
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 82,
+                          "end": 83
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 84,
+                  "end": 88
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": " bar"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CommandExpression",
+            "span": {
+              "start": 90,
+              "end": 106
+            },
+            "children": [
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 91,
+                  "end": 95
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "foo "
+                },
+                "flags": []
+              },
+              {
+                "kind": "EscapeSequence",
+                "span": {
+                  "start": 95,
+                  "end": 97
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "\\$"
+                },
+                "flags": []
+              },
+              {
+                "kind": "StringFragment",
+                "span": {
+                  "start": 97,
+                  "end": 105
+                },
+                "children": [],
+                "value": {
+                  "StringFragment": "name bar"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Comments",
+    "source": "# line comment\n#= block comment =#\n\nx = #= inline block comment =# 1\n\n#==#\n\n#=\nmulti line comment\n=#\n\n#= nested #= block #= comments =# =# =#",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 141
+        },
+        "children": [
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 0,
+              "end": 14
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BlockComment",
+            "span": {
+              "start": 15,
+              "end": 34
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 36,
+              "end": 68
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 36,
+                  "end": 37
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 38,
+                  "end": 39
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "BlockComment",
+                "span": {
+                  "start": 40,
+                  "end": 66
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 67,
+                  "end": 68
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "1"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BlockComment",
+            "span": {
+              "start": 70,
+              "end": 74
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BlockComment",
+            "span": {
+              "start": 76,
+              "end": 100
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BlockComment",
+            "span": {
+              "start": 102,
+              "end": 141
+            },
+            "children": [
+              {
+                "kind": "BlockComment",
+                "span": {
+                  "start": 112,
+                  "end": 138
+                },
+                "children": [
+                  {
+                    "kind": "BlockComment",
+                    "span": {
+                      "start": 121,
+                      "end": 135
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  }
+]

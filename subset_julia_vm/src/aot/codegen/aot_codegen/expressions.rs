@@ -185,6 +185,21 @@ impl AotCodeGenerator {
         })
     }
 
+    fn emit_sum_iter_expr(&self, iter: &AotExpr) -> AotResult<String> {
+        let StaticType::Array { ndims, .. } = iter.get_type() else {
+            return self.emit_owned_iter_expr(iter);
+        };
+        let Some(rank) = ndims else {
+            return self.emit_owned_iter_expr(iter);
+        };
+        if rank <= 1 {
+            return self.emit_owned_iter_expr(iter);
+        }
+
+        let iter_str = self.emit_expr_to_string(iter)?;
+        Ok(build_column_major_iter_expr(&iter_str, rank))
+    }
+
     fn emit_comprehension_loop_nest(
         &self,
         iterations: &[(String, AotExpr)],
@@ -396,7 +411,7 @@ impl AotCodeGenerator {
                     ))
                 })?;
                 Ok(format!(
-                    "subset_julia_vm_runtime::dynamic_binop(subset_julia_vm_runtime::BinOp::{}, &({}), &({})).unwrap()",
+                    "subset_julia_vm_runtime::dynamic_binop(subset_julia_vm_runtime::BinOp::{}, &({}), &({})).unwrap_or_else(|e| subset_julia_vm_runtime::error::aot_throw(e))",
                     runtime_op, left_str, right_str
                 ))
             }
@@ -439,13 +454,13 @@ impl AotCodeGenerator {
                     .collect::<AotResult<_>>()?;
                 if self.needs_dispatch(function) {
                     Ok(format!(
-                        "{}({}).unwrap()",
+                        "{}({}).unwrap_or_else(|e| subset_julia_vm_runtime::error::aot_throw(e))",
                         AotFunction::sanitize_function_name(function),
                         args_str.join(", ")
                     ))
                 } else {
                     Ok(format!(
-                        "subset_julia_vm_runtime::dynamic_call(\"{}\", &[{}]).unwrap()",
+                        "subset_julia_vm_runtime::dynamic_call(\"{}\", &[{}]).unwrap_or_else(|e| subset_julia_vm_runtime::error::aot_throw(e))",
                         function,
                         args_str.join(", ")
                     ))
@@ -580,11 +595,10 @@ impl AotCodeGenerator {
                         ));
                     };
                     if *idx < 1 || (*idx as usize) > tuple_len {
-                        return Err(AotError::CodegenError(format!(
-                            "AoT tuple index {} is out of bounds for tuple length {} \
-                             (Issue #6962)",
-                            idx, tuple_len
-                        )));
+                        return Ok(format!(
+                            "subset_julia_vm_runtime::error::aot_throw(format!(\"BoundsError({{:?}}, ({{}},))\", &{}, {}i64))",
+                            array_str, idx
+                        ));
                     }
                     let rust_idx = *idx - 1;
                     Ok(format!("{}.{}", array_str, rust_idx))
@@ -592,6 +606,10 @@ impl AotCodeGenerator {
                     // 1D array indexing or N-D linear indexing: arr[i]
                     let index_str = self.emit_expr_to_string(&indices[0])?;
                     match array_ty {
+                        StaticType::Generator { .. } => Ok(format!(
+                            "{}.as_mut().next().unwrap_or_else(|| subset_julia_vm_runtime::error::aot_throw(\"BoundsError: destructuring assignment exhausted RHS\"))",
+                            array_str
+                        )),
                         StaticType::Dict { .. } => {
                             Ok(Self::emit_checked_dict_index(&array_str, &index_str))
                         }
@@ -602,6 +620,14 @@ impl AotCodeGenerator {
                             ndims: Some(rank), ..
                         } if rank > 2 => Ok(Self::emit_checked_nd_linear_index(
                             &array_str, &index_str, rank,
+                        )),
+                        StaticType::Range { .. } => Ok(format!(
+                            "{{ let _sjulia_range = &{}; let _sjulia_idx = {}; if _sjulia_idx < 1 {{ subset_julia_vm_runtime::error::aot_throw(format!(\"BoundsError({{:?}}, ({{}},))\", _sjulia_range, _sjulia_idx)); }} _sjulia_range.clone().into_iter().nth((_sjulia_idx - 1) as usize).unwrap_or_else(|| subset_julia_vm_runtime::error::aot_throw(format!(\"BoundsError({{:?}}, ({{}},))\", _sjulia_range, _sjulia_idx)) }}",
+                            array_str, index_str
+                        )),
+                        StaticType::Any => Ok(format!(
+                            "({}).destructure_index({})",
+                            array_str, index_str
                         )),
                         _ => Ok(Self::emit_checked_1d_index(&array_str, &index_str)),
                     }
@@ -801,6 +827,21 @@ impl AotCodeGenerator {
                 captures,
                 return_ty,
             } => self.emit_lambda(params, body, captures, return_ty),
+        }
+    }
+
+    /// Box a native emission in `Value::from(...)` when the expression's
+    /// RECORDED return type is a runtime-boxed slot (Issue #10131). The
+    /// div-family / min / max emitters produce native Rust integers from the
+    /// argument types seen at codegen time; when conversion-time inference
+    /// recorded a boxed return type (the enclosing `let` slot is `Value`),
+    /// the native result must be boxed here or rustc rejects the binding
+    /// (`expected Value, found u64`).
+    fn box_native_result_if_needed(expr: String, return_ty: &StaticType) -> String {
+        if AotAbiValue::from_static_type(return_ty).needs_runtime_value() {
+            format!("Value::from({})", expr)
+        } else {
+            expr
         }
     }
 
@@ -1256,16 +1297,70 @@ impl AotCodeGenerator {
             AotBuiltinOp::Trunc => Ok(format!("{}.trunc()", args[0])),
             AotBuiltinOp::Min => {
                 if args.len() == 2 {
-                    Ok(format!("{}.min({})", args[0], args[1]))
+                    let (left, right) = Self::promote_binary_numeric_operands(
+                        &args[0],
+                        &args[1],
+                        arg_types.first(),
+                        arg_types.get(1),
+                    );
+                    Ok(Self::box_native_result_if_needed(
+                        format!("{}.min({})", left, right),
+                        return_ty,
+                    ))
                 } else {
                     Ok(format!("min({})", args.join(", ")))
                 }
             }
             AotBuiltinOp::Max => {
                 if args.len() == 2 {
-                    Ok(format!("{}.max({})", args[0], args[1]))
+                    let (left, right) = Self::promote_binary_numeric_operands(
+                        &args[0],
+                        &args[1],
+                        arg_types.first(),
+                        arg_types.get(1),
+                    );
+                    Ok(Self::box_native_result_if_needed(
+                        format!("{}.max({})", left, right),
+                        return_ty,
+                    ))
                 } else {
                     Ok(format!("max({})", args.join(", ")))
+                }
+            }
+            // isless(a, b): Julia's canonical total order (Issue #10131).
+            // Integers/Bool coincide with `<`; floats sort every NaN after
+            // all other values and -0.0 before 0.0, mirroring upstream
+            // julia/base/float.jl `isless` via the `_fpint` sign-flip
+            // (`to_bits` reinterpret, negative patterns xor'd with MAX).
+            AotBuiltinOp::IsLess => {
+                if args.len() != 2 {
+                    return Ok(format!("/* isless: expected 2 args, got {} */", args.len()));
+                }
+                let (left, right) = Self::promote_binary_numeric_operands(
+                    &args[0],
+                    &args[1],
+                    arg_types.first(),
+                    arg_types.get(1),
+                );
+                let float_width = match (arg_types.first(), arg_types.get(1)) {
+                    (Some(a), Some(b))
+                        if matches!(a, StaticType::F64) || matches!(b, StaticType::F64) =>
+                    {
+                        Some(("f64", "i64"))
+                    }
+                    (Some(a), Some(b)) if a.is_float() || b.is_float() => Some(("f32", "i32")),
+                    _ => None,
+                };
+                match float_width {
+                    Some((f, i)) => Ok(format!(
+                        "{{ let __isless_a: {f} = {left}; let __isless_b: {f} = {right}; \
+                         if __isless_a.is_nan() || __isless_b.is_nan() {{ !__isless_a.is_nan() }} \
+                         else {{ \
+                         let __isless_ia = {{ let __x = __isless_a.to_bits() as {i}; if __x < 0 {{ __x ^ {i}::MAX }} else {{ __x }} }}; \
+                         let __isless_ib = {{ let __x = __isless_b.to_bits() as {i}; if __x < 0 {{ __x ^ {i}::MAX }} else {{ __x }} }}; \
+                         __isless_ia < __isless_ib }} }}"
+                    )),
+                    None => Ok(format!("({} < {})", left, right)),
                 }
             }
             AotBuiltinOp::Clamp => {
@@ -1281,11 +1376,14 @@ impl AotCodeGenerator {
             // Integer math operations
             AotBuiltinOp::Div => {
                 if args.len() == 2 && arg_types.iter().take(2).all(|ty| ty.is_integer()) {
-                    Ok(Self::emit_checked_truncating_int_div(
-                        &args[0],
-                        &args[1],
-                        &arg_types[0],
-                        &arg_types[1],
+                    Ok(Self::box_native_result_if_needed(
+                        Self::emit_checked_truncating_int_div(
+                            &args[0],
+                            &args[1],
+                            &arg_types[0],
+                            &arg_types[1],
+                            return_ty,
+                        ),
                         return_ty,
                     ))
                 } else {
@@ -1294,11 +1392,14 @@ impl AotCodeGenerator {
             }
             AotBuiltinOp::Mod => {
                 if args.len() == 2 && arg_types.iter().take(2).all(|ty| ty.is_integer()) {
-                    Ok(Self::emit_checked_int_mod(
-                        &args[0],
-                        &args[1],
-                        &arg_types[0],
-                        &arg_types[1],
+                    Ok(Self::box_native_result_if_needed(
+                        Self::emit_checked_int_mod(
+                            &args[0],
+                            &args[1],
+                            &arg_types[0],
+                            &arg_types[1],
+                            return_ty,
+                        ),
                         return_ty,
                     ))
                 } else {
@@ -1307,11 +1408,14 @@ impl AotCodeGenerator {
             }
             AotBuiltinOp::Rem => {
                 if args.len() == 2 && arg_types.iter().take(2).all(|ty| ty.is_integer()) {
-                    Ok(Self::emit_checked_int_rem(
-                        &args[0],
-                        &args[1],
-                        &arg_types[0],
-                        &arg_types[1],
+                    Ok(Self::box_native_result_if_needed(
+                        Self::emit_checked_int_rem(
+                            &args[0],
+                            &args[1],
+                            &arg_types[0],
+                            &arg_types[1],
+                            return_ty,
+                        ),
                         return_ty,
                     ))
                 } else {
@@ -1320,11 +1424,14 @@ impl AotCodeGenerator {
             }
             AotBuiltinOp::Fld => {
                 if args.len() == 2 && arg_types.iter().take(2).all(|ty| ty.is_integer()) {
-                    Ok(Self::emit_checked_int_fld(
-                        &args[0],
-                        &args[1],
-                        &arg_types[0],
-                        &arg_types[1],
+                    Ok(Self::box_native_result_if_needed(
+                        Self::emit_checked_int_fld(
+                            &args[0],
+                            &args[1],
+                            &arg_types[0],
+                            &arg_types[1],
+                            return_ty,
+                        ),
                         return_ty,
                     ))
                 } else {
@@ -1333,11 +1440,14 @@ impl AotCodeGenerator {
             }
             AotBuiltinOp::Cld => {
                 if args.len() == 2 && arg_types.iter().take(2).all(|ty| ty.is_integer()) {
-                    Ok(Self::emit_checked_int_cld(
-                        &args[0],
-                        &args[1],
-                        &arg_types[0],
-                        &arg_types[1],
+                    Ok(Self::box_native_result_if_needed(
+                        Self::emit_checked_int_cld(
+                            &args[0],
+                            &args[1],
+                            &arg_types[0],
+                            &arg_types[1],
+                            return_ty,
+                        ),
                         return_ty,
                     ))
                 } else {
@@ -1359,13 +1469,19 @@ impl AotCodeGenerator {
                 Ok(format!("{{ let _ = {}.insert({}); {}.clone() }}", args[0], args[1], args[0]))
             }
             AotBuiltinOp::Push => Ok(format!("{}.push({})", args[0], args[1])),
+            // pop!/popfirst! on an empty collection: upstream Julia throws
+            // `ArgumentError: array must be non-empty` (matches the VM
+            // interpreter's `VmError::EmptyArrayPop` mapping in
+            // `vm/exec/error_handling.rs`), routed through the same diverging
+            // `aot_throw` used by every other Julia-visible error template in
+            // this file instead of an uncontrolled raw Rust abort (Issue #10955).
             AotBuiltinOp::Pop => Ok(format!(
-                "{}.pop().expect(\"pop! from empty collection\")",
+                "{}.pop().unwrap_or_else(|| subset_julia_vm_runtime::error::aot_throw(\"ArgumentError: array must be non-empty\"))",
                 args[0]
             )),
             AotBuiltinOp::PushFirst => Ok(format!("{}.insert(0, {})", args[0], args[1])),
             AotBuiltinOp::PopFirst => Ok(format!(
-                "{{ if {}.is_empty() {{ panic!(\"popfirst! from empty collection\") }} else {{ {}.remove(0) }} }}",
+                "{{ if {}.is_empty() {{ subset_julia_vm_runtime::error::aot_throw(\"ArgumentError: array must be non-empty\") }} else {{ {}.remove(0) }} }}",
                 args[0], args[0]
             )),
             // insert!(arr, i, x) -> arr.insert((i - 1) as usize, x)
@@ -1481,7 +1597,7 @@ impl AotCodeGenerator {
                 if args.len() == 1 {
                     Ok(format!(
                         "{}.sum::<{}>()",
-                        self.emit_owned_iter_expr(&raw_args[0])?,
+                        self.emit_sum_iter_expr(&raw_args[0])?,
                         sum_ty
                     ))
                 } else if args.len() >= 2 {
@@ -1672,8 +1788,15 @@ impl AotCodeGenerator {
                     display_args.join(", ")
                 ))
             }
+            // A clock that appears to run backwards relative to UNIX_EPOCH is a
+            // host-environment anomaly, not a Julia-level error condition
+            // (there is no Julia exception type for it) — mirror the VM
+            // interpreter's own `time_ns()` handler
+            // (`vm/builtins_io.rs::BuiltinId::TimeNs`), which falls back to
+            // zero elapsed time via `unwrap_or_default()` instead of panicking
+            // (Issue #10955; keeps AoT/interpreter behavior identical here).
             AotBuiltinOp::TimeNs => Ok(
-                "std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect(\"time went backwards\").as_nanos() as i64".to_string()
+                "std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as i64".to_string()
             ),
 
             // Type operations
@@ -1753,6 +1876,18 @@ impl AotCodeGenerator {
             }
 
             // Complex number operations (Issue #3410)
+            AotBuiltinOp::Abs2
+                if arg_types
+                    .first()
+                    .is_some_and(|ty| AotAbiValue::from_static_type(ty).needs_runtime_value()) =>
+            {
+                let abs2 = format!("abs2_value(&({}))", args[0]);
+                if AotAbiValue::from_static_type(return_ty).needs_runtime_value() {
+                    Ok(format!("Value::from({abs2})"))
+                } else {
+                    Ok(abs2)
+                }
+            }
             AotBuiltinOp::Abs2 => Ok(format!("abs2_complex({})", args[0])),
             AotBuiltinOp::Real => Ok(format!("real_complex({})", args[0])),
             AotBuiltinOp::Imag => Ok(format!("imag_complex({})", args[0])),
@@ -2191,6 +2326,53 @@ fn build_nested_vec_colmajor(
     }
 }
 
+fn zero_prefix_expr(root: &str, depth: usize) -> String {
+    let mut expr = root.to_string();
+    for _ in 0..depth {
+        expr.push_str("[0]");
+    }
+    expr
+}
+
+fn dimension_len_expr(root: &str, dim: usize) -> String {
+    if dim == 0 {
+        return format!("{root}.len()");
+    }
+
+    let guards = (0..dim)
+        .map(|depth| format!("{}.is_empty()", zero_prefix_expr(root, depth)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    format!(
+        "if {guards} {{ 0 }} else {{ {}.len() }}",
+        zero_prefix_expr(root, dim)
+    )
+}
+
+fn build_column_major_iter_expr(iter_str: &str, rank: usize) -> String {
+    let root = "__sjulia_sum_arr";
+    let mut expr =
+        format!("{{ let {root} = &({iter_str}); let mut __sjulia_sum_items = Vec::new(); ");
+    for dim in (0..rank).rev() {
+        expr.push_str(&format!(
+            "for __sjulia_i{dim} in 0..{} {{ ",
+            dimension_len_expr(root, dim)
+        ));
+    }
+
+    expr.push_str("__sjulia_sum_items.push(__sjulia_sum_arr");
+    for dim in 0..rank {
+        expr.push_str(&format!("[__sjulia_i{dim}]"));
+    }
+    expr.push_str(".clone());");
+
+    for _ in 0..rank {
+        expr.push_str(" }");
+    }
+    expr.push_str(" __sjulia_sum_items.into_iter() }");
+    expr
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2260,5 +2442,31 @@ mod tests {
             result,
             "vec![vec![vec![1], vec![3], vec![5]], vec![vec![2], vec![4], vec![6]]]"
         );
+    }
+
+    #[test]
+    fn test_build_column_major_iter_expr_2d_issue_8790() {
+        let result = build_column_major_iter_expr("matrix", 2);
+        assert!(result.contains("for __sjulia_i1"));
+        assert!(result.contains("for __sjulia_i0"));
+        assert!(result.contains("__sjulia_sum_arr[__sjulia_i0][__sjulia_i1].clone()"));
+        assert!(
+            result.find("for __sjulia_i1").unwrap() < result.find("for __sjulia_i0").unwrap(),
+            "outer loop should visit columns before rows: {result}"
+        );
+        assert!(!result.contains(".flatten()"));
+    }
+
+    #[test]
+    fn test_build_column_major_iter_expr_3d_issue_8790() {
+        let result = build_column_major_iter_expr("tensor", 3);
+        assert!(
+            result.find("for __sjulia_i2").unwrap() < result.find("for __sjulia_i1").unwrap()
+                && result.find("for __sjulia_i1").unwrap()
+                    < result.find("for __sjulia_i0").unwrap(),
+            "outer loops should leave first dimension varying fastest: {result}"
+        );
+        assert!(result.contains("__sjulia_sum_arr[__sjulia_i0][__sjulia_i1][__sjulia_i2].clone()"));
+        assert!(result.contains("__sjulia_sum_arr[0].is_empty()"));
     }
 }

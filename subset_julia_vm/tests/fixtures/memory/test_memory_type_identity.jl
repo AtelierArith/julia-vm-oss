@@ -1,7 +1,7 @@
 using Test
 
 @testset "Memory{T} runtime type identity and reflection" begin
-    m = Memory{Int64}(3)
+    m = Memory{Int64}(undef, 3)
     @test typeof(m) == Memory{Int64}
     @test eltype(m) == Int64
     @test length(m) == 3
@@ -22,7 +22,7 @@ using Test
     @test !(m isa Vector{Int64})
     @test !(m isa Array{Int64,1})
 
-    mf = Memory{Float64}(2)
+    mf = Memory{Float64}(undef, 2)
     mf[1] = 1.25
     mf[2] = 2.5
     @test typeof(mf) == Memory{Float64}
@@ -30,7 +30,7 @@ using Test
     @test typeof(mf[1]) == Float64
     @test mf[1] + mf[2] == 3.75
 
-    mb = Memory{Bool}(2)
+    mb = Memory{Bool}(undef, 2)
     mb[1] = true
     mb[2] = false
     @test typeof(mb) == Memory{Bool}

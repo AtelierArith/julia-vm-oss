@@ -9,6 +9,9 @@ using Test
     @test istaskdone(t) == false
 
     schedule(t)
+    @test istaskstarted(t) == false
+    @test istaskdone(t) == false
+    wait(t)
     @test istaskstarted(t) == true
     @test istaskdone(t) == true
     @test fetch(t) == 3
@@ -17,6 +20,9 @@ end
 @testset "@async macro" begin
     t = @async 2 * 3
     @test isa(t, Task)
+    @test istaskstarted(t) == false
+    @test istaskdone(t) == false
+    wait(t)
     @test istaskstarted(t) == true
     @test istaskdone(t) == true
     @test istaskfailed(t) == false
@@ -47,6 +53,13 @@ end
 @testset "@async failed task" begin
     t = @async error("boom")
     @test isa(t, Task)
+    wait_threw = false
+    try
+        wait(t)
+    catch e
+        wait_threw = isa(e, TaskFailedException)
+    end
+    @test wait_threw
     @test istaskdone(t) == true
     @test istaskfailed(t) == true
     @test_throws TaskFailedException fetch(t)

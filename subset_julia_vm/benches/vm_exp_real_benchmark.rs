@@ -7,11 +7,12 @@
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::hint::black_box;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{CompiledProgram, Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::{CompiledProgram, Value};
 
 const N: i64 = 10_000;
 

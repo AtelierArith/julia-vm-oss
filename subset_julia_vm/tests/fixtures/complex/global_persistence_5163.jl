@@ -1,7 +1,7 @@
-# Issue #5163: Complex globals are persisted through the same generic
-# struct-persistence path Rational already uses (StructRef -> struct_instances
-# -> struct_instance_to_literal), instead of a Complex-specific (f64, f64)
-# REPL slot that lost the real struct_name and element type.
+# Issue #5163: Complex globals are persisted through the same generic path
+# Rational already uses: REPLGlobals keeps the authoritative StructRef and a
+# fresh full-recompile reconstructs it once from last_struct_heap. This replaces
+# the Complex-specific (f64, f64) REPL slot that lost struct_name/element type.
 #
 # This fixture verifies that bare Complex globals of every element type keep
 # their exact type and value, mirroring upstream Julia. Re-injection of these

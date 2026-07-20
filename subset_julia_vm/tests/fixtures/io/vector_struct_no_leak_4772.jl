@@ -6,7 +6,7 @@
 # element leaked as `StructRef(heap_idx=N)` inside the compact form.
 #
 # Fix: extend `resolve_struct_refs_for_format` in
-# `subset_julia_vm/src/vm/formatting.rs` to recurse into both
+# `subset_julia_vm_vm/src/vm/formatting.rs` to recurse into both
 # `Value::Memory` and `Value::ExprArgs`, replacing the carrier
 # with a fresh `Any`-typed copy whose elements are pre-resolved.
 # The widening is throw-away (only used by the formatting copy of

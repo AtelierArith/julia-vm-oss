@@ -478,3 +478,21 @@ name = "iteration_filter_tuple_stateful_iterate_8370"
 file = "filter_tuple_stateful_iterate_8370.jl"
 expected = true
 description = "Iterators.filter over Tuple supports stateful iterate(collection, state) with Julia-visible tuple states (Issue #8370)"
+
+[[tests]]
+name = "iteration_user_iterator_traits_cached_dispatch_8555"
+file = "user_iterator_traits_cached_dispatch_8555.jl"
+expected = true
+description = "User IteratorSize/IteratorEltype/eltype extensions dispatch correctly on the precompiled-Base-cache path (Issue #8555 retires the #4088 full-compile bypass for program-local-type-anchored methods). Covers SizeUnknown+HasEltype collect (typed Vector via user eltype), HasShape{2} collect to Matrix with user size, type-object and value-form trait queries, and Base iterators keeping their own traits. Verified vs upstream julia 1.12."
+
+[[tests]]
+name = "iteration_struct_iterate_element_type_9124"
+file = "struct_iterate_element_type_9124.jl"
+expected = true
+description = "A struct implementing Base.iterate(struct, state) propagates its element type into `for x in value` instead of degrading to unknown/dynamic dispatch; covers a default+explicitly-typed state param, an empty collection, a comprehension-built Vector{Struct} field (the ArrayOf-convert regression risk from the prior analysis), and confirms builtin Array/Range/Dict iterate are unaffected (Issue #9124)."
+
+[[tests]]
+name = "iteration_struct_index_element_type_9188"
+file = "struct_index_element_type_9188.jl"
+expected = true
+description = "A struct value loaded from an array element via `arr[i]` (IndexLoad) propagates its concrete element type into the destination local slot, so `.field` access specializes to typed GetField + native ops instead of dynamic GetFieldByName dispatch. Covers a direct local, chained `c.items[i].x` access, an empty collection, a comprehension-built Vector{Struct} field, Vector{Struct}/Matrix{Struct} parameter and field annotations, push! into a Vector{Struct} field, and confirms builtin Array/Range/Tuple/Dict indexing are unaffected (Issue #9188, distinct from the #9124 iterate-protocol fix)."

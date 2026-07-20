@@ -39,6 +39,27 @@ pub(crate) struct IrConverter<'a> {
     /// User-declared abstract type names with their parent and type parameter
     /// names, used to resolve static subtype (`<:`) relations (Issue #7037).
     abstract_types: Vec<(String, Option<String>, Vec<String>)>,
+    /// Stack of nested lexical scopes (`let` blocks) currently being converted.
+    /// Each frame snapshots the enclosing scope so that same-named bindings in
+    /// sibling scopes are kept independent instead of being unified under the
+    /// first-seen static type (Issue #10251).
+    scope_stack: Vec<LexicalScopeFrame>,
+    /// Monotonic suffix shared by collision-proof AoT internal locals.
+    internal_local_counter: usize,
+    /// Rust identifiers already claimed by user bindings or generated locals.
+    /// Names are reserved after `escape_rust_ident`, because distinct Core IR
+    /// names such as `#x` and `_x` otherwise collide in generated Rust.
+    reserved_rust_locals: HashSet<String>,
+}
+
+/// Saved enclosing-scope state captured on entry to a nested lexical scope
+/// (a `let` block). On exit, any variable newly bound inside the scope is
+/// removed from `declared_locals` and its type in `engine.env` is restored to
+/// the enclosing value, so a subsequent sibling scope that rebinds the same
+/// name sees a fresh binding (Issue #10251).
+struct LexicalScopeFrame {
+    declared_snapshot: HashSet<String>,
+    env_snapshot: HashMap<String, StaticType>,
 }
 
 mod expr;
@@ -91,7 +112,7 @@ impl<'a> IrConverter<'a> {
         let functions: HashMap<String, &'a Function> = program
             .functions
             .iter()
-            .map(|f| (f.name.clone(), f))
+            .map(|f| (f.name.clone(), f.as_ref()))
             .collect();
         let generic_any_function_names = program
             .functions
@@ -125,6 +146,19 @@ impl<'a> IrConverter<'a> {
             collect_abstracts(&module.abstract_types);
         }
 
+        let mut reserved_rust_locals = HashSet::new();
+        for name in typed.globals.keys() {
+            reserved_rust_locals.insert(crate::aot::codegen::aot_codegen::escape_rust_ident(name));
+        }
+        for funcs in typed.functions.values() {
+            for func in funcs {
+                for name in func.signature.param_names.iter().chain(func.locals.keys()) {
+                    reserved_rust_locals
+                        .insert(crate::aot::codegen::aot_codegen::escape_rust_ident(name));
+                }
+            }
+        }
+
         Self {
             typed,
             engine,
@@ -134,6 +168,179 @@ impl<'a> IrConverter<'a> {
             function_occurrences: HashMap::new(),
             current_return_type: None,
             abstract_types,
+            scope_stack: Vec::new(),
+            internal_local_counter: 0,
+            reserved_rust_locals,
+        }
+    }
+
+    fn fresh_internal_local(&mut self, base: &str) -> String {
+        loop {
+            let name = format!("#{base}_{}", self.internal_local_counter);
+            self.internal_local_counter += 1;
+            let rust_name = crate::aot::codegen::aot_codegen::escape_rust_ident(&name);
+            if !self.declared_locals.contains(&name) && self.reserved_rust_locals.insert(rust_name)
+            {
+                return name;
+            }
+        }
+    }
+
+    /// Enter a nested lexical scope (a `let` block), snapshotting the enclosing
+    /// declared locals and their static types (Issue #10251).
+    ///
+    /// Also narrows `engine.env` to each fresh binding's **scope-local** type:
+    /// the union of the types it is assigned *within this scope only*. This
+    /// replaces the whole-program inference type — which unions every
+    /// assignment to the name across *all* sibling scopes — so a binding that is
+    /// monomorphic within its own scope is typed precisely (Issue #10251),
+    /// while a binding that is genuinely type-unstable within one scope stays
+    /// `Any`/`Union` and is boxed to a dynamic `Value` (Issue #7075). The
+    /// override is undone by [`Self::exit_lexical_scope`], which restores the
+    /// snapshot for every name forgotten on exit.
+    fn enter_lexical_scope(
+        &mut self,
+        bindings: &[(crate::ir::core::InternedStr, Expr)],
+        body: &Block,
+    ) {
+        let declared_snapshot = self.declared_locals.clone();
+        let env_snapshot = self.engine.env.clone();
+        let mut scope_local: HashMap<String, StaticType> = HashMap::new();
+        self.collect_scope_local_types(bindings, body, &declared_snapshot, &mut scope_local);
+        for (name, ty) in scope_local {
+            // A binding that is genuinely type-unstable *within this scope*
+            // must keep a boxed `Value` slot (Issues #7075 / #6978). That is
+            // both:
+            // - `StaticType::Union { .. }` — join of distinct concrete types
+            //   (e.g. `x = 1; x = "s"`), and
+            // - `StaticType::Any` — join involving an already-dynamic RHS
+            //   (e.g. `x = 1; x = g("s")` where `g` returns `Any`).
+            // `unify_types` collapses Any+T to Any (not Union), so treating only
+            // Union as dynamic would drop the whole-program `Any` entry, let the
+            // first concrete assignment declare an `i64` slot, and then fail
+            // codegen on the later Any store (Issue #10537; codex review of
+            // #10528). Match the declaration-site check in `stmt.rs`.
+            // Otherwise drop any cross-scope whole-program entry for this name
+            // so the precise per-site type from `convert_expr` (which, unlike
+            // `infer_expr_type`, models conversion calls like `Int8(x)`) types
+            // the fresh monomorphic binding (Issue #10251).
+            if matches!(ty, StaticType::Any | StaticType::Union { .. }) {
+                self.engine.env.insert(name, ty);
+            } else {
+                self.engine.env.remove(&name);
+            }
+        }
+        self.scope_stack.push(LexicalScopeFrame {
+            declared_snapshot,
+            env_snapshot,
+        });
+    }
+
+    /// Compute, for each name freshly bound in this lexical scope, the union of
+    /// the types it is assigned within the scope. Descends into `if`/`begin`
+    /// (same Julia scope) but NOT into nested `let`/`for`/`while` bodies (their
+    /// bindings are independent scopes). Names already declared in an enclosing
+    /// scope are treated as reassignments, not fresh bindings, and skipped
+    /// (Issue #10251).
+    fn collect_scope_local_types(
+        &self,
+        bindings: &[(crate::ir::core::InternedStr, Expr)],
+        body: &Block,
+        enclosing: &HashSet<String>,
+        out: &mut HashMap<String, StaticType>,
+    ) {
+        for (name, value) in bindings {
+            self.note_scope_local_assignment(name, value, enclosing, out);
+        }
+        self.walk_scope_local_stmts(&body.stmts, enclosing, out);
+    }
+
+    fn note_scope_local_assignment(
+        &self,
+        name: &str,
+        value: &Expr,
+        enclosing: &HashSet<String>,
+        out: &mut HashMap<String, StaticType>,
+    ) {
+        if enclosing.contains(name) {
+            return;
+        }
+        // `infer_expr_type` can see the whole-program environment for a name
+        // that is rebound in several sibling `let` scopes and conservatively
+        // report `Any`. AoT expression conversion knows about concrete
+        // conversion calls such as `Int8(3)` / `UInt8(200)`, so prefer its
+        // precise result when available and keep the broader inference only as
+        // a fallback (Issue #10111).
+        let ty = self
+            .convert_expr(value)
+            .map(|expr| expr.get_type())
+            .unwrap_or_else(|_| self.engine.infer_expr_type(value));
+        out.entry(name.to_string())
+            .and_modify(|existing| *existing = self.engine.unify_types(existing, &ty))
+            .or_insert(ty);
+    }
+
+    fn walk_scope_local_stmts(
+        &self,
+        stmts: &[Stmt],
+        enclosing: &HashSet<String>,
+        out: &mut HashMap<String, StaticType>,
+    ) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Assign { var, value, .. } => {
+                    // A plain `x = expr` binds `x` in this scope. Nested
+                    // `let`/`@time` (`LetBlock`) or assignment-expression RHS
+                    // forms keep the legacy whole-program type — they are their
+                    // own scopes / handled by the conversion heuristic.
+                    if matches!(value, Expr::LetBlock { .. } | Expr::AssignExpr { .. }) {
+                        continue;
+                    }
+                    self.note_scope_local_assignment(var, value, enclosing, out);
+                }
+                Stmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    self.walk_scope_local_stmts(&then_branch.stmts, enclosing, out);
+                    if let Some(else_branch) = else_branch {
+                        self.walk_scope_local_stmts(&else_branch.stmts, enclosing, out);
+                    }
+                }
+                Stmt::Block(block) => self.walk_scope_local_stmts(&block.stmts, enclosing, out),
+                // Nested lexical scopes: their locals are independent bindings.
+                _ => {}
+            }
+        }
+    }
+
+    /// Leave a nested lexical scope. Every variable that was newly bound inside
+    /// the scope (except any name in `keep`, which leaks its value to the
+    /// enclosing scope — e.g. the target of `x = let ... end`) is forgotten so
+    /// that a sibling scope rebinding the same name starts from a fresh binding
+    /// with its own static type. Types of forgotten names are restored to their
+    /// enclosing-scope value (Issue #10251).
+    fn exit_lexical_scope(&mut self, keep: Option<&str>) {
+        let Some(frame) = self.scope_stack.pop() else {
+            return;
+        };
+        let new_locals: Vec<String> = self
+            .declared_locals
+            .difference(&frame.declared_snapshot)
+            .filter(|name| keep != Some(name.as_str()))
+            .cloned()
+            .collect();
+        for name in new_locals {
+            self.declared_locals.remove(&name);
+            match frame.env_snapshot.get(&name) {
+                Some(prev) => {
+                    self.engine.env.insert(name, prev.clone());
+                }
+                None => {
+                    self.engine.env.remove(&name);
+                }
+            }
         }
     }
 
@@ -245,6 +452,10 @@ impl<'a> IrConverter<'a> {
             // (`HasShape{1}`, …) that AoT cannot lower; the call site routes to
             // the builtin instead.
             if crate::aot::call_graph::is_intercepted_string_builtin(&func.name) {
+                continue;
+            }
+            // Same interception for the numeric builtin family (Issue #10131).
+            if crate::aot::call_graph::is_intercepted_numeric_builtin(&func.name) {
                 continue;
             }
             let signature = Self::function_redefinition_key(func);

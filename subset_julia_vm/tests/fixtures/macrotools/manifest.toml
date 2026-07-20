@@ -13,6 +13,12 @@ expected = true
 description = "Nested macrocall expansion during macro-result conversion dereferences StructRef heap handles so OR-pattern @capture helpers (splitdef/isshortdef/splitarg) load and run (Issue #7856)"
 
 [[tests]]
+name = "macrotools_assert_capture_bindings_9055"
+file = "assert_capture_bindings_9055.jl"
+expected = true
+description = "MacroTools @capture bindings assigned inside an @assert condition remain visible after the assertion, matching upstream begin-block scoping (Issue #9055)"
+
+[[tests]]
 name = "macrotools_selective_import_module_capture_7451"
 file = "selective_import_module_capture_7451.jl"
 expected = true
@@ -124,7 +130,7 @@ description = "MacroTools typed matcher patterns keep capture bindings dynamic i
 name = "macrotools_splitarg_unbound_refs_7556"
 file = "splitarg_unbound_refs_7556.jl"
 expected = true
-description = "MacroTools @match let bindings stay branch-local so later clauses do not shadow-save uninitialized bindings (Issue #7556)"
+description = "MacroTools @match let bindings stay branch-local so later clauses do not shadow-save uninitialized bindings (Issue #7556); a Nothing-initialized local later widened by conditional destructuring retains a physical backing slot on the non-assigning path (Issue #10819)"
 
 [[tests]]
 name = "macrotools_forward_quote_7572"
@@ -173,3 +179,9 @@ name = "macrotools_upstream_flatten_try"
 file = "upstream_flatten_try.jl"
 expected = true
 description = "Upstream MacroTools.jl test/flatten_try.jl testset runs under sjulia"
+
+[[tests]]
+name = "macrotools_structdef_split_combine_9176"
+file = "structdef_split_combine_9176.jl"
+expected = true
+description = "MacroTools loads (its structdef.jl do-block quote now lowers), splitstructdef/combinestructdef round-trip a struct Expr, and @capture updates explicitly predeclared enclosing targets; fresh targets inside @test are clause-local on upstream Julia (Issues #9176/#11281)"

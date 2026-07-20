@@ -24,10 +24,13 @@ if ! command -v julia >/dev/null 2>&1; then
     exit 2
 fi
 
-sjulia_bin="./target/release/sjulia"
+# SJULIA_BIN override lets CI point at a non-default profile build,
+# e.g. target/release-fast/sjulia in the pr-fast workflow (Issue #8632).
+sjulia_bin="${SJULIA_BIN:-./target/release/sjulia}"
 if [[ ! -x "$sjulia_bin" ]]; then
-    echo "ERROR: sjulia binary not built. Run:" >&2
+    echo "ERROR: sjulia binary not built ($sjulia_bin). Run:" >&2
     echo "  cargo build --release --bin sjulia --features repl" >&2
+    echo "  (or set SJULIA_BIN to an existing sjulia binary)" >&2
     exit 2
 fi
 

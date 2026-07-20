@@ -3,7 +3,8 @@ use crate::aot::inference::{FunctionSignature, TypeInferenceEngine, TypedFunctio
 use crate::aot::ir::{AotBinOp, AotBuiltinOp, AotExpr, AotInlinePolicy, AotStmt, AotUnaryOp};
 use crate::aot::types::StaticType;
 use crate::ir::core::{
-    Expr, Function, Literal, MetaAnnotation, Program, Stmt, StructDef, StructField,
+    AbstractTypeDef, Expr, Function, Literal, MetaAnnotation, Program, RuntimeNominalDef, Stmt,
+    StructDef, StructField,
 };
 use crate::types::{JuliaType, TypeExpr, TypeParam};
 
@@ -64,6 +65,33 @@ fn empty_program() -> Program {
             span: test_span(),
         },
     }
+}
+
+#[test]
+fn runtime_nominal_definition_fails_closed_with_span_11654() {
+    let typed = TypedProgram::new();
+    let program = empty_program();
+    let mut converter = IrConverter::new(&typed, &program);
+    let span = Span::new(12, 58, 3, 3, 5, 51);
+    let statement = Stmt::RuntimeNominalDef {
+        definition: RuntimeNominalDef::AbstractType(AbstractTypeDef {
+            name: "AotRuntimeAbstract11654".to_string(),
+            parent: None,
+            type_params: vec![],
+            span,
+        }),
+        published_members: None,
+        span,
+    };
+
+    let err = converter
+        .convert_stmt(&statement)
+        .expect_err("AoT must reject runtime nominal definitions");
+    let crate::aot::AotError::UnsupportedInstruction(diagnostic) = err else {
+        panic!("expected span-bearing UnsupportedInstruction, got {err:?}");
+    };
+    assert!(diagnostic.message.contains("runtime-conditional nominal"));
+    assert_eq!(diagnostic.span, Some(span));
 }
 
 #[test]
@@ -150,7 +178,7 @@ fn global_inf_nan_constants_convert_to_float_literals_issue_7017() {
         ("NaN32", true),
     ] {
         let result = converter
-            .convert_expr(&Expr::Var(name.to_string(), test_span()))
+            .convert_expr(&Expr::Var(name.to_string().into(), test_span()))
             .unwrap();
         match (result, is_f32, name.contains("NaN")) {
             (AotExpr::LitF64(value), false, true) => assert!(value.is_nan()),
@@ -177,10 +205,10 @@ fn local_inf_nan_bindings_are_not_rewritten_issue_7017() {
         .insert("NaN".to_string(), StaticType::Str);
 
     let inf = converter
-        .convert_expr(&Expr::Var("Inf".to_string(), test_span()))
+        .convert_expr(&Expr::Var("Inf".to_string().into(), test_span()))
         .unwrap();
     let nan = converter
-        .convert_expr(&Expr::Var("NaN".to_string(), test_span()))
+        .convert_expr(&Expr::Var("NaN".to_string().into(), test_span()))
         .unwrap();
 
     assert!(matches!(
@@ -232,7 +260,7 @@ fn expression_let_block_side_effects_reject_with_span_issue_7014() {
             stmts: vec![
                 Stmt::Expr {
                     expr: Expr::Call {
-                        function: "println".to_string(),
+                        function: "println".to_string().into(),
                         args: vec![Expr::Literal(Literal::Str("side".to_string()), test_span())],
                         kwargs: vec![],
                         splat_mask: vec![false],
@@ -273,7 +301,7 @@ fn test_program_to_aot_ir_rejects_ccall_boundary_with_span() {
     let span = Span::new(10, 28, 3, 3, 5, 23);
     program.main.stmts.push(Stmt::Expr {
         expr: Expr::Call {
-            function: "ccall".to_string(),
+            function: "ccall".to_string().into(),
             args: vec![],
             kwargs: vec![],
             splat_mask: vec![],
@@ -299,7 +327,7 @@ fn local_untyped_dict_construction_rejects_with_span_issue_7034() {
 
     let span = Span::new(20, 34, 4, 4, 2, 16);
     let call = Expr::Call {
-        function: "Dict".to_string(),
+        function: "Dict".to_string().into(),
         args: vec![],
         kwargs: vec![],
         splat_mask: vec![],
@@ -337,7 +365,7 @@ fn local_dict_construction_lowers_to_hashmap_issue_7034() {
     let converter = IrConverter::new(&typed, &program);
     let span = Span::new(20, 34, 4, 4, 2, 16);
     let call = Expr::Call {
-        function: "Dict".to_string(),
+        function: "Dict".to_string().into(),
         args: vec![Expr::Pair {
             key: Box::new(Expr::Literal(Literal::Str("a".to_string()), span)),
             value: Box::new(Expr::Literal(Literal::Int(1), span)),
@@ -378,7 +406,7 @@ fn local_typed_empty_dict_construction_lowers_to_hashmap_issue_7034() {
     let converter = IrConverter::new(&typed, &program);
     let span = Span::new(20, 50, 4, 4, 2, 32);
     let call = Expr::Call {
-        function: "Dict{String, Int64}".to_string(),
+        function: "Dict{String, Int64}".into(),
         args: vec![],
         kwargs: vec![],
         splat_mask: vec![],
@@ -414,7 +442,7 @@ fn local_set_construction_lowers_to_hashset_issue_7035() {
     let converter = IrConverter::new(&typed, &program);
     let span = Span::new(20, 34, 4, 4, 2, 16);
     let call = Expr::Call {
-        function: "Set".to_string(),
+        function: "Set".to_string().into(),
         args: vec![Expr::ArrayLiteral {
             elements: vec![
                 Expr::Literal(Literal::Int(1), span),
@@ -452,8 +480,10 @@ fn parametric_struct_definition_alone_is_skipped_issue_6975() {
     let mut program = empty_program();
     let span = Span::new(2, 28, 1, 1, 1, 27);
     program.structs.push(StructDef {
+        global_new_helpers: Vec::new(),
         name: "Box".to_string(),
         is_mutable: false,
+        is_base_origin: false,
         type_params: vec![TypeParam::new("T".to_string())],
         parent_type: None,
         fields: vec![StructField {
@@ -479,8 +509,10 @@ fn parametric_struct_constructor_lowers_to_instantiated_struct_issue_7040() {
     let mut program = empty_program();
     let span = Span::new(2, 28, 1, 1, 1, 27);
     let struct_def = StructDef {
+        global_new_helpers: Vec::new(),
         name: "Box".to_string(),
         is_mutable: false,
+        is_base_origin: false,
         type_params: vec![TypeParam::new("T".to_string())],
         parent_type: None,
         fields: vec![StructField {
@@ -501,7 +533,7 @@ fn parametric_struct_constructor_lowers_to_instantiated_struct_issue_7040() {
     let converter = IrConverter::new(&typed, &program);
 
     let call = Expr::Call {
-        function: "Box{Int64}".to_string(),
+        function: "Box{Int64}".to_string().into(),
         args: vec![Expr::Literal(Literal::Int(41), test_span())],
         kwargs: vec![],
         splat_mask: vec![false],
@@ -518,7 +550,7 @@ fn parametric_struct_constructor_lowers_to_instantiated_struct_issue_7040() {
     ));
 
     let inferred_call = Expr::Call {
-        function: "Box".to_string(),
+        function: "Box".to_string().into(),
         args: vec![Expr::Literal(Literal::Float(1.5), test_span())],
         kwargs: vec![],
         splat_mask: vec![false],
@@ -541,7 +573,7 @@ fn unresolved_constructor_like_call_rejects_with_span_issue_6975() {
     let converter = IrConverter::new(&typed, &program);
     let span = Span::new(20, 26, 1, 1, 20, 26);
     let call = Expr::Call {
-        function: "Box".to_string(),
+        function: "Box".to_string().into(),
         args: vec![Expr::Literal(Literal::Int(1), test_span())],
         kwargs: vec![],
         splat_mask: vec![false],
@@ -595,8 +627,8 @@ fn test_program_to_aot_ir_rejects_core_intrinsics_llvmcall_boundary() {
     let span = Span::new(20, 64, 4, 4, 9, 53);
     program.main.stmts.push(Stmt::Expr {
         expr: Expr::ModuleCall {
-            module: "Core.Intrinsics".to_string(),
-            function: "llvmcall".to_string(),
+            module: "Core.Intrinsics".to_string().into(),
+            function: "llvmcall".to_string().into(),
             args: vec![],
             kwargs: vec![],
             splat_mask: vec![],
@@ -670,7 +702,7 @@ fn test_convert_expr_var() {
         .env
         .insert("x".to_string(), StaticType::I64);
 
-    let expr = Expr::Var("x".to_string(), test_span());
+    let expr = Expr::Var("x".to_string().into(), test_span());
     let result = converter.convert_expr(&expr).unwrap();
     assert!(
         matches!(&result, AotExpr::Var { .. }),
@@ -714,7 +746,7 @@ fn two_arg_operator_alias_calls_use_binary_path_issue_6980() {
     let converter = IrConverter::new(&typed, &program);
 
     let div_expr = Expr::Call {
-        function: "div".to_string(),
+        function: "div".to_string().into(),
         args: vec![
             Expr::Literal(Literal::Bool(true), test_span()),
             Expr::Literal(Literal::Bool(true), test_span()),
@@ -737,7 +769,7 @@ fn two_arg_operator_alias_calls_use_binary_path_issue_6980() {
     }
 
     let mod_expr = Expr::Call {
-        function: "mod".to_string(),
+        function: "mod".to_string().into(),
         args: vec![
             Expr::Literal(Literal::Bool(true), test_span()),
             Expr::Literal(Literal::Bool(true), test_span()),
@@ -770,9 +802,9 @@ fn zeros_ones_type_argument_is_not_a_dimension_issue_7069() {
     let converter = IrConverter::new(&typed, &program);
 
     let expr = Expr::Call {
-        function: "zeros".to_string(),
+        function: "zeros".to_string().into(),
         args: vec![
-            Expr::Var("Int64".to_string(), test_span()),
+            Expr::Var("Int64".to_string().into(), test_span()),
             Expr::Literal(Literal::Int(3), test_span()),
         ],
         kwargs: Vec::new(),
@@ -886,7 +918,7 @@ fn test_convert_expr_complex_im_literal_folds_to_struct_new() {
         result
     );
     if let AotExpr::StructNew { name, fields } = result {
-        assert_eq!(name, "Complex");
+        assert_eq!(name, "Complex{Float64}");
         assert_eq!(fields.len(), 2);
         assert!(matches!(fields[0], AotExpr::LitF64(v) if v == 0.0));
         assert!(matches!(fields[1], AotExpr::LitF64(v) if v == 0.0));
@@ -1037,6 +1069,181 @@ fn test_convert_stmt_assign_existing() {
 }
 
 #[test]
+fn test_convert_flat_nonliteral_destructuring_stmt_10464() {
+    let typed = TypedProgram::new();
+    let program = empty_program();
+    let mut converter = IrConverter::new(&typed, &program);
+    let tuple_ty = StaticType::Tuple(vec![StaticType::I64, StaticType::F64]);
+    converter.declared_locals.insert("rhs".to_string());
+    converter.engine.env.insert("rhs".to_string(), tuple_ty);
+
+    let stmt = Stmt::DestructuringAssign {
+        targets: vec!["a".to_string(), "b".to_string()],
+        value: Expr::Var("rhs".to_string().into(), test_span()),
+        span: test_span(),
+    };
+    let result = converter.convert_stmt_expanded(&stmt).unwrap();
+
+    assert_eq!(result.len(), 4, "tuple temp, two bindings, and value");
+    let AotStmt::Let {
+        name: tuple_temp,
+        ty: StaticType::Tuple(_),
+        ..
+    } = &result[0]
+    else {
+        panic!("expected one tuple-valued RHS temp, got {:?}", result);
+    };
+    for (stmt, target, index) in [(&result[1], "a", 1), (&result[2], "b", 2)] {
+        assert!(matches!(
+            stmt,
+            AotStmt::Let {
+                name,
+                value: AotExpr::Index { indices, is_tuple: true, .. },
+                ..
+            } if name == target
+                && matches!(indices.as_slice(), [AotExpr::LitI64(actual)] if *actual == index)
+        ));
+    }
+    assert!(matches!(
+        &result[3],
+        AotStmt::ValueCarrier(AotExpr::Var { name, .. }) if name == tuple_temp
+    ));
+}
+
+#[test]
+fn test_convert_destructuring_accepts_static_iterables_and_julia_arity_10464() {
+    for rhs_ty in [
+        StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(1),
+        },
+        StaticType::Range {
+            element: Box::new(StaticType::I64),
+        },
+        StaticType::Tuple(vec![StaticType::I64, StaticType::I64, StaticType::I64]),
+        StaticType::Tuple(vec![StaticType::I64]),
+    ] {
+        let typed = TypedProgram::new();
+        let program = empty_program();
+        let mut converter = IrConverter::new(&typed, &program);
+        converter.declared_locals.insert("rhs".to_string());
+        converter
+            .engine
+            .env
+            .insert("rhs".to_string(), rhs_ty.clone());
+        let result = converter
+            .convert_stmt_expanded(&Stmt::DestructuringAssign {
+                targets: vec!["a".to_string(), "b".to_string()],
+                value: Expr::Var("rhs".to_string().into(), test_span()),
+                span: test_span(),
+            })
+            .expect("static iterable RHS and both extra/short arities must convert");
+        let expected_len = match rhs_ty {
+            StaticType::Array { .. } | StaticType::Range { .. } => 5,
+            StaticType::Tuple(_) => 4,
+            _ => unreachable!(),
+        };
+        assert_eq!(result.len(), expected_len);
+    }
+}
+
+#[test]
+fn test_convert_destructuring_rejects_unrepresentable_iterator_with_span_10464() {
+    for rhs_ty in [
+        StaticType::Generator {
+            element: Box::new(StaticType::I64),
+        },
+        StaticType::Struct {
+            type_id: 10464,
+            name: "PairIterator10464".to_string(),
+        },
+    ] {
+        let typed = TypedProgram::new();
+        let program = empty_program();
+        let mut converter = IrConverter::new(&typed, &program);
+        converter.declared_locals.insert("rhs".to_string());
+        converter.engine.env.insert("rhs".to_string(), rhs_ty);
+        let err = converter
+            .convert_stmt_expanded(&Stmt::DestructuringAssign {
+                targets: vec!["a".to_string(), "b".to_string()],
+                value: Expr::Var("rhs".to_string().into(), test_span()),
+                span: test_span(),
+            })
+            .expect_err("AoT must fail safely when it cannot represent an iterate cursor");
+        let crate::aot::AotError::UnsupportedInstruction(diagnostic) = err else {
+            unreachable!("expected span-bearing UnsupportedInstruction, got {err:?}");
+        };
+        assert!(diagnostic
+            .message
+            .contains("statically representable iteration cursor"));
+        assert_eq!(diagnostic.span, Some(test_span()));
+    }
+}
+
+#[test]
+fn test_convert_destructuring_accepts_dynamic_runtime_value_10464() {
+    let typed = TypedProgram::new();
+    let program = empty_program();
+    let mut converter = IrConverter::new(&typed, &program);
+    converter.declared_locals.insert("rhs".to_string());
+    converter
+        .engine
+        .env
+        .insert("rhs".to_string(), StaticType::Any);
+
+    let result = converter
+        .convert_stmt_expanded(&Stmt::DestructuringAssign {
+            targets: vec!["a".to_string(), "b".to_string()],
+            value: Expr::Var("rhs".to_string().into(), test_span()),
+            span: test_span(),
+        })
+        .expect("dynamic Value tuple/array destructuring should defer indexing to runtime");
+
+    assert_eq!(result.len(), 4, "value temp, two bindings, and carrier");
+    assert!(matches!(
+        &result[1],
+        AotStmt::Let {
+            value: AotExpr::Index {
+                is_tuple: false,
+                ..
+            },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_destructuring_temp_avoids_escaped_user_local_collision_10464() {
+    let mut typed = TypedProgram::new();
+    typed.globals.insert(
+        "_destructure_value_aot_0".to_string(),
+        StaticType::Tuple(vec![StaticType::I64, StaticType::I64]),
+    );
+    let program = empty_program();
+    let mut converter = IrConverter::new(&typed, &program);
+    converter.declared_locals.insert("rhs".to_string());
+    converter.engine.env.insert(
+        "rhs".to_string(),
+        StaticType::Tuple(vec![StaticType::I64, StaticType::I64]),
+    );
+
+    let result = converter
+        .convert_stmt_expanded(&Stmt::DestructuringAssign {
+            targets: vec!["a".to_string(), "b".to_string()],
+            value: Expr::Var("rhs".to_string().into(), test_span()),
+            span: test_span(),
+        })
+        .unwrap();
+    let AotStmt::Let { name, .. } = &result[0] else {
+        panic!("expected internal tuple binding");
+    };
+    assert_ne!(
+        crate::aot::codegen::aot_codegen::escape_rust_ident(name),
+        "_destructure_value_aot_0"
+    );
+}
+
+#[test]
 fn test_convert_stmt_return() {
     let typed = TypedProgram::new();
     let program = empty_program();
@@ -1133,6 +1340,7 @@ fn test_convert_function_flattens_timed_stmt_body() {
     let mut converter = IrConverter::new(&typed, &program);
 
     let func = Function {
+        new_struct_name: None,
         name: "timed_body".to_string(),
         params: vec![],
         kwparams: vec![],
@@ -1169,6 +1377,7 @@ fn test_convert_function_retains_inline_policy_from_meta() {
     let mut converter = IrConverter::new(&typed, &program);
 
     let func = Function {
+        new_struct_name: None,
         name: "marked_noinline".to_string(),
         params: vec![],
         kwparams: vec![],
@@ -1215,6 +1424,8 @@ end
 
     let mut parser = crate::parser::Parser::new().expect("parser");
     let outcome = parser.parse(src).expect("parse");
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    crate::macro_runtime::install();
     let mut lowering = crate::lowering::Lowering::new(src);
     let program = lowering.lower(outcome).expect("lower");
 
@@ -1263,6 +1474,7 @@ fn test_convert_function_flattens_let_block_assign_expr() {
     let mut converter = IrConverter::new(&typed, &program);
 
     let func = Function {
+        new_struct_name: None,
         name: "timed_like".to_string(),
         params: vec![],
         kwparams: vec![],
@@ -1277,7 +1489,7 @@ fn test_convert_function_flattens_let_block_assign_expr() {
                             Stmt::Assign {
                                 var: "#result#1".to_string(),
                                 value: Expr::AssignExpr {
-                                    var: "grid".to_string(),
+                                    var: "grid".to_string().into(),
                                     value: Box::new(Expr::Literal(Literal::Int(7), test_span())),
                                     span: test_span(),
                                 },
@@ -1285,8 +1497,11 @@ fn test_convert_function_flattens_let_block_assign_expr() {
                             },
                             Stmt::Expr {
                                 expr: Expr::Call {
-                                    function: "println".to_string(),
-                                    args: vec![Expr::Var("#elapsed_s#3".to_string(), test_span())],
+                                    function: "println".to_string().into(),
+                                    args: vec![Expr::Var(
+                                        "#elapsed_s#3".to_string().into(),
+                                        test_span(),
+                                    )],
                                     kwargs: vec![],
                                     splat_mask: vec![false],
                                     kwargs_splat_mask: vec![],
@@ -1295,7 +1510,7 @@ fn test_convert_function_flattens_let_block_assign_expr() {
                                 span: test_span(),
                             },
                             Stmt::Expr {
-                                expr: Expr::Var("#result#1".to_string(), test_span()),
+                                expr: Expr::Var("#result#1".to_string().into(), test_span()),
                                 span: test_span(),
                             },
                         ],
@@ -1336,12 +1551,13 @@ fn test_convert_function_flattens_let_block_assign_expr() {
 }
 
 #[test]
-fn statement_letblock_drops_plain_result_alias_issue_8499() {
+fn statement_letblock_preserves_user_result_alias_issue_11310() {
     let typed = TypedProgram::new();
     let program = empty_program();
     let mut converter = IrConverter::new(&typed, &program);
 
     let func = Function {
+        new_struct_name: None,
         name: "timed_plain_result".to_string(),
         params: vec![],
         kwparams: vec![],
@@ -1357,7 +1573,7 @@ fn statement_letblock_drops_plain_result_alias_issue_8499() {
                                 Stmt::Assign {
                                     var: "result".to_string(),
                                     value: Expr::AssignExpr {
-                                        var: "xs".to_string(),
+                                        var: "xs".to_string().into(),
                                         value: Box::new(Expr::ArrayLiteral {
                                             elements: vec![
                                                 Expr::Literal(Literal::Int(1), test_span()),
@@ -1372,7 +1588,7 @@ fn statement_letblock_drops_plain_result_alias_issue_8499() {
                                 },
                                 Stmt::Expr {
                                     expr: Expr::Call {
-                                        function: "println".to_string(),
+                                        function: "println".to_string().into(),
                                         args: vec![Expr::Literal(
                                             Literal::Str(" seconds".to_string()),
                                             test_span(),
@@ -1385,7 +1601,7 @@ fn statement_letblock_drops_plain_result_alias_issue_8499() {
                                     span: test_span(),
                                 },
                                 Stmt::Expr {
-                                    expr: Expr::Var("result".to_string(), test_span()),
+                                    expr: Expr::Var("result".to_string().into(), test_span()),
                                     span: test_span(),
                                 },
                             ],
@@ -1397,9 +1613,9 @@ fn statement_letblock_drops_plain_result_alias_issue_8499() {
                 },
                 Stmt::Expr {
                     expr: Expr::Call {
-                        function: "println".to_string(),
+                        function: "println".to_string().into(),
                         args: vec![Expr::Index {
-                            array: Box::new(Expr::Var("xs".to_string(), test_span())),
+                            array: Box::new(Expr::Var("xs".to_string().into(), test_span())),
                             indices: vec![Expr::Literal(Literal::Int(1), test_span())],
                             span: test_span(),
                         }],
@@ -1419,13 +1635,13 @@ fn statement_letblock_drops_plain_result_alias_issue_8499() {
     };
 
     let result = converter.convert_function(&func).unwrap();
-    assert_eq!(result.body.len(), 3);
+    assert_eq!(result.body.len(), 4);
     assert!(
-        !result
+        result
             .body
             .iter()
             .any(|stmt| matches!(stmt, AotStmt::Let { name, .. } if name == "result")),
-        "statement-position @time passthrough slot must not move the assigned value: {:?}",
+        "an ordinary user binding named result must preserve its outer store: {:?}",
         result.body
     );
     assert!(matches!(
@@ -1444,7 +1660,7 @@ fn test_convert_materialized_broadcast_mul_to_helper_call() {
         "im".to_string(),
         StaticType::Struct {
             type_id: 0,
-            name: "Complex64".to_string(),
+            name: "Complex".to_string(),
         },
     );
     converter.engine.env.insert(
@@ -1456,18 +1672,18 @@ fn test_convert_materialized_broadcast_mul_to_helper_call() {
     );
 
     let expr = Expr::Call {
-        function: "materialize".to_string(),
+        function: "materialize".to_string().into(),
         args: vec![Expr::Call {
-            function: "Broadcasted".to_string(),
+            function: "Broadcasted".to_string().into(),
             args: vec![
                 Expr::FunctionRef {
-                    name: "*".to_string(),
+                    name: "*".to_string().into(),
                     span: test_span(),
                 },
                 Expr::TupleLiteral {
                     elements: vec![
-                        Expr::Var("im".to_string(), test_span()),
-                        Expr::Var("ys".to_string(), test_span()),
+                        Expr::Var("im".to_string().into(), test_span()),
+                        Expr::Var("ys".to_string().into(), test_span()),
                     ],
                     span: test_span(),
                 },
@@ -1502,7 +1718,7 @@ fn test_convert_builtin_call() {
     let converter = IrConverter::new(&typed, &program);
 
     let expr = Expr::Call {
-        function: "sqrt".to_string(),
+        function: "sqrt".to_string().into(),
         args: vec![Expr::Literal(Literal::Float(4.0), test_span())],
         kwargs: vec![],
         splat_mask: vec![],
@@ -1546,13 +1762,13 @@ fn test_convert_expr_call_includes_kwargs_in_static_dispatch() {
     let converter = IrConverter::new(&typed, &program);
 
     let expr = Expr::Call {
-        function: "range".to_string(),
+        function: "range".to_string().into(),
         args: vec![
             Expr::Literal(Literal::Float(-2.0), test_span()),
             Expr::Literal(Literal::Float(1.0), test_span()),
         ],
         kwargs: vec![(
-            "length".to_string(),
+            "length".to_string().into(),
             Expr::Literal(Literal::Int(50), test_span()),
         )],
         splat_mask: vec![false, false],
@@ -1594,9 +1810,9 @@ fn test_convert_expr_callsite_inline_policy_wrapper() {
     let converter = IrConverter::new(&typed, &program);
 
     let expr = Expr::Call {
-        function: "#__sjulia_inline__".to_string(),
+        function: "#__sjulia_inline__".to_string().into(),
         args: vec![Expr::Call {
-            function: "callee_inline_policy_4286".to_string(),
+            function: "callee_inline_policy_4286".to_string().into(),
             args: vec![Expr::Literal(Literal::Int(1), test_span())],
             kwargs: vec![],
             splat_mask: vec![false],
@@ -1634,9 +1850,9 @@ fn test_convert_expr_callsite_nested_policy_uses_innermost() {
     let converter = IrConverter::new(&typed, &program);
 
     let inner = Expr::Call {
-        function: "#__sjulia_noinline__".to_string(),
+        function: "#__sjulia_noinline__".to_string().into(),
         args: vec![Expr::Call {
-            function: "callee_nested_policy_4286".to_string(),
+            function: "callee_nested_policy_4286".to_string().into(),
             args: vec![Expr::Literal(Literal::Int(1), test_span())],
             kwargs: vec![],
             splat_mask: vec![false],
@@ -1649,7 +1865,7 @@ fn test_convert_expr_callsite_nested_policy_uses_innermost() {
         span: test_span(),
     };
     let outer = Expr::Call {
-        function: "#__sjulia_inline__".to_string(),
+        function: "#__sjulia_inline__".to_string().into(),
         args: vec![inner],
         kwargs: vec![],
         splat_mask: vec![false],
@@ -1684,11 +1900,11 @@ fn test_convert_expr_callsite_policy_applies_to_nested_static_calls() {
     let converter = IrConverter::new(&typed, &program);
 
     let expr = Expr::Call {
-        function: "#__sjulia_inline__".to_string(),
+        function: "#__sjulia_inline__".to_string().into(),
         args: vec![Expr::BinaryOp {
             op: BinaryOp::Add,
             left: Box::new(Expr::Call {
-                function: "callee_block_policy_a_4286".to_string(),
+                function: "callee_block_policy_a_4286".to_string().into(),
                 args: vec![Expr::Literal(Literal::Int(1), test_span())],
                 kwargs: vec![],
                 splat_mask: vec![false],
@@ -1696,7 +1912,7 @@ fn test_convert_expr_callsite_policy_applies_to_nested_static_calls() {
                 span: test_span(),
             }),
             right: Box::new(Expr::Call {
-                function: "callee_block_policy_b_4286".to_string(),
+                function: "callee_block_policy_b_4286".to_string().into(),
                 args: vec![Expr::Literal(Literal::Int(2), test_span())],
                 kwargs: vec![],
                 splat_mask: vec![false],
@@ -1751,9 +1967,9 @@ fn test_convert_expr_callsite_policy_keeps_inner_policy_in_block() {
     let converter = IrConverter::new(&typed, &program);
 
     let left_inner = Expr::Call {
-        function: "#__sjulia_noinline__".to_string(),
+        function: "#__sjulia_noinline__".to_string().into(),
         args: vec![Expr::Call {
-            function: "callee_block_inner_policy_a_4286".to_string(),
+            function: "callee_block_inner_policy_a_4286".to_string().into(),
             args: vec![Expr::Literal(Literal::Int(1), test_span())],
             kwargs: vec![],
             splat_mask: vec![false],
@@ -1766,12 +1982,12 @@ fn test_convert_expr_callsite_policy_keeps_inner_policy_in_block() {
         span: test_span(),
     };
     let expr = Expr::Call {
-        function: "#__sjulia_inline__".to_string(),
+        function: "#__sjulia_inline__".to_string().into(),
         args: vec![Expr::BinaryOp {
             op: BinaryOp::Add,
             left: Box::new(left_inner),
             right: Box::new(Expr::Call {
-                function: "callee_block_inner_policy_b_4286".to_string(),
+                function: "callee_block_inner_policy_b_4286".to_string().into(),
                 args: vec![Expr::Literal(Literal::Int(2), test_span())],
                 kwargs: vec![],
                 splat_mask: vec![false],
@@ -1813,6 +2029,7 @@ fn test_convert_simple_function() {
     let mut converter = IrConverter::new(&typed, &program);
 
     let func = Function {
+        new_struct_name: None,
         name: "add".to_string(),
         params: vec![
             TypedParam::new("x".to_string(), None, test_span()),
@@ -1825,8 +2042,8 @@ fn test_convert_simple_function() {
             stmts: vec![Stmt::Return {
                 value: Some(Expr::BinaryOp {
                     op: BinaryOp::Add,
-                    left: Box::new(Expr::Var("x".to_string(), test_span())),
-                    right: Box::new(Expr::Var("y".to_string(), test_span())),
+                    left: Box::new(Expr::Var("x".to_string().into(), test_span())),
+                    right: Box::new(Expr::Var("y".to_string().into(), test_span())),
                     span: test_span(),
                 }),
                 span: test_span(),
@@ -1851,6 +2068,7 @@ fn implicit_function_body_result_converts_to_aot_expr_issue_7010() {
     let mut converter = IrConverter::new(&typed, &program);
 
     let func = Function {
+        new_struct_name: None,
         name: "add".to_string(),
         params: vec![
             TypedParam::new("x".to_string(), Some(JuliaType::Int64), test_span()),
@@ -1863,8 +2081,8 @@ fn implicit_function_body_result_converts_to_aot_expr_issue_7010() {
             stmts: vec![Stmt::Expr {
                 expr: Expr::BinaryOp {
                     op: BinaryOp::Add,
-                    left: Box::new(Expr::Var("x".to_string(), test_span())),
-                    right: Box::new(Expr::Var("y".to_string(), test_span())),
+                    left: Box::new(Expr::Var("x".to_string().into(), test_span())),
+                    right: Box::new(Expr::Var("y".to_string().into(), test_span())),
                     span: test_span(),
                 },
                 span: test_span(),
@@ -1891,6 +2109,7 @@ fn test_convert_lambda_function_ref() {
 
     // Create a program with a lambda function: __lambda_0__ = x -> x + 1
     let lambda_func = Function {
+        new_struct_name: None,
         name: "__lambda_0__".to_string(),
         params: vec![TypedParam::new("x".to_string(), None, test_span())],
         kwparams: vec![],
@@ -1900,7 +2119,7 @@ fn test_convert_lambda_function_ref() {
             stmts: vec![Stmt::Return {
                 value: Some(Expr::BinaryOp {
                     op: BinaryOp::Add,
-                    left: Box::new(Expr::Var("x".to_string(), test_span())),
+                    left: Box::new(Expr::Var("x".to_string().into(), test_span())),
                     right: Box::new(Expr::Literal(Literal::Int(1), test_span())),
                     span: test_span(),
                 }),
@@ -1918,7 +2137,7 @@ fn test_convert_lambda_function_ref() {
         primitive_types: vec![],
         type_aliases: vec![],
         structs: vec![],
-        functions: vec![lambda_func],
+        functions: vec![std::sync::Arc::new(lambda_func)],
         base_function_count: 0,
         modules: vec![],
         usings: vec![],
@@ -1934,7 +2153,7 @@ fn test_convert_lambda_function_ref() {
 
     // Convert a FunctionRef pointing to the lambda
     let func_ref = Expr::FunctionRef {
-        name: "__lambda_0__".to_string(),
+        name: "__lambda_0__".to_string().into(),
         span: test_span(),
     };
 
@@ -1961,6 +2180,7 @@ fn test_convert_lambda_with_capture() {
 
     // Create a program with a lambda that captures 'a': __lambda_0__ = x -> x + a
     let lambda_func = Function {
+        new_struct_name: None,
         name: "__lambda_0__".to_string(),
         params: vec![TypedParam::new("x".to_string(), None, test_span())],
         kwparams: vec![],
@@ -1970,8 +2190,8 @@ fn test_convert_lambda_with_capture() {
             stmts: vec![Stmt::Return {
                 value: Some(Expr::BinaryOp {
                     op: BinaryOp::Add,
-                    left: Box::new(Expr::Var("x".to_string(), test_span())),
-                    right: Box::new(Expr::Var("a".to_string(), test_span())),
+                    left: Box::new(Expr::Var("x".to_string().into(), test_span())),
+                    right: Box::new(Expr::Var("a".to_string().into(), test_span())),
                     span: test_span(),
                 }),
                 span: test_span(),
@@ -1988,7 +2208,7 @@ fn test_convert_lambda_with_capture() {
         primitive_types: vec![],
         type_aliases: vec![],
         structs: vec![],
-        functions: vec![lambda_func],
+        functions: vec![std::sync::Arc::new(lambda_func)],
         base_function_count: 0,
         modules: vec![],
         usings: vec![],
@@ -2009,7 +2229,7 @@ fn test_convert_lambda_with_capture() {
 
     // Convert a FunctionRef pointing to the lambda
     let func_ref = Expr::FunctionRef {
-        name: "__lambda_0__".to_string(),
+        name: "__lambda_0__".to_string().into(),
         span: test_span(),
     };
 
@@ -2038,6 +2258,7 @@ fn lambda_multi_statement_body_rejects_with_span_issue_6938() {
     let body_span = Span::new(10, 40, 2, 3, 5, 8);
 
     let lambda_func = Function {
+        new_struct_name: None,
         name: "__lambda_0__".to_string(),
         params: vec![TypedParam::new("x".to_string(), None, test_span())],
         kwparams: vec![],
@@ -2048,14 +2269,14 @@ fn lambda_multi_statement_body_rejects_with_span_issue_6938() {
                 Stmt::Expr {
                     expr: Expr::BinaryOp {
                         op: BinaryOp::Add,
-                        left: Box::new(Expr::Var("x".to_string(), test_span())),
+                        left: Box::new(Expr::Var("x".to_string().into(), test_span())),
                         right: Box::new(Expr::Literal(Literal::Int(1), test_span())),
                         span: test_span(),
                     },
                     span: test_span(),
                 },
                 Stmt::Return {
-                    value: Some(Expr::Var("x".to_string(), test_span())),
+                    value: Some(Expr::Var("x".to_string().into(), test_span())),
                     span: test_span(),
                 },
             ],
@@ -2071,7 +2292,7 @@ fn lambda_multi_statement_body_rejects_with_span_issue_6938() {
         primitive_types: vec![],
         type_aliases: vec![],
         structs: vec![],
-        functions: vec![lambda_func],
+        functions: vec![std::sync::Arc::new(lambda_func)],
         base_function_count: 0,
         modules: vec![],
         usings: vec![],
@@ -2084,7 +2305,7 @@ fn lambda_multi_statement_body_rejects_with_span_issue_6938() {
     };
     let converter = IrConverter::new(&typed, &program);
     let func_ref = Expr::FunctionRef {
-        name: "__lambda_0__".to_string(),
+        name: "__lambda_0__".to_string().into(),
         span: test_span(),
     };
 
@@ -2124,7 +2345,7 @@ fn test_is_lambda_function() {
 
 fn make_call_expr(name: &str) -> Expr {
     Expr::Call {
-        function: name.to_string(),
+        function: name.to_string().into(),
         args: vec![],
         kwargs: vec![],
         splat_mask: vec![],
@@ -2133,7 +2354,7 @@ fn make_call_expr(name: &str) -> Expr {
     }
 }
 
-fn make_function(name: &str, calls: Vec<&str>) -> Function {
+fn make_function(name: &str, calls: Vec<&str>) -> std::sync::Arc<Function> {
     let stmts: Vec<Stmt> = calls
         .into_iter()
         .map(|c| Stmt::Expr {
@@ -2142,7 +2363,8 @@ fn make_function(name: &str, calls: Vec<&str>) -> Function {
         })
         .collect();
 
-    Function {
+    std::sync::Arc::new(Function {
+        new_struct_name: None,
         name: name.to_string(),
         params: vec![],
         kwparams: vec![],
@@ -2155,7 +2377,7 @@ fn make_function(name: &str, calls: Vec<&str>) -> Function {
         is_base_extension: false,
         is_runtime_eval: false,
         span: test_span(),
-    }
+    })
 }
 
 #[test]

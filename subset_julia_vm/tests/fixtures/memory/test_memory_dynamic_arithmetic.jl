@@ -1,9 +1,9 @@
 using Test
 
 @testset "Memory dynamic arithmetic" begin
-    m = Memory{Int64}(3)
-    n = Memory{Int64}(3)
-    f = Memory{Float64}(3)
+    m = Memory{Int64}(undef, 3)
+    n = Memory{Int64}(undef, 3)
+    f = Memory{Float64}(undef, 3)
 
     for i in 1:3
         m[i] = i

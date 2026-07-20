@@ -20,7 +20,7 @@ end
     r = test_union_return(arr)
     @test r !== nothing
     @test r[1] == 1
-    @test r[2] == 1
+    @test r[2] == 2
 
     # Test with empty array - should return nothing
     empty_arr = Int64[]

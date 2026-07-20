@@ -1,4 +1,0 @@
-# Snapshot for scripts/audit_base_cache_schema_fingerprint.sh (Issue #8444).
-# Keep CACHE_VERSION aligned with subset_julia_vm/src/compile/precompile.rs.
-CACHE_VERSION=66
-SCHEMA_FINGERPRINT=dd2d2a8d9f4d70329a452b8c6258c3a7bab41695bbf32410cc5f755db02f380d

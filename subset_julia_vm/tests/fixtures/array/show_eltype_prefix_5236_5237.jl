@@ -66,6 +66,11 @@ end
     @test repr(fm) ==
           "ShowPrefixFoo[ShowPrefixFoo(1) ShowPrefixFoo(2); ShowPrefixFoo(3) ShowPrefixFoo(4)]"
 
+    backing = Memory{ShowPrefixFoo}(undef, 4)
+    ref = memoryref(backing)
+    @test typeof(ref) == MemoryRef{ShowPrefixFoo}
+    @test ref isa MemoryRef{ShowPrefixFoo}
+
     # --- Any eltype, heterogeneous: Any[...] prefix (#5237) --------------
     ax = Any[1, "x"]
     @test eltype(ax) == Any

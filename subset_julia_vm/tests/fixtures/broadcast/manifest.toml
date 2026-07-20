@@ -348,13 +348,13 @@ description = "show/display methods for Broadcasted and BroadcastStyle types (Is
 name = "broadcast_perf_fastpath_regression"
 file = "broadcast_perf_fastpath_regression.jl"
 expected = true
-description = "Regression: broadcast numeric array path should not be drastically slower than for loop"
+description = "Correctness: in-place Float64 broadcast equals for-loop result; perf guard moved to vm_broadcast_fastpath_benchmark (Issue #9489)"
 
 [[tests]]
 name = "broadcast_perf_int_fastpath_regression"
 file = "broadcast_perf_int_fastpath_regression.jl"
 expected = true
-description = "Regression: same-shape Int array broadcast should not be drastically slower than for loop"
+description = "Correctness: in-place same-shape Int broadcast equals for-loop result; perf guard moved to vm_broadcast_fastpath_benchmark (Issue #9489)"
 
 [[tests]]
 name = "broadcast_mixed_float_int_arith_7587"
@@ -366,7 +366,7 @@ description = "Mixed Float/Int arithmetic value and type parity, scalar and broa
 name = "broadcast_perf_mixed_float_int_7587"
 file = "broadcast_perf_mixed_float_int_7587.jl"
 expected = true
-description = "Regression: Float64-array × Int-scalar broadcast should not be drastically slower than Float-scalar form (Issue #7587)"
+description = "Correctness: Float64-array × Int-scalar broadcast agrees with scalar expansion and Float-scalar twin (Issue #7587; perf guard in vm_broadcast_mixed_float_int_benchmark, Issue #9489)"
 
 # === Phase 5-1: flatten/isflat loop fusion (Issue #2544) ===
 
@@ -429,3 +429,51 @@ name = "broadcast_prefix_unary_dot_7234"
 file = "prefix_unary_dot_7234.jl"
 expected = true
 description = "Prefix dotted unary operators .-v / .+v / .~v broadcast elementwise (Issue #7234)"
+
+[[tests]]
+name = "broadcast_copyto_2d_array_fastpath_9155"
+file = "test_copyto_2d_array_fastpath_9155.jl"
+expected = true
+description = "2D outer broadcast (row .+ col, e.g. Mandelbrot-grid xs' .+ im .* ys) fast path (Issue #9155)"
+
+[[tests]]
+name = "broadcast_mandelbrot_grid_layout"
+file = "mandelbrot_grid_layout.jl"
+expected = true
+description = "Mandelbrot heatmap grid layout: xs' .+ im .* ys matches the 2D reference; row-major fill + column-major reshape is the scramble trap"
+
+[[tests]]
+name = "broadcast_chained_broadcast_comparison_9300"
+file = "chained_broadcast_comparison_9300.jl"
+expected = true
+description = "Chained dotted comparison a .<= v .< b lowers through the broadcast-fused & (not scalar &&), so it no longer collapses a Bool array to all-false; also guards the scalar chain and single-evaluation of a non-atomic middle operand (Issue #9300)"
+
+[[tests]]
+name = "broadcast_float16_le_ge_negative_9348"
+file = "float16_le_ge_negative_9348.jl"
+expected = true
+description = "Broadcast .<= / .>= over a Float16 array is sign-correct for negative elements (0 .<= Float16[-0.5,...] no longer flips to true); .</.>, scalar, and Float32 controls included (Issue #9348)"
+
+[[tests]]
+name = "broadcast_dotted_subtype_9376"
+file = "dotted_subtype_broadcast_9376.jl"
+expected = true
+description = "Dotted subtype/supertype operators .<: and .>: broadcast through their base operator functions for array inputs (Issue #9376)"
+
+[[tests]]
+name = "broadcast_tuple_materialize_shape_9533"
+file = "tuple_materialize_shape_9533.jl"
+expected = true
+description = "Issues #9533/#9547: tuple-only broadcast materializes a Tuple, including tuple-literal unary broadcast, promoted tuples, dotted subtype, scalar expansion, nested tuple broadcast, and empty tuple; mixed array+tuple broadcast remains Vector"
+
+[[tests]]
+name = "broadcast_namedtuple_return_10469"
+file = "namedtuple_return_10469.jl"
+expected = true
+description = "Broadcasting a NamedTuple-returning function materializes Vector/Matrix with concrete NamedTuple eltype instead of routing the element store through numeric coercion (Issue #10469)"
+
+[[tests]]
+name = "broadcast_untyped_complex_call_variable_10704"
+file = "untyped_complex_broadcast_call_variable_10704.jl"
+expected = true
+description = "Untyped f.(A, B) two-array ComplexF64 broadcast (bypasses the single-array-arg bulk typed kernel, so f is called through CallFunctionVariable per element), single-array f.(C, scalar) broadcast, a non-concrete Any-element-type array falling back correctly, and NaN/Inf/signed-zero complex elements (Issue #10704)"

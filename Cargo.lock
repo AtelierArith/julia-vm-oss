@@ -92,6 +92,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-polyfill"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4"
+dependencies = [
+ "critical-section",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -111,6 +120,21 @@ checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "bit-set"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
+dependencies = [
+ "bit-vec",
+]
+
+[[package]]
+name = "bit-vec"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
@@ -147,6 +171,12 @@ name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
+
+[[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cast"
@@ -235,6 +265,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
 dependencies = [
  "error-code",
+]
+
+[[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -459,6 +498,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "critical-section"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -522,6 +567,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -560,6 +617,17 @@ name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fancy-regex"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1e1dacd0d2082dfcf1351c4bdd566bbe89a2b263235a2b50058f1e130a47277"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
 
 [[package]]
 name = "fastrand"
@@ -788,6 +856,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash32"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,6 +884,20 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "heapless"
+version = "0.7.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
+dependencies = [
+ "atomic-polyfill",
+ "hash32",
+ "rustc_version",
+ "serde",
+ "spin",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "heck"
@@ -913,6 +1004,15 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
+name = "lock_api"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+dependencies = [
+ "scopeguard",
+]
 
 [[package]]
 name = "log"
@@ -1153,6 +1253,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
 dependencies = [
  "plotters-backend",
+]
+
+[[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "heapless",
+ "serde",
 ]
 
 [[package]]
@@ -1404,6 +1517,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "scopeguard"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1530,14 +1649,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "subset_julia_vm"
-version = "0.9.5"
+version = "0.10.3"
 dependencies = [
  "astro-float",
  "bincode",
@@ -1557,13 +1706,22 @@ dependencies = [
  "num-traits",
  "object",
  "once_cell",
+ "postcard",
  "regex",
  "rustyline",
  "serde",
  "serde_json",
  "sha2",
+ "smallvec",
+ "strum",
+ "subset_julia_vm_bytecode",
+ "subset_julia_vm_compile",
+ "subset_julia_vm_ir",
+ "subset_julia_vm_lowering",
  "subset_julia_vm_parser",
  "subset_julia_vm_runtime",
+ "subset_julia_vm_types",
+ "subset_julia_vm_vm",
  "target-lexicon",
  "tempfile",
  "thiserror 1.0.69",
@@ -1572,11 +1730,80 @@ dependencies = [
 ]
 
 [[package]]
+name = "subset_julia_vm_bytecode"
+version = "0.1.0"
+dependencies = [
+ "astro-float",
+ "bincode",
+ "fancy-regex",
+ "half",
+ "num-bigint",
+ "num-traits",
+ "serde",
+ "sha2",
+ "strum",
+ "subset_julia_vm_ir",
+ "subset_julia_vm_types",
+]
+
+[[package]]
+name = "subset_julia_vm_compile"
+version = "0.10.3"
+dependencies = [
+ "astro-float",
+ "bincode",
+ "half",
+ "nalgebra",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "once_cell",
+ "postcard",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smallvec",
+ "strum",
+ "subset_julia_vm",
+ "subset_julia_vm_bytecode",
+ "subset_julia_vm_ir",
+ "subset_julia_vm_lowering",
+ "subset_julia_vm_parser",
+ "subset_julia_vm_types",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
 name = "subset_julia_vm_ffi"
-version = "0.9.0"
+version = "0.9.2"
 dependencies = [
  "serde_json",
  "subset_julia_vm",
+ "subset_julia_vm_bytecode",
+]
+
+[[package]]
+name = "subset_julia_vm_ir"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "serde",
+ "subset_julia_vm_parser",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "subset_julia_vm_lowering"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "once_cell",
+ "subset_julia_vm_bytecode",
+ "subset_julia_vm_ir",
+ "subset_julia_vm_parser",
+ "subset_julia_vm_types",
 ]
 
 [[package]]
@@ -1593,6 +1820,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "subset_julia_vm_parser_common"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "subset_julia_vm_runtime"
 version = "0.1.0"
 dependencies = [
@@ -1601,8 +1836,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "subset_julia_vm_types"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "half",
+ "serde",
+ "strum",
+ "subset_julia_vm_ir",
+]
+
+[[package]]
+name = "subset_julia_vm_vm"
+version = "0.10.3"
+dependencies = [
+ "astro-float",
+ "half",
+ "js-sys",
+ "nalgebra",
+ "num-bigint",
+ "num-traits",
+ "serde_json",
+ "smallvec",
+ "subset_julia_vm",
+ "subset_julia_vm_bytecode",
+ "subset_julia_vm_compile",
+ "subset_julia_vm_ir",
+ "subset_julia_vm_lowering",
+ "subset_julia_vm_parser",
+ "subset_julia_vm_types",
+]
+
+[[package]]
 name = "subset_julia_vm_web"
-version = "0.9.5"
+version = "0.10.3"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",
@@ -1610,6 +1877,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "subset_julia_vm",
+ "subset_julia_vm_bytecode",
  "subset_julia_vm_parser",
  "wasm-bindgen",
 ]

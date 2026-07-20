@@ -59,10 +59,28 @@ expected = true
 description = "UInt128 arithmetic (+,-,*,%) preserves UInt128 instead of truncating to Int64 (Issue #3697)"
 
 [[tests]]
+name = "numeric_uint128_float_remmod"
+file = "numeric_uint128_float_remmod.jl"
+expected = true
+description = "rem/mod between UInt128 and Float16/32/64 return the promoted float value, not NaN (Issue #9338)"
+
+[[tests]]
 name = "numeric_uint_narrow_div"
 file = "numeric_uint_narrow_div.jl"
 expected = true
-description = "UInt8/UInt16/UInt32/UInt64 ÷ preserves UIntN via div(::UIntN,::UIntN) (Issue #3701)"
+description = "UInt8/UInt16/UInt32/UInt64 ÷ preserves UIntN via fixed-width integer div dispatch instead of widening through Float64 (Issue #3701)"
+
+[[tests]]
+name = "numeric_fld_cld_zero_divide_error_8901"
+file = "fld_cld_zero_divide_error_8901.jl"
+expected = true
+description = "fld/cld(::Int64,::Int64) throw DivideError for zero denominator instead of routing through Float64 Inf -> InexactError (Issue #8901)"
+
+[[tests]]
+name = "numeric_int64_div_overflow_divide_error_8896"
+file = "int64_div_overflow_divide_error_8896.jl"
+expected = true
+description = "div(typemin(Int64), -1) throws DivideError instead of panicking in the signed integer intrinsic (Issue #8896)"
 
 [[tests]]
 name = "numeric_typemax_typemin_widths"
@@ -207,3 +225,94 @@ name = "numeric_char_range_typeof_4830"
 file = "char_range_typeof_4830.jl"
 expected = true
 description = "typeof('a':'e') and friends report StepRange{Char, Int64} (matching upstream) instead of UnitRange{Char}. Adds Char-element guards to value_enum::runtime_type, introspection::value_type, and call_dynamic::is_native_range_candidate_mismatch so typeof / isa / show dispatch all agree (Issue #4830, follow-up to #4795)"
+
+[[tests]]
+name = "numeric_matrix_reduced_8696"
+file = "numeric_matrix_reduced_8696.jl"
+expected = true
+description = "Generated upstream oracle metadata for the reduced numeric type-pair × operator matrix (16 types × 16 types × 15 operators = 3840 cells); TSV comparison is wired by follow-up Issue #8697 (Issue #8696)"
+
+[[tests]]
+name = "numeric_float_rem_zero_nan_8895"
+file = "float_rem_zero_nan_8895.jl"
+expected = true
+description = "Float-involved rem/mod/% with zero denominators returns NaN instead of escaping as DivisionByZero; integer/integer zero still throws DivideError (Issue #8895)"
+
+[[tests]]
+name = "numeric_bitinteger_parametric_widths_9381"
+file = "bitinteger_parametric_widths_9381.jl"
+expected = true
+description = "Bundled Base numeric width refactor: fixed-width div/rem/mod/bitrotate use BitSigned / BitUnsigned / BitInteger parametric dispatch; convert, number scalar helpers, signed/unsigned, Rational and //, Complex constructors, and zeros/ones allocation helpers use upstream-shaped generic signatures while preserving type results, signed typemin/-1 DivideError, and Bool/BigInt exclusions (Issue #9381)"
+
+# --- merged from `number` category (Issue #9671 Phase 2) ---
+[[tests]]
+name = "number_widemul_basic"
+file = "widemul_basic.jl"
+expected = true
+description = "widemul: multiply with widening (Issue #487)"
+
+[[tests]]
+name = "number_scalar_iteration"
+file = "scalar_iteration.jl"
+expected = true
+description = "Number scalar iteration and indexing methods (Issue #487)"
+
+[[tests]]
+name = "number_zero_one"
+file = "zero_one.jl"
+expected = true
+description = "zero, one, oneunit - numeric identity functions (Issue #1870)"
+
+[[tests]]
+name = "number_flipsign_basic"
+file = "flipsign_basic.jl"
+expected = true
+description = "flipsign - flip sign of x based on sign of y (Issue #1870)"
+
+[[tests]]
+name = "number_predicates"
+file = "number_predicates.jl"
+expected = true
+description = "isreal, abs2, float, inv - number utility functions (Issue #1877)"
+
+[[tests]]
+name = "number_type_param_return_types"
+file = "type_param_return_types.jl"
+expected = true
+description = "Type{T}→T function return types: typemin, typemax, zero, one (Issue #2245)"
+
+[[tests]]
+name = "number_oneunit_imag_type_preserving"
+file = "oneunit_imag_type_preserving.jl"
+expected = true
+description = "oneunit/imag/real are type-preserving, not Int64/Float64 stubs (Issue #5039)"
+
+[[tests]]
+name = "number_zero_one_oneunit_float_type_preserving_5167"
+file = "zero_one_oneunit_float_type_preserving_5167.jl"
+expected = true
+description = "zero/one/oneunit preserve Float16/Float32/Float64 for direct and untyped calls (Issue #5167)"
+
+[[tests]]
+name = "number_zero_one_unsigned_type_preserving_8220"
+file = "zero_one_unsigned_type_preserving_8220.jl"
+expected = true
+description = "zero/one preserve the unsigned integer type (UInt8/16/32/64/128) for direct and untyped calls instead of widening to Int64 (Issue #8220)"
+
+[[tests]]
+name = "numeric_int_range_conversion_boundary_11214"
+file = "numeric_int_range_conversion_boundary_11214.jl"
+expected = true
+description = "Checked integer constructors (Int64(::AbstractFloat), Int64(::BigInt), Int32/UInt64/Int128/UInt128 siblings) raise InexactError for every out-of-range value: a Float64(2^63)/Float32(2^31) exactly-integer-valued-but-out-of-range float no longer silently saturates to typemax via the old cast-then-round-trip-compare check, and an out-of-range BigInt raises InexactError instead of TypeError; typemin/typemax boundaries and large in-range magnitudes remain valid (Issue #11214)."
+
+[[tests]]
+name = "numeric_abs2_string_methoderror_10602"
+file = "abs2_string_methoderror_10602.jl"
+expected = true
+description = "abs2(x::Real) = x*x (was untyped abs2(x)); abs2(\"a\") raises MethodError instead of silently returning \"aa\" (Issue #10602)"
+
+[[tests]]
+name = "numeric_real_fallback_string_methoderror_11522_11525_11797"
+file = "real_fallback_string_methoderror_11522_11525_11797.jl"
+expected = true
+description = "Real-number fallbacks retain upstream ::Real signatures; String arguments are inapplicable and raise MethodError while numeric/Complex controls preserve dispatch (Issues #11522, #11525, #11797)"

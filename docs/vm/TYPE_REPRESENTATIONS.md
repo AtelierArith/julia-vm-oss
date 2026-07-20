@@ -1,14 +1,117 @@
-# Type Representations: Complete Conversion Inventory (Issue #5916)
+# Type Representations: Complete Conversion Inventory (Issues #5916 / #10460)
 
-*Last updated: 2026-06-16*
+*Last updated: 2026-07-17*
 
 This is the detailed companion to the summary table in
 [TYPE_SYSTEM.md](./TYPE_SYSTEM.md#type-representation-conversion-inventory-issue-5916).
 It maps **every** type representation in the codebase, **every** conversion
 between them (with `file:line` and what each conversion loses), and derives the
-consolidation roadmap for Issue #5916.
+consolidation roadmap for Issue #5916. Issue #10460 keeps this inventory live as
+the structured-UnionAll / TypeVar preservation tracker: semantic inference,
+dispatch, and VM runtime type paths must not add new `JuliaType::from_name`,
+`JuliaType::from_name_or_struct`, `CoreType::from_julia_name`,
+`parametric_base_name`, or `JuliaType::name()` bridges while the migration is
+open. `scripts/check_type_representation_string_reparse.sh` ratchets the reviewed
+boundary-adapter counts for those roots; lower its baselines in the same PR that
+retires a bridge.
 
 All paths below are relative to `subset_julia_vm/src/`.
+
+## Issue #10460 Phase 0 tripwire
+
+The Phase 0 invariant is not "no strings exist" yet. It is narrower and
+enforceable: new semantic code in inference, dispatch, reflection, type-object,
+and VM execution paths must not increase the existing display-string bridge
+surface. The audit covers production Rust under:
+
+- `subset_julia_vm_types/src/inference_core`
+- `subset_julia_vm_compile/src/compile/expr/infer`
+- `subset_julia_vm_compile/src/compile/abstract_interp`
+- `subset_julia_vm_compile/src/compile/expr/call`
+- `subset_julia_vm_vm/src/vm/builtins_reflection`
+- `subset_julia_vm_vm/src/vm/type_objects.rs`
+- `subset_julia_vm_vm/src/vm/type_utils.rs`
+- `subset_julia_vm_vm/src/vm/builtins_types.rs`
+- `subset_julia_vm_vm/src/vm/exec`
+
+The tracked buckets are:
+
+| Bucket | Why it is risky |
+|---|---|
+| `JuliaType::from_name(...)` | Reconstructs semantics from display spelling and can mis-handle UnionAll suffixes, aliases, or shadowed names. |
+| `JuliaType::from_name_or_struct(...)` | Never fails; unknown spellings silently become opaque `Struct(String)` placeholders. |
+| `CoreType::from_julia_name(...)` | Better than `JuliaType` reparsing, but still accepts a string instead of preserving the original structured owner/binder graph. |
+| `parametric_base_name(...)` | Peels parametric structure by text shape rather than a canonical type node. |
+| `JuliaType::name()` in semantic roots | Projects structure to display text; if followed by lookup/reparse, owner, bound, and applied-state data can be lost. |
+
+This ratchet complements `docs/vm/SEMANTIC_IDENTITIES.md`: #10459 prevents new
+name-only identity tables, while #10460 prevents new structured-type semantics
+from being routed through display strings.
+
+Issue #10460's first structured alias slice merged the two `VectorOf` /
+`MatrixOf` `.name()` projections in `vm/type_utils.rs` behind one extractor
+that reads an unbounded source `TypeVar` node directly (2 → 1). The follow-up
+slice moved builtin/registered-name shadowing to runtime `UnionAll`
+construction: after the explicit binder is known, the body is rebound in the
+canonical `CoreType` graph and projected with the original runtime TypeVar ID.
+The alias comparator therefore needs no display fallback and the
+`vm_type_utils/julia_name_projection` bucket is now 0. Source-shadow wrappers
+remain fresh objects (`==` but `!==`) instead of being folded to a bare alias.
+The structured walker also retains outer-binder identity inside nested binder
+bounds, preserves module-qualified leaves beside captured bare leaves, and
+canonicalizes runtime `Vararg` / `VarargLen` in direct, wrapper, and dispatch
+projections.
+Prevention #11241 registers this ratchet in the guarded premerge source-audit
+authority.
+
+### Closure ledger (2026-07-17)
+
+Issue #10460's target is now enforced at the semantic boundary. `CoreType` owns
+subtype, dispatch matching, typejoin/intersection, owner-qualified nominal
+metadata, scoped/rigid TypeVar identity, and cache serialization. The remaining
+tokens counted by the conservative audit are adapters at one of four explicit
+boundaries; they are not allowed to accept a structured type's display output
+as semantic input:
+
+| Boundary | Allowed input | Owner |
+|---|---|---|
+| lexical/source | parser/lowering text, legacy `TypeParam` bound text | `TypeExpr` / `CoreType::from_julia_name` front door |
+| declared-name registry | user type declarations, method metadata, user-extensible promotion rules | compile/runtime registries keyed by declared Julia names |
+| serialized/bytecode compatibility | existing wire fields whose schema is a type-name string | cache/bytecode adapter before semantic use |
+| display/result projection | diagnostics, reflection spelling, legacy `JuliaType` result view | `JuliaType::name` / `core_type_to_julia_type`; no parse-back decision |
+
+The 2026-07-17 closure slice retired the remaining reviewed render-and-reparse
+decisions in the affected vertical paths:
+
+- `RuntimeTypeHandle` reads the owner-qualified base, parameters, and leading
+  `UnionAll` body directly from its `CoreType` identity. Runtime type-object
+  classification no longer calls `parametric_base_name` (9 -> 0) and no longer
+  peels eight associated display projections. The semantic JuliaType-to-Core
+  entry point preserves explicit sibling-module owners for ordinary
+  `JuliaType::Struct` projections as well as `RuntimeParametric` projections.
+- scalar inference uses `core_type_to_julia_type`; `collect(::Tuple)` joins
+  `CoreType`s directly; `_typeintersect` converts runtime `JuliaType` values once,
+  computes with `CoreType`, and projects the result once. These retire three
+  `from_name_or_struct`, two `.name()`, and two `CoreType::from_julia_name`
+  semantic bridges.
+- The serialized `MethodSig` cache carrier now round trips a non-rigid scoped
+  binder and a same-name rigid free TypeVar with a dependent bound without
+  identity drift. Diagonal intersection matches TypeVars by scoped/rigid
+  identity rather than name. The generated `parity_subtype` script compares
+  seven additional UnionAll/TypeVar/value-parameter rows with upstream Julia.
+
+Acceptance evidence:
+
+| Criterion | Executable evidence |
+|---|---|
+| canonical representation and conversion ownership | this inventory; `CoreType::{nominal_base_name, nominal_type_parameters, unwrap_unionall_ref}` |
+| no display reparse in semantic subtype/dispatch/inference | exact-site inventory digests in `check_type_representation_string_reparse.sh`; `collect_tuple_typejoin_stays_structural_issue_10460`; `structured_typeintersect_*_issue_10460` |
+| nested/dependent TypeVar owner, bounds, identity | `dependent_bound_typevar_identity_10252.jl`; `runtime_type_handle_reads_owner_and_params_from_core_issue_10460` |
+| alpha-equivalence and capture avoidance | `type_core/equivalence.rs`; `substitute_avoids_capturing_free_var_with_alpha_rename`; `parity_subtype` alpha row |
+| narrowest valid `typejoin` wrapper | `typejoin_partial_param_widen_10091.jl` including dependent and value parameters |
+| reflection shares the structural graph | `typevar_projection_owner_identity_10420.jl`; `RuntimeTypeIdentity { semantic: CoreType }` |
+| cache preserves structural equality and TypeVar identity | `method_sig_cache_roundtrip_preserves_bound_and_free_typevar_identity_issue_10460`; fresh/cache metamorphic lane |
+| generated upstream differential corpus | `parity_subtype::subtype_parity_corpus_matches_upstream_julia_issue_8439` |
 
 ---
 
@@ -186,7 +289,7 @@ string, **D** = duplicated implementation exists.
 | 40 | `ArrayElementType` ↔ `ConcreteType` | `convert_array_element_type` / `convert_concrete_to_array_element` | `compile/bridge.rs:403` / `:540` | L,S | ~~`UnionOf(String)` body re-parsed at `bridge.rs:475`~~ **resolved (Issue #6720)**: `UnionOf` now carries `Vec<JuliaType>`; `convert_union_array_element_members` canonicalizes structurally via `canonicalize_union`, no string re-parse |
 | 41 | `ValueType` → `VarTypeTag` | `value_type_to_var_type_tag` | `vm/slot.rs:437` | L | slot-tag projection |
 | 42 | `[JuliaType]` → `CoreType` (tuple sig) | `core_tuple_signature_from_julia_types` | `inference_core/dispatch_resolver.rs:61` | — | dispatch cache key (Issue #6336 canonical) |
-| 43 | IR annotation → `JuliaType` | `as_julia_type` | `ir/core.rs:244` | L | `None` for typevars |
+| 43 | IR annotation → `JuliaType` | `as_julia_type` | `subset_julia_vm_types/src/ir/core.rs:244` | L | `None` for typevars |
 | 44 | `ConcreteType` lossy via `to_string` | `ConcreteType::from_type_name(&jt.to_string())` | `vm/builtins_reflection/mod.rs:2476` (+ `reflection_julia_type_to_concrete` `:2506`) | S,D | `JuliaType → Display string → ConcreteType` where structured #18/#19 exists |
 
 ---

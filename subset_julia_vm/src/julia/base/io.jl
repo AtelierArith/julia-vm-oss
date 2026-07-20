@@ -108,7 +108,19 @@ end
 
 function _iocontext_with_pair(io, pair)
     props = _ioproperties(io)
-    props = _add_property(props, pair[1], pair[2])
+    if isa(pair, Pair)
+        props = _add_property(props, pair.first, pair.second)
+    elseif length(pair) > 0 && isa(pair[1], Pair)
+        i = 1
+        n = length(pair)
+        while i <= n
+            p = pair[i]
+            props = _add_property(props, p.first, p.second)
+            i = i + 1
+        end
+    else
+        props = _add_property(props, pair[1], pair[2])
+    end
     return IOContext(io, props)
 end
 
@@ -403,26 +415,18 @@ end
 # Call the function `f` with an IOBuffer and the given arguments,
 # returning the resulting string.
 #
-# Note: Our IOBuffer is immutable (functional style)
-# write(io, x) returns a new IOBuffer with x appended
-#
-# Current implementation: For compatibility, we directly write values
-# to the buffer. Full function invocation support (f(io, args...))
-# would require VM-level support for passing IOBuffer to Julia functions.
-
 # Single argument: sprint(x) -> string(x)
-sprint(x) = take!(write(IOBuffer(), x))
+function sprint(x)
+    io = IOBuffer()
+    print(io, x)
+    return String(take!(io))
+end
 
 # Varargs version without context: sprint(f, args...)
-# Writes all args to buffer (simplified implementation)
-# Note: The function f is currently not invoked directly due to VM limitations.
-# Instead, we write the args directly as print would.
 function sprint(f, args...)
     io = IOBuffer()
-    for arg in args
-        io = write(io, arg)
-    end
-    return take!(io)
+    f(io, args...)
+    return String(take!(io))
 end
 
 # Internal helper for context-aware sprint
@@ -433,21 +437,56 @@ function sprint_context(f, args, context)
     io_ctx = nothing
     if isa(context, IOContext)
         io_ctx = IOContext(io, context)
+    elseif isa(context, Pair)
+        # Handle :key => value keyword context.
+        io_ctx = iocontext(io, context)
     elseif isa(context, Tuple)
-        # Handle :key => value (parsed as Tuple in SubsetJuliaVM)
+        # Older lowering paths may still pass :key => value as a Tuple.
         io_ctx = iocontext(io, context)
     end
 
     if !isnothing(io_ctx)
-        for arg in args
-            io = _write_with_context(io, io_ctx, arg)
+        if length(args) == 1 && isa(args[1], Float64)
+            _write_with_context(io, io_ctx, args[1])
+        else
+            f(io_ctx, args...)
         end
     else
-        for arg in args
-            io = write(io, arg)
-        end
+        f(io, args...)
     end
-    return take!(io)
+    return String(take!(io))
+end
+
+function _redirect_stdio_call(f, stderr_stream)
+    if stderr_stream === nothing
+        return f()
+    else
+        return redirect_stderr(f, stderr_stream)
+    end
+end
+
+function redirect_stdio(; stdin=nothing, stderr=nothing, stdout=nothing)
+    if !(stdin === nothing)
+        throw(ArgumentError("redirect_stdio stdin is not supported"))
+    end
+    if !(stderr === nothing)
+        redirect_stderr(stderr)
+    end
+    if !(stdout === nothing)
+        redirect_stdout(stdout)
+    end
+    return nothing
+end
+
+function redirect_stdio(f; stdin=nothing, stderr=nothing, stdout=nothing)
+    if !(stdin === nothing)
+        throw(ArgumentError("redirect_stdio stdin is not supported"))
+    end
+    if stdout === nothing
+        return _redirect_stdio_call(f, stderr)
+    else
+        return redirect_stdout(() -> _redirect_stdio_call(f, stderr), stdout)
+    end
 end
 
 # Helper function to write values respecting IOContext properties
@@ -460,10 +499,11 @@ function _write_with_context(io, ctx::IOContext, x)
         # Compact mode: limit decimal places for floats
         # Use round to 4 significant digits after decimal point
         s = _compact_float_string(x)
-        return write(io, s)
+        write(io, s)
     else
-        return write(io, x)
+        print(io, x)
     end
+    return io
 end
 
 # Format a float in compact mode (similar to Julia's compact printing)
@@ -809,13 +849,16 @@ end
 # whose components are all implicit) print WITHOUT a `T[...]` prefix; everything
 # else (other numeric widths, `Bool`, `Complex`, user structs, …) is prefixed.
 #
-# This is value-driven rather than type-driven because sjulia's `fieldtypes`
-# does not preserve the precise `Tuple`/`Pair` parameters (see
-# `docs/vm/UNIMPLEMENTED.md`), so the implicit-ness of a `Pair`/`Tuple` element
-# is decided from its actual field values.
+# This value-driven path is still needed for arrays whose element type is widened
+# to `Any` even though upstream would infer a precise composite eltype. In that
+# case the implicit-ness of each `Pair`/`Tuple`/`NamedTuple` element is decided
+# from its actual value.
 function _value_typeinfo_implicit(@nospecialize(x))
     T = typeof(x)
     (T === Float64 || T === Int64 || T === Char || T === String || T === Symbol) && return true
+    if x isa NamedTuple
+        return _type_parameters_typeinfo_implicit(T)
+    end
     if x isa Pair
         return _value_typeinfo_implicit(x.first) && _value_typeinfo_implicit(x.second)
     end
@@ -842,14 +885,38 @@ function _elem_show_type(@nospecialize(x))
     return (string(typeof(x)), _value_typeinfo_implicit(x))
 end
 
-# Whether a (non-`Any`) element *type* `T` is implicit. Used only for arrays
-# whose `eltype` is a precise scalar/struct/array type — `Int64`/`Float64`/`Char`/
-# `String`/`Symbol` are implicit, `Array{T,N}` of an implicit eltype is implicit,
-# all other concrete types are prefixed.
+# Whether a (non-`Any`) element *type* `T` is implicit. Used for arrays whose
+# `eltype` is precise: implicit scalars, arrays/dicts with implicit element or
+# key/value types, and tuple-like containers whose field types are all implicit
+# print bare; other concrete types keep the `T[...]` prefix.
+function _type_parameters_typeinfo_implicit(@nospecialize(T))
+    for FT in T.parameters
+        _type_typeinfo_implicit(FT) || return false
+    end
+    return true
+end
+
+function _fieldtypes_typeinfo_implicit(@nospecialize(T))
+    for FT in fieldtypes(T)
+        _type_typeinfo_implicit(FT) || return false
+    end
+    return true
+end
+
 function _type_typeinfo_implicit(@nospecialize(T))
     (T === Float64 || T === Int64 || T === Char || T === String || T === Symbol) && return true
+    isconcretetype(T) || return false
     if T <: AbstractArray
         return _type_typeinfo_implicit(eltype(T))
+    end
+    if T <: Pair || T <: Tuple
+        return _fieldtypes_typeinfo_implicit(T)
+    end
+    if T <: NamedTuple
+        return _type_parameters_typeinfo_implicit(T)
+    end
+    if T <: Dict
+        return _type_parameters_typeinfo_implicit(T)
     end
     return false
 end
@@ -861,7 +928,7 @@ end
 # may drop the `Any[...]` prefix; a *scalar* element under an `Any` eltype means
 # an explicit `Any[...]` literal, which keeps its prefix (Issue #7303).
 function _value_is_inference_widened_composite(@nospecialize(x))
-    return x isa Pair || x isa Tuple || x isa AbstractArray
+    return x isa Pair || x isa Tuple || x isa NamedTuple || x isa AbstractArray
 end
 
 # Compute the array-show type prefix and whether the eltype is implicit,
@@ -1017,10 +1084,12 @@ function show(io::IO, arr::Array)
         # same), so this only changes the previously-wrong struct-element case.
         print(io, arr)
     else
-        # Higher dimensional arrays - show summary
-        s = size(arr)
-        et = eltype(arr)
-        print(io, "Array{", et, ", ", nd, "} with size ", s)
+        # Higher dimensional arrays: delegate to the VM `print` path like the
+        # 2-d branch above — it renders upstream's nested `;;`-literal compact
+        # form (`[0.0 0.0; 0.0 0.0;;; 0.0 0.0; 0.0 0.0]`) for rank >= 3
+        # (Issue #10385; previously printed a nonstandard
+        # "Array{T, N} with size (...)" summary).
+        print(io, arr)
     end
 end
 
@@ -1101,6 +1170,27 @@ explicit IO argument.
 """
 show(x) = show(stdout, x)
 
+# Workaround: `Irrational{sym}`'s bare symbol name (`"π"`, `"ℯ"`, ...), as plain text. (Issue #8869)
+# Upstream reads this via `sym` directly (`show(io::IO,
+# x::Irrational{sym}) where {sym} = print(io, sym)`,
+# `julia/base/irrationals.jl`) — a Symbol-valued `where`-clause type
+# variable, or equivalently `typeof(x).parameters[1]`. Both currently lose
+# `Symbol` identity for *non-ASCII* symbols in sjulia (`typeof` reports
+# `DataType`, and `print`/`string` render the quoted `:sym` show-form instead
+# of the bare name) — exactly the case that matters here, since every
+# `Irrational` singleton (`π`, `ℯ`, ...) is named with a non-ASCII symbol.
+# Parse the symbol out of `string(typeof(x))` (`"Irrational{:π}"`) instead:
+# that string is built from the correctly-encoded type name text, not the
+# broken value-parameter reflection. (Issue #8869)
+function _irrational_symbol_text(x::AbstractIrrational)
+    type_name = string(typeof(x))
+    # Keep both public range endpoints on character starts (Issue #11618).
+    symbol_start = ncodeunits("Irrational{:") + 1
+    closing_brace = prevind(type_name, ncodeunits(type_name) + 1)
+    symbol_end = prevind(type_name, closing_brace)
+    return type_name[symbol_start:symbol_end]
+end
+
 """
     show(io::IO, x)
 
@@ -1117,23 +1207,26 @@ most-specific-method rule.
 """
 function show(io::IO, x)
     # Irrational singletons (π, ℯ) reach this generic fallback when called with a
-    # statically-Any argument (e.g. inside `repr`'s `show(io, x)`), bypassing the
-    # `show(io, ::AbstractIrrational)` method. Catch them at runtime (Issue #5656).
+    # statically-Any argument (e.g. inside `repr`'s `show(io, x)` or
+    # `sprint(show, x)`), bypassing the more specific `show(io, ::Irrational)`
+    # method below. Catch them at runtime (Issue #5656). Route through
+    # `_irrational_symbol_text` rather than `string(x)` (which would re-enter
+    # this same fallback and recurse forever, Issue #8875).
     if x isa AbstractIrrational
-        print(io, string(x))
-        return nothing
+        print(io, _irrational_symbol_text(x))
+    elseif x isa Array
+        # Statically-Any call sites such as `sprint(show, collect(...))` can
+        # resolve to this fallback before the runtime Array value is known.
+        # Preserve the specific compact Array show form by delegating to the VM
+        # print formatter used by `show(io::IO, arr::Array)` above (Issue #8819).
+        print(io, x)
+    else
+        # Keep statically-Any show calls on the VM print path. That path can
+        # re-enter a registered `Base.show(io, ::T)` using the runtime value,
+        # while still falling back to the default struct field display when no
+        # user method exists (Issues #9364/#9456).
+        print(io, x)
     end
-    print(io, typeof(x))
-    print(io, "(")
-    names = fieldnames(typeof(x))
-    n = length(names)
-    for i in 1:n
-        show(io, getfield(x, names[i]))
-        if i < n
-            print(io, ", ")
-        end
-    end
-    print(io, ")")
 end
 
 """
@@ -1152,9 +1245,13 @@ generic `show(io::IO, x)` fallback.
 show(io::IO, x::Type) = print(io, string(x))
 
 # Irrational singletons (π, ℯ, ...) show as their symbol name, not the generic
-# `Irrational{:π}()` struct dump (Issue #5656). `string(x)` already renders the
-# symbol, so route through it like the `::Type` arm above.
-show(io::IO, x::AbstractIrrational) = print(io, string(x))
+# `Irrational{:π}()` struct dump (Issue #5656). Bound directly to the concrete
+# `Irrational` type (not the abstract `AbstractIrrational`) and routing
+# through `_irrational_symbol_text` rather than `string(x)` (as this used to):
+# `string(x)`'s single-arg fast path can now resolve a `show` method through
+# an abstract supertype (Issue #8875), so calling it here would re-enter this
+# same method forever.
+show(io::IO, x::Irrational) = print(io, _irrational_symbol_text(x))
 
 """
     show(io::IO, x::Bool)
@@ -1256,8 +1353,18 @@ show(io::IO, x::UInt128) = print(io, "0x", string(x, base=16, pad=32))
 Display a Float16 value with the `Float16(...)` constructor wrapper
 (Issue #4747). This preserves the element type across `repr` round
 trips: `eval(Meta.parse(repr(Float16(1.5)))) === Float16(1.5)`.
+Special values Inf16 / -Inf16 / NaN16 are written without the wrapper
+(Issue #8884): `repr(Float16(Inf)) === "Inf16"`.
 """
-show(io::IO, x::Float16) = print(io, "Float16(", x, ")")
+function show(io::IO, x::Float16)
+    if isnan(x)
+        print(io, "NaN16")
+    elseif isinf(x)
+        print(io, x < 0 ? "-Inf16" : "Inf16")
+    else
+        print(io, "Float16(", x, ")")
+    end
+end
 
 """
     show(io::IO, x::Float32)
@@ -1265,8 +1372,23 @@ show(io::IO, x::Float16) = print(io, "Float16(", x, ")")
 Display a Float32 value with the `f0` typed-literal suffix
 (Issue #4747). This preserves the element type across `repr` round
 trips: `eval(Meta.parse(repr(Float32(1.5)))) === Float32(1.5)`.
+Special values Inf32 / -Inf32 / NaN32 are written without the suffix
+(Issue #8884): `repr(Float32(Inf)) === "Inf32"`.
 """
-show(io::IO, x::Float32) = print(io, x, "f0")
+function show(io::IO, x::Float32)
+    if isnan(x)
+        print(io, "NaN32")
+    elseif isinf(x)
+        print(io, x < 0 ? "-Inf32" : "Inf32")
+    else
+        s = string(x)
+        if occursin("e", s)
+            print(io, replace(s, "e" => "f"))
+        else
+            print(io, s, "f0")
+        end
+    end
+end
 
 """
     show(io::IO, x::Float64)
@@ -1298,7 +1420,11 @@ Display a Char value with single quotes, escaping special characters
 valid Julia source literal (Issue #4749).
 """
 function show(io::IO, x::Char)
-    if x == '\\'
+    if !isvalid(x)
+        # Malformed Char from invalid UTF-8 (Issue #8995): upstream shows each
+        # raw pattern byte as a \xNN escape (e.g. show('\xff') → '\xff').
+        print(io, _char_repr_invalid(x))
+    elseif x == '\\'
         print(io, "'\\\\'")
     elseif x == '\''
         print(io, "'\\''")
@@ -1432,6 +1558,9 @@ function show(io::IO, r::StepRange)
     show(io, last(r))
 end
 
+string(r::UnitRange) = repr(r)
+string(r::StepRange) = repr(r)
+
 # Issue #4759: VM-native Value::Range is reported as StepRangeLen/LinRange but
 # is not backed by struct fields, so Pure-Julia field-access methods like
 # first(r::StepRangeLen) crash on it. Forwarding through an untyped helper
@@ -1448,11 +1577,25 @@ function show(io::IO, r::StepRangeLen)
 end
 
 function _show_steprangelen_dynamic(io, r)
-    show(io, first(r))
-    print(io, ":")
-    show(io, step(r))
-    print(io, ":")
-    show(io, last(r))
+    st = step(r)
+    if !iszero(st)
+        show(io, first(r))
+        print(io, ":")
+        show(io, st)
+        print(io, ":")
+        show(io, last(r))
+    else
+        # Upstream show(io, ::StepRangeLen): a zero step has no valid colon
+        # form (`1.0:0.0:1.0` would not even parse back to this range), so
+        # print the constructor form `StepRangeLen(1.0, 0.0, 3)` (Issue #11440).
+        print(io, "StepRangeLen(")
+        show(io, first(r))
+        print(io, ", ")
+        show(io, st)
+        print(io, ", ")
+        show(io, length(r))
+        print(io, ")")
+    end
 end
 
 """
@@ -1599,9 +1742,13 @@ julia> repr((1, 2))
 ```
 """
 function repr(x)
+    # Issue #8884: repr must route ALL types through show(io, x) via an IOBuffer
+    # so that typed representations (e.g. UInt8 → "0x06", Float16 → "Float16(3.5)",
+    # Float32 → "3.5f0") are produced. Previously only String/Char/Symbol went
+    # through IOBuffer; other types called string(x) which used the print format.
     io = IOBuffer()
     show(io, x)
-    return take!(io)
+    return String(take!(io))
 end
 
 # =============================================================================

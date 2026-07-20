@@ -93,7 +93,7 @@ fn count_pattern_before_test_block(contents: &str, pattern: &str) -> usize {
 #[test]
 fn vm_unwrap_count_does_not_regress() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let vm_dir = manifest_dir.join("src/vm");
+    let vm_dir = manifest_dir.join("../subset_julia_vm_vm/src/vm");
 
     let unwrap_count = count_in_non_test_code(&vm_dir, ".unwrap()");
 
@@ -128,7 +128,7 @@ fn vm_unwrap_count_does_not_regress() {
 #[test]
 fn vm_expect_count_does_not_regress() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let vm_dir = manifest_dir.join("src/vm");
+    let vm_dir = manifest_dir.join("../subset_julia_vm_vm/src/vm");
 
     let expect_count = count_in_non_test_code(&vm_dir, ".expect(");
 
@@ -157,7 +157,7 @@ fn vm_expect_count_does_not_regress() {
 #[test]
 fn vm_panic_count_does_not_regress() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let vm_dir = manifest_dir.join("src/vm");
+    let vm_dir = manifest_dir.join("../subset_julia_vm_vm/src/vm");
 
     let panic_count = count_in_non_test_code(&vm_dir, "panic!(");
 

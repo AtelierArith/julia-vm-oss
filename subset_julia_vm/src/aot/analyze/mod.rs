@@ -9,9 +9,12 @@
 
 mod core_ir_analyzer;
 mod ir_converter;
+pub(crate) mod lift_reversal;
 mod loader;
 #[cfg(test)]
 mod tests;
+
+pub use lift_reversal::reverse_generator_lifts_in_program;
 
 // Re-export all public types
 pub use core_ir_analyzer::{AnalysisResult, ConstantInfo, CoreIrAnalyzer, FunctionInfo};

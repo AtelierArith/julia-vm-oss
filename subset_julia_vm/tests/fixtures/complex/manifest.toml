@@ -299,3 +299,99 @@ name = "complex_array_fallback_parity_7876"
 file = "complex_array_fallback_parity_7876.jl"
 expected = true
 description = "Guarantees the interleaved-Complex Rust array fast paths (broadcast `.+ .- .*`, scalar product, `abs.`/`conj.`/`real.`/`imag.`, `sum` reduction, matrix×vector and matrix×matrix matmul) return exactly what the pure-Julia scalar Complex multiple-dispatch path (the gold-standard fallback) returns. The interleaved `[re0, im0, ...]` representation is a no-JIT performance tradeoff (RUST_BOUNDARY_JUSTIFICATION.md condition 4, Issue #7876); this fixture is the fallback-equivalence guard that breaks if a future representation change makes the fast path diverge. Verified to pass identically under upstream julia."
+
+[[tests]]
+name = "complex_int_literal_arith_9169"
+file = "complex_int_literal_arith_9169.jl"
+expected = true
+description = "Scalar `+ - * /` on integer-component Complex values built via the `a + b*im` literal path (`z = 2 + 3im`) now preserve the integer element type (`Complex{Int64}`) instead of silently widening to `ComplexF64`; the `Complex(a, b)` constructor path, already correct, is included as a same-fixture regression guard. Root cause #1 (`subset_julia_vm_compile/src/compile/core_compiler.rs`, `julia_type_to_value_type_with_ctx`): a bare `::Complex` method parameter (`Base.:+(x::Real, z::Complex) = ...`, no element type) resolved at compile time to an arbitrarily-guessed registered instantiation instead of `ValueType::Any`, hard-wiring the method body's field access / struct construction to whichever `Complex{T}` happened to be in the struct table first. Root cause #2 (`subset_julia_vm_compile/src/compile/expr/binary/user_defined.rs`, `compile_user_defined_binary_op`): once root cause #1 was fixed and the method's own return type became imprecise, the Complex-result-type recovery promoted the method's *declared* (bare) parameter types instead of the actual call-site argument types; a bare `Complex` name fails the `Complex{`-prefix check in `julia_type_to_type_name` and silently defaulted to `\"Float64\"`, so the promoted-name struct-table lookup missed and fell through to a hardcoded `Complex{Float64}` safe default for every bare-`Complex`-typed operator call. A related gap (`abstract_interp/engine/mod.rs`, `infer_parametric_struct_constructor`) is fixed alongside: an unregistered `Complex{T}` instantiation's placeholder `type_id: 0` was reinterpreted downstream as a real struct-table index instead of being treated as absent. Covers Complex{Int64}, Complex{Int32}, Complex{Bool} (via `im`'s `Complex{Bool}` component-type promotion), and confirms Complex{Float64} arithmetic is unaffected (Issue #9169)."
+
+[[tests]]
+name = "complex_slot_pair_sroa_9198"
+file = "complex_slot_pair_sroa_9198.jl"
+expected = true
+description = "Complex{Float64} slot-pair SROA (Issue #9198 S2, `compile::complex_sroa`): a proven-ComplexF64 loop local is unboxed into two f64 re/im slots so `z = z*z + c` and `real`/`imag`/`abs2`/`z.re`/`z.im`/`+=`/subtraction/real*complex/conj compile to fused typed-f64 slot ops with zero per-iteration heap allocation. Value parity with boxed Complex arithmetic (byte-identical to upstream Julia): accumulation loops, mandelbrot escape-time iteration counts (both `real(z)*real(z)+imag(z)*imag(z)` and `abs2(z)` conditions), and escape boundaries where the unboxed value is materialized back to a boxed `Complex{Float64}` — returned mid-loop, `push!`ed into an array, and captured by a closure (which forces the SROA gate to bail and keep the local boxed)."
+
+[[tests]]
+name = "complex_struct_sroa_s3_9198"
+file = "complex_struct_sroa_s3_9198.jl"
+expected = true
+description = "2-field isbits-struct slot-pair SROA generalization (Issue #9198 S3, `compile::complex_sroa`): three new qualifying families beyond S2's Complex{Float64}-only gate, each byte-identical to the boxed form (verified against upstream Julia 1.12.6). (1) `im`-literal initializers with provably-Float64 coefficients (`z = 0.0 + 0.0im`) are recognized as Complex{Float64} and unbox, while an integer coefficient (`2im` = Complex{Int64}) still bails; (2) a boxed `::ComplexF64` PARAMETER used as a decomposed operand in `z = z*z + c` (mandelbrot kernel spelling `mandel_point(cr + ci*im, maxiter)`), its re/im hoisted to f64 locals at function entry; (3) any user immutable struct with exactly two Float64 fields (`struct V2; x::Float64; y::Float64; end`) unboxes construction `V2(a,b)` and field reads `p.x`/`p.y` — with the struct materialized back to a boxed value at escape (return). Covers the mandelbrot escape-time count (8278 at 30x20x50), im-literal accumulation, user-struct field arithmetic, and user-struct escape materialization."
+
+[[tests]]
+name = "complex_sqrt_int_abs_width_9342"
+file = "complex_sqrt_int_abs_width_9342.jl"
+expected = true
+description = "sqrt(Complex{Int}) no longer aborts the whole program with a fatal, span-less compile-time error (even when unreachable, e.g. an uncalled `f() = sqrt(-1 + 0im)` definition): integer/rational Complex sqrt promotes to Complex{Float64} via `sqrt(z::Complex{<:Union{Integer,Rational}}) = sqrt(float(z))` (spelled as an explicit Complex{Float64} constructor so the inner sqrt statically routes to the concrete method), and the compiler's static-routing failure in compile/expr/builtin.rs falls back to that promotion instead of erroring. Also guards abs width preservation: abs(::Complex{Float16/Float32}) returns the same-width float (via hypot) instead of widening to Float64, while abs(::Complex{Int}) stays Float64 (Issue #9342)."
+
+[[tests]]
+name = "complex_inverse_trig_8813"
+file = "complex_inverse_trig_8813.jl"
+expected = true
+description = "Inverse trigonometric / inverse hyperbolic functions asin/acos/atan/asinh/acosh/atanh for Complex{Float64} arguments, ported from upstream julia base/complex.jl (Issue #8813). Previously raised MethodError (asin/acos/atan) or a runtime type error (asinh/acosh/atanh) since only the forward transcendentals (sin/cos/tan/exp/log/sqrt) had Complex methods. Verifies both the exact upstream values for z = 1.0 + 2.0im and the principal-branch round-trip identities sin(asin(z)) ≈ z etc. The asin/acos/acosh implementations reconstruct the conjugate inline via complex(real(w), -imag(w)) instead of sqrt(conj(w)) to sidestep the compile-time sqrt static-routing bug that mis-routes the Any-inferred conj(...) result to the real SqrtF64 path (Issue #9342 / W-54)."
+
+[[tests]]
+name = "complex_array_contiguous_storage_9198_s5"
+file = "complex_array_contiguous_storage_9198_s5.jl"
+expected = true
+description = "Issue #9198 S5: Complex{Float64} arrays fold onto the S4 general contiguous-isbits StructF64 storage (was the ComplexF64-specific ArrayData::F64 interleaved buffer), keeping the ComplexF64 element-type tag as the entry point for is_complex/matmul/display/inference. Exercises construction (literal, undef, zeros, fill, similar), index get/set (incl. real-scalar store as (x,0)), iterate/collect/map/comprehension/sum, broadcast (.+ .* conj. abs.), matmul + scalar multiply, and reflection/display (eltype/typeof/sizeof stays 16*n, show prefix ComplexF64[...] for both vector and matrix). Byte-identical parity with upstream julia verified."
+
+[[tests]]
+name = "complex_empty_array_push_9407_9492"
+file = "complex_empty_array_push_9407_9492.jl"
+expected = true
+description = "push! into empty typed Complex arrays (`Complex{Float64}[]`, `ComplexF64[]`, `ComplexF32[]`, and `Vector{ComplexF64}(undef, 0)`) accepts boxed Complex values by resolving StructRef at the packed array storage boundary instead of rejecting them as Any; real-scalar push reads back as ComplexF64, not a bare Float64; Complex scalars read from packed storage still multiply Complex vectors (Issues #9407/#9492/#9737)"
+
+[[tests]]
+name = "complex_typed_comprehension_convert_9505"
+file = "complex_typed_comprehension_convert_9505.jl"
+expected = true
+description = "Typed Complex comprehensions (`Complex{Float64}[expr for ...]`, `ComplexF64[...]`, and `Complex{Float32}[...]`) lower through `convert(T, expr)` and allocate the forced Complex eltype instead of calling the `Complex{T}` constructor on an existing Complex value and attempting `convert(Float64, ::Complex)` (Issue #9505)"
+
+[[tests]]
+name = "complex_typed_call_im_8871"
+file = "typed_call_im_8871.jl"
+expected = true
+description = "Coefficient syntax after a typed numeric call before `im` parses and evaluates (`Int8(100)im`) (Issue #8871)"
+
+[[tests]]
+name = "complex_mandelbrot_escape_early_return_9654"
+file = "mandelbrot_escape_early_return_9654.jl"
+expected = true
+description = "Issue #9654: the SROA'd (#9198 S2) ComplexF64 Mandelbrot escape loop — a counted loop whose escape path is an early return — runs on the native typed-loop path via the general TypedLoopOp::ReturnI64 / LoadAddConstI64Slot ops (no kernel-specific recognizer). Locks escape counts (early-return k-1 vs loop-exhausted maxiter, maxiter=0 edge), agreement between the Complex form and its real-decomposed twin, and a 40x40 grid checksum (39114) verified against upstream julia."
+
+[[tests]]
+name = "complex_range_broadcast_twiceprecision_9659"
+file = "complex_range_broadcast_twiceprecision_9659.jl"
+expected = true
+description = "Issue #9659: `im .* range(...)` on a TwicePrecision-backed Float64 range reproduces upstream's range broadcast fusion (broadcast.jl:1169) — ref/step scaled in twice precision, elements from the scaled complex lerp — instead of elementwise `im * r[i]` (1ulp divergence on ~30% of grid points that shifted the 1700x1360 Mandelbrot broadcast escape checksum by 195). Asserts julia-1.12.6 bit patterns for sampled elements, the signature 1ulp point imys[11], an order-fixed imag accumulation, the 2-D grid construction path `xs' .+ im .* ys`, and that integer-range / Vector operands keep the generic elementwise path."
+
+[[tests]]
+name = "complex_untyped_typed_loop_10567"
+file = "complex_untyped_typed_loop.jl"
+expected = true
+description = "Issue #10567: untyped ComplexF64 mandelbrot-style hot loop is accepted by the typed-loop recognizer and produces the same escape-count checksum as upstream Julia (9180 at 20x20x100)."
+
+[[tests]]
+name = "complex_mixed_arg_call_specialize_10567"
+file = "complex_mixed_arg_call_specialize_10567.jl"
+expected = true
+description = "Issue #10567: the generic `CallSpecialize`/`CallSpecializeInbounds` dispatch path's new frame-less mixed-type fast path (`try_execute_typed_scalar_function_call_from_values`) binds a genuinely mixed argument list (boxed `ComplexF64` plus `Int64`) without boxing round-trips. Exercises repeated calls at the same call site (cache reuse), NaN/Inf/signed-zero IEEE edge values through the escape recurrence, a return-value escape boundary materializing back to a boxed `Complex{Float64}`, and a non-complex call site confirming the generic fallback path is unaffected."
+
+[[tests]]
+name = "complex_specializer_mixed_real_arith_10749"
+file = "complex_specializer_mixed_real_arith_10749.jl"
+expected = true
+description = "The runtime specializer's value-level Complex arithmetic on the split-slot (SROA) representation: mixed real/complex +,-,* use upstream's NARROW base/complex.jl methods (pinned by Inf/NaN cases where the full complex formula would diverge), and a LICM-hoisted Complex loop-invariant temp no longer aborts specialization (Issue #10749)"
+
+[[tests]]
+name = "complex_f64_binary_predecode_10645"
+file = "complex_f64_binary_predecode_10645.jl"
+expected = true
+description = "Issue #10645: concrete Complex{Float64}+/*Complex{Float64} overloads predecode into a frame-less TypedScalarFunctionBlock; locks IEEE correctness (NaN/+-Inf/signed zero), mixed Complex-Real operands, and a short accumulation loop against upstream julia."
+
+[[tests]]
+name = "complex_abs2_concrete_dispatch_stability_10775"
+file = "complex_abs2_concrete_dispatch_stability_10775.jl"
+expected = true
+description = "Issue #10775: the concrete `abs2(z::Complex{Float64})` / `abs2(z::Complex{Float32})` overloads (alongside the fully general `abs2(z::Complex{T}) where {T<:Real}` fallback) must never match a `Complex{Int64}`/`Complex{Int32}`/`Complex{Bool}` argument — sjulia's runtime dynamic-dispatch resolver previously matched a concrete Complex{Float64}/Float32 method parameter against a Complex{Int64} argument in a process-seed-dependent (HashMap iteration order) way, so `abs2(Complex(2,3))` returned `13.0::Float64`/`Float32` instead of `13::Int64` in roughly 1 of every 3 processes on unmodified main (commit 6d4b174a0). Re-verified against upstream julia and pinned by 100 fresh-process runs with byte-identical output; `scripts/dispatch_seed_sweep.sh complex` provides the ongoing multi-process determinism guard (this fixture's category is now included in its default sweep set)."

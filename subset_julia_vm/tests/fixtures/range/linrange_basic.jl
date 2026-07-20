@@ -40,11 +40,15 @@ end
     @test r[3] == 0.5
 end
 
-@testset "LinRange from range function" begin
-    # range(start, stop, length) should return LinRange
+@testset "StepRangeLen from range function" begin
+    # range(start, stop, length) on Float64 endpoints returns upstream's
+    # TwicePrecision-backed StepRangeLen, not LinRange (Issue #9419;
+    # julia/base/twiceprecision.jl range_start_stop_length). LinRange remains
+    # the generic non-IEEEFloat fallback.
     r = range(1.0, 10.0, 5)
 
-    @test isa(r, LinRange)
+    @test isa(r, StepRangeLen)
+    @test !isa(r, LinRange)
     @test first(r) == 1.0
     @test last(r) == 10.0
     @test length(r) == 5

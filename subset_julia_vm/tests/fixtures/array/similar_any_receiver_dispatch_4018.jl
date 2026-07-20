@@ -1,3 +1,10 @@
+# Kept standalone: extends Base.similar with a method on a Base argument type
+# (`similar(::Vector{Int64}, ::Int64)`), i.e. method piracy. Method-table
+# extension is process-global, not module-scoped, so wrapping this in a module
+# inside an aggregate would leak the pirated method to every later member that
+# calls `similar` (e.g. `similar_basic`). Same #5966 class as the
+# dispatch/*_user_method_* fixtures; excluded from Issue #10238 module-wrap
+# aggregation.
 using Test
 
 import Base: similar

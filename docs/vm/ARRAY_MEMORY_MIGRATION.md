@@ -464,6 +464,18 @@ MemoryRef-backed pure-Julia `Array{T,N}` wrapper; the `Value::ExprArgs` carrier 
 confined to the metaprogramming `expr.args` representation, where its auto-freed
 `Rc` semantics are correct.
 
+### Update (2026-07, #8918): confinement is now a type, not a grep
+
+The `EXPR_ARGS_ALLOWLIST` grep ratchet described above was **retired to a type**.
+`Value::ExprArgs`'s payload is now the private-field witness newtype
+`ExprArgsCarrier` (`subset_julia_vm_bytecode/src/value/array_value/mod.rs`): the
+carrier can only be constructed or destructured through the `native_array_*` hub
+in that module (the sole code with access to the private field), so an off-hub
+carrier site is a **compile error** instead of an audit failure. Only the
+`Value::Array` deleted-variant zero-match remains in
+`check_value_array_allowlist.sh`. This follows the `Resolved` newtype template
+(#8642); see `docs/vm/CODE_AUDITS.md`.
+
 ## Active Work
 
 - Keep new code free of literal `Value::Array` matches.

@@ -10,12 +10,13 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::compile_and_run_str;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{CompiledProgram, Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::{CompiledProgram, Value};
 
 // ── Dynamic dispatch ──────────────────────────────────────────────────────────
 
@@ -33,6 +34,22 @@ function run_dispatch_string_6345(n, x::Any)
 end
 
 run_dispatch_string_6345(20000, "abcd")
+"#;
+
+const SLOT_CONST_ADD_8446_SOURCE: &str = r#"
+function add_const_8446(x::Int64)
+    x + 1
+end
+
+function run_slot_const_add_8446(n::Int64)
+    total = 0
+    for i in 1:n
+        total += add_const_8446(i)
+    end
+    total
+end
+
+run_slot_const_add_8446(20000)
 "#;
 
 fn compile_source(source: &str) -> CompiledProgram {
@@ -256,6 +273,26 @@ tight_loop(20000)
 "#;
     c.bench_function("dispatch_loop_overhead_20000", |b| {
         b.iter(|| compile_and_run_str(black_box(source), 0))
+    });
+}
+
+/// Benchmark: VM-only slot load plus literal-add superinstruction (Issue #8446).
+///
+/// The leaf function compiles `x + 1` to `LoadAddConstI64Slot`, reducing the
+/// function body from three arithmetic/load instructions to one before return.
+fn bench_slot_const_add_vm_run(c: &mut Criterion) {
+    let compiled = compile_source(SLOT_CONST_ADD_8446_SOURCE);
+    let mut validation_vm = Vm::new_program(compiled.clone(), StableRng::new(0));
+    match validation_vm.run().unwrap() {
+        Value::I64(value) => assert_eq!(value, 200_030_000),
+        other => panic!("expected Int64 result from slot const add benchmark, got {other:?}"),
+    }
+
+    c.bench_function("vm_slot_const_add_20000", |b| {
+        b.iter(|| {
+            let mut vm = Vm::new_program(black_box(compiled.clone()), StableRng::new(0));
+            black_box(vm.run().unwrap())
+        })
     });
 }
 
@@ -524,6 +561,7 @@ criterion_group!(
     bench_const_step_count_loop,
     bench_const_step_countdown_loop,
     bench_dispatch_loop_overhead,
+    bench_slot_const_add_vm_run,
     bench_foreach_array_sum,
     bench_map_operation,
     bench_filter_operation,

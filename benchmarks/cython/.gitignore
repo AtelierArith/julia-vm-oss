@@ -1,0 +1,5 @@
+build/
+*.c
+*.so
+.venv/
+__pycache__/

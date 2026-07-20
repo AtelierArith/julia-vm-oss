@@ -2,6 +2,7 @@
 # Range - Range utilities
 # =============================================================================
 # Based on Julia's base/range.jl
+# upstream: julia/base/range.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-06-04)
 #
 # IMPORTANT: This module only contains functions that exist in Julia Base.
 # Removed functions (not in Julia Base):
@@ -12,6 +13,243 @@
 #   - stepsize (renamed to step)
 #   - range_length (internal)
 
+struct UnitRange{T<:Real} <: AbstractUnitRange
+    start::T
+    stop::T
+
+    UnitRange{T}(start::T, stop::T) where {T<:Real} =
+        new{T}(start, unitrange_last(start, stop))
+end
+
+struct StepRange{T,S} <: OrdinalRange
+    start::T
+    step::S
+    stop::T
+
+    StepRange{T,S}(start::T, step::S, stop::T) where {T,S} =
+        new{T,S}(start, step, steprange_last(start, step, stop))
+end
+
+function unitrange_last(start::Integer, stop::Integer)
+    if stop >= start
+        return stop
+    end
+    return typeof(stop)(start - oneunit(start - stop))
+end
+
+function unitrange_last(start, stop)
+    if stop >= start
+        return typeof(stop)(start + floor(stop - start))
+    end
+    return typeof(stop)(start - oneunit(start - stop))
+end
+
+function steprange_last(start, step, stop)
+    if start isa AbstractFloat || step isa AbstractFloat
+        throw(ArgumentError("StepRange should not be used with floating point"))
+    end
+    if step == zero(step)
+        throw(ArgumentError("step cannot be zero"))
+    end
+    if step > zero(step)
+        if stop < start
+            return steprange_last_empty(start, step, stop)
+        end
+        return typeof(stop)(start + div(stop - start, step) * step)
+    end
+    if stop > start
+        return steprange_last_empty(start, step, stop)
+    end
+    return typeof(stop)(start + div(start - stop, -step) * step)
+end
+
+function steprange_last_empty(start::Integer, step, stop)
+    if step > zero(step)
+        return typeof(stop)(start - oneunit(step))
+    end
+    return typeof(stop)(start + oneunit(step))
+end
+
+function steprange_last_empty(start, step, stop)
+    return stop
+end
+
+function UnitRange{T}(start, stop) where {T<:Real}
+    lo = T(start)
+    hi = T(stop)
+    return UnitRange{T}(lo, unitrange_last(lo, hi))
+end
+
+function UnitRange(start::T, stop::T) where {T<:Real}
+    return UnitRange{T}(start, unitrange_last(start, stop))
+end
+
+function UnitRange(start::Real, stop::Real)
+    endpoints = promote(start, stop)
+    return UnitRange(endpoints[1], endpoints[2])
+end
+
+function StepRange{T,S}(start, step, stop) where {T,S}
+    lo = T(start)
+    st = S(step)
+    hi = T(stop)
+    return StepRange{T,S}(lo, st, steprange_last(lo, st, hi))
+end
+
+function StepRange{T}(start, step::S, stop) where {T,S}
+    lo = T(start)
+    hi = T(stop)
+    return StepRange{T,S}(lo, step, steprange_last(lo, step, hi))
+end
+
+function StepRange(start::T, step::S, stop::T) where {T,S}
+    return StepRange{T,S}(start, step, steprange_last(start, step, stop))
+end
+
+function StepRange(start, step, stop)
+    endpoints = promote(start, stop)
+    return StepRange(endpoints[1], step, endpoints[2])
+end
+
+first(r::UnitRange) = _tuple_first(r)
+first(r::StepRange) = _tuple_first(r)
+last(r::UnitRange) = _tuple_last(r)
+last(r::StepRange) = _tuple_last(r)
+step(r::UnitRange) = oneunit(eltype(r))
+step(r::StepRange) = _range_step(r)
+
+function _range_length_from_parts(lo, st, hi)
+    if st > zero(st)
+        if hi < lo
+            return Int64(0)
+        end
+        return Int64(div(hi - lo, st) + 1)
+    end
+    if hi > lo
+        return Int64(0)
+    end
+    return Int64(div(lo - hi, -st) + 1)
+end
+
+function _range_length_from_parts(lo::BigInt, st, hi)
+    if st > zero(st)
+        if hi < lo
+            return big(0)
+        end
+        return div(hi - lo, st) + big(1)
+    end
+    if hi > lo
+        return big(0)
+    end
+    return div(lo - hi, -st) + big(1)
+end
+
+function length(r::UnitRange)
+    return _range_length_from_parts(first(r), step(r), last(r))
+end
+
+function length(r::StepRange)
+    return _range_length_from_parts(first(r), step(r), last(r))
+end
+
+function getindex(r::UnitRange, i::Int64)
+    n = _range_length_from_parts(first(r), step(r), last(r))
+    if i < 1 || i > n
+        throw(BoundsError(r, i))
+    end
+    T = eltype(r)
+    value = first(r) + (i - 1) * step(r)
+    if value isa T
+        return value
+    end
+    return T(value)
+end
+
+function getindex(r::UnitRange, i::Integer)
+    return getindex(r, Int64(i))
+end
+
+function getindex(r::StepRange, i::Int64)
+    n = _range_length_from_parts(first(r), step(r), last(r))
+    if i < 1 || i > n
+        throw(BoundsError(r, i))
+    end
+    T = eltype(r)
+    value = first(r) + (i - 1) * step(r)
+    if value isa T
+        return value
+    end
+    return T(value)
+end
+
+function getindex(r::StepRange, i::Integer)
+    return getindex(r, Int64(i))
+end
+
+function _range_first_count(n::Int64, len)
+    if n < 0
+        throw(ArgumentError("Number of elements must be non-negative"))
+    end
+    m = n
+    if len < m
+        m = len
+    end
+    return Int64(m)
+end
+
+function first(r::UnitRange, n::Int64)
+    m = _range_first_count(n, length(r))
+    if m == 0
+        return UnitRange(first(r), first(r) - step(r))
+    end
+    return UnitRange(first(r), r[m])
+end
+
+function first(r::StepRange, n::Int64)
+    m = _range_first_count(n, length(r))
+    if m == 0
+        return StepRange(first(r), step(r), first(r) - step(r))
+    end
+    return StepRange(first(r), step(r), r[m])
+end
+
+function iterate(r::UnitRange)
+    return isempty(r) ? nothing : (first(r), first(r))
+end
+
+function iterate(r::UnitRange{T}, state) where {T}
+    state == last(r) && return nothing
+    next = convert(T, state + step(r))
+    return (next, next)
+end
+
+function iterate(r::StepRange)
+    if length(r) == 0
+        return nothing
+    end
+    value = first(r)
+    return (value, value)
+end
+
+function iterate(r::StepRange{T,S}, state) where {T,S}
+    state == last(r) && return nothing
+    next = convert(T, state + step(r))
+    return (next, next)
+end
+
+size(r::UnitRange) = (length(r),)
+size(r::StepRange) = (length(r),)
+IteratorSize(::Type{UnitRange{T}}) where {T} = HasShape{1}()
+IteratorSize(::Type{StepRange{T,S}}) where {T,S} = HasShape{1}()
+IteratorSize(r::UnitRange) = IteratorSize(typeof(r))
+IteratorSize(r::StepRange) = IteratorSize(typeof(r))
+IteratorEltype(::Type{UnitRange{T}}) where {T} = HasEltype()
+IteratorEltype(::Type{StepRange{T,S}}) where {T,S} = HasEltype()
+IteratorEltype(r::UnitRange) = IteratorEltype(typeof(r))
+IteratorEltype(r::StepRange) = IteratorEltype(typeof(r))
+isempty(r::UnitRange) = length(r) == 0
+isempty(r::StepRange) = length(r) == 0
+
 # VM-native range collect bridges.
 #
 # Upstream Julia defines `collect(r::AbstractRange) = Array(r)`. sjulia still
@@ -21,74 +259,28 @@
 # ranges still retain a VM-native materialization fallback until they have safe
 # Julia wrappers.
 function _collect_vm_range(r)
-    n = length(r)
-    if n == 0
-        if isa(r, StepRange{Int64,Int64})
-            return _array_undef_from_dims(Int64, (0,))
-        end
-        return []
-    end
-    if isa(r, StepRange{Int64,Int64})
-        result = _array_undef_from_dims(Int64, (n,))
-        for i in 1:n
-            result[i] = Int64(r[i])
-        end
-        return result
-    end
-    first_value = r[1]
-    if isa(first_value, Int64)
-        result = _array_undef_from_dims(Int64, (n,))
-    elseif isa(first_value, Float64)
-        result = _array_undef_from_dims(Float64, (n,))
-    elseif isa(first_value, Float32)
-        result = _array_undef_from_dims(Float32, (n,))
-    else
-        result = _array_undef_from_dims(Any, (n,))
-    end
-    result[1] = first_value
-    for i in 2:n
+    n = Int(length(r))
+    T = eltype(r)
+    result = _array_undef_from_dims(T, (n,))
+    for i in 1:n
         value = r[i]
-        result[i] = value
+        result[i] = T === Any ? value : T(value)
     end
     return result
 end
 
 function _collect_vm_range_as(::Type{T}, r) where {T}
-    n = length(r)
-    if n == 0
-        if T === Int64
-            return _array_undef_from_dims(Int64, (0,))
-        elseif T === Float64
-            return _array_undef_from_dims(Float64, (0,))
-        elseif T === Float32
-            return _array_undef_from_dims(Float32, (0,))
-        end
-        return []
+    n = Int(length(r))
+    result = _array_undef_from_dims(T, (n,))
+    for i in 1:n
+        value = r[i]
+        result[i] = T === Any ? value : T(value)
     end
-    if T === Int64
-        result = _array_undef_from_dims(Int64, (n,))
-        for i in 1:n
-            result[i] = Int64(r[i])
-        end
-        return result
-    elseif T === Float64
-        result = _array_undef_from_dims(Float64, (n,))
-        for i in 1:n
-            result[i] = Float64(r[i])
-        end
-        return result
-    elseif T === Float32
-        result = _array_undef_from_dims(Float32, (n,))
-        for i in 1:n
-            result[i] = Float32(r[i])
-        end
-        return result
-    end
-    return _collect_vm_range(r)
+    return result
 end
 
 function collect(r::UnitRange{T}) where {T}
-    return _collect_vm_range_as(T, r)
+    return _collect_vm_range(r)
 end
 
 function collect(r::UnitRange)
@@ -96,7 +288,7 @@ function collect(r::UnitRange)
 end
 
 function collect(r::StepRange{T,S}) where {T,S}
-    return _collect_vm_range_as(T, r)
+    return _collect_vm_range(r)
 end
 
 function collect(r::StepRange)
@@ -175,11 +367,11 @@ end
 # between `start` and `stop`. Unlike StepRange, the spacing is controlled
 # by length rather than step.
 
-struct LinRange{T<:Real}
+struct LinRange{T,L<:Integer}
     start::T
     stop::T
-    len::Int64
-    lendiv::Int64
+    len::L
+    lendiv::L
 end
 
 # Constructor with type inference
@@ -192,7 +384,7 @@ function LinRange(start, stop, len::Int64)
     end
     lendiv = max(len - 1, Int64(1))
     T = typeof((stop - start) / 1)
-    return LinRange{T}(T(start), T(stop), len, lendiv)
+    return LinRange{T,Int64}(T(start), T(stop), len, lendiv)
 end
 
 # Constructor with integer len conversion
@@ -270,7 +462,7 @@ function size(r::LinRange)
     return (r.len,)
 end
 
-function IteratorSize(::Type{LinRange{T}}) where {T}
+function IteratorSize(::Type{LinRange{T,L}}) where {T,L}
     return HasShape{1}()
 end
 
@@ -278,7 +470,7 @@ function IteratorSize(r::LinRange)
     return IteratorSize(typeof(r))
 end
 
-function IteratorEltype(::Type{LinRange{T}}) where {T}
+function IteratorEltype(::Type{LinRange{T,L}}) where {T,L}
     return HasEltype()
 end
 
@@ -286,7 +478,7 @@ function IteratorEltype(r::LinRange)
     return IteratorEltype(typeof(r))
 end
 
-function eltype(::Type{LinRange{T}}) where {T}
+function eltype(::Type{LinRange{T,L}}) where {T,L}
     return T
 end
 
@@ -384,6 +576,10 @@ function step(r::StepRangeLen)
     return r.step
 end
 
+function step(r::StepRange)
+    return _range_step(r)
+end
+
 # Internal getindex
 function _steprangelen_getindex(r::StepRangeLen, i::Int64)
     if r.len == 0
@@ -434,7 +630,14 @@ function IteratorSize(::Type{StepRangeLen{T}}) where {T}
 end
 
 function IteratorSize(r::StepRangeLen)
-    return IteratorSize(typeof(r))
+    # Upstream is `IteratorSize(::Type{<:AbstractRange}) = HasShape{1}()`
+    # (julia/base/range.jl). Forwarding through `typeof(r)` loses the VM-native
+    # TwicePrecision StepRangeLen: its type object carries all four upstream
+    # parameters, matches neither `::Type{StepRangeLen{T}}` above nor
+    # `Type{<:AbstractRange}` in Base-internal dispatch, and fell through to
+    # the generic `IteratorSize(::Type) = HasLength()` (Issue #11443). Every
+    # StepRangeLen is one-dimensional, so answer directly.
+    return HasShape{1}()
 end
 
 function IteratorEltype(::Type{StepRangeLen{T}}) where {T}
@@ -446,6 +649,17 @@ function IteratorEltype(r::StepRangeLen)
 end
 
 function eltype(::Type{StepRangeLen{T}}) where {T}
+    return T
+end
+
+# Issue #9345: a float range built by the VM colon operator (`1:0.5:3`,
+# `0:0.5f0:6.0`) is reported by `typeof` in upstream's fully-parameterized
+# form `StepRangeLen{T, TwicePrecision{T}, TwicePrecision{T}, Int64}` (see
+# `typeof` in vm/type_ops/introspection.rs). The 1-parameter method above only
+# matches genuine `StepRangeLen{T}` struct instances, so `eltype(typeof(r))`
+# on those float ranges fell through to `eltype(::Type) = Any`. Match the
+# 4-parameter display type here and recover the element type `T`.
+function eltype(::Type{StepRangeLen{T,R,S,L}}) where {T,R,S,L}
     return T
 end
 
@@ -554,10 +768,93 @@ function range_start_stop(start, stop)
 end
 
 # range_start_stop_length(start, stop, len) - the core implementation
-# Julia: range_start_stop_length(start, stop, len::Integer) = LinRange(start, stop, len)
-# Returns a lazy LinRange for compatibility with Julia.
+# Julia: range_start_stop_length(start, stop, len::Integer) =
+#     range_start_stop_length(promote(start, stop)..., len)   (range.jl:601)
+# Julia: range_start_stop_length(start::T, stop::T, len::Integer) where {T} = LinRange(start, stop, len)
+# Generic fallback: promote mixed endpoints first (so e.g. (Int32, Float32)
+# reaches the Float32 method below); same-type non-IEEEFloat endpoints keep
+# the lazy LinRange, matching upstream's non-IEEEFloat path (Issue #9509).
 function range_start_stop_length(start, stop, len)
-    return LinRange(start, stop, Int64(len))
+    ps, pe = promote(start, stop)
+    if typeof(ps) === typeof(start) && typeof(pe) === typeof(stop)
+        return LinRange(ps, pe, Int64(len))
+    end
+    return range_start_stop_length(ps, pe, len)
+end
+
+# Upstream lifts Integer and IEEEFloat endpoints to a TwicePrecision-backed
+# StepRangeLen (julia/base/twiceprecision.jl `range_start_stop_length` /
+# `_linspace`), so `typeof(range(0, 1, length=3))` is
+# `StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}`
+# and the elements are shortest-decimal exact. sjulia's TwicePrecision
+# StepRangeLen is the VM-native float range value, built by the
+# `_linspace_range_f64` intrinsic (Issues #9419/#9509). The `len < 2` argument
+# checks mirror upstream `_linspace1`.
+function _range_start_stop_length_f64(start::Float64, stop::Float64, n::Int64)
+    if n < 0
+        throw(ArgumentError("range($start, stop=$stop, length=$n): negative length"))
+    end
+    if n == 1 && start != stop
+        throw(ArgumentError("range($start, stop=$stop, length=$n): endpoints differ"))
+    end
+    return _linspace_range_f64(start, stop, n)
+end
+
+# Upstream: range_start_stop_length(start::T, stop::T, len) where {T<:Integer}
+# = _linspace(float(T), start, stop, len) (range.jl:604). All fixed-width
+# integer endpoints (and their mixes) promote to the Float64 TwicePrecision
+# StepRangeLen; BigInt endpoints keep the LinRange fallback because
+# float(BigInt) = BigFloat is not an IEEEFloat (upstream reaches the generic
+# _linspace, range.jl:608). Issue #9509.
+function range_start_stop_length(start::Integer, stop::Integer, len)
+    if start isa BigInt || stop isa BigInt
+        return LinRange(start, stop, Int64(len))
+    end
+    return _range_start_stop_length_f64(Float64(start), Float64(stop), Int64(len))
+end
+
+# Upstream: range_start_stop_length(start::T, stop::T, len) where
+# {T<:IEEEFloat} (twiceprecision.jl:645). Float32/Float16 run the rational
+# search in the range's own precision and collapse ref/step to plain Float64
+# scalars — typeof is `StepRangeLen{Float32, Float64, Float64, Int64}`
+# (Issue #9509). Error messages interpolate the original narrow-float values,
+# matching upstream `_linspace1`.
+function range_start_stop_length(start::Float32, stop::Float32, len)
+    n = Int64(len)
+    if n < 0
+        throw(ArgumentError("range($start, stop=$stop, length=$n): negative length"))
+    end
+    if n == 1 && start != stop
+        throw(ArgumentError("range($start, stop=$stop, length=$n): endpoints differ"))
+    end
+    return _linspace_range_f64(Float64(start), Float64(stop), n, 1)
+end
+
+function range_start_stop_length(start::Float16, stop::Float16, len)
+    n = Int64(len)
+    if n < 0
+        throw(ArgumentError("range($start, stop=$stop, length=$n): negative length"))
+    end
+    if n == 1 && start != stop
+        throw(ArgumentError("range($start, stop=$stop, length=$n): endpoints differ"))
+    end
+    return _linspace_range_f64(Float64(start), Float64(stop), n, 2)
+end
+
+function range_start_stop_length(start::Int64, stop::Int64, len)
+    return _range_start_stop_length_f64(Float64(start), Float64(stop), Int64(len))
+end
+
+function range_start_stop_length(start::Float64, stop::Float64, len)
+    return _range_start_stop_length_f64(start, stop, Int64(len))
+end
+
+function range_start_stop_length(start::Int64, stop::Float64, len)
+    return _range_start_stop_length_f64(Float64(start), stop, Int64(len))
+end
+
+function range_start_stop_length(start::Float64, stop::Int64, len)
+    return _range_start_stop_length_f64(start, Float64(stop), Int64(len))
 end
 
 # range_start_step_length(start, step, len) - start and step with length
@@ -568,15 +865,30 @@ end
 # element type, so `range(1, step=2, length=5)` produced `[1.0, 3.0, ...]`
 # instead of the integer `[1, 3, 5, 7, 9]`. Route the all-integer case through
 # the VM colon operator (`start:step:stop`), which materializes the correct
-# `StepRange{Int64,Int64}` with integer elements. Non-integer arguments keep the
-# existing float `StepRangeLen` representation, matching upstream values there.
+# `StepRange{Int64,Int64}` with integer elements.
+#
+# (Issue #9509) IEEEFloat-promoted arguments follow upstream
+# `range_start_step_length(a::T, st::T, len) where T<:IEEEFloat`
+# (julia/base/twiceprecision.jl:448): a TwicePrecision-backed StepRangeLen
+# with authoritative length, built by the `_steprangelen_range_f64` intrinsic.
+# The negative-length check mirrors the upstream StepRangeLen inner
+# constructor. Non-IEEE non-integer arguments keep the pure-Julia
+# `StepRangeLen` struct fallback.
 function range_start_step_length(start, step, len)
     n = Int64(len)
     if isa(start, Integer) && isa(step, Integer)
         stop = start + step * (n - 1)
         return start:step:stop
     end
-    return StepRangeLen(start * 1.0, step * 1.0, n, 1)
+    a, st = promote(start, step)
+    if isa(a, Float64) || isa(a, Float32) || isa(a, Float16)
+        if n < 0
+            throw(ArgumentError("length cannot be negative, got $n"))
+        end
+        tag = isa(a, Float64) ? 0 : (isa(a, Float32) ? 1 : 2)
+        return _steprangelen_range_f64(Float64(a), Float64(st), n, tag)
+    end
+    return StepRangeLen(a * 1.0, st * 1.0, n, 1)
 end
 
 # range_start_length(start, len) - start and length, step=1
@@ -652,6 +964,10 @@ end
 # Note: For actual Range values, this is handled by VM
 function step(arr)
     if length(arr) < 2
+        if arr isa UnitRange
+            T = eltype(arr)
+            return oneunit(T) - zero(T)
+        end
         return 1
     end
     return arr[2] - arr[1]
@@ -897,17 +1213,25 @@ end
 
 # Constructor with validation
 function LogRange(start::Real, stop::Real, len::Int64)
-    if start <= 0 || stop <= 0
-        error("DomainError: LogRange does not accept zero or negative numbers")
+    # Upstream raises DomainError here, not ErrorException (verified against
+    # julia 1.12.6: `logrange(-1.0, 10.0, 3)` -> `DomainError with (-1.0, 10.0):
+    # LogRange does not accept negative numbers`). These sites raised the class
+    # by NAMING it in an `error("DomainError: ...")` message, which throws an
+    # ErrorException whose message contradicts `typeof(e)` (Issue #11146).
+    if start == 0 || stop == 0
+        throw(DomainError((start, stop), "LogRange cannot start or stop at zero"))
+    end
+    if start < 0 || stop < 0
+        throw(DomainError((start, stop), "LogRange does not accept negative numbers"))
     end
     if !isfinite(Float64(start)) || !isfinite(Float64(stop))
-        error("DomainError: LogRange is only defined for finite start & stop")
+        throw(DomainError((start, stop), "LogRange is only defined for finite start & stop"))
     end
     if len < 0
-        error("ArgumentError: LogRange: negative length")
+        throw(ArgumentError("LogRange: negative length"))
     end
     if len == 1 && start != stop
-        error("ArgumentError: LogRange: endpoints differ with length=1")
+        throw(ArgumentError("LogRange: endpoints differ with length=1"))
     end
     T = typeof(Float64(start))
     s = Float64(start)

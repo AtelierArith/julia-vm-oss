@@ -43,7 +43,25 @@ expected = true
 description = "`type` and `as` are contextual keywords (`type` only after abstract/primitive, `as` only in import/using aliasing); everywhere else (long/short function definition named `type`/`as`, variable, parameter, struct field, function value) they parse as ordinary identifiers. Also confirms `abstract type`/`primitive type` and `using ... as ...` parse/lower unchanged (Issue #8108)"
 
 [[tests]]
+name = "parse_public_as_identifier_9637"
+file = "public_as_identifier_9637.jl"
+expected = true
+description = "`public` is a contextual keyword only as a statement introducer (`public foo, bar`); everywhere else (macro/function definition named `public`, variable, parameter, struct field, function value, and the public-statement introducer case) it parses as an ordinary identifier (Issue #9637)"
+
+[[tests]]
 name = "parse_bang_not_equal_8194"
 file = "bang_not_equal_8194.jl"
 expected = true
 description = "Identifier directly followed by != with no space (a!=b) lexes as a != b, not a! = b; trailing-! names (push!, in!) and unary ! preserved (Issue #8194)"
+
+[[tests]]
+name = "parse_mid_identifier_bang_10713"
+file = "mid_identifier_bang_10713.jl"
+expected = true
+description = "Mid-identifier ! is part of the identifier (`foo!bar`, `name!x`, `is!valid!`), while `!=`/`!==` still split as operators (Issue #10713)"
+
+[[tests]]
+name = "parse_nested_grouping_newlines_10128"
+file = "nested_grouping_newlines_10128.jl"
+expected = true
+description = "Regression coverage for the CompileSpeed fix to peek_non_newline_token/peek_non_newline_token_after_current (Pratt loop continuation check), which stopped rebuilding a fresh Lexer::new(self.source) (and its O(source length) SourceMap scan) on every newline seen inside (...)/[...]/{...} groupings. Exercises deeply nested parenthesized arithmetic, vector/tuple literals, a function signature with a grouped default value, and a generator filter clause, all split across newlines, plus several levels of nesting stacked together (Issue #10128)."

@@ -4,10 +4,10 @@
 //! Also provides a global registry for Base macros that can be used by user code.
 
 use crate::ir::core::Program;
-use crate::lowering::{Lowering, MacroParamType, StoredMacroDef};
+use crate::lowering::{Lowering, MacroHygieneInfo, MacroParamType, StoredMacroDef};
 use crate::parser::Parser;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 /// Global registry for Base macros.
@@ -40,8 +40,11 @@ pub fn get_base_program() -> Option<&'static Program> {
         let parse_outcome = parser.parse(&source).ok()?;
 
         // Lower using unified Lowering
+        // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+        crate::macro_runtime::install();
         let mut lowering = Lowering::new(&source);
-        let program = lowering.lower(parse_outcome).ok()?;
+        let mut program = lowering.lower(parse_outcome).ok()?;
+        program.mark_structs_as_base_origin();
 
         // Extract and store macros in the global registry
         register_base_macros(&program);
@@ -64,7 +67,14 @@ fn register_base_macros(program: &Program) {
             body: macro_def.body.clone(),
             expansion_functions: vec![],
             expansion_structs: vec![],
-            hygiene: None,
+            // Base macros are not plain top-level user macros. Mark them as
+            // module-owned so quote-local gensym hygiene does not rewrite
+            // caller expressions such as `@time grid = ...` (Issue #9619).
+            hygiene: Some(MacroHygieneInfo {
+                module: "Base".to_string(),
+                members: HashSet::new(),
+                exports: HashSet::new(),
+            }),
             span: macro_def.span,
         };
         registry
@@ -129,6 +139,8 @@ mod tests {
             use crate::parser::Parser;
             let mut parser = Parser::new().expect("parser init");
             let parse_outcome = parser.parse(&source).expect("parse failed");
+            // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+            crate::macro_runtime::install();
             let mut lowering = Lowering::new(&source);
             let result = lowering.lower(parse_outcome);
             match result {
@@ -158,7 +170,6 @@ mod tests {
                 println!("  [{:3}] {}", i, f.name);
             }
         }
-        // Just print, don't assert anything specific
     }
 
     #[test]

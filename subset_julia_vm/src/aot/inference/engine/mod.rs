@@ -13,14 +13,13 @@ use super::super::specialization::{
 use super::super::types::StaticType;
 use super::super::AotResult;
 use super::types::{FunctionSignature, StructTypeInfo, TypeEnv, TypedFunction, TypedProgram};
-use crate::compile::abstract_interp::engine::{
-    widen_argtype_for_cache_key, CacheArgType, InferenceCacheKey,
-};
-use crate::compile::lattice::types::ConstValue;
 use crate::ir::core::{
     BinaryOp, Block, EnumDef, Expr, Function, Literal, Program, Stmt, StructDef, UnaryOp,
 };
 use std::collections::{HashMap, HashSet};
+use subset_julia_vm_types::{
+    widen_argtype_for_cache_key, CacheArgType, ConstValue, InferenceCacheKey, LatticeType,
+};
 
 /// Recursively collect `@enum` definitions from a block, descending into nested
 /// value blocks (`let`/`begin`) and `if` bodies. `@enum` lowers to a
@@ -300,7 +299,7 @@ impl TypeInferenceEngine {
         let _func_map: HashMap<String, &Function> = program
             .functions
             .iter()
-            .map(|f| (f.name.clone(), f))
+            .map(|f| (f.name.clone(), f.as_ref()))
             .collect();
 
         // Iterative type inference:
@@ -392,12 +391,19 @@ impl TypeInferenceEngine {
                 } = value
                 {
                     let inner_ty = self.infer_expr_type(inner_value);
-                    self.env.insert(inner_var.clone(), inner_ty.clone());
+                    self.env.insert(inner_var.to_string(), inner_ty.clone());
                     self.env.insert(var.clone(), inner_ty);
                 } else {
                     // Infer type of the assigned value
                     let ty = self.infer_expr_type(value);
                     self.env.insert(var.clone(), ty);
+                }
+            }
+            Stmt::DestructuringAssign { targets, value, .. } => {
+                let rhs_ty = self.infer_expr_type(value);
+                for (index, target) in targets.iter().enumerate() {
+                    let ty = self.tuple_element_type_at(&rhs_ty, index + 1);
+                    self.env.insert(target.clone(), ty);
                 }
             }
             Stmt::For {
@@ -453,7 +459,7 @@ impl TypeInferenceEngine {
             } => {
                 for (name, value) in bindings {
                     let ty = self.infer_expr_type(value);
-                    self.env.insert(name.clone(), ty);
+                    self.env.insert(name.to_string(), ty);
                 }
                 self.setup_local_env_from_block(body);
             }
@@ -471,7 +477,7 @@ impl TypeInferenceEngine {
     /// Collect call sites from a statement
     fn collect_call_sites_from_stmt(&mut self, stmt: &Stmt, user_functions: &HashSet<String>) {
         match stmt {
-            Stmt::Assign { value, .. } => {
+            Stmt::Assign { value, .. } | Stmt::DestructuringAssign { value, .. } => {
                 self.collect_call_sites_from_expr(value, user_functions);
             }
             Stmt::Expr { expr, .. } => {
@@ -596,7 +602,7 @@ impl TypeInferenceEngine {
                 }
 
                 // If this is a call to a user-defined function, record the argument types
-                if user_functions.contains(function) {
+                if user_functions.contains(function.as_str()) {
                     let arg_types: Vec<StaticType> = args
                         .iter()
                         .map(|a| self.infer_expr_type(a))
@@ -713,9 +719,7 @@ impl TypeInferenceEngine {
     /// the ABI `StaticType` projected into the shared lattice type.
     fn arg_key_for_expr(&self, expr: &Expr, ty: &StaticType) -> CacheArgType {
         match Self::const_value_for_arg_expr(expr) {
-            Some(cv) => {
-                widen_argtype_for_cache_key(&crate::compile::lattice::types::LatticeType::Const(cv))
-            }
+            Some(cv) => widen_argtype_for_cache_key(&LatticeType::Const(cv)),
             None => CacheArgType::Type(lattice_type_for_static_type(ty)),
         }
     }
@@ -932,13 +936,21 @@ impl TypeInferenceEngine {
                         let inner_ty = self.infer_expr_type(inner_value);
                         let inner_merged =
                             self.merge_local_type(&mut locals, inner_var, inner_ty.clone());
-                        self.env.insert(inner_var.clone(), inner_merged);
+                        self.env.insert(inner_var.to_string(), inner_merged);
                         let merged = self.merge_local_type(&mut locals, var, inner_ty);
                         self.env.insert(var.clone(), merged);
                     } else {
                         let ty = self.infer_expr_type(value);
                         let merged = self.merge_local_type(&mut locals, var, ty);
                         self.env.insert(var.clone(), merged);
+                    }
+                }
+                Stmt::DestructuringAssign { targets, value, .. } => {
+                    let rhs_ty = self.infer_expr_type(value);
+                    for (index, target) in targets.iter().enumerate() {
+                        let ty = self.tuple_element_type_at(&rhs_ty, index + 1);
+                        let merged = self.merge_local_type(&mut locals, target, ty);
+                        self.env.insert(target.clone(), merged);
                     }
                 }
                 Stmt::For {
@@ -1001,7 +1013,7 @@ impl TypeInferenceEngine {
                     for (name, value) in bindings {
                         let ty = self.infer_expr_type(value);
                         let merged = self.merge_local_type(&mut locals, name, ty);
-                        self.env.insert(name.clone(), merged);
+                        self.env.insert(name.to_string(), merged);
                     }
                     let body_locals = self.collect_local_types(body)?;
                     self.merge_local_types(&mut locals, body_locals);
@@ -1076,6 +1088,9 @@ impl TypeInferenceEngine {
             match block.stmts.last() {
                 Some(Stmt::Expr { expr, .. }) => self.infer_expr_type_with_env(expr, &env),
                 Some(Stmt::Assign { value, .. }) => self.infer_expr_type_with_env(value, &env),
+                Some(Stmt::DestructuringAssign { value, .. }) => {
+                    self.infer_expr_type_with_env(value, &env)
+                }
                 Some(Stmt::If {
                     then_branch,
                     else_branch: Some(else_block),
@@ -1103,13 +1118,16 @@ impl TypeInferenceEngine {
     ///
     /// Recognises:
     /// - `Stmt::Expr`: the expression's value
-    /// - `Stmt::Assign`: the assigned value (Issue #3542)
+    /// - `Stmt::Assign` / `Stmt::DestructuringAssign`: the assigned value
     /// - `Stmt::If`: join of branch values when both branches present
     /// - `Stmt::Block`: nested block's value
     fn infer_block_value_type(&self, block: &Block, env: &TypeEnv) -> StaticType {
         match block.stmts.last() {
             Some(Stmt::Expr { expr, .. }) => self.infer_expr_type_with_env(expr, env),
             Some(Stmt::Assign { value, .. }) => self.infer_expr_type_with_env(value, env),
+            Some(Stmt::DestructuringAssign { value, .. }) => {
+                self.infer_expr_type_with_env(value, env)
+            }
             Some(Stmt::If {
                 then_branch,
                 else_branch: Some(else_block),
@@ -1136,11 +1154,18 @@ impl TypeInferenceEngine {
                     } = value
                     {
                         let inner_ty = self.infer_expr_type_with_env(inner_value, env);
-                        env.insert(inner_var.clone(), inner_ty.clone());
+                        env.insert(inner_var.to_string(), inner_ty.clone());
                         env.insert(var.clone(), inner_ty);
                     } else {
                         let ty = self.infer_expr_type_with_env(value, env);
                         env.insert(var.clone(), ty);
+                    }
+                }
+                Stmt::DestructuringAssign { targets, value, .. } => {
+                    let rhs_ty = self.infer_expr_type_with_env(value, env);
+                    for (index, target) in targets.iter().enumerate() {
+                        let ty = self.tuple_element_type_at(&rhs_ty, index + 1);
+                        env.insert(target.clone(), ty);
                     }
                 }
                 Stmt::For {
@@ -1192,7 +1217,7 @@ impl TypeInferenceEngine {
                     let mut local_env = env.clone();
                     for (name, value) in bindings {
                         let ty = self.infer_expr_type_with_env(value, &local_env);
-                        local_env.insert(name.clone(), ty);
+                        local_env.insert(name.to_string(), ty);
                     }
                     self.collect_local_types_for_env(body, &mut local_env);
                 }
@@ -1261,7 +1286,7 @@ impl TypeInferenceEngine {
                 StaticType::Str
             }
             Expr::Var(name, _) => env
-                .get(name)
+                .get(name.as_str())
                 .cloned()
                 .or_else(|| self.function_ref_type(name))
                 .unwrap_or_else(|| self.lookup_global_or_const(name)),
@@ -1273,7 +1298,7 @@ impl TypeInferenceEngine {
                 let mut local_env = env.clone();
                 for (name, value) in bindings {
                     let ty = self.infer_expr_type_with_env(value, &local_env);
-                    local_env.insert(name.clone(), ty);
+                    local_env.insert(name.to_string(), ty);
                 }
                 self.collect_local_types_for_env(body, &mut local_env);
                 self.infer_block_value_type(body, &local_env)
@@ -1381,7 +1406,7 @@ impl TypeInferenceEngine {
                     return StaticType::Struct { type_id: 0, name };
                 }
                 // Check if it's a struct constructor
-                if let Some(struct_info) = self.structs.get(function) {
+                if let Some(struct_info) = self.structs.get(function.as_str()) {
                     return StaticType::Struct {
                         type_id: 0,
                         name: struct_info.name.clone(),
@@ -1390,7 +1415,7 @@ impl TypeInferenceEngine {
                 if StaticType::complex_param_type_from_name(function).is_some() {
                     return StaticType::Struct {
                         type_id: 0,
-                        name: function.clone(),
+                        name: function.to_string(),
                     };
                 }
                 self.call_result_type(function, &arg_types)
@@ -1443,7 +1468,9 @@ impl TypeInferenceEngine {
             Expr::NamedTupleLiteral { fields, .. } => StaticType::NamedTuple(
                 fields
                     .iter()
-                    .map(|(name, expr)| (name.clone(), self.infer_expr_type_with_env(expr, env)))
+                    .map(|(name, expr)| {
+                        (name.to_string(), self.infer_expr_type_with_env(expr, env))
+                    })
                     .collect(),
             ),
             Expr::Pair { key, value, .. } => StaticType::Tuple(vec![
@@ -1475,7 +1502,7 @@ impl TypeInferenceEngine {
                 let iter_ty = self.infer_expr_type_with_env(iter, env);
                 let elem_ty = self.element_type(&iter_ty);
                 let mut local_env = env.clone();
-                local_env.insert(var.clone(), elem_ty);
+                local_env.insert(var.to_string(), elem_ty);
                 if let Some(filter) = filter {
                     let _ = self.infer_expr_type_with_env(filter, &local_env);
                 }
@@ -1494,7 +1521,7 @@ impl TypeInferenceEngine {
                 let iter_ty = self.infer_expr_type_with_env(iter, env);
                 let elem_ty = self.element_type(&iter_ty);
                 let mut local_env = env.clone();
-                local_env.insert(var.clone(), elem_ty);
+                local_env.insert(var.to_string(), elem_ty);
                 if let Some(filter) = filter {
                     let _ = self.infer_expr_type_with_env(filter, &local_env);
                 }
@@ -1511,7 +1538,7 @@ impl TypeInferenceEngine {
                 let mut local_env = env.clone();
                 for (var, iter) in iterations {
                     let iter_ty = self.infer_expr_type_with_env(iter, &local_env);
-                    local_env.insert(var.clone(), self.element_type(&iter_ty));
+                    local_env.insert(var.to_string(), self.element_type(&iter_ty));
                 }
                 if let Some(filter) = filter {
                     let _ = self.infer_expr_type_with_env(filter, &local_env);
@@ -1673,6 +1700,7 @@ impl TypeInferenceEngine {
                         }
                         StaticType::Any
                     }
+                    BuiltinOp::RangeStep => StaticType::Any,
                     // Note: TupleLength removed — dead code (Issue #2643)
                     // Dict operations
                     BuiltinOp::HasKey | BuiltinOp::In => StaticType::Bool,
@@ -2001,7 +2029,9 @@ impl TypeInferenceEngine {
             Literal::Float16(_) => StaticType::F16,
             Literal::Bool(_) => StaticType::Bool,
             Literal::Str(_) => StaticType::Str,
+            Literal::StrBytes(_) => StaticType::Str,
             Literal::Char(_) => StaticType::Char,
+            Literal::CharMalformed(_) => StaticType::Char,
             Literal::Nothing => StaticType::Nothing,
             Literal::Missing => StaticType::Missing,
             Literal::Undef => StaticType::Any,
@@ -2069,6 +2099,14 @@ impl TypeInferenceEngine {
                     && matches!(right, StaticType::Str | StaticType::Char)
                 {
                     StaticType::Str
+                } else if matches!((left, right), (StaticType::Bool, StaticType::Bool))
+                    && matches!(op, BinaryOp::Add | BinaryOp::Sub)
+                {
+                    // Julia: `true + true === 2::Int64` and `true - true === 0::Int64`
+                    // (Bool `+`/`-` widen to Int), whereas `true * true === true`
+                    // (`*` is `&`), which `numeric_promote` already yields via the
+                    // shared `promote_type` path (Issue #9351).
+                    StaticType::I64
                 } else {
                     self.numeric_promote(left, right)
                 }
@@ -2140,6 +2178,12 @@ impl TypeInferenceEngine {
                     && matches!(right, StaticType::Str | StaticType::Char)
                 {
                     StaticType::Str
+                } else if matches!((left, right), (StaticType::Bool, StaticType::Bool))
+                    && matches!(op, AotBinOp::Add | AotBinOp::Sub)
+                {
+                    // Bool `+`/`-` widen to Int64 (`true + true === 2`); `*` stays
+                    // Bool via `numeric_promote`'s shared `promote_type` path (Issue #9351).
+                    StaticType::I64
                 } else {
                     self.numeric_promote(left, right)
                 }
@@ -2819,6 +2863,13 @@ fn static_type_compatible(param: &StaticType, arg: &StaticType) -> bool {
             } else {
                 false
             }
+        }
+        StaticType::Struct { name: p_name, .. } if p_name == "Complex" => {
+            matches!(
+                arg,
+                StaticType::Struct { name: a_name, .. }
+                    if StaticType::complex_param_type_from_name(a_name).is_some()
+            )
         }
         // Union{...} parameter: arg compatible if it matches any variant.
         StaticType::Union { variants } => variants.iter().any(|v| static_type_compatible(v, arg)),

@@ -1,0 +1,362 @@
+# pr-fast — the fast per-PR gate (Issue #8632, parent #8613).
+#
+# Philosophy: automate the gates this repo already prescribes by convention —
+# `cargo fmt`, `cargo clippy -D warnings`, the release-fast fixture suite, and
+# the scripts/check_*.sh audit family — instead of inventing new checks.
+# Target: < 15 minutes wall clock with warm sccache. This workflow is
+# INFORMATIONAL until the flaky burn-in completes; Issue #8634 promotes the
+# `pr-fast` summary job to a required branch-protection check.
+#
+# Cost controls:
+#   * concurrency-cancellation per PR (superseded pushes stop old runs)
+#   * `changes` job skips the two compile-heavy jobs for docs-only PRs
+#     (skipped jobs count as success in the `pr-fast` summary job, so the
+#     summary check still reports — required-check safe, unlike path filters)
+#   * sccache via the GitHub Actions cache service (mozilla-actions/sccache-action)
+#
+# MAINTAINER PUSH NOTE (Issues #8632, #4714, #5652): automation tokens without
+# the `workflow` OAuth scope cannot push .github/workflows/*.yml changes over
+# HTTPS. SSH-key pushes are not OAuth-scoped and do work. If a push touching
+# this file is rejected with "refusing to allow an OAuth App to create or
+# update workflow", a maintainer must push the branch by hand:
+#   git fetch origin <branch> && git push origin <branch>:refs/heads/<branch>
+# (see docs/vm/CODE_AUDITS.md, "When automation cannot update ci.yml").
+#
+name: pr-fast
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: pr-fast-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # Detect what a PR touches so docs-only PRs skip the compile-heavy jobs.
+  # Uses the PR files API (cheap) instead of a fetch-depth:0 clone.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.detect.outputs.rust }}
+      aot: ${{ steps.detect.outputs.aot }}
+      fixtures: ${{ steps.detect.outputs.fixtures }}
+      fixture_scope: ${{ steps.detect.outputs.fixture_scope }}
+      fixture_filters: ${{ steps.detect.outputs.fixture_filters }}
+      fixture_reason: ${{ steps.detect.outputs.fixture_reason }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            # workflow_dispatch: no diff to inspect — run everything.
+            {
+              echo "rust=true"
+              echo "aot=true"
+              echo "fixtures="
+              echo "fixture_scope=all"
+              echo "fixture_filters="
+              echo "fixture_reason=workflow-dispatch"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename' > changed-files.txt
+          echo "Changed files:" && cat changed-files.txt
+          if grep -Eq '^(subset_julia_vm/|subset_julia_vm_parser/|subset_julia_vm_ffi/|subset_julia_vm_runtime/|subset_julia_vm_web/|Cargo\.(toml|lock)$|\.config/|\.cargo/|\.github/(workflows/(pr-fast|main-full)\.yml|fixture-selection\.toml)|scripts/(select_pr_fixture_tests\.py|test_with_cache\.sh))' changed-files.txt; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+          python3 scripts/select_pr_fixture_tests.py \
+            --changed-files changed-files.txt \
+            --config .github/fixture-selection.toml \
+            --github-output "$GITHUB_OUTPUT"
+          # One dependency-aware selector owns AoT paths for both PR workflows.
+          python3 scripts/select_aot_gate.py --changed-files changed-files.txt --github-output "$GITHUB_OUTPUT"
+          # Changed fixture .jl files feed the Julia parity spot-check below.
+          {
+            echo 'fixtures<<CHANGED_FIXTURES_EOF'
+            grep -E '^subset_julia_vm/tests/fixtures/.*\.jl$' changed-files.txt || true
+            echo 'CHANGED_FIXTURES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # Batch-run the whole audit family. Unlike ci.yml's enumerated list, this
+  # globs scripts/check_*.sh so newly added audit scripts are enforced
+  # automatically (ci.yml's meta-check still guards doc/CI registration).
+  audits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck, ripgrep, python3
+        # ripgrep: several audit scripts call `rg` directly
+        # (e.g. check_binary_both_fallback_inventory.sh).
+        run: sudo apt-get update && sudo apt-get install -y shellcheck ripgrep python3
+
+      - name: Shellcheck all audit scripts
+        run: shellcheck scripts/check_*.sh scripts/audit_*.sh
+
+      - name: Run scripts/check_*.sh batch
+        run: |
+          failed=()
+          for f in scripts/check_*.sh; do
+            # check_metaprogramming_roundtrip.sh needs a built sjulia binary
+            # and julia on PATH; it runs in the fixture-tests job instead.
+            if [[ "$f" == "scripts/check_metaprogramming_roundtrip.sh" ]]; then
+              continue
+            fi
+            # check_vendored_drift.sh queries crates.io (network access); it runs
+            # in ci.yml's code-audits job and nightly-gates supply-chain job.
+            # The pr-fast batch cannot guarantee network availability (proxy/firewall).
+            if [[ "$f" == "scripts/check_vendored_drift.sh" ]]; then
+              continue
+            fi
+            echo "::group::$f"
+            if ! bash "$f"; then
+              failed+=("$f")
+            fi
+            echo "::endgroup::"
+          done
+          if [[ ${#failed[@]} -gt 0 ]]; then
+            echo "FAILED audit scripts:"
+            for f in "${failed[@]}"; do echo "  $f"; done
+            echo "(Pre-existing main failures are tracked in Issue #8740.)"
+            exit 1
+          fi
+          echo "OK: all check_*.sh audit scripts passed"
+
+      - name: Run registered audit_*.sh gates
+        # audit_*.sh gates that need neither a build nor the julia submodule.
+        # (audit_julia_base_stubs.sh only reads subset_julia_vm/src/julia/.)
+        run: |
+          bash scripts/audit_base_cache_schema_fingerprint.sh
+          bash scripts/audit_julia_base_stubs.sh
+          bash scripts/audit_compile_vm_coupling.sh
+
+      - name: Audit health summary report
+        # Human-readable summary of the ratchet audits for PR review and
+        # long-term debt tracking. Informational while main has standing
+        # failures (Issue #8740); remove continue-on-error once main is green
+        # and pr-fast can be promoted to a required check (Issue #8634).
+        continue-on-error: true
+        run: |
+          bash scripts/audit_health_report.sh --fast --format markdown --jobs 8
+
+  clippy:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Clippy (default features, zero warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+  fixture-tests:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld) and ripgrep
+        run: sudo apt-get update && sudo apt-get install -y lld ripgrep
+
+      - name: Install Julia (pinned for fixture parity — Issue #8632)
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Run fixture tests (release-fast cargo profile)
+        run: |
+          scope="${{ needs.changes.outputs.fixture_scope }}"
+          filters="${{ needs.changes.outputs.fixture_filters }}"
+          reason="${{ needs.changes.outputs.fixture_reason }}"
+          echo "fixture scope: $scope"
+          echo "fixture filters: $filters"
+          echo "fixture reason: $reason"
+          if [[ "$scope" == "none" ]]; then
+            echo "No fixture tests selected."
+            exit 0
+          fi
+          if [[ "$scope" == "selected" ]]; then
+            timeout 1800 cargo nextest run --locked --cargo-profile release-fast \
+              --test fixture_tests $filters --no-fail-fast
+          else
+            timeout 1800 cargo nextest run --locked --cargo-profile release-fast \
+              --test fixture_tests --no-fail-fast
+          fi
+
+      - name: Build sjulia (release-fast) for script gates
+        run: |
+          cargo build --locked --profile release-fast -p subset_julia_vm \
+            --bin sjulia --features repl
+
+      - name: Metaprogramming roundtrip gate (Issue #7549)
+        env:
+          SJULIA_BIN: target/release-fast/sjulia
+        run: bash scripts/check_metaprogramming_roundtrip.sh
+
+      - name: Julia parity spot-check on changed fixtures (Issue #4712)
+        # Informational: fixtures that intentionally diverge from upstream
+        # (see the SCOPE note in scripts/fixture_julia_parity.sh) legitimately
+        # fail this check, so it must not gate merges.
+        if: needs.changes.outputs.fixtures != ''
+        continue-on-error: true
+        env:
+          SJULIA_BIN: target/release-fast/sjulia
+          CHANGED_FIXTURES: ${{ needs.changes.outputs.fixtures }}
+        run: |
+          status=0
+          while IFS= read -r fx; do
+            if [[ -z "$fx" || ! -f "$fx" ]]; then
+              continue
+            fi
+            echo "::group::parity $fx"
+            if ! bash scripts/fixture_julia_parity.sh "$fx"; then
+              echo "::warning file=$fx::julia/sjulia parity mismatch (informational)"
+              status=1
+            fi
+            echo "::endgroup::"
+          done <<< "$CHANGED_FIXTURES"
+          exit $status
+
+  # AoT gate on direct or shared-semantic AoT changes (Issues #8639/#10866).
+  aot-gate:
+    needs: changes
+    if: needs.changes.outputs.aot == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-aot-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-aot-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Run AoT gate (scripts/test_aot.sh)
+        run: bash scripts/test_aot.sh
+
+  # Single summary check — the future required check for branch protection
+  # (Issue #8634). Skipped jobs (docs-only PRs) count as success so the check
+  # always reports; failures and cancellations fail it.
+  pr-fast:
+    needs: [changes, fmt, audits, clippy, fixture-tests, aot-gate]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          failed=$(echo "$RESULTS" | python3 -c '
+          import json, sys
+          needs = json.load(sys.stdin)
+          bad = [k for k, v in needs.items()
+                 if v.get("result") not in ("success", "skipped")]
+          print(" ".join(bad))
+          ')
+          if [[ -n "$failed" ]]; then
+            echo "pr-fast FAILED — failing jobs: $failed"
+            exit 1
+          fi
+          echo "pr-fast OK"

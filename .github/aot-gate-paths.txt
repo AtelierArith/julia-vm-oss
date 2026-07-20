@@ -1,0 +1,25 @@
+# Canonical paths whose changes require scripts/test_aot.sh (Issue #10866).
+# Keep semantic dependencies here instead of duplicating regexes in workflows.
+
+# Direct AoT implementation and entry points.
+subset_julia_vm/src/aot/**
+subset_julia_vm/src/bin/aot.rs
+subset_julia_vm/src/bin/juliars.rs
+subset_julia_vm_runtime/**
+
+# Shared type/inference semantics consumed directly by AoT.
+subset_julia_vm_types/src/inference_core/**
+subset_julia_vm_types/src/runtime_types/**
+subset_julia_vm_types/src/inference_cache_key.rs
+
+# AoT tests, fixtures, and gate ownership.
+subset_julia_vm/tests/aot_*
+subset_julia_vm/tests/core_ir_aot_*
+subset_julia_vm/tests/fixtures/aot/**
+scripts/test_aot.sh
+scripts/select_aot_gate.py
+scripts/check_aot_gate_selection.sh
+.github/aot-gate-paths.txt
+.github/workflows/pr-fast.yml
+.github/workflows/ci.yml
+docs/aot/**

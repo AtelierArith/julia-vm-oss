@@ -1,46 +1,58 @@
 # Test manifest for reflection category
 
 [[tests]]
+name = "reflection_datatype_name_wrapper_10558"
+file = "datatype_name_wrapper_10558.jl"
+expected = true
+description = "DataType.name.wrapper exposes the canonical generic UnionAll wrapper of a type (Foo{Int}.name.wrapper === Foo), with identity stable across concrete instantiations. Covers user parametric/multi-param/non-parametric structs, @enum types, Base display aliases sharing a TypeName (Vector/Matrix -> Array), builtin parametrics (Complex/Rational), abstract types, the getfield form, and a catchable FieldError on unknown fields (Issue #10558)"
+
+[[tests]]
+name = "reflection_infer_effects_body_side_effect_8441"
+file = "infer_effects_body_side_effect_8441.jl"
+expected = true
+description = "Base.infer_effects uses body-derived effects for user methods with visible side effects instead of proving every matched user method total (Issue #8441)"
+
+[[tests]]
+name = "reflection_infer_effects_control_flow_10145"
+file = "infer_effects_control_flow_10145.jl"
+expected = true
+description = "Base.infer_effects detects side effects reachable through if/elseif/else, ternary, &&/||, and while/for loops for methods with fully-typed (non-generic) params, not just untyped params (Issues #10145, #10264)"
+
+[[tests]]
+name = "reflection_infer_effects_ternary_shortcircuit_terminates_10368"
+file = "infer_effects_ternary_shortcircuit_terminates_10368.jl"
+expected = true
+description = "Base.infer_effects: a call (e.g. println) reachable only through Expr::Ternary or short-circuit &&/|| must propagate terminates/noub/nonoverlayed/nortcall exactly like the equivalent if/else form, not the optimistic curated-name-table fallback (Issue #10368)"
+
+[[tests]]
+name = "reflection_infer_effects_throwing_base_plus_8441"
+file = "infer_effects_throwing_base_plus_8441.jl"
+expected = true
+description = "Base.infer_effects composes exception classification into body-derived effects so a user-defined throwing Base.:+ and wrappers using + are not inferred nothrow (Issue #8441)"
+
+[[tests]]
 name = "reflection_datatype_name_typename_identity_8451"
 file = "datatype_name_typename_identity_8451.jl"
 expected = true
-description = "DataType.name returns a TypeName identity object: same-named types in distinct modules compare non-identical, while different Array parameterizations share the same TypeName (Issue #8451)"
+description = "DataType.name keeps leaf-symbol and wrapper projection separate from owner-qualified TypeName identity: sibling-module types compare non-identical while each wrapper resolves exactly, and Array parameterizations share one TypeName (Issue #8451)"
 
 [[tests]]
-name = "reflection_module_equality_4959"
-file = "module_equality_4959.jl"
+name = "reflection_union_reflection_fields_10606"
+file = "union_reflection_fields_10606.jl"
 expected = true
-description = "Module equality (Base == Base, Base != Core) and identity compare module names instead of coercing to I64 (Issue #4959)"
+description = "Union-kind type values expose only a/b fields; DataType/UnionAll/TypeVar reflection fields such as name/parameters/var/body/lb/ub raise FieldError(Union, field), matching upstream Julia (Issue #10606)"
+
+[[tests]]
+name = "reflection_union_reflection_static_typejoin_10606"
+file = "union_reflection_static_typejoin_10606.jl"
+expected = true
+description = "Issue #10606 follow-up: on the STATIC dot-access path a Union receiver's parameters/var/body/lb/ub route to the dedicated reflection builtins (_TypeParameters/_UnionAllVar/_UnionAllBody/_TypeVarLowerBound/_TypeVarUpperBound), which must raise FieldError(Union, field) (with the Union receiver name, not an svec of branches nor FieldError(DataType, ...)); and typejoin collapses a Union operand via its a/b branch fields instead of indexing the now-rejected .parameters, so typejoin over Union arguments no longer errors."
 
 [[tests]]
 name = "reflection_module_names_7938"
 file = "module_names_7938.jl"
 expected = true
 description = "names(::Module) returns the module self binding and exported names as Vector{Symbol} (Issue #7938)"
-
-[[tests]]
-name = "reflection_dense_array_supertype_3909"
-file = "dense_array_supertype_3909.jl"
-expected = true
-description = "DenseArray alias hierarchy in runtime type-object reflection: bare DenseArray/DenseVector/DenseMatrix resolve as first-class type values, Vector{Int}/Matrix{Int} and rank-specialized Array{Int,N} supertype to DenseVector/DenseMatrix/DenseArray as upstream, DenseVector/DenseMatrix/DenseArray supertype to AbstractVector/AbstractMatrix/AbstractArray with parameters preserved, and invariant subtype checks reject mismatched elements/ranks (Issue #3909)"
-
-[[tests]]
-name = "reflection_array_dimensional_alias_5593"
-file = "array_dimensional_alias_5593.jl"
-expected = true
-description = "Array/Vector/Matrix and DenseArray/DenseVector/DenseMatrix runtime type objects preserve the Array{T,N}/DenseArray{T,N} UnionAll bodies, rank value parameters, TypeName aliases, rank-specialized supertypes, and alias identity required by upstream Julia (Issue #5593)"
-
-[[tests]]
-name = "reflection_base_function_value_lookup_4960"
-file = "base_function_value_lookup_4960.jl"
-expected = true
-description = "Base.return_types/code_typed/code_lowered/infer_return_type/widen/promote_type/promote_rule/convert/oftype resolve as callable function values (Issues #4960-#4966)"
-
-[[tests]]
-name = "reflection_base_function_value_general_8137"
-file = "base_function_value_general_8137.jl"
-expected = true
-description = "Ordinary Pure-Julia Base functions (map/filter/reduce/foldl/sum/sin/cos) resolve as callable function values via qualified Base.<name>, ignoring same-named local shadows (Issue #8137)"
 
 [[tests]]
 name = "reflection_base_isexpr_qualified_7527"
@@ -53,6 +65,12 @@ name = "reflection_deepcopy_basic"
 file = "deepcopy_basic.jl"
 expected = true
 description = "deepcopy - recursive deep copy of mutable struct"
+
+[[tests]]
+name = "reflection_pure_julia_migration_8779_function_values"
+file = "pure_julia_migration_8779_function_values.jl"
+expected = true
+description = "Ref, getindex(::Ref), composition, nonmissingtype, and deepcopy remain callable function values through Pure Julia public wrappers (Issue #8779)"
 
 [[tests]]
 name = "reflection_nfields_basic"
@@ -71,18 +89,6 @@ name = "reflection_fieldtypes_basic"
 file = "fieldtypes_basic.jl"
 expected = true
 description = "fieldtypes - tuple of field types (length returns Int64)"
-
-[[tests]]
-name = "reflection_fieldtype_index_name_5099"
-file = "fieldtype_index_name_5099.jl"
-expected = true
-description = "fieldtype(T, i) / fieldtype(T, name) by index or Symbol on plain, concrete-parametric, and bare-UnionAll types, plus out-of-range/bad-name errors (Issue #5099)"
-
-[[tests]]
-name = "reflection_hasfield_builtin_type_objects"
-file = "hasfield_builtin_type_objects.jl"
-expected = true
-description = "hasfield - builtin runtime type objects use registry field metadata"
 
 [[tests]]
 name = "reflection_hasmethod_basic"
@@ -121,12 +127,6 @@ expected = true
 description = "Type{Pair{K,V}} method dispatch and which() beat bare Type{Pair} for concrete Pair type objects (Issue #4636)"
 
 [[tests]]
-name = "reflection_getfield_module_binding_4621"
-file = "getfield_module_binding_4621.jl"
-expected = true
-description = "getfield(Main, ::Symbol) resolves function bindings for reflection/probing patterns (Issue #4621)"
-
-[[tests]]
 name = "reflection_isdefined_function_form_5002"
 file = "isdefined_function_form_5002.jl"
 expected = true
@@ -157,24 +157,6 @@ expected = true
 description = "methods(f) listing reflection: upstream-style Method display and source-location fields (Issue #5125), verified against upstream Julia 1.12 with matching pass counts. show(m) / string(m) / println(m) render `name(::T...) @ Module file:line` instead of a raw struct dump (the print path now special-cases the Method struct, and the user Base.show(io, ::Method) gained the ` @ Module file:line` suffix). The .module (Module, prints as Main for top-level definitions), .file (Symbol), and .line (Int32, the FunctionInfo.def_line recovered from the IR Function.span) fields are populated and accessible; `module` is declared as the placeholder `mod` in struct Method and renamed to `module` in the compiler field table since the parser cannot accept the reserved keyword as a field name. string(Main) now renders the bare module name (was Module(Main)). Parity-safe: asserts STRUCTURE (startswith name(, contains ::Int64, contains ` @ `, positive line) not an exact path, since sjulia's fixture file/line differ from the upstream julia invocation. The Base.MethodList type name and Tuple{typeof(f), ...} .sig form remain deferred"
 
 [[tests]]
-name = "reflection_version_constant"
-file = "version_constant.jl"
-expected = true
-description = "VERSION constant: global version string (Issue #340)"
-
-[[tests]]
-name = "reflection_args_constant"
-file = "args_constant.jl"
-expected = true
-description = "ARGS constant: command-line arguments array (Issue #340)"
-
-[[tests]]
-name = "reflection_program_file_constant"
-file = "program_file_constant.jl"
-expected = true
-description = "PROGRAM_FILE constant: path to running script (Issue #340)"
-
-[[tests]]
 name = "reflection_nameof_type"
 file = "nameof_type.jl"
 expected = true
@@ -203,24 +185,6 @@ name = "reflection_ispublic_isexported"
 file = "ispublic_isexported.jl"
 expected = true
 description = "ispublic/isexported: check if symbol is public or exported from module (Issue #876)"
-
-[[tests]]
-name = "reflection_env_constant"
-file = "env_constant.jl"
-expected = true
-description = "ENV constant: environment variable dictionary (Issue #340)"
-
-[[tests]]
-name = "reflection_getfield_basic"
-file = "getfield_basic.jl"
-expected = true
-description = "getfield: field access by name (Symbol) or index (Int) (Issue #1313)"
-
-[[tests]]
-name = "reflection_property_functions"
-file = "property_functions.jl"
-expected = true
-description = "getproperty, setproperty!, propertynames: property access functions (Issue #1450)"
 
 [[tests]]
 name = "reflection_methods_type_filter"
@@ -259,58 +223,10 @@ expected = true
 description = "subtypes: user-defined abstract and struct direct children (Issue #3768)"
 
 [[tests]]
-name = "reflection_subtypes_builtin_core_hierarchy"
-file = "subtypes_builtin_core_hierarchy.jl"
-expected = true
-description = "subtypes: built-in direct children come from shared CoreType hierarchy (Issue #3826)"
-
-[[tests]]
 name = "reflection_type_hierarchy"
 file = "type_hierarchy.jl"
 expected = true
 description = "supertype/supertypes/typeintersect shared type hierarchy (Issue #3762, #3763)"
-
-[[tests]]
-name = "reflection_type_parameters"
-file = "type_parameters.jl"
-expected = true
-description = "DataType.parameters and getfield(T, :parameters) for concrete/generic parametric types (Issues #3770, #4673)"
-
-[[tests]]
-name = "reflection_typevar_unionall_reflection"
-file = "typevar_unionall_reflection.jl"
-expected = true
-description = "TypeVar/UnionAll property reflection and eltype for parametric type objects (Issue #3770)"
-
-[[tests]]
-name = "reflection_runtime_type_object_identity"
-file = "runtime_type_object_identity.jl"
-expected = true
-description = "Registry-backed identity projections for DataType, UnionAll, TypeVar, and builtin AST-like types (Issue #3896)"
-
-[[tests]]
-name = "reflection_fresh_typevar_identity"
-file = "fresh_typevar_identity.jl"
-expected = true
-description = "Fresh TypeVar constructor objects preserve identity separately from name/bounds semantics (Issue #3903)"
-
-[[tests]]
-name = "reflection_parametric_typevar_identity_4698"
-file = "parametric_typevar_identity_4698.jl"
-expected = true
-description = "A fresh TypeVar embedded in a parametric type's .parameters stays === to the original TypeVar (Issue #4698)"
-
-[[tests]]
-name = "reflection_user_struct_layout_metadata_3909"
-file = "user_struct_layout_metadata_3909.jl"
-expected = true
-description = "User struct field names, field types, field counts, isbitstype, and sizeof come from runtime type layout metadata (Issue #3909)"
-
-[[tests]]
-name = "reflection_fieldoffset_layout_3909"
-file = "fieldoffset_layout_3909.jl"
-expected = true
-description = "fieldoffset uses runtime type-object layout metadata for user and builtin types (Issue #3909)"
 
 [[tests]]
 name = "reflection_fieldoffset_struct_layout_5100"
@@ -319,52 +235,10 @@ expected = true
 description = "fieldoffset/sizeof use field alignment (max-of-fields, not next_pow2) for isbits/immutable and nested structs (Issue #5100)"
 
 [[tests]]
-name = "reflection_runtime_type_object_kind_3909"
-file = "runtime_type_object_kind_3909.jl"
-expected = true
-description = "typeof uses registry-backed DataType, UnionAll, and TypeVar object kind projection (Issue #3909)"
-
-[[tests]]
-name = "reflection_runtime_type_object_acceptance_3909"
-file = "runtime_type_object_acceptance_3909.jl"
-expected = true
-description = "Consolidated #3909 acceptance surface regression guard: fresh TypeVar construction (name/lb/ub/isa), UnionAll wrap/unwrap + rewrap roundtrip, parametric type parameters (svec/===/<:), builtin+user struct layout metadata (fieldnames/fieldtypes/isbitstype/ismutabletype/sizeof), and identity-sensitive type comparisons, all parity-verified against upstream Julia 1.12.6 (Issue #3909)"
-
-[[tests]]
-name = "reflection_isa_typeof_kind_consistency_3909"
-file = "isa_typeof_kind_consistency_3909.jl"
-expected = true
-description = "isa(x, DataType/UnionAll/TypeVar/Type) agrees with typeof and Base.unwrap_unionall iterates through UnionAll bodies (Issue #3909)"
-
-[[tests]]
 name = "reflection_parametric_instantiation_reflection_3909"
 file = "parametric_instantiation_reflection_3909.jl"
 expected = true
 description = "fieldnames/fieldcount/fieldtypes/supertype on parametric struct instantiations resolve the base schema and substitute type parameters to match upstream (Issue #3909)"
-
-[[tests]]
-name = "reflection_unionall_constructor_4694"
-file = "unionall_constructor_4694.jl"
-expected = true
-description = "UnionAll(var, body) constructs a UnionAll only when body references var; Base.rewrap_unionall round-trips with Base.unwrap_unionall (Issue #4694)"
-
-[[tests]]
-name = "reflection_parametric_runtime_typevar_4696"
-file = "parametric_runtime_typevar_4696.jl"
-expected = true
-description = "Vector{T}, Matrix{T}, Dict{T,T}, and user struct{T} preserve a runtime TypeVar argument as a TypeVar parameter (no Any erasure) (Issue #4696)"
-
-[[tests]]
-name = "reflection_isvarargtype_4701"
-file = "isvarargtype_4701.jl"
-expected = true
-description = "Base.isvarargtype recognises Vararg-bearing DataTypes and Base.isvatuple detects trailing Vararg in Tuple types (Issue #4701)"
-
-[[tests]]
-name = "reflection_subtypes_any_vector_helper_3908"
-file = "subtypes_any_vector_helper_3908.jl"
-expected = true
-description = "subtypes routes empty- and populated-result construction through the shared Memory-first any_vector helper (Issue #3908)"
 
 [[tests]]
 name = "reflection_applicable_basic_4957"
@@ -397,84 +271,6 @@ expected = true
 description = "reflection-time return-type inference unifies a Tuple{Vararg{T,N}} / NTuple{N,NTuple{M,T}} parameter annotation against the concrete argument type, binding where type parameters to their DataType and length parameters to their Int64 length so a returned tuple of where-parameters recovers the precise shape (e.g. Tuple{DataType,Int64}) instead of Any (Issue #4843)"
 
 [[tests]]
-name = "reflection_infer_effects_basic_4274"
-file = "infer_effects_basic_4274.jl"
-expected = true
-description = "Base.infer_effects returns an upstream-compatible Effects record (field layout, ALWAYS_TRUE/false UInt8 + Bool encoding, and custom (+c,+e,+n,+t,+s,+m,+u,+o,+r) show) and Base.infer_exception_type returns Union{} for simple proven-total user methods (Issue #4274)"
-
-[[tests]]
-name = "reflection_infer_effects_exception_classification_4274"
-file = "infer_effects_exception_classification_4274.jl"
-expected = true
-description = "Base.infer_effects / Base.infer_exception_type classify array helpers (fill/zeros/reshape/vec/fill!/insert!/splice!, Issue #4972), method/type helpers (applicable/which/methods/fieldoffset/typejoin/typeintersect, Issue #4957), and DataType-callable constructors (Int64/Bool/Float64 without the unsupported methods(::DataType) path, Issue #4991) to match upstream field-for-field (Issue #4274)"
-
-[[tests]]
-name = "reflection_infer_effects_builtin_categories_4274"
-file = "infer_effects_builtin_categories_4274.jl"
-expected = true
-description = "Core builtin effect/exception metadata is composed from upstream semantic category sets (_PURE_BUILTINS/_CONSISTENT_BUILTINS/_EFFECT_FREE_BUILTINS/_INACCESSIBLEMEM_BUILTINS) plus a per-call nothrow decision mirroring builtin_effects/builtin_exct: tuple/typeof/nfields/isa/typeassert/sizeof/ifelse are TOTAL with Union{} exception, while fieldtype taints nothrow and surfaces an Any exception, matching upstream field-for-field (Issue #4274)"
-
-[[tests]]
-name = "reflection_infer_effects_type_callable_4987"
-file = "infer_effects_type_callable_4987.jl"
-expected = true
-description = "DataType callables (constructors Int64/Bool/Float64) are accepted by methods/which/hasmethod and the infer_effects/infer_exception_type surface (extract_func_name keys a DataType by its type name) instead of raising 'Expected function, string, or symbol'; two-arg classification and single-arg forms match upstream (Issue #4987)"
-
-[[tests]]
-name = "reflection_infer_effects_math_4970"
-file = "infer_effects_math_4970.jl"
-expected = true
-description = "Base.infer_exception_type / infer_effects report documented inferred exception types and non-nothrow effects for throwing math helpers sin/cos/sqrt (DomainError), log/log1p (Union{DomainError,InexactError}), divrem/gcd/lcm (exp stays proven-total), and Method.purity is retained (Issues #4970, #4986)"
-
-[[tests]]
-name = "reflection_infer_effects_string_helpers_4968"
-file = "infer_effects_string_helpers_4968.jl"
-expected = true
-description = "Base.infer_effects / infer_exception_type classify representative public string-transformation helpers (uppercase/lowercase/titlecase/strip/rstrip/chomp/chop/split/join report EFFECTS_UNKNOWN; lstrip and repeat(::String,::Int) report their precise records) keyed by signature so non-string overloads keep falling through, matching upstream field-for-field (Issue #4968)"
-
-[[tests]]
-name = "reflection_infer_effects_parse_helpers_4969"
-file = "infer_effects_parse_helpers_4969.jl"
-expected = true
-description = "Base.infer_effects / infer_exception_type classify representative parse/string-conversion helpers (parse/tryparse over a String source, bitstring, unescape_string, repr report EFFECTS_UNKNOWN with Any exception; string(::Char) is total-except-notaskstate/inaccessiblememonly with Union{} exception), matching upstream field-for-field (Issue #4969)"
-
-[[tests]]
-name = "reflection_infer_effects_search_helpers_4971"
-file = "infer_effects_search_helpers_4971.jl"
-expected = true
-description = "Base.infer_effects / infer_exception_type classify representative string search/index helpers (findfirst/findnext/count over strings and replace(::String,::Pair) report EFFECTS_UNKNOWN; thisind/nextind report the precise index record) keyed by signature so Function/Vector overloads keep falling through, matching upstream field-for-field (Issue #4971)"
-
-[[tests]]
-name = "reflection_infer_effects_tuple_range_helpers_4974"
-file = "infer_effects_tuple_range_helpers_4974.jl"
-expected = true
-description = "Base.infer_effects / infer_exception_type classify representative tuple/pair/range helpers (tuple first/last/length/isempty/reverse/only are total; getindex(::Pair,::Int) is total-except-nothrow; eachindex(::AbstractVector) is the ?c/?m refined record; collect(::AbstractRange) allocates) keyed by signature so Vector overloads keep falling through, matching upstream field-for-field (Issue #4974)"
-
-[[tests]]
-name = "reflection_infer_effects_bitwise_4274"
-file = "infer_effects_bitwise_4274.jl"
-expected = true
-description = "Base.infer_effects / infer_exception_type classify representative bitwise/shift integer operations (count_ones/count_zeros/leading_zeros/trailing_zeros/leading_ones/trailing_ones, xor/&/|/~, <</>>/>>>, bitrotate) as EFFECTS_TOTAL with Union{} exception over Integer args, keyed by name+integer arg types so non-integer overloads keep falling through, matching upstream field-for-field (Issue #4274)"
-
-[[tests]]
-name = "reflection_infer_effects_intdiv_4274"
-file = "infer_effects_intdiv_4274.jl"
-expected = true
-description = "Base.infer_effects / infer_exception_type classify integer div/rem/mod/fld/cld over all-Integer arguments as DivideError with the total-except-nothrow record (+c,+e,!n,+t,+s,+m,+u,+o,+r), keyed by name+integer arg types so float and mixed int/float overloads keep falling through to the proven-total Union{} representative, matching upstream field-for-field (Issue #4274)"
-
-[[tests]]
-name = "reflection_parameters_simplevector_svec_4722"
-file = "parameters_simplevector_svec_4722.jl"
-expected = true
-description = "<DataType>.parameters returns a Core.SimpleVector (svec): display svec(...), typeof === Core.SimpleVector, isa, length, 1-based indexing, iteration, structural === / ==, splat, and the Core.svec(...) constructor (Issue #4722)"
-
-[[tests]]
-name = "reflection_parameters_value_params_5162"
-file = "parameters_value_params_5162.jl"
-expected = true
-description = "<Type>.parameters includes integer/value parameters: Vector{Int}.parameters == svec(Int64, 1), Matrix{Float64} == svec(Float64, 2), Array{T,N} == svec(T, N), Val{5}/Val{:foo}/Val{true}; value element identity/typeof, length, splat, getfield form, dynamic field-access path, and svec(...) display all match upstream (Issue #5162)"
-
-[[tests]]
 name = "reflection_issingletontype_basic_5103"
 file = "issingletontype_basic_5103.jl"
 expected = true
@@ -485,30 +281,6 @@ name = "reflection_isconcretetype_boundary_5203"
 file = "isconcretetype_boundary_5203.jl"
 expected = true
 description = "isconcretetype(T): true for concrete parametric struct instantiations (ParamS{Int}, Box{Int}, Pair{Int,String}, Box{Number}, Box{Vector}, Vector{Vector}), function singleton types (typeof(f)), the empty tuple Tuple{}, tuples of concrete elements, and bounded-Vararg tuples; false for abstract types, UnionAll/bare-parametric types (Box, ParamS, Vector), Union, the any-tuple Tuple, and tuples with abstract/UnionAll/unbounded-Vararg element types (Issue #5203)"
-
-[[tests]]
-name = "reflection_collect_simplevector_svec_5196"
-file = "collect_simplevector_svec_5196.jl"
-expected = true
-description = "collect over a heterogeneous Core.SimpleVector (svec) yields Vector{Any} preserving type/value elements: collect(Tuple{Int,String}.parameters), collect(Dict{String,Int}.parameters), collect(Vector{Int}.parameters), collect(Core.svec(1,\"a\",Int)); homogeneous numeric/type svecs still collect to Vector{Any} (never narrowed); eltype(svec) === Any; setindex! of a type object into Vector{Any} no longer errors (Issue #5196)"
-
-[[tests]]
-name = "reflection_hasfield_hasproperty_propertynames_5101"
-file = "hasfield_hasproperty_propertynames_5101.jl"
-expected = true
-description = "hasfield/hasproperty/propertynames for user types: hasfield(Foo,:x)===true, hasfield(Foo,:z)===false, propertynames(foo)===(:x,:y), hasproperty(foo,:x)===true for a plain struct; parametric Box{Int} instantiation; empty struct (propertynames()===(), hasfield===false). hasproperty now routes through the overridable propertynames (s in propertynames(x)) so a custom Base.propertynames overload exposing a non-field property is honored, matching upstream (Issue #5101)"
-
-[[tests]]
-name = "reflection_unwrap_rewrap_unionall_roundtrip_5105"
-file = "unwrap_rewrap_unionall_roundtrip_5105.jl"
-expected = true
-description = "Base.unwrap_unionall / Base.rewrap_unionall: unwrap is a no-op on concrete types (Int64, Vector{Int64}, Dict{Symbol,Int64}) and strips outer UnionAll wrappers off the Vector/Dict/Set aliases; rewrap_unionall(unwrap_unionall(X), X) === X round-trips back to the canonical alias for Vector/Set/Dict, rewrap onto a non-UnionAll returns the body unchanged, and the round-trip result is again a UnionAll. Array's upstream two-var (T, N) nested UnionAll and dimensional aliases are covered by reflection_array_dimensional_alias_5593 (Issue #5105)"
-
-[[tests]]
-name = "reflection_fieldname_index_errors_5098"
-file = "fieldname_index_errors_5098.jl"
-expected = true
-description = "fieldname(T, i) by 1-based index on user-defined and concrete parametric struct types (fieldname(Foo,1)===:x, fieldname(Box{Int},1)===:val); out-of-range and non-positive indices throw ArgumentError, abstract types throw ArgumentError('type does not have definite field names'), matching upstream Base.fieldname; plus fieldnames/fieldcount regression checks (Issue #5098)"
 
 [[tests]]
 name = "reflection_isbitstype_nested_5104"
@@ -523,12 +295,6 @@ expected = true
 description = "Completeness and mutual consistency of the five type predicates (isconcretetype/isabstracttype/isstructtype/ismutabletype/isprimitivetype) across the full case matrix vs upstream Julia 1.12: concrete immutable struct, mutable struct (also parametric MBox{T}), abstract type (incl. abstract parametric AbsP{Int} which stays abstract via unwrap_unionall), primitive types (Int/Float64/Char are not struct types; String is a struct type not primitive), concrete parametric instantiation (IBox{Int}, Pair{Int,String}, Vector{Int}), bare parametric UnionAll (IBox/MBox/Vector/Pair/UnitRange/NamedTuple/Complex/Dict are struct types but not concrete; Dict/Vector are mutable), Union/Union{}, Tuple (any-tuple is a struct type but not concrete; Tuple{Int,Float64}/Tuple{} are concrete), function singleton typeof(f), Nothing, and Type{Int}/DataType kinds; plus the consistency relations (concrete⇒!abstract, abstract⇒!concrete∧!struct, primitive⇎struct, mutable struct⇒struct∧concrete) (Issue #5102)"
 
 [[tests]]
-name = "reflection_type_objectid_hash_dict_key_5108"
-file = "type_objectid_hash_dict_key_5108.jl"
-expected = true
-description = "Type objects have a stable, equality-consistent objectid/hash so they work as Dict keys and Set elements (Issue #5108). Asserts the observable contract (which holds identically under upstream Julia 1.12), never non-portable literal hash integers: equal types (concrete Int/Float64, parametric Vector{Int}/Pair{Int,String}, abstract Number, Union) hash/objectid equal while distinct types (Int vs Float64, Vector{Int} vs Vector{Float64}, Pair{Int,String} vs Pair{String,Int}) almost surely differ; type objects usable as Dict{Type,Int} keys (insert/lookup/overwrite, Dict literals, parametric/abstract/Union keys, get/delete!/haskey, keys() round-trip via `in`) and Set{Type} elements (dedup, membership); a type key is distinct from instances of that type in a Dict{Any}. Implemented via a registry-free CoreType structural canonicalization for the DictKey::Type variant plus type-object equality in the Array/Tuple `in` path"
-
-[[tests]]
 name = "reflection_supertype_subtypes_user_types_5057"
 file = "supertype_subtypes_user_types_5057.jl"
 expected = true
@@ -541,28 +307,10 @@ expected = true
 description = "sizeof(T) for struct types plus Base.aligned_sizeof / Base.allocatedinline / Base.datatype_alignment (Issue #5107), verified against upstream Julia 1.12. Builds on the #5100 max-of-field-alignments layout and #5104 isbits recursion. sizeof: primitives (Int 8, Bool 1, Float32 4, Char 4, Nothing 0); isbits immutable structs from the field layout (two-Int64 16, mixed Int8/Int64/Int8 24 with padding, packed three-Int8 3, Float32+Float64 16, empty 0, nested 24, immutable-with-String-field 16); mutable structs use the data-layout size not the pointer width (two-Int64 16, one-Int64 8, mixed 24); a mutable struct embedded as a field is boxed/by-pointer so the outer struct counts it as 8 bytes (ASOuterMut 16, field 2 at offset 8). datatype_alignment is the max of field alignments (Int64 8, Int8 1, Float32 4, struct max). allocatedinline true for concrete immutable types incl. ones with boxed fields (String-field immutable), false for mutable structs, String, and abstract Number. aligned_sizeof rounds sizeof up to the alignment for inline types and falls back to the pointer width (8) for non-inline (mutable/abstract) types. Return types: sizeof/aligned_sizeof/datatype_alignment are Int, allocatedinline is Bool. Struct names are multi-character to avoid the unrelated single-letter-name TypeVar misclassification (Issue #5252)"
 
 [[tests]]
-name = "reflection_function_singleton_typevar_binding_5128"
-file = "function_singleton_typevar_binding_5128.jl"
-expected = true
-description = "Each generic function has its own singleton type typeof(f) <: Function (Issue #5128). A `where {F}` / `where {F<:Function}` type variable matched against a function argument now binds F to that function's singleton type instead of Any: ftype(sin)===typeof(sin), ftype(+)===typeof(+), ftype(cos)===typeof(cos); the bounded form gtype(x::F) where {F<:Function} binds the same singleton; the bound type is usable as a value (F<:Function holds, F===typeof(x)); two function args get independent singleton types (distinct(sin,sin)===true, distinct(sin,cos)===false). Verified against upstream Julia. Root cause: Vm::get_value_julia_type fell through to the Any catch-all for Value::Function, so type-variable binding lost the singleton; it now mirrors the typeof(f) projection used by BuiltinId::TypeOf"
-
-[[tests]]
 name = "reflection_code_warntype_basic_5145"
 file = "code_warntype_basic_5145.jl"
 expected = true
 description = "code_warntype / @code_warntype type-stability diagnostic (Issue #5145), verified against upstream Julia 1.12 with matching 8/8 pass count. Core.Compiler.return_type routes through the shared inference surface and reports a concrete type for a type-stable method (cwt_stable_5145::Int64 -> Int64) and a Union for a type-unstable one (cwt_unstable_5145 -> Union{Int64,String}); Base.infer_return_type agrees (cwt_add_5145(Int64,Float64) -> Float64). code_warntype([io],f,types) prints a subset type-stability report (matched method signature plus inferred return type, flagged non-concrete) and returns nothing; output is directed to devnull. The @code_warntype f(args...) macro (requires `using InteractiveUtils`) is lowered in Rust to code_warntype(f, typeof((args...,))), extracting the argument types from the call, and returns nothing"
-
-[[tests]]
-name = "reflection_core_builtin_type_distinction_5129"
-file = "core_builtin_type_distinction_5129.jl"
-expected = true
-description = "Core.Builtin vs generic function type distinction (Issue #5129), verified against upstream Julia 1.12 (32/32 pass). Core.Builtin resolves as an abstract DataType with Core.Builtin <: Function (julia/base/boot.jl) but Core.Builtin !== Function. True built-in functions get a typeof(f) <: Core.Builtin singleton type: isa(===, Core.Builtin), isa(isa,..), isa(typeof,..), isa(<:,..), isa(tuple,..), isa(throw,..), isa(fieldtype,..), isa(applicable,..) all true and typeof(===) <: Core.Builtin. Generic/operator functions and user functions are NOT Core.Builtin: isa(+,Core.Builtin)==false, isa(*,..)==false, isa(identity,..)==false, isa(!,..)==false, isa(sin,..)==false, isa(map,..)==false, isa(println,..)==false, isa(string,..)==false, and user f()=1/g(x)=x+1 are false; typeof(+)<:Core.Builtin==false, typeof(sin)/typeof(f) likewise. All of them remain isa(_, Function)/typeof(_) <: Function. Recognized via a precise builtin-name registry (only names that resolve to a genuine Core.Builtin when referenced unqualified in user code), not the VM's broad BuiltinId set"
-
-[[tests]]
-name = "reflection_pair_fieldtypes_5733"
-file = "reflection_pair_fieldtypes_5733.jl"
-expected = true
-description = "fieldtypes/fieldtype on Pair{A,B} resolve from the type arguments (first::A, second::B) instead of returning (Any,Any) (Issue #5733). sjulia's Pair is non-parametric so its declared field types are untyped; field_types() special-cases the Pair{X,Y} name. Bare Pair, Complex, and user structs unaffected."
 
 [[tests]]
 name = "reflection_infer_exception_type_interprocedural_5600"
@@ -589,25 +337,98 @@ expected = true
 description = "Reflection ambiguity filter: two methods individually applicable to a concrete signature with neither strictly more specific (g(x::Int,y) vs g(x,y::Int) on (Int,Int)) report no applicable method — methods() empty, return_types Any[], infer_return_type Union{}, which() errors. Regression guards: a non-ambiguous (Int,Float64) signature and an ambiguity resolved by a strictly-more-specific third method still resolve to exactly one method (Issue #5937)."
 
 [[tests]]
-name = "reflection_sys_word_size_6096"
-file = "sys_word_size_6096.jl"
-expected = true
-description = "Sys.WORD_SIZE is exposed as a Sys module binding, has Int type, reports a native word size (32 or 64), and resolves through getfield/isdefined (Issue #6096). Native Int/UInt alias identity is covered separately by reflection_native_word_aliases_6097_6105."
-
-[[tests]]
-name = "reflection_native_word_aliases_6097_6105"
-file = "native_word_aliases_6097_6105.jl"
-expected = true
-description = "Int/UInt resolve to the native word-size aliases (Int64/UInt64 on 64-bit, Int32/UInt32 on 32-bit), including type objects, constructors, and parametric type aliases (Issues #6097, #6105)."
-
-[[tests]]
-name = "reflection_expr_getfield_through_any_7614"
-file = "expr_getfield_through_any_7614.jl"
-expected = true
-description = "getfield/getproperty on an Expr value resolves head/args by Symbol name and by 1-based integer index (1=>head, 2=>args), including access through an Any-typed parameter (e.g. a MacroTools helper). args returns the shared backing array (reference identity). The generic reflection getfield previously rejected Expr because only the .head/.args property syntax was special-cased to GetExprField (Issue #7614)."
-
-[[tests]]
 name = "reflection_expr_getfield_any_7614"
 file = "expr_getfield_any_7614.jl"
 expected = true
 description = "Expr carried through an Any-typed parameter still supports getfield(ex, :head/:args) and getfield(ex, 1/2), matching upstream and unblocking MacroTools splitdef (Issue #7614)"
+
+[[tests]]
+name = "reflection_parametric_default_ctor_reflection_8638"
+file = "parametric_default_ctor_reflection_8638.jl"
+expected = true
+description = "Base.infer_return_type re-runs body inference for a fully typed method whose return expression is a parametric default constructor, so PW9_8638(flag::Bool)=PW9_8638(flag ? 1.5 : 2.5, 41) reports PW9_8638{Float64} instead of falling back to a stale Any snapshot. The untyped method and post-execution re-query are covered as guards (Issue #8638)."
+
+[[tests]]
+name = "reflection_infer_float_type_object_9955"
+file = "infer_float_type_object_9955.jl"
+expected = true
+description = "Base.infer_return_type/Core.Compiler.return_type on a function that calls float(::Type{T}) where {T<:AbstractFloat} = T (e.g. float(Float64)) report the precise Type{Float64} instead of widening to Any, matching upstream; covers a direct Float64 argument and a nested float(promote_type(Int, Float64)) call. Execution already returned the correct Float64 value before this fix — only reflection-time inference was imprecise (Issue #9955)."
+
+[[tests]]
+name = "reflection_infer_float_type_ternary_10281"
+file = "infer_float_type_ternary_10281.jl"
+expected = true
+description = "Base.infer_return_type/Core.Compiler.return_type on float(::Type{T}) where {T<:Integer} = T === BigInt ? BigFloat : Float64 (a type-level ternary, not a direct return of T like Issue #9955) constant-fold the T === BigInt comparison and report the precise Type{Float64}/Type{BigInt} branch instead of widening to DataType, matching upstream. Covers both the direct reflection query (#10281) and wrapper functions that call float(Int64)/float(BigInt): for the latter, selected overloaded methods whose call-independent MethodSig snapshot widens to Top are re-analyzed through their exact global-indexed body at the call-site type (#10133)."
+
+
+[[tests]]
+name = "reflection_agg_infer_effects_9671"
+file = "reflection_agg_infer_effects_9671.jl"
+expected = true
+description = "Aggregated concat-safe reflection Base.infer_effects classification fixtures (6 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "reflection_agg_constants_9671"
+file = "reflection_agg_constants_9671.jl"
+expected = true
+description = "Aggregated concat-safe reflection reflection constants (ARGS/ENV/VERSION/word size) fixtures (6 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "reflection_agg_misc_9671"
+file = "reflection_agg_misc_9671.jl"
+expected = true
+description = "Aggregated concat-safe reflection miscellaneous fixtures (21 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "reflection_agg_misc_10238"
+file = "reflection_agg_misc_10238.jl"
+expected = true
+description = "Aggregated reflection miscellaneous definition-heavy fixtures with top-level definitions, each former fixture isolated in its own module (9 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "reflection_agg_fields_layout_10238"
+file = "reflection_agg_fields_layout_10238.jl"
+expected = true
+description = "Aggregated reflection field/property reflection and struct layout metadata fixtures with top-level definitions, each former fixture isolated in its own module (7 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "reflection_agg_infer_effects_10238"
+file = "reflection_agg_infer_effects_10238.jl"
+expected = true
+description = "Aggregated reflection Base.infer_effects reflection fixtures with top-level definitions, each former fixture isolated in its own module (8 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "reflection_isdefined_integer_key_widths_10240"
+file = "isdefined_integer_key_widths_10240.jl"
+expected = true
+description = "isdefined(x, key) matches upstream's builtin contract: only Symbol or machine Int keys are accepted; every other Integer width (Int8/16/32/128, UInt8..128, Bool, BigInt) and non-integer keys (Float64, String) raise TypeError(:isdefined, ..., Symbol, key) instead of returning Bool or MethodError; out-of-range Int returns false. Covers Core.Binding, plain structs, and Modules (Issue #10240)."
+
+[[tests]]
+name = "reflection_typevar_projection_owner_identity_10420"
+file = "typevar_projection_owner_identity_10420.jl"
+expected = true
+description = "Owner-scoped UnionAll TypeVar projection identity survives a populated constructed-TypeVar cache: after a user TypeVar(:T)/TypeVar(:K)/TypeVar(:V) is recorded via Vector{T}/Dict{K,V} construction (Vector{T}.parameters[1] === T), Vector.var === Vector.body.parameters[1] and the Dict two-binder chain still project one owner-scoped identity, distinct from the user TypeVars — order is load-bearing (Issue #10420; regression shape from Issue #10412)"
+
+[[tests]]
+name = "reflection_typevar_reflection_read_order_identity_10603"
+file = "typevar_reflection_read_order_identity_10603.jl"
+expected = true
+description = "UnionAll TypeVar reflection identity is read-order INDEPENDENT in both directions (Issue #10603, complements the load-bearing-order #10420 fixture): Direction A reads a wrapper body `.parameters` BEFORE `.var` after a user Vector{T}/Matrix{S} construction — the body param resolves to the wrapper's own owner-scoped var (=== .var, !== the user TypeVar), not the leaked global constructed-TypeVar entry; Direction B reads Dict.var/Set.var BEFORE constructing Dict{K,V}/Set{T} — the constructed `.parameters` still resolve to the user TypeVars (=== K/V/T), not the wrapper projection. The reversed orders the #10420 fixture does not exercise; fixed on main by the canonical-source UnionAll-body / runtime-TypeVar-identity work"
+
+[[tests]]
+name = "reflection_regexmatch_generator_field_projection_11382"
+file = "regexmatch_generator_field_projection_11382.jl"
+expected = true
+description = "RegexMatch and Base.Generator report their real upstream physical fields through fieldcount/fieldnames/getfield/propertynames instead of masquerading as zero-field values: RegexMatch's 5 fields (match, captures, offset, offsets, regex) and Generator's 2 fields (f, iter) are projected by name and by 1-based index, dot-property access agrees with getfield, and unknown-field/out-of-range access still raise FieldError/BoundsError rather than silently reporting zero fields (Issue #11382)"
+
+[[tests]]
+name = "reflection_constructor_return_types_11402"
+file = "reflection_constructor_return_types_11402.jl"
+expected = true
+description = "Direct constructor reflection resolves the concrete instantiated result structurally: infer_return_type/return_types on a bare parametric family infer the type parameters from the argument types, an applied spelling constructs exactly itself (including explicit inner constructors), unmatched arities report Union{}, and ordinary function reflection is untouched (Issue #11402)"
+
+[[tests]]
+name = "reflection_numeric_constructor_return_types_11507"
+file = "reflection_numeric_constructor_return_types_11507.jl"
+expected = true
+description = "infer_return_type/return_types on a builtin numeric DataType used as a constructor/conversion callable (Int8/16/32/64/128, UInt8/16/32/64/128, Bool, Float16/32/64, BigInt, BigFloat) called with a single concrete numeric or complex argument type reports the exact constructed type instead of widening to Union{}/Any/an empty vector (covering both types with no pure-Julia wrapper, e.g. Int64/Float64/BigInt/BigFloat, and types implemented as a thin pure-Julia wrapper over an internal intrinsic, e.g. UInt8(x) = _to_uint8(x)); wrong arity and non-numeric arguments still report Union{}, and ordinary function reflection is untouched (Issue #11507)"

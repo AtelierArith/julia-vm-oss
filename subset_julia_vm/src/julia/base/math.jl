@@ -43,16 +43,8 @@ function sign(x::BigInt)
     end
 end
 
-# clamp: constrain a value between lo and hi
-function clamp(x, lo, hi)
-    if x < lo
-        return lo
-    elseif x > hi
-        return hi
-    else
-        return x
-    end
-end
+# clamp(x, lo, hi) with promote_type widening lives in base/intfuncs.jl,
+# matching upstream.
 
 # clamp(x, r): constrain an Integer to a unit range's bounds. Matches upstream
 # `clamp(x::Integer, r::AbstractUnitRange)`; a Float `x` or a StepRange `r` has no
@@ -63,25 +55,98 @@ end
 
 # mod: modulo operation (result has same sign as divisor)
 function mod(x, y)
+    # Issue #8883: for mixed integer types, promote first to preserve the result
+    # type correctly (e.g. mod(true, UInt8(5)) should give UInt8, not Int64).
+    if x isa Integer && y isa Integer
+        px, py = promote(x, y)
+        r = px % py
+        if r != 0 && (r < 0) != (py < 0)
+            return r + py
+        else
+            return r
+        end
+    end
     r = x % y
-    if r != 0 && (r < 0) != (y < 0)
+    if r == 0
+        # A zero remainder carries the sign of the divisor, mirroring upstream
+        # `mod(x::T, y::T) where {T<:AbstractFloat}` in base/float.jl:
+        # `r == 0 && return copysign(r, y)` — e.g. mod(5.0, -2.5) == -0.0
+        # (Issue #9414).
+        return copysign(r, y)
+    elseif (r < 0) != (y < 0)
         return r + y
     else
         return r
     end
 end
 
+# BigFloat mod. Mirrors upstream `mod(x::T, y::T) where {T<:AbstractFloat}`
+# (base/math.jl): a zero remainder takes the divisor's sign (`copysign(r, y)`),
+# so mod(zero(BigFloat), BigFloat(-1.0)) == -0.0 like MPFR/Julia — the generic
+# `mod` above returns the raw remainder, whose zero keeps the dividend's sign
+# (Issue #9450). Needs signbit(::BigFloat) (base/gmp.jl) so copysign can
+# observe the signed zero.
+function mod(x::BigFloat, y::BigFloat)
+    r = x % y
+    if r == 0
+        return copysign(r, y)
+    elseif (r > 0) != (y > 0)
+        return r + y
+    else
+        return r
+    end
+end
+# Mixed BigFloat/Real promotes to BigFloat, mirroring upstream
+# `mod(x::Real, y::Real) = mod(promote(x, y)...)` (base/promotion.jl).
+mod(x::BigFloat, y::Real) = mod(promote(x, y)...)
+mod(x::Real, y::BigFloat) = mod(promote(x, y)...)
+
 # div: integer division, rounding toward zero (RoundToZero).
 # Mirrors upstream `div(a, b) = div(a, b, RoundToZero)` — NOT floor division
 # (that is `fld`). Differs from `fld`/`cld` only for operands of opposite sign,
 # e.g. div(-7.0, 3.0) == -2.0 while fld(-7.0, 3.0) == -3.0 (Issue #6891).
+function div(x::Float64, y::Float64)
+    r = x % y
+    return round((x - r) / y)
+end
+
 function div(x, y)
-    return trunc(x / y)
+    px, py = promote(x, y)
+    if !(typeof(px) == typeof(x) && typeof(py) == typeof(y))
+        return div(px, py)
+    end
+    q = px / py
+    return trunc(q)
 end
 
 # hypot: hypotenuse length sqrt(x^2 + y^2)
 function hypot(x, y)
     return sqrt(x * x + y * y)
+end
+
+# hypot(x...): overflow/underflow-safe hypotenuse over any number of
+# arguments, mirroring upstream julia/base/math.jl:
+#   hypot(x::Number) = abs(float(x))
+#   hypot(x::Number, y::Number, xs::Number...) = _hypot(float.(promote(x, y, xs...)))
+# (Issue #9410)
+hypot(x::Number) = abs(float(x))
+
+function hypot(x::Number, y::Number, xs::Number...)
+    return _hypot(float.(promote(x, y, xs...)))
+end
+
+# _hypot over a tuple: pivot on the maximum-magnitude element to avoid
+# overflow/underflow. Port of upstream julia/base/math.jl
+# `_hypot(x::NTuple{N,<:Number}) where {N}`.
+function _hypot(x::NTuple{N,<:Number}) where {N}
+    maxabs = maximum(abs, x)
+    if isnan(maxabs) && any(isinf, x)
+        return typeof(maxabs)(Inf)
+    elseif (iszero(maxabs) || isinf(maxabs))
+        return maxabs
+    else
+        return maxabs * sqrt(sum(y -> abs2(y / maxabs), x))
+    end
 end
 
 # =============================================================================
@@ -131,23 +196,92 @@ end
 # Note: abs(x) is implemented as a builtin (uses Intrinsic::AbsFloat)
 
 # rem: remainder (same as % operator)
+# Issue #8883: for mixed integer types (e.g. rem(true, UInt8(5))), sjulia's
+# dispatch falls back to rem(x::Int64, y::Int64) after widening both to Int64,
+# losing the narrower type. Use promote to match the promoted type first.
 function rem(x, y)
+    if x isa Integer && y isa Integer
+        px, py = promote(x, y)
+        return px % py
+    end
     return x % y
 end
 
 # fld: floored division - returns integer type for integers, float for floats
 # Julia's fld returns the same type as input for integers
 function fld(x::Int64, y::Int64)
-    # floor() returns Float64, convert back to Int64
-    return Int64(floor(x / y))
+    q = div(x, y)
+    r = rem(x, y)
+    return (r != 0 && ((x < 0) != (y < 0))) ? q - 1 : q
 end
 
+# Float64 floored division. Mirrors upstream
+# `div(x::T, y::T, ::RoundDown) where {T<:AbstractFloat} = round((x - rem(x, y, RoundDown)) / y)`
+# (base/div.jl), with `rem(x, y, RoundDown) == mod(x, y)`. This is *not*
+# `floor(x / y)`: an infinite `x` or a zero `y` makes the remainder NaN, so the
+# result is NaN like upstream instead of a leaked ±Inf (Issue #9450). The
+# explicit `copysign` on a zero remainder reproduces upstream float `mod`'s
+# `r == 0 ? copysign(r, y) : r` zero-sign rule locally (sjulia's generic `mod`
+# lacks it, Issue #9414), so fld(-0.0, 1.0) == -0.0 and fld(0.0, -1.0) == -0.0.
 function fld(x::Float64, y::Float64)
-    return floor(x / y)
+    r = mod(x, y)
+    if r == 0
+        r = copysign(r, y)
+    end
+    return round((x - r) / y)
 end
+
+# Upstream keeps ceil/floor of the widened exact quotient for the narrow float
+# types (base/div.jl, Lefèvre: exact when eps(x/y) <= 1), so an infinite
+# dividend stays ±Inf here — unlike the Float64/BigFloat remainder formula,
+# which yields NaN (fld(Float32(Inf), 1.0f0) == Inf32 but fld(Inf, 1.0) is NaN).
+fld(x::Float32, y::Float32) = Float32(floor(Float64(x) / Float64(y)))
+fld(x::Float16, y::Float16) = Float16(floor(Float32(x) / Float32(y)))
+
+# BigFloat floored division. Mirrors upstream
+# `div(x::T, y::T, ::RoundDown) where {T<:AbstractFloat} = round((x - rem(x, y, RoundDown)) / y)`
+# (base/div.jl), with `rem(x, y, RoundDown) == mod(x, y)`. This is *not*
+# `floor(x / y)`: for an infinite `x` or a zero `y` the true value is undefined,
+# so `mod` yields `NaN` and the result is `NaN` (matching MPFR/Julia), whereas
+# `floor(x / y)` would leak a spurious `±Inf` (Issue #9443).
+fld(x::BigFloat, y::BigFloat) = round((x - mod(x, y)) / y)
+# Mixed BigFloat/Real promotes to BigFloat, mirroring upstream
+# `fld(x::Real, y::Real) = div(promote(x, y)..., RoundDown)` (base/div.jl):
+# fld(big(Inf), 1) must be NaN, not the ±Inf the generic `floor(x/y)` leaks.
+# `promote` (not `BigFloat(y)`) handles every Real width, including Bool/UInt8/
+# Float32 that lack a direct `BigFloat` constructor.
+fld(x::BigFloat, y::Real) = fld(promote(x, y)...)
+fld(x::Real, y::BigFloat) = fld(promote(x, y)...)
 
 function fld(x, y)
-    return floor(x / y)
+    # Issue #8883: for integer operands, floor(x/y) widens to Float64 and loses
+    # the integer type. Upstream Julia: fld(a,b) = div(a,b,RoundDown) which
+    # does type-preserving integer division with floor rounding. Replicate that
+    # here for the generic case by promoting both to the same integer type and
+    # applying the Int64-specific formula (correct for any Integer width):
+    # q = div(px,py); adjust by -1 when remainder is non-zero AND signs differ.
+    if x isa Integer && y isa Integer
+        px, py = promote(x, y)
+        q = div(px, py)
+        r = rem(px, py)
+        return (r != 0 && ((px < 0) != (py < 0))) ? q - one(q) : q
+    end
+    # Mixed Real pairs promote and re-dispatch, mirroring upstream
+    # `div(x::Real, y::Real, r::RoundingMode) = div(promote(x, y)..., r)`
+    # (base/div.jl), so e.g. fld(big(1), Float16(Inf)) reaches the BigFloat
+    # method and yields NaN instead of the ±Inf that `floor(x / y)` leaks
+    # (Issue #9450). `promote` is idempotent, so this bounces at most once: a
+    # same-type pair with no specific method falls through to the upstream
+    # AbstractFloat remainder formula below (see fld(::Float64, ::Float64)).
+    px, py = promote(x, y)
+    if !(typeof(px) == typeof(x) && typeof(py) == typeof(y))
+        return fld(px, py)
+    end
+    r = mod(px, py)
+    if r == 0
+        r = copysign(r, py)
+    end
+    return round((px - r) / py)
 end
 
 # =============================================================================
@@ -253,7 +387,7 @@ function sinc(x)
         return 1.0
     end
     px = pi * x
-    return sin(px) / px
+    return sinpi(x) / px
 end
 
 # Concrete Float64 fast path (Issue #6846): a typed method lets the VM specialize
@@ -264,7 +398,7 @@ function sinc(x::Float64)
         return 1.0
     end
     px = pi * x
-    return sin(px) / px
+    return sinpi(x) / px
 end
 
 # cosc: derivative of sinc, cos(πx)/x - sin(πx)/(πx²)
@@ -273,7 +407,7 @@ function cosc(x)
         return 0.0
     end
     px = pi * x
-    return cos(px) / x - sin(px) / (px * x)
+    return cospi(x) / x - sinpi(x) / (px * x)
 end
 
 # Concrete Float64 fast path (Issue #6846): a typed method lets the VM specialize
@@ -285,7 +419,7 @@ function cosc(x::Float64)
         return 0.0
     end
     px = pi * x
-    return cos(px) / x - sin(px) / (px * x)
+    return cospi(x) / x - sinpi(x) / (px * x)
 end
 
 # sincos: return (sin(x), cos(x)) as a tuple
@@ -365,17 +499,17 @@ end
 
 # sind: sine of x in degrees
 function sind(x)
-    return sin(deg2rad(x))
+    return sinpi(x / 180)
 end
 
 # cosd: cosine of x in degrees
 function cosd(x)
-    return cos(deg2rad(x))
+    return cospi(x / 180)
 end
 
 # tand: tangent of x in degrees
 function tand(x)
-    return tan(deg2rad(x))
+    return tanpi(x / 180)
 end
 
 # asind: arcsine returning degrees
@@ -386,6 +520,14 @@ end
 # acosd: arccosine returning degrees
 function acosd(x)
     return rad2deg(acos(x))
+end
+
+# Two-argument atan(y, x): the angle of the point (x, y). Mirrors upstream
+# `atan(y::Real, x::Real) = atan(promote(float(y), float(x))...)` (base/math.jl):
+# mixed / integer args are floated and promoted so they reach the two-Float64
+# intrinsic, e.g. atan(1, 2.0) and atan(1, 2) both return a Float64.
+function atan(y::Real, x::Real)
+    return atan(promote(float(y), float(x))...)
 end
 
 # atand: arctangent returning degrees
@@ -594,9 +736,14 @@ function minmax(a, b)
 end
 
 # copysign: return |x| with the sign of y
+# Uses signbit (not `y < 0`) so a negative-zero y transfers its sign, matching
+# upstream `copysign(x::Real, y::Real) = ifelse(signbit(x) != signbit(y), -x, +x)`
+# (base/number.jl): copysign(BigFloat(1.0), -zero(BigFloat)) == -1.0
+# (Issue #9450). This definition loads after operators.jl's identical generic
+# and is what the method table keeps.
 function copysign(x, y)
     ax = abs(x)
-    if y < 0
+    if signbit(y)
         return -ax
     else
         return ax

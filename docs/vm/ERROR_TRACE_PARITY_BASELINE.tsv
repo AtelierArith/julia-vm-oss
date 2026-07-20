@@ -1,0 +1,3 @@
+case	min_user_frames	line_match	function_names_match	format_match	reason
+method	3	yes	yes	no	sjulia now matches user-frame line numbers but still reports an ErrorException-style unknown-function message instead of upstream UndefVarError wording.
+domain	3	yes	yes	no	sjulia now matches user-frame line numbers but omits upstream Base.Math frames and still differs in DomainError headline formatting.

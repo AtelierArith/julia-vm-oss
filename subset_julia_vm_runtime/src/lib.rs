@@ -19,7 +19,10 @@ pub mod convert;
 pub mod dispatch;
 pub mod error;
 pub mod intrinsics;
-#[path = "../../subset_julia_vm/src/rng.rs"]
+// `rng.rs` is owned by `subset_julia_vm_bytecode` since Issue #8656 (the
+// integration crate's `src/rng.rs` is now a re-export shim, which cannot be
+// `#[path]`-included). Share the single source of truth textually, as before.
+#[path = "../../subset_julia_vm_bytecode/src/rng.rs"]
 pub mod rng;
 pub mod value;
 
@@ -27,7 +30,7 @@ pub mod value;
 ///
 /// The compiler emits a compile-time equality check against this value so a
 /// generated file cannot silently link with an incompatible runtime crate.
-pub const AOT_RUNTIME_ABI_VERSION: usize = 1;
+pub const AOT_RUNTIME_ABI_VERSION: usize = 2;
 
 /// Prelude module for convenient imports
 ///

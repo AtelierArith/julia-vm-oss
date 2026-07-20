@@ -1,0 +1,127 @@
+file	unwrap_used	expect_used	reason
+subset_julia_vm_vm/src/vm/exec/arithmetic.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/array_basic.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/array_index.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/array_index_slice.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/array_mutate.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/binary_both.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/binary_no_fallback.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/call.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/call_dynamic.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/call_dynamic_binary.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/call_dynamic_typed.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/call_function_variable.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/comparison.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/conversion.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/dict.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/error_handling.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/hof.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/handler_table.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/iterator.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/jump.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/locals.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/matrix.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/memory.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/mod.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/named_tuple.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/pairs.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/print.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/range.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/return_ops.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/rng.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/set.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/sleep.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/stack.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/string_ops.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/struct_ops.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/exec/tuple.rs	true	true	zero unwrap/expect execution module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_collections.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_dicts.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_exec.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_numeric.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_strings.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_types.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/builtins_types_conversion.rs	true	true	zero unwrap/expect builtin module fixed before Issue #8706 ratchet
+subset_julia_vm_vm/src/vm/convert.rs	true	true	zero unwrap/expect conversion module fixed before Issue #8706 ratchet
+subset_julia_vm/src/repl/session.rs	true	true	zero real unwrap/expect after Issue #10906 converted the sole site (session.rs:550) to a guarded match; rest is #[cfg(test)]
+subset_julia_vm/src/repl/converters.rs	true	true	zero real unwrap/expect/panic; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm/src/repl/globals.rs	true	true	zero real unwrap/expect; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_compile/src/compile/cache.rs	true	true	cache-load boundary, zero real unwrap/expect; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_compile/src/compile/embedded_cache.rs	true	true	cache-load boundary, zero unwrap/expect of any kind (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_compile/src/compile/preload_cache.rs	true	true	cache-load boundary, zero real unwrap/expect; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_compile/src/compile/seeded_cache.rs	true	true	cache-load boundary, zero real unwrap/expect/panic; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_compile/src/compile/precompile.rs	true	true	Base cache (de)serialize boundary, zero real unwrap/expect/panic; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm/src/core_ir_file.rs	true	true	.sjir cache-load boundary; the 2 expect_call token matches are inside a //! doc-comment example, not code (Issue #10906 Phase 1c of #10869)
+subset_julia_vm/src/vm_bytecode_file.rs	true	true	.sjvmbc cache-load boundary, zero real unwrap/expect; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm/src/loader.rs	true	true	.ji.json package-loader cache-load boundary, zero real unwrap/expect; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_ffi/src/bytecode.rs	true	true	.sjvmbc FFI cache-load boundary, zero real unwrap/expect; all matches are inside #[cfg(test)] (Issue #10906 Phase 1c of #10869)
+subset_julia_vm_parser/src/parser/mod.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/collections.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/literals.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/mod.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/calls.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/field.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/index.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/postfix.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/primary.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/expressions/types.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/mod.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/control_flow.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/declarations.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/definitions.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/imports.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/jumps.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/parser/statements/types.rs	true	true	zero unwrap/expect parser module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_parser/src/cst.rs	true	true	zero unwrap/expect CST accessor module fixed before Issue #10904 ratchet (Phase 1a of #10869)
+subset_julia_vm_vm/src/vm/specialize/mod.rs	true	true	zero real unwrap/expect/panic; every raw token match is inside #[cfg(test)] mod tests (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/specialize/expr.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/specialize/helpers.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/specialize/stmt.rs	true	true	zero unwrap/expect of any kind; the sole #[cfg(test)] fn (new_for_tests) has no unwrap/expect calls (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/type_ops/mod.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/type_ops/comparison.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/type_ops/conversion.rs	true	true	zero real unwrap/expect; all matches are inside #[cfg(test)] mod tests (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/type_ops/deep_copy.rs	true	true	zero real unwrap/expect; all matches are inside #[cfg(test)] mod tests (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/type_ops/introspection.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/type_ops/iteration.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/formatting/mod.rs	true	true	zero real unwrap/expect; all matches are inside #[cfg(test)] mod tests (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/formatting/julia_code.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/formatting/numeric.rs	true	true	zero real unwrap/expect; all matches are inside #[cfg(test)] mod bigfloat_repr_tests (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/vm/formatting/sprintf.rs	true	true	zero unwrap/expect of any kind (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_vm/src/register_vm.rs	true	true	zero real unwrap/expect/panic; every raw token match is inside #[cfg(test)] mod tests (Issue #10907 Phase 2 of #10869)
+subset_julia_vm_lowering/src/lowering/expr/binary.rs	true	true	zero unwrap/expect lowering module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_lowering/src/lowering/expr/call.rs	true	true	zero unwrap/expect lowering module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_lowering/src/lowering/expr/collection.rs	true	true	zero unwrap/expect lowering module fixed before Issue #10905 ratchet (Phase 1b of #10869); inline #[cfg(test)] mod tests carries its own allow
+subset_julia_vm_lowering/src/lowering/expr/misc.rs	true	true	zero unwrap/expect lowering module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_lowering/src/lowering/expr/quote/cst_to_constructor.rs	true	true	zero unwrap/expect lowering module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_lowering/src/lowering/stmt/assignment.rs	true	true	zero unwrap/expect lowering module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm/src/macro_runtime.rs	true	true	zero real unwrap/expect after Issue #10905 converted the 9 real sites; inline #[cfg(test)] mod tests carries its own allow (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/types.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/abstract_interp/worklist.rs	true	true	zero real unwrap/expect after Issue #10905 converted `lower_block_to_cfg` to return Option; inline #[cfg(test)] mod tests carries its own allow (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/abstract_interp/loop_analysis.rs	true	true	zero real unwrap/expect/panic; the 1 panic_macro token match is inside a /// doc-comment example, not code (Issue #10905 Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/expr/builtin_array.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/expr/call/constructors.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/expr/infer/julia_type.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869); its sole child module (named_tuple.rs) has none of its own
+subset_julia_vm_compile/src/compile/lattice/widening.rs	true	true	zero real unwrap/expect after Issue #10905 converted both sites to a match with the module's own LatticeType::Bottom empty-union sentinel; inline #[cfg(test)] mod tests carries its own allow (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/ssa_ir/build.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/ssa_ir/plan.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869)
+subset_julia_vm_compile/src/compile/stmt.rs	true	true	zero unwrap/expect compile module fixed before Issue #10905 ratchet (Phase 1b of #10869); its sole child module (stmt_try_catch.rs) has none of its own
+subset_julia_vm_lowering/src/expr_heads.rs	true	true	zero real unwrap/expect; one #[allow(clippy::expect_used)] documented like the vm/exec/mod.rs SystemTime exception (ExprHead::spec() lookup miss is an sjulia compiler bug, never user-triggerable — proven exhaustive by expr_head_registry_covers_all_variants); rest is #[cfg(test)] (Issue #10908 Phase 3 of #10869)
+subset_julia_vm/src/runtime_types.rs	true	true	zero real unwrap/expect after Issue #10908 converted build_reflection_inference_session to return Option (Phase 3 of #10869); its only child module (bridge.rs) has panic! only, no unwrap/expect
+subset_julia_vm/src/api.rs	true	true	zero real unwrap/expect; the 1 unwrap_call token match is inside a doctest ``` example (not compiled by --all-targets), matching the core_ir_file.rs doc-comment caveat; #[cfg(test)] mod tests carries its own allow (Issue #10908 Phase 3 of #10869)
+subset_julia_vm/src/bin/sjulia.rs	true	true	zero real unwrap/expect after Issue #10908 converted the sole --dump-ast --json unwrap to a typed CLI error path; already deny(expect_used) from an earlier pass (Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/type_stability/mod.rs	true	true	zero real unwrap/expect; the 1 unwrap_call token match is inside a //! doc-comment example (commented out); 5 child modules (analysis_report/analyzer/output/reason/report.rs) all zero-real, their #[cfg(test)] mod tests carry local allows (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_vm/src/vm/stack_ops.rs	true	true	zero real unwrap/expect; the 1 unwrap_call token match is inside a rustdoc /// example, not compiled code (Issue #10908 Phase 3 of #10869, confirms the Phase 2 finding)
+subset_julia_vm_compile/src/compile/lattice/mod.rs	true	true	zero unwrap/expect; cascades to abstract_lattice.rs/ops.rs/types.rs (widening.rs already denied); ops.rs's #[cfg(test)] mod tests carries its own allow (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/expr/call/mod.rs	true	true	zero unwrap/expect; cascades to dispatch.rs/dynamic.rs/handlers.rs/module_call.rs/nary.rs (constructors.rs already denied); dispatch.rs's and mod.rs's own #[cfg(test)] test modules carry local allows (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/expr/infer/mod.rs	true	true	zero unwrap/expect; cascades to array.rs/expr_tfuncs.rs/hof.rs/shared.rs (julia_type.rs already denied); array.rs/mod.rs/shared.rs #[cfg(test)] test modules carry local allows (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/expr/mod.rs	true	true	zero unwrap/expect; cascades to binary/builtin/builtin_array(denied)/builtin_hof/builtin_io/builtin_math/builtin_string/builtin_types/call(denied subtree)/coercion/collection/infer(denied subtree)/struct_/unary (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/abstract_interp/mod.rs	true	true	zero unwrap/expect; cascades to conditional.rs/engine subtree/env.rs/local_authority.rs/struct_info.rs/usage_analysis.rs (loop_analysis.rs and worklist.rs already denied); conditional.rs, engine/cache_key.rs, engine/world.rs, and the whole engine/tests/ subtree carry local allows (engine/mod.rs itself, a base-cache-schema-manifest file, was not directly edited) (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/ssa_ir/mod.rs	true	true	zero unwrap/expect; cascades to dom.rs/lower.rs/model.rs/opt.rs/scan.rs/verify.rs/test_util.rs/tests.rs (build.rs and plan.rs already denied); opt.rs's #[cfg(test)] mod tests and the whole-file-test-only test_util.rs/tests.rs carry local allows (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_lowering/src/lowering/expr/mod.rs	true	true	zero unwrap/expect; cascades to helpers.rs/literal.rs/macros subtree/quote subtree (binary.rs/call.rs/collection.rs/misc.rs already denied); literal.rs and macros/mod.rs, macros/namedtuple.rs, macros/nested.rs carry local allows on their #[cfg(test)] mod tests (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_lowering/src/lowering/expr/quote/mod.rs	true	true	zero unwrap/expect; cascades to code_generation.rs/handlers.rs/hygiene.rs (cst_to_constructor.rs already denied) (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_lowering/src/lowering/stmt/mod.rs	true	true	zero unwrap/expect; cascades to control_for.rs/control_if.rs/control_try.rs/control_while.rs/macros/mod.rs (assignment.rs already denied); each control_*.rs and macros/mod.rs carries a local allow on its #[cfg(test)] mod tests (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_compile/src/compile/mod.rs	true	true	zero unwrap/expect at the compile/ crate-root level; cascades to every remaining undenied file under compile/ not already covered by a more specific deny entry (base_functions.rs, base_merge.rs, complex_sroa.rs, constants.rs, context.rs, context_snapshot.rs [whole-file test-only], effects/*, inference_trace.rs, instr_wire_ids.rs [base-cache-schema-manifest file, CACHE_VERSION 129->130], ir_inline.rs, ir_opt.rs, pipeline_ctx.rs, schema_fingerprint_guard.rs [whole-file test-only], sorted_serde.rs, tfuncs/registry.rs, and more); every affected #[cfg(test)] test module carries a local allow, verified by workspace `cargo clippy --all-targets -- -D warnings` (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_lowering/src/lowering/mod.rs	true	true	zero unwrap/expect at the lowering/ crate-root level; cascades to abstract_.rs, closure_box.rs, function/* (signature.rs, tests.rs), generated_unquote.rs, macro_expander.rs, macros_registry.rs, primitive.rs, soft_scope.rs, struct_.rs, type_alias.rs, and lowering/mod.rs's own #[cfg(test)] mod tests; every affected test module carries a local allow (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_parser/src/lib.rs	true	true	zero unwrap/expect at the parser crate root; cascades to corpus.rs, error.rs, lexer.rs, node_kind/*, span.rs, token.rs (mod.rs/collections.rs/literals.rs/expressions/*/statements/*/cst.rs already denied); lexer.rs and lib.rs's own #[cfg(test)] mod tests carry local allows; Phase 1a's rationale for skipping this file (child-cascade) no longer applies now that every child is converted (Issue #10908 Phase 3 of #10869)
+subset_julia_vm_runtime/src/convert.rs	true	true	zero real unwrap/expect after Issue #10908 converted the guarded to_char single-byte-length unwrap to ok_or_else (Phase 3 of #10869); #[cfg(test)] mod tests carries its own allow
+subset_julia_vm_vm/src/vm/mod.rs	true	true	zero unwrap/expect at the vm/ top-level scope (sole real hit, vm/stack_ops.rs's rustdoc doctest example, already allowlisted in docs/vm/PANIC_FREE_PRODUCTION_BASELINE.tsv); cascades to every remaining undenied file directly under vm/ (broadcast.rs, builtins_arrays.rs, builtins_collections.rs, builtins_dicts.rs, builtins_equality.rs, builtins_exec.rs, builtins_io.rs, builtins_linalg.rs, builtins_numeric.rs, builtins_stacktrace.rs, builtins_stats.rs, builtins_strings.rs, builtins_tasks.rs, builtins_types.rs, builtins_types_conversion.rs, complex_fastpath_gate.rs, convert.rs, dispatch.rs, dispatch_binding.rs, equality.rs, executable.rs, frame.rs, generator_fastpath_gate.rs, hof_exec.rs, instr/*, intrinsics_exec.rs, narrow_int_arith.rs, native_array_compat.rs, numeric_identity.rs, profiler.rs, register_gate.rs, repl_support.rs, splat.rs, stack_metrics.rs, state.rs, struct_setup.rs, tests.rs [whole-file test-only], type_objects.rs, type_utils.rs, util.rs) plus the 4 previously-undenied subdirectories (builtins_macro/, builtins_reflection/, dynamic_ops/, matmul/) — exec/, formatting/, specialize/, type_ops/ and stack_ops.rs were already denied individually; every affected #[cfg(test)] test module or fn carries a local allow, verified by workspace `cargo clippy --all-targets -- -D warnings` (Issue #10979 Phase 4 of #10869)

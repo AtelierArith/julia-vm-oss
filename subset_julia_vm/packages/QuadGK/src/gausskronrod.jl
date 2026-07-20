@@ -589,6 +589,9 @@ const wgd7 = [1.2948496616886969327061143267787e-01,
               2.797053914892766679014677714229e-01,
               3.8183005050511894495036977548818e-01,
               4.1795918367346938775510204081658e-01]
+const xf7 = Vector{Float32}(xd7)
+const wf7 = Vector{Float32}(wd7)
+const wgf7 = Vector{Float32}(wgd7)
 
 # cache of T -> n -> (x,w,wg) Kronrod rules, to avoid recomputing them
 # unnecessarily for repeated integration.   We initialize it with the
@@ -597,7 +600,7 @@ const wgd7 = [1.2948496616886969327061143267787e-01,
 # a generated function below.
 const rulecache = Dict{Type,Dict}(
     Float64 => Dict{Int,NTuple{3,Vector{Float64}}}(7 => (xd7,wd7,wgd7)),
-    Float32 => Dict{Int,NTuple{3,Vector{Float32}}}(7 => (xd7,wd7,wgd7)))
+    Float32 => Dict{Int,NTuple{3,Vector{Float32}}}(7 => (xf7,wf7,wgf7)))
 const rulecache_lock = ReentrantLock() # thread-safety
 
 # for BigFloat rules, we need a separate cache keyed by (n,precision)
@@ -635,6 +638,16 @@ function cachedrule(::Union{Type{Float64},Type{ComplexF64}}, n::Integer)
     lock(rulecache_lock)
     try
         return _cachedrule(Float64, Int(n))
+    finally
+        unlock(rulecache_lock)
+    end
+end
+
+function cachedrule(::Type{Float32}, n::Integer)
+    n == 7 && return (xf7,wf7,wgf7)
+    lock(rulecache_lock)
+    try
+        return _cachedrule(Float32, Int(n))
     finally
         unlock(rulecache_lock)
     end

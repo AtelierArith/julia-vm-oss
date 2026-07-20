@@ -11,7 +11,7 @@ Julia's type promotion is a three-layer system:
 2. `promote_type(T, S)` — Tries `promote_rule` in both directions and returns the common type
 3. `promote(x, y)` — Converts values to the common type via `convert`
 
-SubsetJuliaVM implements this in `subset_julia_vm/src/compile/promotion.rs`.
+SubsetJuliaVM implements this in `subset_julia_vm/src/promotion.rs`.
 
 Bundled integer rules in `subset_julia_vm/src/julia/base/promotion.jl` are
 spelled as explicit concrete `promote_rule(::Type{A}, ::Type{B})` pairs for
@@ -38,7 +38,7 @@ Julia `promote_rule` methods.
 ### Promotion Rule Registry (Thread-Local)
 
 ```rust
-// subset_julia_vm/src/compile/promotion.rs
+// subset_julia_vm/src/promotion.rs
 thread_local! {
     static PROMOTION_RULE_REGISTRY: RefCell<HashMap<(String, String), String>>;
     static REGISTRY_INITIALIZED: RefCell<bool>;
@@ -168,25 +168,42 @@ binary-op path (`execute_binary_both`):
 2. `promote_numeric_pair` — converts a heterogeneous pair to its common type
    (returning a `PromotedPairPolicy` that pins the legacy unsupported-op error
    label), after which `same_type_fast_path` is re-applied. The pair table must
-   stay consistent with `compile/promotion.rs` and the rules in this document.
+   stay consistent with `promotion.rs` and the rules in this document.
 3. Anything else falls through to the tagged fallback chain and ultimately the
    Pure Julia promote fallback.
 
-Only pairs whose current behavior is exactly "promote, then same-type op" may
-be folded into layer 2. Behavior-exception pairs (Bool result types, Float16×Int
-result-narrowing, unsigned widths, Int128 mixes, BigInt/BigFloat, Char) stay on
-explicit arms — see the recursion-trap section above for why a silently dropped
-pair is dangerous. Full arm inventory: docs/vm/BINARY_DISPATCH.md
-("Promote-then-same-type structure") + `scripts/check_binary_both_fallback_inventory.sh`.
+Only pairs whose behavior and fallback placement are owned by the early promote
+table may be folded into layer 2. Behavior-exception pairs (Bool result types,
+Bool×float multiply — see below, unsigned widths, Int128 mixes,
+BigInt/BigFloat, Char) and pairs still recreated by later normalization
+(`Float16×Int`) stay on explicit arms — see the recursion-trap section above for
+why a silently dropped pair is dangerous. Full arm inventory:
+docs/vm/BINARY_DISPATCH.md ("Promote-then-same-type structure") +
+`scripts/check_binary_both_fallback_inventory.sh`.
+
+**Bool × AbstractFloat multiply is a strong zero, NOT a promote (Issue #9343).**
+Upstream `base/bool.jl` defines
+`*(x::Bool, y::T) where {T<:AbstractFloat} = ifelse(x, y, copysign(zero(y), y))`
+(and the symmetric `*(y::AbstractFloat, x::Bool)`). When `x` is `false` the
+result is `copysign(zero(y), y)` — a "strong zero" stronger than IEEE NaN
+propagation — so `false * Inf == 0.0`, `false * -Inf == -0.0`, `false * NaN ==
+0.0`. Promoting `false` to `0.0` and multiplying would instead give `0.0 * Inf ==
+NaN`. This pair therefore must NOT reach `promote_numeric_pair`: the primitive
+`Bool × Float16/Float32/Float64` multiply is intercepted early in
+`execute_binary_both` (`bool_float_strong_zero_mul`), and the compiler routes a
+statically-typed `Bool × machine-float` `*` to `CallDynamicBinaryBoth` instead of
+the `BoolToI64; ToF64; MulF64` specialization (`compile_builtin_binary_op`). The
+pure-Julia `*` methods in `base/bool.jl` cover the remaining `AbstractFloat`
+subtypes that reach method dispatch.
 
 ## Related Files
 
 | File | Role |
 |------|------|
-| `subset_julia_vm/src/compile/promotion.rs` | Registry, `promote_type`, `promote_rule` fallback |
-| `subset_julia_vm/src/compile/cache.rs` | `extract_promotion_rules_from_ir`, `compile_base_functions` |
-| `subset_julia_vm/src/compile/precompile.rs` | `serialize_base_cache`, `deserialize_base_cache` |
-| `subset_julia_vm/src/compile/embedded_cache.rs` | `load_embedded_cache`, replay path |
+| `subset_julia_vm/src/promotion.rs` | Registry, `promote_type`, `promote_rule` fallback |
+| `subset_julia_vm_compile/src/compile/cache.rs` | `extract_promotion_rules_from_ir`, `compile_base_functions` |
+| `subset_julia_vm_compile/src/compile/precompile.rs` | `serialize_base_cache`, `deserialize_base_cache` |
+| `subset_julia_vm_compile/src/compile/embedded_cache.rs` | `load_embedded_cache`, replay path |
 | `subset_julia_vm/src/julia/base/promotion.jl` | Julia-defined `promote_rule` methods |
 
 ## Testing

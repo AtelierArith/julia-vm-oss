@@ -119,6 +119,12 @@ expected = true
 description = "Runtime-dispatched keyword calls preserve explicit kwargs across three same-arity overloads (Issue #7021)"
 
 [[tests]]
+name = "kwargs_keyword_forwarding_fallback_8566"
+file = "keyword_forwarding_fallback_8566.jl"
+expected = true
+description = "Keyword calls skip positional-only methods when another arity-compatible method accepts the supplied keywords, so forwarding fallbacks like f(xs...; kws...) are selected instead of raising unsupported-keyword MethodError (Issue #8566)"
+
+[[tests]]
 name = "kwargs_function_default_vararg_where_8367"
 file = "function_default_vararg_where_8367.jl"
 expected = true
@@ -147,3 +153,45 @@ name = "kwargs_inf_nan_default_8078"
 file = "kwarg_inf_nan_default_8078.jl"
 expected = true
 description = "A keyword-argument default of Inf/-Inf/NaN (and the Inf32/Inf16/Inf64/NaN* family) resolves to the float special constant instead of the baked 0 fallback; bound names still shadow it (Issue #8078)"
+
+[[tests]]
+name = "kwargs_annotated_kwarg_call_default_positional_stub_11124"
+file = "annotated_kwarg_call_default_positional_stub_11124.jl"
+expected = true
+description = "A type-annotated keyword whose default is a CALL keeps its default when the function also has a defaulted positional argument: the reduced-arity forwarding stub forwards the raw NOT-SUPPLIED sentinel (Value::Undef) verbatim, and the #11024 declared-type assertion must skip it instead of reporting 'expected Integer, got a value of type #undef'. Pins the 3-way trigger (pos-default x annotated kwarg x call default), that an omitted REQUIRED annotated keyword still raises UndefKeywordError (the sentinel is also the required marker), and that the #11024 assertion still fires on SUPPLIED wrong-typed values (Issue #11124, regression from PR #11082)"
+
+[[tests]]
+name = "kwargs_annotated_kwarg_default_type_11135"
+file = "annotated_kwarg_default_type_11135.jl"
+expected = true
+description = "A keyword's declared type is asserted against omitted literal and call-valued defaults, including through a positional-default forwarding stub; mismatched defaults raise upstream's MethodError while supplied mismatches remain TypeError (Issue #11135)"
+
+[[tests]]
+name = "kwargs_arrow_lambda_kwparams_10354"
+file = "arrow_lambda_kwparams_10354.jl"
+expected = true
+description = "An arrow (->) lambda lowers its keyword parameters through the same authority as the named-function signature path (signature::parse_kwparam_node). Pins both divergences the Issue #10354 @test_throws type check surfaced: (1) an ANNOTATED keyword (k::Integer = 3) was silently DROPPED from the arrow's signature — the body's k became a global load (UndefVarError) and a supplied k was an 'unsupported keyword argument' — and its declared type was discarded, so the #11024/#11081 declared-type and required-keyword handling never reached arrows; (2) the parser's Assignment->KwParameter rewrap ran over the WHOLE arrow parameter list, so an optional POSITIONAL default before the ';' was also lowered as a KEYWORD and supplying it by position raised NoMethodFound. Verified against upstream julia 1.12.6 (Issue #10354)"
+
+[[tests]]
+name = "kwargs_insertion_order_11383"
+file = "kwargs_insertion_order_11383.jl"
+expected = true
+description = "Keyword-argument materialization preserves insertion order (each key keeps the position of its first occurrence) for literal keyword arguments and for a tuple-of-pairs keyword splat, instead of the HashMap-seed-dependent order it used to observe (Issue #11383)"
+
+[[tests]]
+name = "kwargs_duplicate_overwrite_in_place_11383"
+file = "kwargs_duplicate_overwrite_in_place_11383.jl"
+expected = true
+description = "A duplicate keyword name (within a single splat source, and across a literal keyword followed by a splat) replaces the value at its existing first-occurrence slot instead of moving to the end or losing insertion order (Issue #11383)"
+
+[[tests]]
+name = "kwargs_splat_user_merge_dispatch_11381"
+file = "kwargs_splat_user_merge_dispatch_11381.jl"
+expected = true
+description = "Keyword splatting routes the source through real merge(::NamedTuple, source) multiple dispatch so a user-defined Base.merge(a::NamedTuple, ::T) extension actually runs instead of being silently ignored (Issue #11381)"
+
+[[tests]]
+name = "kwargs_splat_zip_duplicate_key_merge_11381"
+file = "kwargs_splat_zip_duplicate_key_merge_11381.jl"
+expected = true
+description = "Keyword splatting routes an Iterators.Zip source through real merge(::NamedTuple, source) dispatch so Base's Zip duplicate-key validation raises upstream's ErrorException (\"duplicate field name in NamedTuple\"), while a duplicate-free zip still merges as before (Issue #11381)"

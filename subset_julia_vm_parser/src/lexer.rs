@@ -50,6 +50,29 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Create a lexer for bounded lookahead where only the token *kind* is
+    /// read back (spans are discarded by the caller).
+    ///
+    /// `Lexer::new` pays for `SourceMap::new`, an `O(source length)` scan for
+    /// newlines, on every call. Parser lookahead helpers such as
+    /// `peek_non_newline_token` construct a throwaway lexer on every newline
+    /// encountered inside `(...)`/`[...]`/`{...}` groupings, so for deeply
+    /// nested/grouped expressions that scan was repeated dozens-to-hundreds
+    /// of times per parse. Since these callers only match on `token.token`
+    /// and never read `token.span`, the source map's line/column bookkeeping
+    /// is wasted work; this constructor swaps in a cheap stub so building the
+    /// lookahead lexer is `O(1)` instead (Issue #10128).
+    pub(crate) fn new_for_token_peek(source: &'a str) -> Self {
+        Self {
+            source,
+            inner: Token::lexer(source),
+            source_map: SourceMap::stub(),
+            peeked: None,
+            position: 0,
+            offset: 0,
+        }
+    }
+
     /// Get the source code
     pub fn source(&self) -> &'a str {
         self.source
@@ -162,6 +185,38 @@ impl<'a> Lexer<'a> {
                 let text = &self.source[start..name_end];
                 self.restart_from(name_end);
                 Some(Ok(SpannedToken::new(Token::Identifier, span, text)))
+            }
+
+            Ok(Token::Identifier)
+                if self.source[start..end].starts_with('∘') && end > start + '∘'.len_utf8() =>
+            {
+                // The identifier regex admits several mathematical-symbol code
+                // points as leading identifier characters. For composition
+                // chains like `g∘g` or `!isempty∘last`, logos can therefore
+                // greedily emit `∘last` as one Identifier. Julia treats `∘` as
+                // an infix operator even without whitespace, so split the
+                // leading ring operator and let the following identifier lex on
+                // the next step (Issue #8759).
+                let op_end = start + '∘'.len_utf8();
+                let span = self.make_span(start, op_end);
+                let text = &self.source[start..op_end];
+                self.restart_from(op_end);
+                Some(Ok(SpannedToken::new(Token::RingOperator, span, text)))
+            }
+
+            Ok(Token::FloatLiteral)
+                if end > start + 1
+                    && self.source.as_bytes()[end - 1] == b'.'
+                    && self.source.as_bytes().get(end) == Some(&b'.') =>
+            {
+                // `10...` is `10` followed by splat `...`, not float `10.`
+                // followed by range `..` (Issue #8759). Give the trailing dot
+                // back so the next lexer step can emit `Ellipsis`.
+                let number_end = end - 1;
+                let span = self.make_span(start, number_end);
+                let text = &self.source[start..number_end];
+                self.restart_from(number_end);
+                Some(Ok(SpannedToken::new(Token::DecimalLiteral, span, text)))
             }
 
             Ok(token) => {
@@ -304,6 +359,7 @@ pub fn tokenize(source: &str) -> Vec<Result<SpannedToken<'_>, ParseError>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -387,6 +443,269 @@ mod tests {
         // "bar" at 6..9
         assert_eq!(tokens[2].span.start, 6);
         assert_eq!(tokens[2].span.end, 9);
+    }
+
+    #[test]
+    fn test_adjacent_composition_operator_issue_8759() {
+        let tokens: Vec<_> = tokenize("g∘g !isempty∘last textwidth∘last")
+            .into_iter()
+            .filter_map(|r| r.ok())
+            .map(|t| (t.token, t.text.to_string()))
+            .collect();
+
+        assert_eq!(
+            tokens,
+            vec![
+                (Token::Identifier, "g".to_string()),
+                (Token::RingOperator, "∘".to_string()),
+                (Token::Identifier, "g".to_string()),
+                (Token::Not, "!".to_string()),
+                (Token::Identifier, "isempty".to_string()),
+                (Token::RingOperator, "∘".to_string()),
+                (Token::Identifier, "last".to_string()),
+                (Token::Identifier, "textwidth".to_string()),
+                (Token::RingOperator, "∘".to_string()),
+                (Token::Identifier, "last".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_mid_identifier_bang_and_not_equal_boundary_issue_10713() {
+        let tokens: Vec<_> = tokenize("foo!bar name!x is!valid! a!=b a!b!=c a!b!==c .!x")
+            .into_iter()
+            .filter_map(|r| r.ok())
+            .map(|t| (t.token, t.text.to_string()))
+            .collect();
+
+        assert_eq!(
+            tokens,
+            vec![
+                (Token::Identifier, "foo!bar".to_string()),
+                (Token::Identifier, "name!x".to_string()),
+                (Token::Identifier, "is!valid!".to_string()),
+                (Token::Identifier, "a".to_string()),
+                (Token::NotEq, "!=".to_string()),
+                (Token::Identifier, "b".to_string()),
+                (Token::Identifier, "a!b".to_string()),
+                (Token::NotEq, "!=".to_string()),
+                (Token::Identifier, "c".to_string()),
+                (Token::Identifier, "a!b".to_string()),
+                (Token::NotEqEq, "!==".to_string()),
+                (Token::Identifier, "c".to_string()),
+                (Token::DotNot, ".!".to_string()),
+                (Token::Identifier, "x".to_string()),
+            ]
+        );
+    }
+
+    /// Paired boundary coverage (Issue #10848 convention): broadening the operator
+    /// character set must not swallow, or be swallowed by, the neighbouring operator
+    /// boundaries — `!=` / `!==` after an identifier, dotted operators, `::`, and the
+    /// syntactic `&&` / `||` rejection (Issue #10932).
+    #[test]
+    fn test_unicode_operator_boundaries_issue_11083() {
+        let cases: &[(&str, &[(Token, &str)])] = &[
+            // Newly-recognized operator, tight spacing on both sides.
+            (
+                "a⊛b",
+                &[
+                    (Token::Identifier, "a"),
+                    (Token::UnicodeOpTimes, "⊛"),
+                    (Token::Identifier, "b"),
+                ],
+            ),
+            // Suffixed operator immediately after an identifier that itself ends in
+            // an identifier-continuation character.
+            (
+                "a₁⊗ᵢb",
+                &[
+                    (Token::Identifier, "a₁"),
+                    (Token::UnicodeOpTimes, "⊗ᵢ"),
+                    (Token::Identifier, "b"),
+                ],
+            ),
+            // `!=` / `!==` boundaries stay intact next to the new operators.
+            (
+                "a⊛b!=c",
+                &[
+                    (Token::Identifier, "a"),
+                    (Token::UnicodeOpTimes, "⊛"),
+                    (Token::Identifier, "b"),
+                    (Token::NotEq, "!="),
+                    (Token::Identifier, "c"),
+                ],
+            ),
+            (
+                "a⊞b!==c",
+                &[
+                    (Token::Identifier, "a"),
+                    (Token::UnicodeOpPlus, "⊞"),
+                    (Token::Identifier, "b"),
+                    (Token::NotEqEq, "!=="),
+                    (Token::Identifier, "c"),
+                ],
+            ),
+            // Dotted boundaries: `.!` (unary broadcast not) and `.⊛` stay distinct.
+            (
+                ".!a⊛b",
+                &[
+                    (Token::DotNot, ".!"),
+                    (Token::Identifier, "a"),
+                    (Token::UnicodeOpTimes, "⊛"),
+                    (Token::Identifier, "b"),
+                ],
+            ),
+            (
+                "a.⊛b.+c",
+                &[
+                    (Token::Identifier, "a"),
+                    (Token::DotUnicodeOpTimes, ".⊛"),
+                    (Token::Identifier, "b"),
+                    (Token::DotPlus, ".+"),
+                    (Token::Identifier, "c"),
+                ],
+            ),
+            // `::` type annotation next to an operator name.
+            (
+                "x::Int⊛y",
+                &[
+                    (Token::Identifier, "x"),
+                    (Token::DoubleColon, "::"),
+                    (Token::Identifier, "Int"),
+                    (Token::UnicodeOpTimes, "⊛"),
+                    (Token::Identifier, "y"),
+                ],
+            ),
+            // `&&` / `||` keep their own (syntactic) tokens — they are NOT folded
+            // into the generic operator classes (Issue #10932).
+            (
+                "a⊛b&&c||d",
+                &[
+                    (Token::Identifier, "a"),
+                    (Token::UnicodeOpTimes, "⊛"),
+                    (Token::Identifier, "b"),
+                    (Token::AndAnd, "&&"),
+                    (Token::Identifier, "c"),
+                    (Token::OrOr, "||"),
+                    (Token::Identifier, "d"),
+                ],
+            ),
+            // Bare `&` / `|` (times/plus class ASCII) keep their dedicated tokens.
+            (
+                "a&b|c",
+                &[
+                    (Token::Identifier, "a"),
+                    (Token::Amp, "&"),
+                    (Token::Identifier, "b"),
+                    (Token::Pipe, "|"),
+                    (Token::Identifier, "c"),
+                ],
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let got: Vec<(Token, String)> = tokenize(source)
+                .into_iter()
+                .map(|r| {
+                    r.unwrap_or_else(|e| panic!("source {source:?} must lex without error: {e:?}"))
+                })
+                .map(|t| (t.token, t.text.to_string()))
+                .collect();
+            let want: Vec<(Token, String)> = expected
+                .iter()
+                .map(|(t, s)| (t.clone(), (*s).to_string()))
+                .collect();
+            assert_eq!(got, want, "source {source:?}");
+        }
+    }
+
+    /// Table-driven operator-boundary coverage for identifier-continuation
+    /// characters (Issue #10848, prevention for Issue #10713): any expansion
+    /// of the identifier-continuation set must keep the greedy identifier
+    /// regex rewinding correctly before `!=` / `!==` and their dotted forms.
+    /// One representative is enumerated per continuation-character class of
+    /// the identifier regex in `token/mod.rs` (`_`, ASCII digit, XID_Continue
+    /// letter, `!`, acute accent, modifier letter, prime, subscript,
+    /// superscript, and the `²`/`³`/`¹` singles). Expected tokenizations
+    /// verified against upstream Julia 1.12.6 (`Meta.parse`).
+    #[test]
+    fn test_identifier_continuation_operator_boundary_table_issue_10848() {
+        // (label, continuation character as identifier tail)
+        const CONTINUATION_CHARS: &[(&str, &str)] = &[
+            ("underscore", "_"),
+            ("ascii digit", "1"),
+            ("xid-continue letter", "α"),
+            ("bang", "!"),
+            ("acute accent U+00B4", "\u{00B4}"),
+            ("modifier letter U+02B9", "\u{02B9}"),
+            ("prime U+2032", "′"),
+            ("subscript U+2081", "₁"),
+            ("superscript U+207F", "\u{207F}"),
+            ("superscript two U+00B2", "²"),
+        ];
+        // (operator source suffix, expected operator token, operator text)
+        const OPERATORS: &[(&str, Token, &str)] = &[
+            ("!=b", Token::NotEq, "!="),
+            ("!==b", Token::NotEqEq, "!=="),
+            (".!=b", Token::DotNotEq, ".!="),
+            (".!==b", Token::DotNotEqEq, ".!=="),
+        ];
+
+        for (label, cont) in CONTINUATION_CHARS {
+            let ident = format!("a{cont}");
+            for (suffix, op_token, op_text) in OPERATORS {
+                let source = format!("{ident}{suffix}");
+                let tokens: Vec<_> = tokenize(&source)
+                    .into_iter()
+                    .filter_map(|r| r.ok())
+                    .map(|t| (t.token, t.text.to_string()))
+                    .collect();
+                assert_eq!(
+                    tokens,
+                    vec![
+                        (Token::Identifier, ident.clone()),
+                        (op_token.clone(), op_text.to_string()),
+                        (Token::Identifier, "b".to_string()),
+                    ],
+                    "continuation char class {label:?}, source {source:?}"
+                );
+            }
+
+            // Dotted unary form after the identifier boundary: `.!` applies
+            // to a following identifier that itself uses the continuation
+            // character (`.!aα`), staying `DotNot` + Identifier.
+            let source = format!(".!{ident}");
+            let tokens: Vec<_> = tokenize(&source)
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .map(|t| (t.token, t.text.to_string()))
+                .collect();
+            assert_eq!(
+                tokens,
+                vec![
+                    (Token::DotNot, ".!".to_string()),
+                    (Token::Identifier, ident.clone()),
+                ],
+                "continuation char class {label:?}, source {source:?}"
+            );
+        }
+
+        // Only ONE trailing `!` is given back before `=`: `f!!=g` is
+        // `f!` `!=` `g` upstream, not `f!!` `=` `g`.
+        let tokens: Vec<_> = tokenize("f!!=g")
+            .into_iter()
+            .filter_map(|r| r.ok())
+            .map(|t| (t.token, t.text.to_string()))
+            .collect();
+        assert_eq!(
+            tokens,
+            vec![
+                (Token::Identifier, "f!".to_string()),
+                (Token::NotEq, "!=".to_string()),
+                (Token::Identifier, "g".to_string()),
+            ]
+        );
     }
 
     #[test]

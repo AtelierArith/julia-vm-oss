@@ -43,7 +43,18 @@ Bottom → Const(value, ConcreteType) → Concrete(ConcreteType) → Union → C
 | Type unions | 1 | `UnionOf(Vec<ConcreteType>)` |
 | Enum | 1 | `Enum{name}` (Issue #2863) |
 
-**Note:** `Memory` is a `ValueType` variant only, NOT a `ConcreteType` variant. Memory values at the lattice level are not yet tracked.
+**Note (resolved — Issues #9009 / #9034):** `Memory{T}` is now a full
+`ConcreteType` lattice variant (`Memory { element: Box<ConcreteType>, ndims:
+Option<usize> }`), mirroring the `Array` variant and reusing its aliasing /
+mutation join behavior. Issue #9034 offered two options — add lattice tracking
+or formalize the limitation — and this implements the tracking option. Before
+this fix, `ValueType::Memory` / `ValueType::MemoryOf(T)` widened to
+`LatticeType::Top`, so direct user-code `Memory{T}` inference reported `Any`.
+Method-table parameter annotations of the form `m::Memory{Int64}` now resolve to
+`ValueType::MemoryOf(I64)` instead of `ValueType::Any`. Residual gap:
+`Memory{T}(undef, n)` constructor calls and indexed-load *return* types still
+widen to `Any` (shared with `Array{T}(undef, n)` — parametric built-in
+constructors are not inferred).
 
 ## Exhaustiveness Pattern
 
@@ -157,6 +168,62 @@ When adding `ConcreteType::Foo`:
 `type_depth()` in `ops.rs` is intentionally exhaustive — it forces every variant to declare its nesting depth. Do NOT add `_ => 1` wildcards. The compile errors when a new variant is missing are the desired safety net.
 
 The same principle applies to bridge conversion functions. Prefer explicit arms over wildcards to maintain compile-time safety when variants are added.
+
+## `PartialStruct` — Constructor Field Facts (Issues #8544 / #8739)
+
+`LatticeType::PartialStruct { struct_name, type_id, field_names, fields }`
+mirrors upstream `Core.PartialStruct` (`julia/Compiler/src/typelattice.jl`):
+an instance of the immutable struct `struct_name` whose per-field lattice
+facts are more precise than the declared field types. Field facts are
+positional (`fields[i]` belongs to `field_names[i]`), may themselves be
+`PartialStruct` (nested constructor chains, Issue #4269), and widen to
+`Concrete(Struct)` via `widen_partial_struct()` (upstream `widenconst`).
+
+Since Issue #8739 the lattice value is the **only** carrier of these facts:
+
+- Default-constructor call sites (`infer_default_struct_constructor`,
+  including bindable parametric instantiations) return the `PartialStruct`
+  directly.
+- Inner-constructor `new(...)` / `new{T}(...)` bodies produce the fact through
+  the regular `Expr::New` arm of `infer_expr` (`infer_new_expr`, upstream
+  `abstract_eval_new`), and constructor call sites with an available ctor body
+  fall through to the ordinary interprocedural analysis instead of stopping at
+  the method table's declared struct return type.
+- Facts cross every boundary through the existing machinery: argument
+  binding, `CachedReturn` world/backedge validity (#5603), the #8553 precise
+  backedge index, and `TypeEnv` variable bindings. The former
+  `ConstructorPartial` side cache, its `analyzing_partial_structs` recursion
+  guard (#7186 — now bounded structurally by the regular
+  `analyzing_functions` cycle guard), and the `TypeEnv::partial_structs`
+  side table are deleted.
+
+### Decision record (Issue #8739)
+
+- **Mutable structs — deferred, design fixed.** Upstream allows
+  `PartialStruct` facts for `const` fields of mutable structs only: in
+  `abstract_eval_new`, `ismutable && !isconst(rt, i)` forces field `i` to its
+  declared type because a later `setfield!` may replace the value. sjulia's
+  parser/runtime has no `const` struct-field support yet, so *no* mutable
+  field can currently carry a fact and mutable constructors intentionally
+  widen to `Concrete(Struct)` everywhere (`infer_new_expr`,
+  `infer_default_struct_constructor`). When `const` fields land, the
+  implementation slot is the `is_mutable` branches of those two functions:
+  keep declared types for non-`const` fields, keep argument facts for `const`
+  ones — no new lattice variant is needed.
+- **MustAlias — rejected for now.** Upstream `MustAlias` wraps a slot's
+  *field reference* so `isa`/`===` constraints on `x.f` re-narrow later reads
+  of the same field. sjulia already covers the practically observed cases
+  with the `TypeEnv` refinement table (`x.f` path refinements from guards,
+  root-alias groups, field-path aliases — Issues #3504/#3520/#4844), which is
+  the same slot-keyed idea without a lattice element. Promoting it into the
+  lattice would add a slot-identity invariant (upstream asserts these never
+  nest and strips them at every boundary via `widenslotwrapper`) with no
+  known sjulia workload benefiting. Revisit only with a concrete fixture that
+  the refinement table cannot express.
+- **PartialOpaque — rejected.** It models `Core.OpaqueClosure` construction;
+  sjulia has no opaque closures (closures compile to named functions with
+  explicit captures), so the element has nothing to describe. Out of scope
+  until opaque closures themselves become a feature.
 
 ## Related Documentation
 

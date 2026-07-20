@@ -1,5 +1,9 @@
 # Test custom string macros (Issue #468)
-# Tests that prefix"text" calls the prefix_str function
+# Tests that prefix"text" calls the prefix_str FUNCTION.
+# NOTE: This is a SubsetJuliaVM extension — upstream Julia requires a
+# `macro prefix_str(s)` (not a function) for `prefix"..."` syntax, so this
+# fixture cannot run under upstream julia. Marked skip_julia_test in
+# manifest.toml (Issue #10237).
 
 using Test
 

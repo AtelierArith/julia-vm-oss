@@ -526,7 +526,7 @@ mod typebound_hierarchy_strictening_issue_6596 {
         h.insert("Pairs", Some("AbstractDict".to_string()), Vec::new());
         let le_pairs = type_of(JuliaType::TypeVar(
             "_".to_string(),
-            Some("Pairs{K,V,I,A}".to_string()),
+            Some("Pairs".to_string()),
         ));
 
         // julia: Type{<concrete Pairs>} <: Type{<:Base.Pairs} == true

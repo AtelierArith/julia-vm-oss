@@ -147,7 +147,7 @@ struct Conditional {
 **実装上の注意**: 設計仕様では Conditional 型を使用することを想定していますが、
 実際の実装では**環境分割（Environment Splitting）**アプローチを採用しています。
 これは機能的に等価であり、実装の簡潔性と保守性を優先した選択です。
-詳細は `subset_julia_vm/src/compile/abstract_interp/conditional.rs` を参照してください。
+詳細は `subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs` を参照してください。
 
 ### MustAlias
 

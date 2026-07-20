@@ -8,12 +8,11 @@
 
 use crate::aot::inference::FunctionSignature;
 use crate::aot::types::StaticType;
-use crate::compile::abstract_interp::engine::InferenceCacheKey;
-use crate::compile::lattice::types::{ConcreteType, LatticeType};
 use crate::inference_core::CoreType;
 use crate::ir::core::Function;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
+use subset_julia_vm_types::{ConcreteType, InferenceCacheKey, LatticeType};
 
 /// Stable key for one AoT method specialization.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -152,22 +151,33 @@ impl SpecializationQueue {
         if self.instances.contains_key(&key) {
             return false;
         }
-
-        self.pending_set.insert(key.clone());
-        self.pending.push_back(key.clone());
-        self.instances
-            .insert(key.clone(), CodeInstance::enqueued(key));
+        self.ensure_enqueued(&key);
         true
+    }
+
+    /// Ensure `key` has an entry (idempotent) and return a mutable reference
+    /// to its `CodeInstance`. Unlike `enqueue`, this can never fail to find
+    /// the entry afterwards: the `Entry` API creates it in the same
+    /// lookup, so callers never need a follow-up fallible `get_mut` plus a
+    /// panicking assertion (Issue #10907 — moves the "instance was just
+    /// enqueued" invariant from a scattered assertion per call site into the
+    /// one place that can actually guarantee it).
+    fn ensure_enqueued(&mut self, key: &CodeInstanceKey) -> &mut CodeInstance {
+        match self.instances.entry(key.clone()) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                self.pending_set.insert(key.clone());
+                self.pending.push_back(key.clone());
+                entry.insert(CodeInstance::enqueued(key.clone()))
+            }
+        }
     }
 
     /// Record that `owner` depends on `dependency`, enqueueing the dependency.
     pub fn add_dependency(&mut self, owner: &CodeInstanceKey, dependency: CodeInstanceKey) -> bool {
         self.enqueue(owner.clone());
         self.enqueue(dependency.clone());
-        self.instances
-            .get_mut(owner)
-            .expect("owner instance was enqueued")
-            .add_dependency(dependency)
+        self.ensure_enqueued(owner).add_dependency(dependency)
     }
 
     pub fn pop_next(&mut self) -> Option<CodeInstanceKey> {
@@ -186,18 +196,13 @@ impl SpecializationQueue {
 
         if matching_keys.is_empty() {
             let key = CodeInstanceKey::new(source.name.clone(), signature.param_types.clone());
-            self.enqueue(key.clone());
-            self.instances
-                .get_mut(&key)
-                .expect("instance was enqueued")
+            self.ensure_enqueued(&key)
                 .attach_inference(source.clone(), signature);
             return;
         }
 
         for key in matching_keys {
-            self.instances
-                .get_mut(&key)
-                .expect("matching instance exists")
+            self.ensure_enqueued(&key)
                 .attach_inference(source.clone(), signature.clone());
         }
     }
@@ -236,8 +241,7 @@ impl SpecializationQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::abstract_interp::engine::{widen_argtype_for_cache_key, CacheArgType};
-    use crate::compile::lattice::types::ConstValue;
+    use subset_julia_vm_types::{widen_argtype_for_cache_key, CacheArgType, ConstValue};
 
     fn const_arg(cv: ConstValue) -> CacheArgType {
         widen_argtype_for_cache_key(&LatticeType::Const(cv))
@@ -303,9 +307,8 @@ mod tests {
 
     #[test]
     fn issue_8372_code_instance_key_stores_inference_cache_key_directly() {
-        use crate::compile::abstract_interp::engine::{CacheArgType, InferenceCacheKey};
-        use crate::compile::lattice::types::{ConcreteType, LatticeType};
         use crate::inference_core::{CorePrimitive, CoreType};
+        use subset_julia_vm_types::{CacheArgType, ConcreteType, InferenceCacheKey, LatticeType};
 
         let expected = InferenceCacheKey::from_argtypes(
             "f8372",
@@ -367,7 +370,7 @@ mod tests {
 
     #[test]
     fn issue_4272_aot_and_compile_paths_agree_on_const_specialization() {
-        use crate::compile::lattice::types::LatticeType;
+        use subset_julia_vm_types::LatticeType;
 
         // AoT now constructs the same `InferenceCacheKey` type as the compile
         // path, so representative ConstValues must produce identical keys.
@@ -418,6 +421,7 @@ mod tests {
         queue.enqueue(false_key.clone());
 
         let source = Function {
+            new_struct_name: None,
             name: "f4272".to_string(),
             params: vec![crate::ir::core::TypedParam::new(
                 "flag".to_string(),

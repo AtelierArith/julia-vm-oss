@@ -420,7 +420,7 @@ Pure Julia と Rust builtin の併用で、以下を中心にサポート:
 ### 基本 I/O
 
 - `print`, `println`
-- `IOBuffer()` と `write(io, x)`, `take!(io)`, `takestring!(io)`
+- `IOBuffer()` と `write(io, x)`, `take!(io)` (`Vector{UInt8}`), `String(take!(io))`
 - `sprint(x)` / `sprint(f, args...)`
   - user-defined `f(io, args...)` を VM がサポート（専用命令あり）
   - `context` 付き sprint（`IOContext`）をサポート

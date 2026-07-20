@@ -1,0 +1,11 @@
+# Upstream Julia parity target (machine-readable single source).
+#
+# Format: the first non-comment line is the target series `MAJOR.MINOR`.
+# sjulia tracks the LATEST PATCH RELEASE of this series. Tooling
+# (scripts/fixture_julia_parity.sh, CI setup-julia, corpus sweeps) reads
+# this file; humans read docs/vm/PARITY_TARGET.md for the full policy.
+#
+# Update this file ONLY together with the `julia/` submodule pointer, in
+# the same PR, following the submodule-update checklist in
+# docs/vm/CHECKLISTS.md (Issue #8644 / #8668).
+1.12

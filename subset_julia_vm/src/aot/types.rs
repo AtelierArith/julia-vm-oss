@@ -241,10 +241,10 @@ impl StaticType {
     /// AoT's backend-oriented `StaticType` representation when the shape has
     /// a stable codegen projection.
     ///
-    /// This is intentionally lossy: semantic supertypes, `UnionAll`, type
-    /// variables, value parameters, and unknown user-defined type objects stay
-    /// in `CoreType` and return `None` instead of forcing `StaticType` to own
-    /// Julia type semantics.
+    /// This is intentionally lossy: semantic supertypes widen to the dynamic
+    /// `Any` carrier, while `UnionAll`, type variables, value parameters, and
+    /// unknown user-defined type objects stay in `CoreType` and return `None`
+    /// instead of forcing `StaticType` to own Julia type semantics.
     pub fn from_core_type_lossy(core: &crate::inference_core::CoreType) -> Option<Self> {
         use crate::inference_core::{
             type_core::CoreValueParam as V, CoreAbstract as A, CorePrimitive as P, CoreType as C,
@@ -275,6 +275,11 @@ impl StaticType {
             C::Primitive(P::Nothing) => StaticType::Nothing,
             C::Primitive(P::Missing) => StaticType::Missing,
             C::Abstract(A::DataType) | C::TypeOf(_) => StaticType::DataType,
+            // StaticType is a backend-layout projection and deliberately has
+            // no nominal abstract-type variants. Preserve enclosing structural
+            // joins by widening abstract members to the dynamic carrier instead
+            // of failing the entire projection (Issue #10865).
+            C::Abstract(_) => StaticType::Any,
             C::Tuple(elements) => StaticType::Tuple(
                 elements
                     .iter()
@@ -427,6 +432,55 @@ impl StaticType {
         self.primitive_numeric().is_some_and(|p| p.is_float())
     }
 
+    /// Integer bit width of a concrete integer StaticType (Bool excluded).
+    fn integer_bits(&self) -> Option<u32> {
+        Some(match self {
+            StaticType::I8 | StaticType::U8 => 8,
+            StaticType::I16 | StaticType::U16 => 16,
+            StaticType::I32 | StaticType::U32 => 32,
+            StaticType::I64 | StaticType::U64 => 64,
+            StaticType::I128 | StaticType::U128 => 128,
+            _ => return None,
+        })
+    }
+
+    /// Julia numeric promotion over a MIXED-type argument list (Issue #10131):
+    /// returns the promoted common type when the args are 2+ numeric
+    /// (non-Bool) types that are not all equal — any `Float64` wins, then
+    /// `Float32`; among integers the wider width wins and equal widths
+    /// promote to unsigned (upstream `promote_type(Int64, UInt64) ==
+    /// UInt64`). Returns `None` for same-type lists (callers keep the
+    /// type-preserving path), Bool-containing lists (callers keep the
+    /// dedicated Bool rule), or any non-numeric argument.
+    pub fn promote_numeric_args(arg_types: &[StaticType]) -> Option<StaticType> {
+        if arg_types.len() < 2 {
+            return None;
+        }
+        if arg_types
+            .iter()
+            .any(|ty| !ty.is_numeric() || matches!(ty, StaticType::Bool))
+        {
+            return None;
+        }
+        if arg_types.iter().all(|ty| ty == &arg_types[0]) {
+            return None;
+        }
+        if arg_types.iter().any(|ty| matches!(ty, StaticType::F64)) {
+            return Some(StaticType::F64);
+        }
+        if arg_types.iter().any(|ty| ty.is_float()) {
+            return Some(StaticType::F32);
+        }
+        let mut best = arg_types[0].clone();
+        for ty in &arg_types[1..] {
+            let (bw, tw) = (best.integer_bits()?, ty.integer_bits()?);
+            if tw > bw || (tw == bw && ty.is_unsigned() && best.is_signed()) {
+                best = ty.clone();
+            }
+        }
+        Some(best)
+    }
+
     /// Check if this is an array type
     pub fn is_array(&self) -> bool {
         matches!(self, StaticType::Array { .. })
@@ -540,24 +594,23 @@ impl StaticType {
             StaticType::Generator { element } => {
                 format!("Box<dyn Iterator<Item = {}>>", element.to_rust_type())
             }
-            StaticType::Struct { name, .. } if name == "Complex" || name == "Complex64" => {
-                "Complex".to_string()
-            }
-            StaticType::Struct { name, .. }
-                if Self::complex_param_rust_type_name(name).is_some()
-                    && Self::parametric_type_parts(name).is_none() =>
-            {
-                format!(
-                    "Complex<{}>",
-                    Self::complex_param_rust_type_name(name).expect("checked above")
-                )
-            }
-            StaticType::Struct { name, .. } if Self::parametric_rust_type_name(name).is_some() => {
-                Self::parametric_rust_type_name(name).expect("checked above")
-            }
+            StaticType::Struct { name, .. } if name == "Complex" => "Complex".to_string(),
             StaticType::Struct { name, .. } => {
-                // Use the struct name as-is (assume it's been declared in generated code)
-                name.clone()
+                // Issue #10907: bind each helper's `Option` once instead of
+                // re-deriving it with a match-guard `.is_some()` check
+                // followed by a body-side panicking assertion on a second
+                // call to the same helper — same result, no panic path at all.
+                if let (Some(inner), true) = (
+                    Self::complex_param_rust_type_name(name),
+                    Self::parametric_type_parts(name).is_none(),
+                ) {
+                    format!("Complex<{}>", inner)
+                } else if let Some(rust_name) = Self::parametric_rust_type_name(name) {
+                    rust_name
+                } else {
+                    // Use the struct name as-is (assume it's been declared in generated code)
+                    name.clone()
+                }
             }
             StaticType::Function { params, ret } => {
                 let param_types: Vec<_> = params.iter().map(|p| p.to_rust_type()).collect();
@@ -1264,6 +1317,14 @@ mod tests {
             Some(StaticType::DataType)
         );
         assert_eq!(
+            StaticType::from_julia_name_lossy("Real"),
+            Some(StaticType::Any)
+        );
+        assert_eq!(
+            StaticType::from_julia_name_lossy("Tuple{Real, Any}"),
+            Some(StaticType::Tuple(vec![StaticType::Any, StaticType::Any]))
+        );
+        assert_eq!(
             StaticType::from_type_expr_lossy(&TypeExpr::Parameterized {
                 base: "Array".to_string(),
                 params: vec![
@@ -1393,5 +1454,69 @@ mod tests {
         };
         assert!(single.is_fully_static()); // Single-variant union is fully static
         assert_eq!(single.to_rust_type(), "i64");
+    }
+}
+
+// `StaticType -> CoreType` bridge (ADR_BACKEND_STRATEGY.md consequence 1,
+// CRATE_SPLIT.md §4.3): lives on the AoT side because `CoreType` moved to
+// `subset_julia_vm_types` (Issue #8655) and `_types` must stay free of AoT
+// dependencies. `impl From<&LocalType> for ForeignType` is orphan-rule-legal.
+// Relocated verbatim from `inference_core/type_core/convert.rs`.
+impl From<&StaticType> for crate::inference_core::CoreType {
+    fn from(ty: &StaticType) -> Self {
+        use crate::inference_core::{CoreAbstract, CorePrimitive};
+        use StaticType as ST;
+        match ty {
+            ST::I64 => Self::Primitive(CorePrimitive::Int64),
+            ST::I128 => Self::Primitive(CorePrimitive::Int128),
+            ST::I32 => Self::Primitive(CorePrimitive::Int32),
+            ST::I16 => Self::Primitive(CorePrimitive::Int16),
+            ST::I8 => Self::Primitive(CorePrimitive::Int8),
+            ST::U64 => Self::Primitive(CorePrimitive::UInt64),
+            ST::U128 => Self::Primitive(CorePrimitive::UInt128),
+            ST::U32 => Self::Primitive(CorePrimitive::UInt32),
+            ST::U16 => Self::Primitive(CorePrimitive::UInt16),
+            ST::U8 => Self::Primitive(CorePrimitive::UInt8),
+            ST::F64 => Self::Primitive(CorePrimitive::Float64),
+            ST::F32 => Self::Primitive(CorePrimitive::Float32),
+            ST::F16 => Self::Primitive(CorePrimitive::Float16),
+            ST::Bool => Self::Primitive(CorePrimitive::Bool),
+            ST::Str => Self::Primitive(CorePrimitive::String),
+            ST::Char => Self::Primitive(CorePrimitive::Char),
+            ST::Nothing => Self::Primitive(CorePrimitive::Nothing),
+            ST::Missing => Self::Primitive(CorePrimitive::Missing),
+            ST::DataType => Self::Abstract(CoreAbstract::DataType),
+            ST::Any => Self::Any,
+            ST::Array { element, .. } => Self::Struct {
+                name: "Array".to_string(),
+                params: vec![Self::from(element.as_ref())],
+            },
+            ST::Dict { key, value } => Self::Struct {
+                name: "Dict".to_string(),
+                params: vec![Self::from(key.as_ref()), Self::from(value.as_ref())],
+            },
+            ST::Set { element } => Self::Struct {
+                name: "Set".to_string(),
+                params: vec![Self::from(element.as_ref())],
+            },
+            ST::Tuple(elements) => Self::Tuple(elements.iter().map(Self::from).collect()),
+            ST::NamedTuple(fields) => Self::NamedTuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Self::from(ty)))
+                    .collect(),
+            ),
+            ST::Union { variants } => Self::Union(variants.iter().map(Self::from).collect()),
+            ST::Struct { name, .. } => Self::from_julia_name(name),
+            ST::Function { .. } => Self::Abstract(CoreAbstract::Function),
+            ST::Range { element } => Self::Struct {
+                name: "AbstractRange".to_string(),
+                params: vec![Self::from(element.as_ref())],
+            },
+            ST::Generator { element } => Self::Struct {
+                name: "Base.Generator".to_string(),
+                params: vec![Self::from(element.as_ref())],
+            },
+        }
     }
 }

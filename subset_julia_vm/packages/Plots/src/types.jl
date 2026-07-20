@@ -4,9 +4,11 @@ struct Series
     z
     label
     seriestype
-    Series(x, y, label) = new(x, y, nothing, label, :line)
-    Series(x, y, label, seriestype) = new(x, y, nothing, label, seriestype)
-    Series(x, y, z, label, seriestype) = new(x, y, z, label, seriestype)
+    levels
+    Series(x, y, label) = new(x, y, nothing, label, :line, nothing)
+    Series(x, y, label, seriestype) = new(x, y, nothing, label, seriestype, nothing)
+    Series(x, y, z, label, seriestype) = new(x, y, z, label, seriestype, nothing)
+    Series(x, y, z, label, seriestype, levels) = new(x, y, z, label, seriestype, levels)
 end
 
 # `title` is the 4th field (Issue #7030). Fields 5-8 added by Issue #7850:

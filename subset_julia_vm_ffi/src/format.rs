@@ -5,8 +5,7 @@
 use subset_julia_vm::ffi_support::{
     apply_complex_float_aliases, format_bigfloat_julia, is_native_array_value, vm_format_value,
 };
-use subset_julia_vm::vm::value::StructInstance;
-use subset_julia_vm::vm::Value;
+use subset_julia_vm_bytecode::{value::StructInstance, Value};
 
 /// Format a struct instance for display.
 /// Special cases for well-known types like Rational.
@@ -392,7 +391,8 @@ pub fn format_value(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use subset_julia_vm::vm::value::{native_array_value_from_array, ArrayData, ArrayValue};
+    use subset_julia_vm_bytecode::value::{native_array_value_from_array, ArrayData, ArrayValue};
+    use subset_julia_vm_bytecode::Value;
 
     #[test]
     fn ffi_format_vector_uses_shared_compact_array_display() {
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn ffi_format_string_vector_uses_show_element_quoting() {
         let value = native_array_value_from_array(ArrayValue::new(
-            ArrayData::String(vec!["a".to_string(), "b".to_string()]),
+            ArrayData::String(vec![Value::str_new("a"), Value::str_new("b")]),
             vec![2],
         ));
 
