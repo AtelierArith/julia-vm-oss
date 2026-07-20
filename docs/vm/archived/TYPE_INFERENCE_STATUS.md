@@ -149,7 +149,7 @@ Const 型は Concrete 型より具体的で、定数伝播に使用されます�
    - `LinRange{Float64}`、`StepRangeLen{Float64}` などのカスタムイテラブル構造体の要素型推論
    - **注意**: VM レベルでのイテレーション処理は実装済み（Issue #944 解決済み）
    - **未実装**: 型推論レベルでの要素型推論（`loop_analysis.rs` の `element_type` 関数で Struct 型を処理していない）
-   - 実装場所: `subset_julia_vm/src/compile/abstract_interp/loop_analysis.rs`
+   - 実装場所: `subset_julia_vm_compile/src/compile/abstract_interp/loop_analysis.rs`
 
 ### 中優先度
 

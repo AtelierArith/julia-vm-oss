@@ -40,14 +40,14 @@ active migration inventory and remaining retirement plan are in
   feasibility investigation.
 - `docs/vm/CODE_AUDITS.md` — audit policy for the zero-match
   `Value::Array` check and memory-first array construction guards.
-- `subset_julia_vm/src/vm/value/memory_value.rs` — `MemoryValue` and
+- `subset_julia_vm_vm/src/vm/value/memory_value.rs` — `MemoryValue` and
   `MemoryRefValue`.
-- `subset_julia_vm/src/vm/value/value_enum.rs` — runtime `Value::Memory` and
+- `subset_julia_vm_vm/src/vm/value/value_enum.rs` — runtime `Value::Memory` and
   `Value::MemoryRef` variants.
-- `subset_julia_vm/src/vm/exec/memory.rs` — VM memory instruction execution.
-- `subset_julia_vm/src/vm/builtins_collections.rs` — `memoryref*` builtin
+- `subset_julia_vm_vm/src/vm/exec/memory.rs` — VM memory instruction execution.
+- `subset_julia_vm_vm/src/vm/builtins_collections.rs` — `memoryref*` builtin
   execution.
-- `subset_julia_vm/src/compile/expr/builtin.rs` — compile-time routing for
+- `subset_julia_vm_compile/src/compile/expr/builtin.rs` — compile-time routing for
   `memoryref*` helpers.
 - `subset_julia_vm/src/julia/base/genericmemory.jl` — supported Julia-facing
   memory helper definitions.

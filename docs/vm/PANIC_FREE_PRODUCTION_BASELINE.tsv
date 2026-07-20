@@ -1,0 +1,10 @@
+metric	module	baseline	reason
+expect_call	subset_julia_vm/src/expr_heads.rs	1	ExprHead::spec() lookup miss is an sjulia compiler bug (missing EXPR_HEAD_REGISTRY entry for a new variant), never reachable from any Julia source; local #[allow] documented like the vm/exec/mod.rs SystemTime exception, proven exhaustive by expr_head_registry_covers_all_variants (Issue #10908)
+expect_call	subset_julia_vm_vm/src/vm/exec/mod.rs	1	Pre-existing SystemTime::now() exception, docs/vm/PANIC_FREE.md "Exceptions"
+expect_call	subset_julia_vm_parser/src/parser	101	Parser::expect(Token) is an already-Result-returning checked helper method, not Option::expect — a static-regex false positive confirmed by Issue #10904 Phase 1a (module reached real zero and is deny-listed)
+panic_macro	subset_julia_vm_compile/src/compile	1	compile/abstract_interp/loop_analysis.rs:129 — inside a /// doc-comment example, not compiled code (Issue #10905)
+panic_macro	subset_julia_vm_runtime/src/error.rs	2	aot_throw's one real panic! is a deliberate, already-reviewed (#5658/#7018) design divergence — the AoT backend's sole "abort the compiled native binary on uncaught throw" mechanism; the second token match is a doc-comment mention in the same function's explanatory comment, not an additional call
+unwrap_call	subset_julia_vm/src/api.rs	1	Inside a ``` doctest example in analyze_type_stability's rustdoc, not compiled by --all-targets (module reached real zero and is deny-listed)
+unwrap_call	subset_julia_vm_compile/src/compile	1	compile/type_stability/mod.rs:34 — inside a //! doc-comment usage example (commented out), not compiled code
+unwrap_call	subset_julia_vm_vm/src/vm	1	vm/stack_ops.rs — inside a /// rustdoc example, not compiled code (confirmed in Issue #10907 Phase 2, re-confirmed here)
+unwrap_call	subset_julia_vm_runtime/src/error.rs	1	Doc-comment mention of `.unwrap()` in aot_throw's own explanatory comment, not an additional call (Issue #10907 Phase 2)

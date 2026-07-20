@@ -20,7 +20,24 @@ Rust に残す条件は以下のいずれかを満たすこととする。
 
 **後方互換性や既存バイトコードキャッシュとの互換性は、Rust 実装を残す正当な理由ではない。** `sjulia` は本家 Julia と同様の振る舞いを目指す。したがって、上記 4 条件に該当しない Rust 実装はすべて Pure Julia 化の対象となる。
 
-条件 1・2 は「Julia 側から再実装できない」わけではないが、本家 Julia でも `ccall`/`llvmcall`/`@cfunction` などで外部世界に出ている。sjulia は iOS 上で no-JIT 動作が要件であるため、これらの外部呼び出しを Rust の FFI/ネイティブラッパーで集中管理するのが適切である。
+## Unsafe 追加時のレビュー規約 (Issue #9004)
+
+新しい `unsafe` は、上記の Rust 境界条件とは別に UB リスクとしてレビューする。
+追加する場合は該当箇所の直前または同じ行に `Safety:` コメントを書き、根拠と
+追跡 Issue を明記する。
+
+```rust
+// Safety: `ptr` is non-null and points to a NUL-terminated string for the
+// duration of this FFI call (Issue #9004).
+let text = unsafe { CStr::from_ptr(ptr) };
+```
+
+`scripts/check_unsafe_inventory.sh` は既存の未注釈 `unsafe` を
+`docs/vm/UNSAFE_INVENTORY_BASELINE.tsv` で grandfather し、新規の未注釈
+`unsafe` を拒否する。既存箇所を監査したら `Safety:` コメントを追加し、
+baseline から外す。
+
+条件 1・2 は「Julia 側から再実装できない」わけではないが、本家 Julia でも `ccall`/`llvmcall`/`@cfunction` などで外部世界に出ている。sjulia は iOS 上で no-JIT 動作が要件であるため、これらの外部呼び出しを Rust の FFI/ネイティブラッパーで集中管理するのが適切である。WASM+iOS 制約下でどの upstream `ccall` family を Pure Rust/VM intrinsic/unsupported に分類するかは [NATIVE_BOUNDARY.md](./NATIVE_BOUNDARY.md) の ADR と生成台帳を正とする。
 
 **条件 4 には封じ込め義務が伴う。** 条件 1〜3 が外部境界という明確な区切りを持つのに対し、条件 4 は「性能のため」という拡張しやすい根拠であり、放置すると Layer-2 が際限なく肥大する。したがって条件 4 で Rust に残すコードには次の2点を必須とする: (a) **pure-Julia の正当性フォールバックが必ず存在**し、fast path と同一結果を返すこと (gold standard = 通常のスカラ multiple dispatch 経路。`tests/fixtures/complex/complex_array_fallback_parity_7876.jl` で保証)。(b) **拡散を allowlist 監査で止める** (`scripts/check_complex_interleaved_allowlist.sh` / `scripts/check_no_new_domain_builtins.sh`)。
 
@@ -104,16 +121,16 @@ Rust に残す条件は以下のいずれかを満たすこととする。
 
 ## 関連ファイル
 
-- `subset_julia_vm/src/vm/builtins_io.rs`
-- `subset_julia_vm/src/vm/exec/print.rs`
-- `subset_julia_vm/src/vm/exec/rng.rs`
-- `subset_julia_vm/src/vm/exec/sleep.rs`
-- `subset_julia_vm/src/vm/builtins_linalg.rs`
-- `subset_julia_vm/src/vm/matmul/*.rs`
-- `subset_julia_vm/src/vm/builtins_numeric.rs`
-- `subset_julia_vm/src/vm/builtins_reflection/primitives.rs`
-- `subset_julia_vm/src/vm/builtins_macro/*.rs`
-- `subset_julia_vm/src/vm/builtins_exec.rs`
+- `subset_julia_vm_vm/src/vm/builtins_io.rs`
+- `subset_julia_vm_vm/src/vm/exec/print.rs`
+- `subset_julia_vm_vm/src/vm/exec/rng.rs`
+- `subset_julia_vm_vm/src/vm/exec/sleep.rs`
+- `subset_julia_vm_vm/src/vm/builtins_linalg.rs`
+- `subset_julia_vm_vm/src/vm/matmul/*.rs`
+- `subset_julia_vm_vm/src/vm/builtins_numeric.rs`
+- `subset_julia_vm_vm/src/vm/builtins_reflection/primitives.rs`
+- `subset_julia_vm_vm/src/vm/builtins_macro/*.rs`
+- `subset_julia_vm_vm/src/vm/builtins_exec.rs`
 
 ## 関連ドキュメント
 

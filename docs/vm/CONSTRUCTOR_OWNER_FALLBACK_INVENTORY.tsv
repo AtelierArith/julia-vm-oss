@@ -1,0 +1,5 @@
+owner	expected_calls	classification	authority	issue
+static_parametric_constructor_method	1	owner-checked compatibility projection	resolved owner + MethodTable constructor family + explicit constructor owner	#11172
+parametric_constructor_method_table_names	1	owner-first compatibility projection	resolved/exact qualified tables precede leaf fallback	#11172
+try_compile_struct_table_constructor_call	1	exact-owner compatibility projection	leaf table is existence-only; exact qualified DataType owns runtime dispatch	#11469
+try_compile_inferred_parametric_constructor_call	1	legacy qualified-inner fallback	resolved parametric definition inner rows; retire with semantic table identity	#10992

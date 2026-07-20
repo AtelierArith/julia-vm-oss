@@ -1,12 +1,50 @@
 # Type System Architecture
 
-*Last updated: 2026-06-10*
+*Last updated: 2026-07-02*
 
 This document describes the type system used in SubsetJuliaVM, including the relationships between different type representations.
+
+## Executable documentation sweep status (Issue #8721)
+
+Initial sweep date: 2026-07-02.
+
+- Reviewed as one of the five major docs named by #8694/#8721.
+- Corrected stale type-system ownership/count claims in the `ConcreteType` and
+  `Value` sections.
+- Reclassified the old parametric `where T` dispatch limitation as historical:
+  #8608 fixed the documented `foo(Int64(6), Int64(2))` example so it now returns
+  `3 :: Int64` instead of the previously documented `3.0 :: Float64`.
+- Representative behavior claims are now covered by `julia-doctest` blocks
+  and the nightly docs doctest gate.
+
+```julia-doctest
+function foo(x::T, y::T) where T
+    x ÷ y
+end
+
+result = foo(6, 2)
+println(result)
+println(typeof(result))
+# output
+3
+Int64
+```
 
 ## Type Representations
 
 SubsetJuliaVM uses four distinct type representations at different compilation stages:
+
+> **Runtime dispatch identity** is a separate concern from these compile-time
+> representations. Issue #9197 introduces a fifth, runtime-only identity layer —
+> the session-scoped `ConcreteTypeId(u32)` intern registry — that replaces the
+> type-name strings and unverified hashes the dispatch caches key on today. Its
+> design (key structure, invalidation, REPL boundary, per-slice consumers) lives
+> in [TYPE_INTERNING.md](./TYPE_INTERNING.md).
+>
+> **Semantic ownership identity** is the broader migration tracked by Issue
+> #10459: TypeVars, structs, functions, and methods need owner-scoped IDs rather
+> than display-name strings. The inventory and phased target model live in
+> [SEMANTIC_IDENTITIES.md](./SEMANTIC_IDENTITIES.md).
 
 ### 0. CoreType (Shared Migration Target)
 
@@ -135,6 +173,19 @@ Initial production users:
   `CoreType::direct_builtin_supertype_name()` first for built-in direct parent
   names. User-defined struct and abstract type parents still come from the VM
   registry fallback; unknown parametric names fall back to their base name.
+  **Exception (Issues #10282, #10283):** rank/dim-generic type ALIASES
+  (`Vector`/`Matrix`/`AbstractVector`/`AbstractMatrix`/`DenseVector`/
+  `DenseMatrix` — upstream `UnionAll`s such as `AbstractMatrix{T} =
+  AbstractArray{T,2}`) are handled by
+  `vm::type_objects::rank_generic_alias_bare_supertype_name()` BEFORE reaching
+  `direct_builtin_supertype_name()`, because upstream `supertype` on a
+  `UnionAll` recurses through the body (`supertype(u::UnionAll) =
+  UnionAll(u.var, supertype(u.body))`) rather than walking the is-a/subtype
+  hierarchy: `supertype(AbstractMatrix) == Any` (not `AbstractArray`) and
+  `supertype(Vector) == DenseVector` (not the rank-erased `DenseArray`), even
+  though `AbstractMatrix <: AbstractArray` and `Vector <: DenseArray` remain
+  true for `<:`/dispatch purposes via the unmodified
+  `direct_builtin_supertype_name()` chain.
 - VM runtime reflection for `subtypes(T)` now asks
   `CoreType::direct_builtin_subtype_names()` for built-in direct children,
   keeping the built-in child list aligned with the same direct-supertype table.
@@ -199,7 +250,7 @@ Shared operations currently available on `CoreType`:
 
 ### 1. LatticeType (Compile-time)
 
-Located in: `subset_julia_vm/src/compile/lattice/types.rs`
+Located in: `subset_julia_vm_compile/src/compile/lattice/types.rs`
 
 `LatticeType` is the compile-time abstract interpretation type used during type inference. It provides the most precise type information and supports:
 
@@ -225,23 +276,24 @@ pub enum LatticeType {
 
 #### ConcreteType
 
-Located in: `subset_julia_vm/src/compile/lattice/types.rs`
+Located in: `subset_julia_vm/src/runtime_types/lattice.rs`
+(`subset_julia_vm_compile/src/compile/lattice/types.rs` is now only a re-export shim).
 
-`ConcreteType` represents specific Julia types inside the lattice. There are currently **49 variants**:
+`ConcreteType` represents specific Julia types inside the lattice. Since the
+CoreType unification work, nullary primitive/abstract/builtin facts (`Int*`,
+`Float*`, `Bool`, `String`, `Char`, `Symbol`, `Nothing`, `Missing`, `Number`,
+`Integer`, `AbstractFloat`, `IO`, `Any`, and related builtins) are represented
+by the shared `Core(CoreType)` variant. Dedicated `ConcreteType` variants are
+reserved for parametric/container/callable/runtime carrier shapes. There are
+currently **24 variants**:
 
-- **Signed integers** (6): `Int8`, `Int16`, `Int32`, `Int64`, `Int128`, `BigInt`
-- **Unsigned integers** (5): `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`
-- **Floating point** (4): `Float16`, `Float32`, `Float64`, `BigFloat`
-- **Boolean** (1): `Bool`
-- **Text** (2): `String`, `Char`
-- **Special** (3): `Any`, `Nothing`, `Missing`
-- **Abstract numeric** (3): `Number`, `Integer`, `AbstractFloat`
-- **Symbolic** (1): `Symbol`
-- **Composite/Collection** (9): `Array{element}`, `Tuple{elements}`, `TupleVararg{elements, tail}`, `NamedTuple{fields}`, `Range{element}`, `Dict{key, value}`, `Set{element}`, `Generator{element}`, `Pairs`
+- **Shared core projection** (1): `Core(CoreType)`
+- **Composite/Collection** (9): `Array{element, ndims}`, `Tuple{elements}`,
+  `TupleVararg{elements, tail}`, `NamedTuple{fields}`, `Range{element}`,
+  `Dict{key, value}`, `Set{element}`, `Generator{element}`, `Pairs`
 - **User-defined** (1): `Struct{name, type_id}`
 - **Callable** (3): `Function{name}`, `Closure{name, captures}`, `ComposedFunction{outer, inner}`
 - **Type system** (2): `DataType{name}`, `Module{name}`
-- **IO** (1): `IO`
 - **Metaprogramming** (4): `Expr`, `QuoteNode`, `LineNumberNode`, `GlobalRef`
 - **Pattern matching** (2): `Regex`, `RegexMatch`
 - **Type unions** (1): `UnionOf(Vec<ConcreteType>)`
@@ -251,7 +303,7 @@ Note: `Dict{key, value}` is parametric in `ConcreteType`, allowing the compile-t
 
 ### 2. ValueType (Runtime)
 
-Located in: `subset_julia_vm/src/vm/value/value_enum.rs`
+Located in: `subset_julia_vm_vm/src/vm/value/value_enum.rs`
 
 `ValueType` is the runtime type tag used for:
 - Method dispatch
@@ -271,7 +323,7 @@ pub enum ValueType {
     // Floating point
     F16, F32, F64, BigFloat,
     // Collections
-    Array, ArrayOf(ArrayElementType),
+    Array, ArrayOf(ArrayElementType, Option<usize>),
     Memory, MemoryOf(ArrayElementType),
     Range,
     // String types
@@ -294,6 +346,56 @@ pub enum ValueType {
 }
 ```
 
+#### `ArrayOf(ArrayElementType::Any, Some(n))`: Known vs Unknown (Issue #10267, #10206)
+
+`ArrayOf`'s `Any` element tag is produced by two structurally different
+sources that share the exact same shape, and this matters because
+`infer_julia_type`'s `Expr::Var` bridge must decide, from `ValueType` alone,
+whether to report the *concrete* `VectorOf(Any)`/`MatrixOf(Any)` (lets a
+`::Array{Any,N}`-typed method statically bind) or the rank-only bare alias
+`Struct("Vector")`/`Struct("Matrix")` (defers element-specific methods to
+runtime dispatch on the concrete value):
+
+1. **Genuinely `Any`** — a value that really is `Vector{Any}`/`Matrix{Any}` at
+   both compile time and runtime (e.g. `expr.args`, an array literal like
+   `x = []`/`[1, "a"]`). Upstream `typeof` is exactly `Vector{Any}` — a
+   concrete, dispatchable type — so the bridge must report the concrete form.
+2. **Unknown due to incomplete inference** — a comprehension whose body
+   expression's return type could not be statically resolved (Issue #6817).
+   The *rank* is known (iterator clause count) but the *element* is a
+   placeholder, not proof the runtime value is `Vector{Any}` (it could be
+   `Vector{Int64}` etc). The bridge must report the bare alias so
+   element-specific methods defer to runtime dispatch instead of a wrong
+   static bind.
+
+The distinction is **not** carried on `ArrayElementType` itself (the
+bincode-serialized storage tag used across ~50 files and embedded in
+`Instr` payloads / the persistent Base cache — adding a marker there would
+leak into runtime storage and cache compatibility) nor on `ValueType`'s
+`ArrayOf` tuple shape (32+ pattern-match sites). Instead, the compiler tracks
+provenance in a dedicated, non-serialized, per-scope side table,
+`known_any_rank_array_locals: HashSet<String>` (`compile/core_compiler.rs`),
+scoped identically to `julia_type_locals` (saved/restored/cleared at the same
+call sites in `stmt.rs`/`unary.rs`/`expr/mod.rs`). It is populated
+**conservatively**: only a proven-`Any` producer (currently: assigning
+`expr.args`) marks a variable; every other `ArrayOf(Any, Some(n))` producer
+(comprehensions) is left unmarked and keeps the safe "unknown, defer to
+runtime dispatch" bridge behavior by default. A future array producer that
+forgets to opt in defaults to the conservative treatment, not a silent wrong
+static bind — this is the mechanism that prevents `elem_unknown`-style ad-hoc
+heuristics from proliferating as new array producers are added.
+
+The dispatch-resolution fallback that defers a rank-known/element-unknown
+bare-alias argument to runtime dispatch (`is_rank_unknown_array_julia_type` in
+`compile/expr/call/mod.rs`, consumed by the `Err(NoMethodFound)` guard in
+`compile/expr/call/dispatch.rs`) originally recognized only *abstract*
+array-family candidate methods (`::AbstractVector`/`::AbstractMatrix`,
+Issue #7266); `core_is_array_family_type` (Issue #10206) broadens this to
+*concrete* `Array`/`Vector`/`Matrix` candidates too, so a multi-iterator
+comprehension's bare `Matrix` argument against a candidate typed
+`::Array{Any,2}` defers to runtime dispatch (which resolves correctly) instead
+of raising a spurious compile-time `MethodError`.
+
 ### 3. JuliaType (User-facing)
 
 Located in: `subset_julia_vm/src/types/julia_type/mod.rs`
@@ -312,9 +414,9 @@ pub enum JuliaType {
 
 ### 4. Value (Runtime values)
 
-Located in: `subset_julia_vm/src/vm/value/value_enum.rs`
+Located in: `subset_julia_vm_vm/src/vm/value/value_enum.rs`
 
-`Value` is the main runtime value enum. Every Julia value at runtime is represented as a `Value` variant. There are currently **52 variants** (verified by compile-time exhaustiveness test `test_all_value_variants_constructed`):
+`Value` is the main runtime value enum. Every Julia value at runtime is represented as a `Value` variant. There are currently **53 variants** (verified by compile-time exhaustiveness test `test_all_value_variants_constructed`):
 
 | Category | Variants | Count |
 |----------|----------|-------|
@@ -323,11 +425,11 @@ Located in: `subset_julia_vm/src/vm/value/value_enum.rs`
 | Boolean | `Bool(bool)` | 1 |
 | Floating point | `F16(f16)`, `F32(f32)`, `F64(f64)`, `BigFloat(RustBigFloat)` | 4 |
 | String types | `Str(String)`, `Char(char)` | 2 |
-| Singletons | `Nothing`, `Missing`, `Undef`, `SliceAll` | 4 |
-| Collections | `NativeArray(ArrayRef)`, `Memory(MemoryRef)`, `MemoryRef(Box<MemoryRefValue>)`, `Range(RangeValue)`, `Tuple(TupleValue)`, `SimpleVector(TupleValue)`, `NamedTuple(NamedTupleValue)`, `Pairs(PairsValue)`, `Dict(DictRef)`, `Set(SetValue)`, `Ref(RefCellRef)`, `Generator(Box<GeneratorValue>)` | 12 |
+| Singletons / sentinels | `Nothing`, `Missing`, `Undef`, `SliceAll` | 4 |
+| Collections / storage carriers | `ExprArgs(ArrayRef)`, `Memory(MemoryRef)`, `MemoryRef(Box<MemoryRefValue>)`, `Range(RangeValue)`, `Tuple(TupleValue)`, `SimpleVector(TupleValue)`, `NamedTuple(NamedTupleValue)`, `Pairs(PairsValue)`, `Ref(RefCellRef)`, `Generator(Box<GeneratorValue>)`, `StaticArray(Box<StaticRealValue>)`, `StaticArrayInline(StaticArrayInlineData)` | 12 |
 | Struct types | `Struct(StructInstance)`, `StructRef(usize)` | 2 |
 | RNG | `Rng(RngInstance)` | 1 |
-| Type/Module | `DataType(JuliaType)`, `RuntimeTypeVar(Box<RuntimeTypeVarValue>)`, `Module(Box<ModuleValue>)` | 3 |
+| Type/Module | `DataType(JuliaType)`, `RuntimeTypeVar(Box<RuntimeTypeVarValue>)`, `RuntimeTypeName(Box<RuntimeTypeNameValue>)`, `Module(Box<ModuleValue>)` | 4 |
 | Callable | `Function(FunctionValue)`, `Closure(ClosureValue)`, `ComposedFunction(ComposedFunctionValue)` | 3 |
 | IO | `IO(IORef)` | 1 |
 | Macro system | `Symbol(SymbolValue)`, `Expr(ExprValue)`, `QuoteNode(Box<Value>)`, `LineNumberNode(LineNumberNodeValue)`, `GlobalRef(GlobalRefValue)` | 5 |
@@ -385,6 +487,12 @@ world visibility, and backend layout constraints are carried through the same
 path. New shared type operations should prefer `CoreType` first and convert to
 `ValueType` or `StaticType` only at codegen/backend boundaries.
 
+Where-clause and `UnionAll` scoping is the companion problem to representation
+conversion: before a type can be preserved structurally, each bare or qualified
+name must be resolved in the correct lexical binder environment. The target
+model and migration plan live in
+[WHERE_BINDER_ENVIRONMENT.md](./WHERE_BINDER_ENVIRONMENT.md) (Issue #10436).
+
 | From | To | Main entry points | Current role | Precision / loss notes |
 |------|----|-------------------|--------------|------------------------|
 | `JuliaType` | `CoreType` | `CoreType::from(&JuliaType)`, `CoreType::from_julia_name()` | Shared semantic queries for runtime, dispatch, reflection, and compiler helpers | Opaque string-like `Struct("Foo{...}")` values are parsed best-effort. User-defined hierarchy still needs registry/context metadata. |
@@ -408,6 +516,86 @@ Immediate reduction targets:
   conversion is lossless, lossy, context-dependent, or backend-only.
 - Legacy fallbacks should be kept only where runtime registry data, user-defined
   hierarchy, or world-specific visibility is still unavailable to `CoreType`.
+
+### Call-dependent type-object returns (Issue #10133)
+
+`MethodSig.return_julia_type` is a persisted, call-independent summary. It can
+represent a direct `Type{T}` return and substitute `T` at dispatch, but a
+type-level branch such as
+`T === BigInt ? BigFloat : Float64` is summarized before `T` is bound as an
+erased `Union{DataType,DataType}`. Converting that summary to the inference
+lattice yields `Top`; treating it as final loses the distinction between the
+two type-object values.
+
+For overloaded functions, the name-only `function_table` intentionally drops
+all bodies rather than guessing an overload. Method-table dispatch, however,
+selects an exact `MethodSig` and its `global_index`. The inference engine keeps
+the exact body only for methods whose return snapshot is a union composed
+entirely of type-object shapes. When that selected snapshot widens to `Top`, it
+analyzes the retained body with the call-site argument/type-parameter bindings.
+Ordinary `Any`/`Top` returns do not retain or re-walk bodies; widening remains
+the conservative default. This preserves structural dispatch ownership while
+avoiding both a `float`-specific rule and a broad inference-cost regression.
+
+Coverage: `reflection_infer_float_type_ternary_10281` checks the direct query
+and wrapper-call forms for the `Int64` and `BigInt` branches, plus the abstract
+type-parameter no-false-fold guard.
+
+### Receiver-sensitive indexed-result inference (Issue #10887)
+
+Index shape alone never proves result shape. Receiver family and index shape
+are independent inference inputs. Recognized array-family receivers may retain
+known element and rank information in the `JuliaType` slice projection; the
+`ValueType` projection retains only its coarser Array result. It also has a
+limited Range preservation for a range receiver on the slice-shaped path, which
+does not prove whether integer-vector or Bool-vector indexing returns a Range
+or an Array. Range, tuple, custom, or unknown result shapes not established by
+the relevant channel stay conservative, and runtime `getindex` dispatch is
+authoritative because custom methods may use arrays or ranges as scalar keys.
+
+The static-channel gates are
+`index_slice_value_type_is_receiver_sensitive_issue_10887`,
+`index_slice_julia_type_is_receiver_sensitive_issue_10887`. The 61-assertion
+`type_inference_index_receiver_shape_matrix_10887` fixture separately covers
+runtime value/`typeof` parity and equality/dispatch consumers; it is not proof
+of precise static projections for every receiver family.
+
+### Semantic distinctions must not be flattened (Issue #10245)
+
+Inference facts, Julia values, existential type structure, effects, and
+display strings are different semantic layers. A representation may project
+into a less precise layer only when it retains provenance or defaults to a
+conservative result; the projection must never be treated as evidence for a
+more precise Julia-visible fact.
+
+The closure audit for #10245 maps each previously conflated distinction to one
+owner and an executable regression gate:
+
+| Distinction | Owner / invariant | Regression coverage |
+|---|---|---|
+| Concrete `Array{Any,N}` vs inference-unknown element (#10206) | `known_any_rank_array_locals` is a non-serialized, scope-local provenance table; unmarked `ArrayOf(Any,Some(n))` defaults to bare-family/runtime dispatch | `dispatch_known_any_field_array_family_10206`, `dispatch_comprehension_concrete_array_family_10206` |
+| Partial `UnionAll` vs concrete `DataType` (#10192) | `Core.apply_type` preserves remaining binders and already-applied prefixes; it does not materialize a concrete type before full application | `types_apply_type_partial_unionall_10192` |
+| Runtime `UnionAll` base vs static type spelling (#10191) | `ApplyTypeDynamicSplat` dispatches on the runtime type object and applies the flattened argument sequence with bound/arity checks | `types_apply_type_dynamic_splat_10191`, `apply_type_dynamic_splat_expands_and_instantiates_unionall_issue_10191` |
+| Control-flow-local effect vs whole-method purity (#10145) | reflection and optimization share the same effect walker and join every branch/loop; method registration populations are identical | `reflection_infer_effects_control_flow_10145` |
+| Type-object value vs generic `DataType` class (#10133) | direct `Type{T}` snapshots substitute `T`; erased type-object branches re-enter only the exact method-table winner's body by `global_index` | `reflection_infer_float_type_ternary_10281`, `issue_10133_method_body_retention_is_narrowly_type_object_gated` |
+| Semantic `UnionAll` vs its display projection (#10195) | trailing free binders may be elided only by `show_can_elide`-equivalent checks; equality/subtyping never depend on a lossy display shortcut | `prefix_partial_unionall_prints_like_upstream_issue_10192`, `diagonal_unionall_does_not_print_as_partial_application_issue_10635` |
+| Lattice relation vs container/name heuristics (#10049) | `CoreType` owns subtype/join/intersection; backend and display forms are projections | `scripts/check_type_application_matrix.sh`, `scripts/check_no_typevar_name_heuristic.sh`, and the #10049 acceptance fixture matrix in [SUBTYPING.md](./SUBTYPING.md) |
+
+Rules for future additions:
+
+1. Never use analysis `Top`/unknown as proof that a Julia value is concretely
+   `Any`; carry provenance or defer.
+2. Preserve `UnionAll`/`TypeVar` structure and binder identity until the
+   operation that legitimately instantiates it.
+3. Join effects over the complete control-flow graph and expose the same
+   summary to reflection and optimization.
+4. Treat rendering as a final projection. Printed names must not become the
+   semantic owner for dispatch, equality, or subtyping.
+5. If a persisted summary loses call dependence, re-enter a richer
+   representation through exact method identity; never select by a bare name.
+
+The broader owner-scoped identity migration remains tracked independently by
+#10279; it is not a correctness blocker for these now-gated distinctions.
 
 ## Type Correspondence Table
 
@@ -503,7 +691,7 @@ impl From<&ValueType> for LatticeType {
 
 ### Unit Tests
 
-Located in: `subset_julia_vm/src/compile/bridge.rs`
+Located in: `subset_julia_vm_compile/src/compile/bridge.rs`
 
 ```bash
 # Run bridge conversion tests
@@ -544,7 +732,7 @@ When adding a new type to the VM:
 
 ## Adding New ValueType Variants
 
-When adding a new variant to the `ValueType` enum in `subset_julia_vm/src/vm/value/value_enum.rs`, you **MUST** update all match statements throughout the codebase. Failure to do so will cause compilation errors or runtime failures.
+When adding a new variant to the `ValueType` enum in `subset_julia_vm_vm/src/vm/value/value_enum.rs`, you **MUST** update all match statements throughout the codebase. Failure to do so will cause compilation errors or runtime failures.
 
 ### Required Updates Checklist
 
@@ -566,7 +754,7 @@ When adding a new variant to the `ValueType` enum in `subset_julia_vm/src/vm/val
   - [ ] `value_type_to_julia_type` function
 - [ ] Update promotion rules if the new variant participates in numeric promotion:
   - [ ] Add the Julia-facing rule in `src/julia/base/promotion.jl` when it is a real Julia promotion rule
-  - [ ] Update the compile-time fallback in `compile/promotion.rs` only for bootstrapping/cache-miss coverage
+  - [ ] Update the shared fallback in `src/promotion.rs` only for bootstrapping/cache-miss coverage
   - [ ] Add promotion tests for `promote_type`, `promote`, and the relevant arithmetic path
 - [ ] Update `vm/convert.rs` (Issue #2267):
   - [ ] Add a `convert_to_<type>()` function handling all numeric source Value variants
@@ -700,10 +888,10 @@ Find potential blocklist guards and catch-all arms:
 
 ```bash
 # Find VM fast-path guards and dynamic arithmetic boundaries
-rg -n "should_use_inline_dynamic_op|inline_dynamic|fast_path|PrimitiveFallbackFirst" subset_julia_vm/src/vm -g '*.rs'
+rg -n "should_use_inline_dynamic_op|inline_dynamic|fast_path|PrimitiveFallbackFirst" subset_julia_vm_vm/src/vm -g '*.rs'
 
 # Find pass-through catch-all arms that need context review
-rg -n "other => other" subset_julia_vm/src/vm -g '*.rs'
+rg -n "other => other" subset_julia_vm_vm/src/vm -g '*.rs'
 ```
 
 ## Specificity Scoring Rules (Issue #2302, #2321)
@@ -772,7 +960,7 @@ Using `u8` for specificity scores, the sum approach is safe for tuples up to 51 
 
 ## Type Conversion Rules
 
-The `compile_expr_as` function in `subset_julia_vm/src/compile/expr/mod.rs` handles type conversions at compile time.
+The `compile_expr_as` function in `subset_julia_vm_compile/src/compile/expr/mod.rs` handles type conversions at compile time.
 
 ### Required Conversions for New Numeric Types
 
@@ -925,262 +1113,62 @@ When adding a new parametric type variant to `JuliaType`:
 - `subset_julia_vm/tests/fixtures/tuple/where_clause_binding.jl` - Basic where-clause binding (Issue #2304)
 - `subset_julia_vm/tests/fixtures/tuple/bounded_where_clause.jl` - Bounded type variables and mixed patterns (Issue #2316)
 
-## Type{T}→T Return Type Override Pattern (Issue #2245)
+## Return-Type Inference for `Type{T}→T`, `abs`/`sign`, and `gcd`/`lcm` (Issues #2245, #2383, #8608)
 
-Functions like `typemin(::Type{T})`, `typemax(::Type{T})`, `zero(::Type{T})`, and `one(::Type{T})` return a value of type `T`. However, when these functions are implemented in Pure Julia (e.g., `typemin(::Type{Float64}) = -Inf`), the method table may incorrectly infer the return type.
+Functions like `typemin(::Type{T})`, `typemax(::Type{T})`, `zero(::Type{T})`,
+`abs`/`abs2`/`sign`, and `gcd`/`lcm` return a value whose concrete type depends
+on the *value* of a type argument or on the numeric type of an ordinary
+argument (e.g. `typemin(Float64)::Float64`, `abs(x::BigInt)::BigInt`,
+`gcd(a::BigInt, b::BigInt)::BigInt`).
 
-### The Problem
+**History (resolved).** These functions were once handled by a **per-function,
+name-keyed return-type override whitelist**: explicit match arms in
+`compile/expr/call/dispatch.rs` and `compile/expr/infer/expr_tfuncs.rs` that
+overrode `method.return_type` by function name after dispatch. The whitelist
+was originally a workaround for the "Parametric Type Dispatch Limitation"
+(Issues #2384/#2388) — inside a `where T` body the compiler could not resolve
+`T` to a concrete type, so generic dispatch produced an over-wide (`Any` /
+`Float64`) return type.
 
-1. The Pure Julia method `typemin(::Type{Float64}) = return -Inf` is compiled
-2. The method table stores `return_type = Bool` (or another incorrect type)
-3. During `compile_call`, the compiler trusts `method.return_type`
-4. With an incorrect return type, the compiler generates wrong type conversion instructions
-5. Runtime fails with type errors (e.g., `BoolToI64` applied to a `Float64`)
+That limitation **no longer reproduces**. The general transfer-function
+registry (`compile/tfuncs/`, e.g. `tfunc_abs`, `tfunc_gcd`, `tfunc_typemin`)
+now infers these return types from argument types through the normal inference
+machinery, matching upstream Julia. The audit tracked by parent Issue #8608
+(sub-issues #8616 / #8617 / #8618) toggled each override off via
+`SJULIA_DISABLE_RETURN_OVERRIDE=<id>` and confirmed, against upstream `julia`,
+that removing it changed **no** observable return type. All seven overrides
+(`abs`/`abs2`/`sign`, `typemin`/`typemax`, `gcd`/`lcm`, and the Complex-math
+family from Issue #4341, in both the dispatch and infer sites) were therefore
+retired, together with the audit harness and its `SJULIA_DISABLE_RETURN_OVERRIDE`
+kill-switch.
 
-### The Solution: Return Type Overrides
+**Current rule.** Do **not** add a new name-keyed return-type override arm.
+When a `f(::Type{T})→T` or type-preserving numeric function infers too wide a
+return type, add or fix its transfer function under `compile/tfuncs/` (the
+general mechanism) so *every* call site benefits, rather than special-casing
+the name in `dispatch.rs` / `expr_tfuncs.rs`.
 
-Add explicit return type overrides in **both** `compile_call` (call.rs) and `infer_expr_type` (infer.rs):
+### Regression Tests
 
-```rust
-// In call.rs and infer.rs
-"typemin" | "typemax" if args.len() == 1 => {
-    let julia_ty = self.infer_julia_type(&args[0]);
-    match julia_ty {
-        JuliaType::TypeOf(inner) => match *inner {
-            JuliaType::Float64 => ValueType::F64,
-            JuliaType::Float32 => ValueType::F32,
-            JuliaType::Int64 => ValueType::I64,
-            // ... all numeric types
-            _ => method.return_type.clone(),
-        },
-        _ => method.return_type.clone(),
-    }
-}
-```
+- `subset_julia_vm/tests/fixtures/type_inference/abs_sign_type_preservation_8617.jl`
+  — `abs`/`abs2`/`sign` return types across all integer/float widths, BigInt,
+  BigFloat, and Complex, including inside a `where T` helper.
+- `subset_julia_vm/tests/fixtures/type_inference/typemin_typemax_preservation_8617.jl`
+  — `typemin`/`typemax` across all numeric widths + Bool, and inside `where T`.
+- `subset_julia_vm/tests/fixtures/type_inference/gcd_complex_return_types_8618.jl`
+  — `gcd`/`lcm` BigInt preservation and Complex-math (`sqrt`/`sin`/…) return
+  types, guarding the removal of the last three overrides.
+- `subset_julia_vm/tests/fixtures/number/type_param_return_types.jl` — original
+  `typemin`/`typemax`/`zero`/`one` coverage (Issue #2245).
+- `subset_julia_vm/tests/fixtures/bigint/type_preservation.jl` — comprehensive
+  BigInt type preservation.
 
-### Functions Requiring Overrides
-
-| Function | Implementation Pattern | Override Status |
-|----------|----------------------|-----------------|
-| `typemin(::Type{T})` | Returns `T` type's minimum | ✓ Implemented |
-| `typemax(::Type{T})` | Returns `T` type's maximum | ✓ Implemented |
-| `zero(::Type{T})` | Returns zero of type `T` | Not yet needed |
-| `one(::Type{T})` | Returns one of type `T` | Not yet needed |
-| `eps(::Type{T})` | Returns epsilon of type `T` | Not yet needed |
-
-### Code Review Checklist
-
-When adding new Pure Julia methods of the form `f(::Type{T}) → T`:
-
-- [ ] Check if the method table infers the correct return type
-- [ ] If not, add override in `call.rs` `compile_call` function
-- [ ] Add the **same** override in `infer.rs` `infer_expr_type` function
-- [ ] Add tests that verify `typeof(f(T)) == T` for all supported types
-- [ ] Document the function in the table above
-
-### Prevention Tests
-
-- `subset_julia_vm/tests/fixtures/number/type_param_return_types.jl` - Verifies return types for typemin/typemax/zero/one (Issue #2245)
-
-## Parametric Type Dispatch Limitation (Issue #2384, #2388)
-
-### Known Limitation
-
-Inside parametric functions with `where T`, function dispatch does NOT resolve type parameters at compile time. This means that calling generic functions inside `where T` context may dispatch to unexpected methods:
-
-```julia
-function foo(x::T, y::T) where T
-    div(x, y)  # Dispatches to generic div(x, y), NOT div(::Int64, ::Int64)
-end
-
-# Result: div returns Float64 instead of Int64!
-foo(Int64(6), Int64(2))  # => 3.0 (Float64)
-```
-
-### Root Cause
-
-The compiler sees `x::T` and `y::T` at compile time, but `T` is an unresolved type parameter. When dispatching `div(x, y)`, the compiler cannot determine that `T = Int64`, so it falls back to the generic `div(x, y)` method which returns `Float64`.
-
-### Affected Patterns
-
-1. **Parametric struct constructors** - Inner constructors with `where T` that call reduction functions
-2. **Generic helper functions** - Functions with `where T` that call type-sensitive operations
-3. **Any function using** `div`, `mod`, `rem`, `fld`, etc. inside `where T` context
-
-### Workarounds
-
-#### 1. Use Intrinsics Directly
-
-For critical type-preserving operations, use intrinsics instead of function calls:
-
-```julia
-# Helper that uses intrinsic directly (no dispatch)
-function _safe_div(x::Int64, y::Int64)
-    return sdiv_int(x, y)  # Intrinsic, no dispatch
-end
-
-# Use in parametric function
-function Rational{T}(num::T, den::T) where T
-    g = gcd(num, den)
-    if g > 1
-        # Use helper instead of div(num, g)
-        num = _safe_div(Int64(num), Int64(g))
-        den = _safe_div(Int64(den), Int64(g))
-    end
-    return new{T}(num, den)
-end
-```
-
-#### 2. Add Return Type Overrides
-
-For commonly used functions, add special handling in `compile/expr/call/` (around line 1493) to override the return type based on argument types:
-
-```rust
-// In compile/expr/call/
-"gcd" | "lcm" if args.len() == 2 => {
-    // Preserve BigInt/Int64 types for gcd/lcm
-    let has_bigint = args.iter().any(|arg| {
-        matches!(self.infer_expr_type(arg), ValueType::BigInt)
-    });
-    if has_bigint {
-        ValueType::BigInt
-    } else {
-        method.return_type.clone()
-    }
-}
-```
-
-### Functions with Return Type Overrides
-
-| Function | Override Location | Notes |
-|----------|-------------------|-------|
-| `gcd` | call.rs, infer.rs | Preserves BigInt/Int64 (Issue #2383) |
-| `lcm` | call.rs, infer.rs | Preserves BigInt/Int64 (Issue #2383) |
-| `abs`, `abs2`, `sign` | call.rs, infer.rs | Preserves BigInt/I128/F32/F16 (Issue #2383) |
-| `typemin`, `typemax` | call.rs, infer.rs | Type{T}→T pattern (Issue #2245) |
-
-### Code Review Checklist
-
-When implementing or reviewing parametric functions (`where T`):
-
-- [ ] Does the function call generic methods like `div`, `mod`, `rem`?
-- [ ] If yes, is the return type critical for correctness?
-- [ ] Consider using an intrinsic helper function instead
-- [ ] Or add a return type override in call.rs/infer.rs
-- [ ] Test with actual type parameters to verify type preservation
-
-### Audit Command
-
-Find potentially problematic patterns:
-
-```bash
-# Find parametric functions that call div/mod/rem
-rg -n -C 20 'where T' subset_julia_vm/src/julia -g '*.jl' | \
-  rg '(div|mod|rem)\(' | \
-  rg -v 'sdiv_int|srem_int'
-```
-
-### Long-term Solution
-
-The fundamental fix would be to improve the compiler's type parameter resolution during function specialization:
-
-1. When `Rational{Int64}` constructor is compiled, track that `T = Int64`
-2. Use this binding when dispatching internal function calls
-3. `div(num::T, g::T)` would then dispatch to `div(::Int64, ::Int64)`
-
-Related code locations:
-- `compile/expr/call/` - Method dispatch
-- `compile/expr/infer/` - Type inference
-- `compile/stmt.rs` - Function specialization
-
-### Fixture Tests
-
-- `subset_julia_vm/tests/fixtures/dispatch/parametric_function_dispatch.jl` - Tests workarounds and known-working patterns
-- `subset_julia_vm/tests/fixtures/rational/` - Rational arithmetic tests (affected by this limitation)
-
-## BigInt Type Preservation (Issue #2383, #2386)
-
-BigInt type must be preserved throughout function calls and arithmetic operations. This requires updates in three locations when adding BigInt support for a function.
-
-### The Three Locations
-
-| Location | File | Purpose |
-|----------|------|---------|
-| Type Inference | `compile/expr/infer/` | Infer return type based on argument types |
-| Compile-time Return Type | `compile/expr/call/` | Override method table return type |
-| Runtime Operations | `vm/dynamic_ops/` | Handle BigInt operands in dynamic dispatch |
-
-### Example: Adding BigInt Support for `abs`
-
-**1. Type Inference (infer.rs)** - Add to `infer_expr_type` match for `Expr::Call`:
-
-```rust
-"abs" | "abs2" | "sign" => {
-    if let Some(arg) = args.first() {
-        let arg_type = self.infer_expr_type(arg);
-        match arg_type {
-            ValueType::BigInt => ValueType::BigInt,  // Preserve BigInt
-            ValueType::I128 => ValueType::I128,
-            ValueType::F32 => ValueType::F32,
-            _ => ValueType::F64,
-        }
-    } else {
-        ValueType::F64
-    }
-}
-```
-
-**2. Compile-time Return Type (call.rs)** - Add to return type override section (~line 1493):
-
-```rust
-"abs" | "abs2" | "sign" if args.len() == 1 => {
-    let arg_type = self.infer_expr_type(&args[0]);
-    match arg_type {
-        ValueType::BigInt => ValueType::BigInt,
-        ValueType::I128 => ValueType::I128,
-        ValueType::F32 => ValueType::F32,
-        _ => method.return_type.clone(),
-    }
-}
-```
-
-**3. Runtime Operations (`vm/dynamic_ops/`, `vm/exec/binary_both.rs`)** - Add BigInt cases:
-
-```rust
-// In dynamic_int_div
-(Value::BigInt(x), Value::BigInt(y)) => {
-    let zero = num_bigint::BigInt::from(0);
-    if *y == zero {
-        return Err(VmError::DivisionByZero);
-    }
-    Ok(Value::BigInt(x / y))
-}
-```
-
-### Functions with BigInt Preservation
-
-| Function | Behavior | Status |
-|----------|----------|--------|
-| `abs`, `abs2`, `sign` | Unary, preserves argument type | ✓ Implemented |
-| `gcd`, `lcm` | Binary, returns BigInt if any arg is BigInt | ✓ Implemented |
-| `+`, `-`, `*` | Binary, promotes to BigInt | ✓ Via dynamic dispatch |
-| `÷`, `div` | Integer division | ✓ Implemented |
-| `%`, `rem`, `mod` | Remainder/modulo | ✓ Implemented |
-
-### Code Review Checklist
-
-When adding a new function that should preserve BigInt:
-
-- [ ] Add BigInt case to `infer_expr_type` in `infer.rs`
-- [ ] Add return type override in `compile_call` in `call.rs`
-- [ ] Add BigInt operand handling in the relevant `dynamic_*` path under
-      `vm/dynamic_ops/` or `vm/exec/binary_both.rs`
-- [ ] Add test cases to `bigint/type_preservation.jl`
-- [ ] Verify chained function calls preserve type (e.g., `abs(gcd(a, b))`)
-
-### Fixture Tests
-
-- `subset_julia_vm/tests/fixtures/bigint/type_preservation.jl` - Comprehensive BigInt type preservation tests
+> **Historical note (Issue #2384/#2388).** Earlier revisions of this document
+> recommended working around the parametric-dispatch limitation by calling
+> intrinsics directly (e.g. `sdiv_int` instead of `div`) or by adding a
+> return-type override. Both recommendations are obsolete: general inference
+> now resolves these return types, and no per-function return-type overrides
+> remain in the compiler.
 
 ## Callable Value Dispatch Sites (Issue #2312)
 
@@ -1234,7 +1222,7 @@ To find potentially incomplete callable value handling:
 
 ```bash
 # Find match statements that handle Function but may be missing Closure or ComposedFunction
-rg -n 'Value::Function' subset_julia_vm/src/vm -g '*.rs' | \
+rg -n 'Value::Function' subset_julia_vm_vm/src/vm -g '*.rs' | \
   rg -v 'ComposedFunction|Closure|test|#\['
 ```
 
@@ -1307,6 +1295,147 @@ When working with type parameter bounds:
 
 - `subset_julia_vm/tests/fixtures/dispatch/where_context_dispatch.jl` — Tests Integer-bounded div dispatch and Real-bounded addition (Issue #2556)
 - `subset_julia_vm/tests/fixtures/types/diagonal_rule.jl` — Tests diagonal rule enforcement at compile time (Issue #2554)
+
+## Parametric Struct Parent: Three Registries (Issue #5614)
+
+A user parametric struct (`struct Circle{T<:Real} <: Shape`) is NOT in
+`shared_ctx.struct_defs` — it instantiates lazily and lives in
+`shared_ctx.parametric_structs`. Its declared parent must be threaded into **three**
+separate subtype data sources that currently disagree:
+
+1. **VM `type_ancestors`** (`vm/mod.rs` `compute_type_ancestors`) — includes parametric
+   structs via `parametric_struct_parents`. Consumed by `check_abstract_type_hierarchy`
+   and `check_nominal_supertype_chain`. This is the **complete** source: `Circle{Int} <:
+   Shape`, bare `Circle <: Shape`, `g(x::Shape)` dispatch, and `typeintersect(Circle{Int},
+   Shape)` all work via this source.
+2. **CoreType `STRUCT_PARENT_REGISTRY`** (thread-local, `inference_core/type_core.rs`) —
+   populated from `struct_defs` + `abstract_types` ONLY → missing parametric user structs
+   at runtime. Consumed by `CoreType::is_subtype_of`.
+3. **`method_table.struct_parents`** (`compile/method_table.rs`) — also built from
+   `struct_defs` ONLY → missing parametric structs. Consumed by
+   `needs_struct_parent_fallback` / `struct_is_subtype_of_abstract` for
+   `where {T<:UserAbstract}` bound checks.
+
+**Rule**: when a parametric-user-struct ↔ user-abstract-parent relation misbehaves,
+identify WHICH source the failing path consults:
+- Runtime `<:` on a `where` form → fails source #2 → fix at VM-layer (extract bare
+  nominal head, resolve via source #1 `check_abstract_type_hierarchy`).
+- Dispatch `f(x::T) where {T<:UserAbstract}` → fails source #3 → seed
+  `parametric_structs`' `(base→parent base)` pairs into `struct_parent_map` at
+  `compile/mod.rs`. This also feeds the inference registry (#2) safely.
+- Prefer reusing source #1 over broadening #2/#3, which perturb inference/dispatch widely.
+
+## `try`/`catch`/`finally` Tail-Position Return-Type Join (Issue #10254)
+
+`try ... catch ... [else ...] [finally ...] end` is a value-producing
+expression (see `LOWERING.md` "`try`/`catch`/`finally` as an Expression" for
+the full lowering mechanism and the value-semantics rule set). This section
+covers the **type-inference half** of that contract: the declared/inferred
+return type a caller sees for a try/catch expression must be the type that
+actually shows up at runtime, or callers slot-type-mismatch crash (the
+original failure mode of Issue #9131) or silently receive the wrong static
+type for arithmetic/`typeof()`/`::T`-annotated returns (Issue #10254).
+
+**Rule**: the inferred type of a try/catch expression is the **join** of the
+tail-expression types of every branch that can produce the value — the
+`try` block's tail, the `catch` block's tail, and the `else` block's tail
+when present. `finally`'s own tail type is never part of the join (it never
+contributes the value — see Rule 3 in `LOWERING.md`).
+
+This is the same `join_type()` merge used for control-flow local-variable
+widening (`LOWERING.md` "Control-Flow Type Tracking", Issue #3044/#3049),
+applied here to the tail *value* itself rather than to each individual
+local variable name:
+
+- `infer_block_branch` (`compile/abstract_interp/engine/mod.rs`) computes
+  and joins the `try_ret`/`catch_ret`/`else_ret` return types for a
+  `Stmt::Try` reached during abstract interpretation.
+- The `Stmt::Try` arms in `compile/inference.rs` do the same join for the
+  narrower per-statement inference pass (also responsible for the
+  Issue #9131 env-sharing fix: the catch branch must infer against the
+  **pre-try** environment, not a mutated shared reference, or a
+  catch-branch assignment silently overwrites the try-branch's inferred
+  type for the same variable).
+- Because the lowering rewrite (`LOWERING.md`) makes assignment-tailed
+  branches (`x = v`, `x += v`, `global x = v`) produce a value exactly the
+  same way as an expression-tailed branch, the type-inference join sees a
+  uniform shape regardless of whether a branch's tail is a plain
+  expression or an assignment — no special-casing was needed in the
+  inference layer once the lowering layer treated both uniformly.
+
+**Regression coverage**: `tests/fixtures/exceptions/try_catch_type_inference_9131.jl`
+(env-join correctness) and `tests/fixtures/exceptions/try_catch_tail_value_semantics_10254.jl`
+(typed post-use of an assign-tail result: `f() + 100`, `typeof(f())`,
+string concatenation, and a `function f()::Int` return annotation on a
+bare try/catch body) both exercise this join end-to-end against upstream
+`julia` parity.
+
+### Extending the Join to Every Assignment Shape, and Its CFG Fast Paths (Issue #10431)
+
+The last bullet above ("no special-casing was needed... once the lowering
+layer treated both uniformly") held for `Stmt::Assign`/`Stmt::AddAssign`
+specifically, because `infer_block_branch` already had a per-statement arm
+for `Stmt::Assign` before Issue #10074/#10254 — the lowering rewrite just
+gave it a uniform shape to see. Generalizing the lowering rewrite to
+`IndexAssign`/`FieldAssign`/`DictAssign`/(most) tuple destructuring (Issue
+#10431, see `LOWERING.md` "Generalizing to Every Assignment Shape") is
+**not** free the same way: `infer_block_branch`'s per-statement loop needed
+NEW arms for these statement kinds too (mirroring the existing
+`Stmt::Assign` arm: `last_stmt_type = Some(self.infer_expr(value, env))`),
+or the block's inferred fallthrough/tail type silently stayed `Nothing`
+even though the compiled body correctly returns the RHS value — a
+declared-type-vs-actual-value mismatch that, unlike a merely-wrong printed
+value, **crashes** at the call site once the (correctly) declared type
+feeds a type-specific instruction (e.g. `PrintI64NoNewline` fed an actual
+`Nothing` from the still-unfixed body).
+
+Three additional wrinkles surfaced fixing this generally, all now covered:
+
+- **CFG fast paths.** `infer_block_with_fixpoint` has two fast paths that
+  bypass the general per-statement loop entirely when eligible:
+  `try_infer_straightline_cfg_return` (no branches) computes each
+  statement's value via `cfg_authoritative_statement_value`, and
+  `try_infer_all_return_cfg` (every exit ends in an explicit `return`) via
+  `infer_cfg_authoritative_payload_stmt`. Both needed their own matching
+  arms — `cfg_authoritative_statement_value` gained one;
+  `cfg_authoritative_all_return_stmt_supported`'s existing gate already
+  excludes `IndexAssign`/`FieldAssign`/`DictAssign`, so that fast path
+  correctly declines and falls through to the general path instead of
+  needing a fix.
+- **Tuple destructuring's `Stmt::Block(inner) if is_last` arm.** A
+  destructuring decomposition is itself a tail-position `Stmt::Block` (see
+  `LOWERING.md`), and `infer_block_branch`'s existing nested-block arm
+  (added for Issue #10023's `global x = v` shape) naively used the inner
+  block's `fallthrough` — the type of its LAST per-target assignment (e.g.
+  `b`), not the whole destructured tuple. Fixed by checking
+  `destructuring_tail_value` (the same detector the lowering/codegen fix
+  uses) and inferring the reconstructed value's type instead when that
+  shape is detected.
+- **The lazy call-site specializer** (`vm/specialize/*.rs`) computes its
+  OWN declared return type independently (it is a separate, on-demand
+  compiled representation keyed on concrete call-site argument types, used
+  once the abstract-interp return type above is already known) and needed
+  the identical `IndexAssign`/`FieldAssign` tail-value fix in its own
+  `compile_function_body`/`compile_block_with_implicit_return`
+  (`vm/specialize/stmt.rs`) — this is what turned "declared type says I64,
+  compiled specialized body still silently returns `Nothing`" into a
+  runtime `PrintI64NoNewline` crash, which is how the gap was actually
+  found (`Stmt::DictAssign` is not reachable there: this specializer's
+  `compile_stmt` has no arm for it at all, so a `d[k] = x` statement fails
+  specialization and falls back to the legacy/abstract-interp-typed path
+  above, which IS fixed).
+
+The one deliberately unfixed sub-case — an independent literal-tuple RHS
+with matching arity, `(a, b) = (1, 2)` exactly (Issue #10444) — is
+correspondingly still typed as the type of its last target (`b`'s type),
+not `Tuple`, in every one of these inference paths; see `LOWERING.md` for
+why a general fix was not attempted in this change.
+
+**Regression coverage**: `tests/fixtures/control_flow/assign_statement_tail_value_10431.jl`,
+including typed arithmetic post-use of an indexed-assign tail result and a
+negative regression guard proving a genuine multi-statement `begin ... end`
+(with and without an `@eval` wrapper sharing one macro-call span) still
+infers/returns its last statement's type, not a reconstructed tuple.
 
 ## Related Documentation
 

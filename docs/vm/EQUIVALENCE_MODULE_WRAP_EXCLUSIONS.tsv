@@ -1,0 +1,21 @@
+# EQUIVALENCE_MODULE_WRAP_EXCLUSIONS.tsv — patterns that are NOT wrap-safe.
+#
+# The "Main vs module wrapper" lane (Issue #10465) runs a corpus file directly
+# and again inside a generated unique `module`, then compares at the observation
+# boundary (the generated module name and source line/col are normalized away).
+# Only WRAP-SAFE fixtures belong in tests/equivalence/module_wrap/.
+#
+# Some Julia constructs are inherently NOT wrap-safe: their observable behavior
+# legitimately depends on running at Main top-level vs module top-level. Those
+# must NOT be forced into the corpus. This file documents the excluded patterns
+# so the curation is explicit rather than silent (Issue #10465 acceptance:
+# "Track exclusions explicitly with linked Issues"). Per-fixture expansion of
+# the corpus is deferred scope under #10465.
+#
+# Columns (TAB-separated):
+#   pattern   short id of the wrap-unsafe construct
+#   issue     tracking / context Issue number (digits only)
+#   reason    why it is not wrap-safe (verified against sjulia + upstream julia)
+pattern	issue	reason
+soft-scope-global-assign	10465	top-level `for` assigning a global without `global` uses soft scope at Main top-level (warn + UndefVarError) but hard scope at module top-level — different observable result; wrap changes semantics, not just the boundary
+reflected-module-identity	10465	`@__MODULE__` / bare `parentmodule`-style observations print `Main` vs the generated module name — the module identity IS the observation, so it cannot be normalized away without hiding a real value

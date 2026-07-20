@@ -439,18 +439,18 @@ if self.should_use_inline_dynamic_op(&a, &b) {
 
 ```bash
 # Should print nothing: Rational arithmetic must not live in builtins_math.rs.
-rg -n "Rational" subset_julia_vm/src/vm/builtins_math.rs
+rg -n "Rational" subset_julia_vm_vm/src/vm/builtins_math.rs
 
 # Representation/conversion boundaries are allowed; investigate any new
 # arithmetic handler that does more than route Rational values to Julia dispatch.
 rg -n 'is_rational|as_rational_parts|RATIONAL_STRUCT_NAME' \
-  subset_julia_vm/src/vm/value/struct_instance.rs \
-  subset_julia_vm/src/vm/exec/conversion.rs \
-  subset_julia_vm/src/vm/type_ops/conversion.rs \
-  subset_julia_vm/src/vm/formatting.rs
+  subset_julia_vm_vm/src/vm/value/struct_instance.rs \
+  subset_julia_vm_vm/src/vm/exec/conversion.rs \
+  subset_julia_vm_vm/src/vm/type_ops/conversion.rs \
+  subset_julia_vm_vm/src/vm/formatting.rs
 rg -n 'Rational arithmetic|Complex and Rational arithmetic' \
-  subset_julia_vm/src/vm/dynamic_ops \
-  subset_julia_vm/src/vm/exec/arithmetic.rs
+  subset_julia_vm_vm/src/vm/dynamic_ops \
+  subset_julia_vm_vm/src/vm/exec/arithmetic.rs
 ```
 
 ### Verify gcd Is Pure Julia
@@ -460,7 +460,7 @@ rg -n 'Rational arithmetic|Complex and Rational arithmetic' \
 rg -n -A 10 'function gcd\(a::Int64' subset_julia_vm/src/julia/base/int.jl
 
 # Should confirm removal from Rust builtins
-rg -n 'gcd, lcm, factorial removed' subset_julia_vm/src/vm/builtins_math.rs
+rg -n 'gcd, lcm, factorial removed' subset_julia_vm_vm/src/vm/builtins_math.rs
 ```
 
 ### Count Pure Julia vs Rust for Complex
@@ -471,7 +471,7 @@ rg -c '^(function|Base\.:)' subset_julia_vm/src/julia/base/complex.jl
 
 # Rust special-cases
 rg -n 'is_complex|as_complex_parts|complex_struct|Complex' \
-  subset_julia_vm/src/vm -g '*.rs' -g '!**/*test*' | rg -v '// ' | wc -l
+  subset_julia_vm_vm/src/vm -g '*.rs' -g '!**/*test*' | rg -v '// ' | wc -l
 ```
 
 ## Keyword Arguments in Base-Loaded Functions (Issue #2624)

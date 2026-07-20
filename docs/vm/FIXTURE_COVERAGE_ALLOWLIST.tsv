@@ -1,0 +1,20 @@
+# Fixture-coverage allowlist (Issue #9360)
+#
+# scripts/check_unregistered_fixtures.sh fails if any subset_julia_vm/tests/
+# fixtures/**/*.jl is neither (a) registered by a `[[tests]]` entry in a
+# category manifest.toml, nor (b) referenced by an `include("...")` /
+# `evalfile("...")` from another fixture (auto-detected — helpers do NOT need a
+# row here), nor (c) listed below. Helpers reached through dynamically computed
+# paths cannot be detected statically and must be listed below.
+#
+# A row here is an intentional NON-test .jl that legitimately has no manifest
+# entry. Every row needs a reason. Helpers referenced by literal include/evalfile
+# paths are covered automatically and must NOT be added here; helpers referenced
+# only through a dynamically computed path require a row explaining that use.
+# Do not add a row to hide a fixture that should be registered.
+#
+# Columns (tab-separated): path<TAB>reason
+#   path = repo-relative path (subset_julia_vm/tests/fixtures/<cat>/<file>.jl)
+modules/include_mutable_struct_10329_def.jl	dynamic-include-helper: intentionally loaded by modules/include_mutable_struct_10329.jl through a joinpath-computed path so Issue #10329 exercises runtime include rather than compile-time literal include; the static coverage scanner cannot resolve the variable.
+types/irrational_type.jl	bad-fixture: asserts `typeof(pi) == Float64` (false in julia — typeof(pi) is Irrational{:π}) and references bare `e` (undefined in julia 1.12); fails under upstream julia too. Fix the assertions or remove.
+types/map_complex_isa.jl	bad-fixture: asserts `map(...) isa Vector{Complex}` which is false in upstream julia (map narrows to a concrete Complex{T}; Vector{Complex} is invariant). Fix the assertion or remove.

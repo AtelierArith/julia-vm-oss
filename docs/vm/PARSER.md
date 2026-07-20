@@ -279,9 +279,65 @@ When modifying keyword handling in `parse_primary()`:
 - **Issue #2310**: `a[begin+1]` arithmetic with `begin` in indexing context
 - **Issue #2308**: This documentation (prevention measure)
 
+## Corpus Differential Testing (Issue #8614)
+
+The parser is validated against the upstream `julia/` submodule corpus
+(`base/`, `stdlib/`, `test/`) via:
+
+### Role partition
+
+| Tool | What it covers |
+|------|---------------|
+| `fixture_julia_parity.sh` | Fixture-level **execution** parity (sjulia result vs upstream Julia result). Covers constructs in sjulia fixture files only. |
+| `scripts/parser_corpus_sweep.sh` | **Parser-only** sweep of the full upstream Julia corpus; no lowering or execution. Catches parse gaps before they reach fixtures. |
+| `docs/vm/PARSER_CORPUS_ALLOWLIST.toml` | Machine-readable allowlist of known parse gaps, each linked to a GitHub Issue. Ratcheted by `scripts/check_parser_corpus_allowlist.sh`. |
+
+### How to run
+
+```bash
+git submodule update --init julia     # corpus must be checked out
+
+# Full sweep (base + stdlib + test) — nightly path:
+bash scripts/parser_corpus_sweep.sh   # writes target/parser_corpus/sweep.tsv
+bash scripts/check_parser_corpus_allowlist.sh   # compare against allowlist
+
+# Fast PR path (julia/base only, ~0.4 s):
+cargo nextest run --release -p subset_julia_vm_parser \
+    --test corpus_allowlist_ratchet_8637
+```
+
+### Baseline numbers (2026-07-02)
+
+730 files in corpus; 464 (63.56%) parse cleanly; 266 with errors;
+0 panics; 2,376 divergence records.
+See `docs/vm/PARSER_CORPUS_BASELINE.md` for full breakdown.
+
+### Known gap families (all filed as `unsupported-feature` Issues)
+
+| Family | Issue | Notes |
+|--------|-------|-------|
+| Implicit line continuation after `,`, `->`, etc. | #8753 | Partially fixed for imports, export/public lists, arrow bodies, let bindings, return tuples, binary/pair RHS continuation, signature defaults, and final newlines before closing delimiters; remaining corpus entries still need reduction |
+| `var"..."` non-standard identifier | #8754 | Resolved: merged into a full-span `Identifier` leaf; name via `strip_var_quotes` |
+| `where` as parameter/variable name (soft keyword) | #8755 | |
+| Named-tuple for-destructuring, `;;`, `@main`, typed for-var, etc. | #8759 | |
+
+Recently resolved: #8751 extended Unicode lexer coverage now accepts the
+emoji identifiers, prime/modifier suffix identifiers, miscellaneous Unicode
+operators, middle-dot aliases, range/interval `⁝`, and operator suffix forms
+that previously produced `LexerError`.
+
+### JuliaSyntax oracle
+
+All the above gaps are confirmed "OK" in JuliaSyntax
+(`julia --startup-file=no -e 'using JuliaSyntax; ...'`). The oracle script
+at `scripts/parser_corpus_sweep.sh` runs sjulia-only; for JuliaSyntax
+cross-comparison see `docs/vm/PARSER_CORPUS_BASELINE.md`.
+
 ## Related Documentation
 
 - `docs/vm/LOWERING.md` - How parsed CST is lowered to Core IR
 - `docs/vm/TYPE_SYSTEM.md` - Type system documentation
 - `docs/vm/STATUS.md` - Current implementation status
 - `docs/vm/DONE.md` - Completed features and fixes
+- `docs/vm/PARSER_CORPUS_BASELINE.md` - Corpus sweep baseline numbers
+- `docs/vm/PARSER_CORPUS_ALLOWLIST.toml` - Machine-readable gap allowlist

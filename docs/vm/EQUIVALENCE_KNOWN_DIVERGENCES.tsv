@@ -1,0 +1,29 @@
+# EQUIVALENCE_KNOWN_DIVERGENCES.tsv — registered, Issue-linked lane divergences.
+#
+# The metamorphic harness (scripts/metamorphic_equivalence.sh) asserts that every
+# non-reference lane of a case matches the reference lane. A row here declares a
+# KNOWN divergence for one (case, lane) pair so the gate stays green while the
+# underlying bug is tracked — it does NOT hide the divergence, it records it with
+# a linked Issue (Issue #10465 / policy of #10452: "allowlists require linked
+# Issues and cannot grow silently").
+#
+# The ratchet is TWO-SIDED: if a registered divergence later AGREES with the
+# reference (the bug was fixed), the harness FAILS the row as STALE and demands
+# you remove it and close the Issue. So this file cannot silently accumulate
+# fixed entries.
+#
+# Do NOT add a row to make a genuine new regression pass. A new divergence with
+# no Issue is a bug: file it (bug label, MWE + julia-vs-sjulia table) first, then
+# register the row keyed to that Issue.
+#
+# Columns (TAB-separated):
+#   lane_group   direct_callable | module_wrap | fresh_cache |
+#                generic_optimized | vm_aot
+#   case         case name (direct_callable.tsv `name`, module_wrap basename,
+#                fresh_cache basename, generic_optimized basename, or
+#                vm_aot.tsv `name`)
+#   lane         the diverging non-reference lane
+#   issue        tracking Issue number (digits only)
+#   reason       one-line human description
+lane_group	case	lane	issue	reason
+vm_aot	scope_sibling_rebind_10251	aot	10523	sibling for-loop bindings of the same name (`s`) under different concrete types (Int16 then Float64) collapse onto one hoisted slot keyed by bare name; the second binding truncates against the first-seen type, panicking with InexactError instead of matching VM/upstream output

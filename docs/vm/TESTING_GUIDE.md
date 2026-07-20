@@ -21,18 +21,56 @@ timeout 1800 cargo nextest run --release --test fixture_tests <category>::   # s
 
 ### Integration Tests
 
-Multiple files covering end-to-end scenarios:
+End-to-end scenarios live in a single `integration_tests.rs` binary, one inline
+`mod` per subsystem (Issue #9671 Phase 1 consolidated the former six binaries):
 
-| File | Purpose |
+| Module (inside `integration_tests.rs`) | Purpose |
 |------|---------|
-| `integration_array_tests.rs` | Array, matrix, broadcast, complex numbers |
-| `integration_string_type_tests.rs` | Char, strings, math constants, BigInt |
-| `integration_dict_broadcast_tests.rs` | Dictionary and broadcast operations |
-| `integration_struct_hof_tests.rs` | Structs and higher-order functions |
-| `integration_module_base_tests.rs` | Module system and Base functions |
-| `integration_compile_sample_tests.rs` | Compilation validation for code samples |
+| `integration_array_tests` | Array, matrix, broadcast, complex numbers |
+| `integration_string_type_tests` | Char, strings, math constants, BigInt |
+| `integration_dict_broadcast_tests` | Dictionary and broadcast operations |
+| `integration_struct_hof_tests` | Structs and higher-order functions |
+| `integration_module_base_tests` | Module system and Base functions |
+| `integration_compile_sample_tests` | Compilation validation for code samples |
 
 **When to run:** After changes to specific subsystems (arrays, strings, etc.).
+Filter a single module with, e.g., `--test integration_tests -E 'test(integration_array_tests)'`.
+
+### Test-binary consolidation (Issue #9671 Phase 1)
+
+Each `tests/*.rs` is a separate binary that links the full ~370k-line VM rlib, so
+binary count dominates full-suite BUILD time. Phase 1 folded per-issue one-off
+binaries into a small set of consolidated binaries. Old → new nextest filter map:
+
+| Former binary (removed) | Now a `mod` inside |
+|-------------------------|--------------------|
+| `hof_*_specialization_5094_tests` (14) | `hof_specialization_5094_tests.rs` |
+| `mandelbrot_*` / `test_mandelbrot_grid_comparison` (5) | `mandelbrot_tests.rs` |
+| `sjulia_cli_*` + `sjulia_cli_soft_scope_9283_tests` (6) | `sjulia_cli_tests.rs` |
+| `register_vm_*` (3) | `register_vm_tests.rs` |
+| `integration_*_tests` (6) | `integration_tests.rs` |
+| field/index/destructuring/slot/bounds/inbounds/hot-loop specialization (12) | `regression_specialization_tests.rs` |
+| annotation/dispatch-cache/inline-cache/lattice/predicate inference (9) | `regression_dispatch_inference_tests.rs` |
+| soft-scope/hardscope/session/memory-budget/cache-eviction (8) | `regression_scope_session_tests.rs` |
+| `*_cached_base_*` parity (3) | `regression_base_cache_tests.rs` |
+| array-construction/structref/dict-demotion/complex-loop/slot-soundness (5) | `regression_runtime_tests.rs` |
+| `ssa_ir_8440` / `ssa_pipeline_parity_8552` (2) | `ssa_pipeline_tests.rs` |
+| `display_plot_artifact_9262` / `plot_artifact_mime_tests` (2) | `plot_artifact_tests.rs` |
+| `test_try_debug` / `test_randn` / `test_if_elseif_else` (3) | `regression_misc_tests.rs` |
+
+The per-test module path is preserved, so `-E 'test(<old_module>)'` still selects
+the same tests inside the new binary.
+
+**Where to put a new regression test (decision flow):**
+
+1. **Prefer a fixture** (`.jl` under `tests/fixtures/<category>/`) with a
+   `manifest.toml` entry — no new binary, no relink.
+2. If it needs Rust (bytecode/inference/dispatch assertions), **add a `mod` to an
+   existing consolidated binary** (`regression_*_tests.rs`, `integration_tests.rs`).
+3. Only create a **new** `tests/*.rs` binary when process isolation or a distinct
+   `required-features` genuinely forces it — and add its name to
+   `docs/vm/TEST_BINARY_ALLOWLIST.tsv` in the same PR (enforced by
+   `scripts/check_test_binary_budget.sh`).
 
 ## Test Organization
 
@@ -112,8 +150,7 @@ Tests that all code samples (Hello World, arrays, matrices, etc.) compile and ru
 | File | Purpose |
 |------|---------|
 | `unicode_tests.rs` | Unicode handling |
-| `broadcast_dispatch_analysis_tests.rs` | Broadcast and dispatch analysis |
-| `type_propagation_call_tests.rs` | Type propagation in function calls |
+| `regression_dispatch_inference_tests.rs` | Broadcast/dispatch analysis + type propagation in calls (Issue #9671: absorbed `broadcast_dispatch_analysis_tests`, `type_propagation_call_tests`) |
 | `core_ir_aot_tests.rs` | AoT Core IR file roundtrip |
 | `include_tests.rs` | `include()` directive |
 | `base_exports_consistency_tests.rs` | Base exports don't exceed upstream Julia |
@@ -130,7 +167,8 @@ Tests that all code samples (Hello World, arrays, matrices, etc.) compile and ru
 | AoT compiler | `aot_e2e_tests` |
 | Code samples | `code_samples_tests`, `ios_samples_tests` |
 | Base/stdlib Julia | `fixture_tests`, `base_exports_consistency_tests` |
-| Any PR | Full: `timeout 1800 cargo nextest run --release` |
+| Fixtures (inner loop) | Smoke tier: `scripts/fixture_fast_feedback.sh <changed.jl>...` emits a combined nextest over the changed categories + representative cross-cutting ones (dispatch / type_inference / types / promotion / iteration / numeric / strings) — the #5966-prone set (Issue #9671 Phase 4) |
+| Any PR | Full: `timeout 1800 cargo nextest run --release` (the merge gate) |
 
 ## Writing Fixture Tests
 
@@ -143,6 +181,16 @@ subset_julia_vm/tests/fixtures/
     manifest.toml            # Test definitions for this category
     test_file.jl             # Julia test file
 ```
+
+**Canonical categories (Issue #9671 Phase 2).** The set of category directories
+is an allowlist in `docs/vm/FIXTURE_CATEGORIES.tsv`, enforced by
+`scripts/check_fixture_categories.sh`. Prefer an EXISTING category over inventing
+a near-synonym — Phase 2 merged the historical duplicates (`arrays`/`array_utils`/
+`global_arrays` → `array`, `macro` → `macros`, `function` → `functions`,
+`module` → `modules`, `int_ops` → `intfuncs`, `float_ops` → `floatfuncs`,
+`meta` → `metaprogramming`, `number` → `numeric`). Adding a genuinely new
+category means adding its name to that TSV in the same PR (align with upstream
+`julia/test/` filenames where one exists).
 
 ### manifest.toml Format
 
@@ -160,6 +208,16 @@ description = "What this test verifies (Issue #XXXX)"
 - `expected` — Expected result: `true`/`false` (bool), `42` (integer), `3.14` (float), `"hello"` (string).
 - `description` — What the test verifies. Include issue number if applicable.
 - `skip` — Optional. Set to `true` to skip the test.
+- `skip_julia_test` — Optional. Marks an intentional SubsetJuliaVM extension
+  that must NOT be run under upstream `julia` for parity (e.g. callable
+  GlobalRef, Issue #302). Honored by `scripts/check_fixture_parity_sweep.sh`.
+- `cache_sensitive` — Optional. Marks a fixture whose semantics depend on the
+  compile/persistent cache mode (GC/WeakRef/finalizer, struct-table identity
+  across cache restore — the #10092 bug class). Any category containing a
+  tagged entry is run under BOTH cache modes by
+  `scripts/check_cache_sensitive_fixture_lane.sh` (Issue #10223).
+- `env` — Optional inline table of per-test environment variables applied by
+  the harness for that fixture only (Issue #9486).
 
 ### Julia Test File Rules
 
@@ -167,6 +225,272 @@ description = "What this test verifies (Issue #XXXX)"
 2. The file must end with an expression that produces the expected value.
 3. Typically end with `true` for tests that verify behavior via assertions.
 4. Verify with Julia first: `julia path/to/test.jl`
+
+### @testset-failure gate — what the harness catches vs. masks (Issue #9360 / #9472 / #10045)
+
+Before Issue #9360, `fixture_tests.rs::run_test_case` compared only the VM's
+**final returned value** against the manifest `expected`. A fixture whose
+`@testset` recorded a failure but still ended with a matching value (e.g. a
+trailing `true`) stayed **green in the harness while red on the CLI**
+(`sjulia <fixture>` prints `Test Failed` and exits 1). #9360 closed that hole
+with a gate; #9472 found and grandfathered the pre-existing backlog behind a
+two-sided ratchet (`docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv`, now **empty** — the
+entire backlog has since been fixed, so today every registered fixture must be
+genuinely green). Epic #10045 task D re-verified this empirically and added
+regression coverage that pins the gate's *decision logic* directly (previously
+only exercised indirectly by the ~4,000 real fixtures in the tree).
+
+**Mechanism.** `Vm::any_test_failed()` is a sticky per-run flag set whenever a
+`@test`/`@test_throws` records a failure (`@test_broken` failing as expected
+does NOT set it). `run_test_case_source` in `fixture_tests.rs` reads that flag
+after `vm.run()` returns and calls the pure `testset_gate_verdict(name, file,
+description, testset_failed, allowlisted)` function, which rejects exactly two
+of its four `(testset_failed, allowlisted)` quadrants: a failure that is NOT
+allowlisted (new masking), and an allowlisted fixture that no longer fails
+(stale ratchet entry).
+
+**Empirically verified truth table** (probed 2026-07-10 by running each shape
+under `target/dev-fast/sjulia` directly and cross-checked against upstream
+`julia` 1.12.6; see `testset_gate_regression_tests_10045` in
+`fixture_tests.rs` for the machine-checked version of row 1). The "Harness
+before #9360" column is what the ORIGINAL value-only comparison would have
+done (git history / the #9360 Issue body); "Harness today" is what
+`run_test_case_source` actually does right now — Issue #10045 task D did not
+change this column, it added the regression test that pins it:
+
+| # | Fixture shape | sjulia CLI | Harness before #9360 | Harness today | Mechanism (today) |
+|---|---|---|---|---|---|
+| 1 | `@testset` runs a failing `@test`, file still ends `true` | `Test Failed`, exit 1 | **Masked** (green — only compared the final value) | **Caught** — `run_test_case` panics via the #9360 gate unless the file is in `TESTSET_FAILURE_ALLOWLIST.tsv` (currently empty) | `any_test_failed()` → `testset_gate_verdict`; pinned by `testset_gate_regression_tests_10045` |
+| 2 | Code after a passing `@test` throws before the trailing `true` | `Runtime error: ...`, exit 1 | **Caught** — `vm.run()` already returned `Err` | **Caught** (unchanged) | Generic VM-error propagation (predates #9360; unrelated to the testset gate) |
+| 3 | The expression inside `@test(...)` itself throws | `Error During Test: ...` then the testset summary (`N errored`), exit 1 — since Issue #10093 sjulia's `@test` wraps its expression in `try`/`catch` and records an "errored" outcome like upstream (before #10093: `Runtime error: ...`, no summary) | **Caught** — was generic VM-error propagation | **Caught** — the errored outcome sets `any_test_failed()`, so the #9360 gate rejects it like row 1 | `_test_record_error!` → `any_test_failed()` → `testset_gate_verdict`; pinned by `testset_exit_code_8191_tests.rs` (#10093 mods) |
+| 4 | `@testset` body executes **zero** `@test`/`@test_throws`/`@test_broken` (e.g. a vacuous `for i in 1:0`) | `0 passed, 0 failed (0 total)`, exit **0** | Not gated | **Not gated — intentionally** (unchanged) | Matches upstream `julia`, which also exits 0 for a zero-test `@testset` (verified: `Test Summary: | Total 0`). Per-testset counts are not currently exposed as a public `Vm` API (`test_pass_count`/`test_fail_count`/`test_broken_count` are private and reset per-testset), so flagging this would require new state — not pursued because it would diverge from upstream and risk false positives on legitimate `for i in 1:0` guard patterns. |
+
+Row 1 is the only row where "before" and "today" differ — that gap is what
+#9360/#9472 already closed (merged prior to epic #10045). Rows 2–3 were never
+masked: row 2 goes through the pipeline's ordinary `Result`-to-`panic!`
+unwrap, and row 3 — which used that same mechanism when this table was first
+probed — now records an errored outcome instead (Issue #10093) and is caught
+by the same `any_test_failed()` gate as row 1. Row 4 is a
+**blind spot for silent-skip fixtures**, not a masking bug in the #9360/#9472
+sense: masking means "harness green, CLI red." A vacuous `@testset` is green
+on both sides, matching upstream, so there is nothing for the harness to
+catch without inventing behavior upstream itself does not have.
+
+**Regression coverage.** `testset_gate_regression_tests_10045` in
+`fixture_tests.rs` (`#[cfg(test)] mod`, run via `cargo nextest run --test
+fixture_tests testset_gate_regression_tests_10045`) pins this two ways without
+touching the fixtures tree or the allowlist TSV:
+- Unit tests all four `(testset_failed, allowlisted)` quadrants of the pure
+  `testset_gate_verdict` decision function directly (no VM run).
+- Feeds a deliberately-failing `@testset`-with-trailing-`true` Julia source
+  string straight into `run_test_case_source` (the same function
+  `run_test_case` calls after reading a fixture file) inside
+  `std::panic::catch_unwind`, and asserts it panics — plus a genuinely-passing
+  counterpart asserting it does NOT panic, to guard against false positives.
+
+If a future refactor of `run_test_case`/`run_test_case_source` accidentally
+drops or inverts the gate, these tests fail immediately instead of waiting for
+someone to notice a broken fixture is green. Verified directly during
+development: temporarily changing `testset_gate_verdict`'s `(true, false)`
+arm to `Ok(())` (silently swallowing the masked-failure case) made both
+`testset_gate_verdict_failed_and_unallowlisted_is_rejected_10045` and
+`run_test_case_source_rejects_broken_but_green_fixture_10045` fail — the
+sabotage was caught, and the change was reverted before landing.
+
+### Upstream-parity sweep (Issue #10246; drift backlog #10237)
+
+Issue #10237 found 13 fixtures that were green in the sjulia harness but red
+under upstream julia 1.12.6 — they asserted sjulia's wrong behavior, and
+nothing compared registered fixtures against upstream by default.
+`scripts/check_fixture_parity_sweep.sh` closes that hole:
+
+```bash
+# scoped, day-to-day (needs upstream julia + a built sjulia binary):
+SJULIA_BIN=target/release-fast/sjulia \
+  bash scripts/check_fixture_parity_sweep.sh --jobs 8 strings macros
+
+# full sweep (nightly-scale):
+bash scripts/check_fixture_parity_sweep.sh --jobs 4 --all
+```
+
+Each registered fixture of the selected categories runs through
+`scripts/fixture_julia_parity.sh --red-green`: divergence = red under one
+interpreter and green under the other, or a differing wrapped final value for
+legacy fixtures without a Test.jl summary. (Exact per-testset pass-count
+comparison — the script's default single-fixture mode — is not sweep-safe
+until sjulia's outer `@testset` summary aggregates nested counts, Issue
+#10338.) Entries with `skip`, `skip_julia_test`, a per-test `env` table, a
+`TESTSET_FAILURE_ALLOWLIST.tsv` row, or a bundled non-stdlib package import
+are skipped and reported.
+
+Known drift is ratcheted through `docs/vm/FIXTURE_PARITY_SWEEP_ALLOWLIST.tsv`
+(TWO-SIDED): an unallowlisted divergence fails the gate, and an allowlisted
+fixture in a swept category that no longer diverges fails as a stale entry —
+the list must monotonically shrink as the #10237 backlog is triaged
+(sjulia-bug → fix the VM; bad-fixture → fix the assertion). The nightly
+`fixture-parity-sweep` job runs the audited category set.
+
+### Cache-mode lane for cache-sensitive fixtures (Issue #10223)
+
+Issue #10092 (a standalone `WeakRef` target surviving `GC.gc()`) manifested
+ONLY with the persistent Base cache present: both cache-restore paths rebuilt
+`struct_table` with `has_inner_constructor: false`, so `WeakRef(x)` skipped
+the outer constructor and the weak cell was never GC-registered. The fixture
+harness runs each fixture under exactly one cache configuration, so no
+single-mode run can catch a cache-mode-dependent bug.
+
+Tag at least one `[[tests]]` entry of an affected category with
+`cache_sensitive = true` (the WeakRef/GC fixtures in `tests/fixtures/ref/` are
+the canonical set). `scripts/check_cache_sensitive_fixture_lane.sh` then runs
+every tagged category three times — cold (persistent caches removed +
+`SUBSET_JULIA_VM_DISABLE_*` env), prime (regenerates the caches), cached
+(every test process restores Base from the persistent cache) — and fails on a
+cold-vs-cached pass/fail divergence:
+
+```bash
+SJULIA_CACHE_LANE_CARGO_PROFILE=release-fast \
+  bash scripts/check_cache_sensitive_fixture_lane.sh        # tagged categories
+bash scripts/check_cache_sensitive_fixture_lane.sh ref      # explicit category
+```
+
+Only tagged categories run three times, keeping suite wall-clock bounded; the
+whole-suite cache-transparency counterpart is the nightly
+`check_cold_cached_nextest.sh` job (Issue #8719). Registered in the nightly
+`cold-cached-parity` job. When adding a GC/WeakRef/finalizer or
+cache-restore-identity fixture, tag its entry `cache_sensitive = true`.
+### The unified `@test`-family recording harness (Issue #10273 / #10093)
+
+Every `@test`-family construct records its outcome through a **single set of
+recording builtins** on the VM, and the harness-level invariant is:
+
+> **No `@test`-family entry point may propagate an evaluation exception past
+> the enclosing `@testset` without first recording an outcome.**
+
+An exception raised while evaluating a test expression must become a recorded
+*errored* (or, for `@test_throws`/`@test_broken`, *pass*/*broken*) outcome —
+never a bare VM error that unwinds out of the testset and drops the summary.
+This mirrors upstream `Test`, where `do_test`/`get_test_result` catch inside
+`try`/`catch` and only throw `TestSetException` at `@testset` end.
+
+**The recording builtins** (`subset_julia_vm_vm/src/vm/builtins_macro/mod.rs`), all
+of which feed the per-testset counters and the sticky
+`any_test_failed()` exit-code flag (Issue #8191):
+
+| Builtin | `BuiltinId` | Outcome | Sets `any_test_failed`? |
+|---|---|---|---|
+| `_test_record!(passed, msg)` | `TestRecord` | Pass / Fail | on Fail |
+| `_test_record_error!(msg, detail)` | `TestRecordError` (wire 306) | Errored | yes |
+| `_test_record_broken!(passed, msg)` | `TestRecordBroken` | Broken / (unexpected-pass ⇒ Error) | on unexpected pass |
+| `_testset_begin!(name)` / `_testset_end!()` | `TestSetBegin`/`TestSetEnd` | scope + summary | — |
+
+**Entry points and how each reaches the recorders:**
+
+| Entry point | Path to the recorders |
+|---|---|
+| `@test ex` (macro) | `macro test` in `stdlib/Test/src/Test.jl` wraps `ex` in `try`/`catch`: `_test_record!` on the Bool result, `_test_record_error!` in the catch (or on a non-Bool value). |
+| `@test x isa T` / `@test isa(x, T)` | Lowered by `try_lower_test_isa_macro_with_ctx` (`lowering/stmt/mod.rs`). **Since Issue #10273** it emits the SAME try/catch recording IR via `build_test_record_try_stmt` instead of the old `Stmt::Test`→`Instr::Test` fast path, which evaluated the condition **outside** any handler and let a throwing `isa`-test escape the testset. |
+| `@test_throws T ex` | `macro test_throws`: `_test_record!(true, …)` in the catch, `_test_record!(false, …)` if no throw. (Type matching not yet implemented — Issue #10354.) |
+| `@test_broken ex` | `macro test_broken`: `try`/`catch` → `_test_record_broken!`. |
+| `@test_skip ex` | `macro test_skip` (Issue #10350): `_test_record_broken!(false, …)` WITHOUT evaluating `ex`. |
+| `@testset …` (incl. nesting) | `macro testset` / `lower_testset_for_macro`: `_testset_begin!`/`_testset_end!` around a hard `let` scope; nested testsets nest these calls. |
+
+**Legacy `Instr::Test` / `Instr::TestSetBegin` path.** The bytecode
+instructions in `vm/exec/error_handling.rs` still exist and are emitted by
+`compile/stmt.rs` for any residual `Stmt::Test`/`Stmt::TestSet`/`Stmt::TestThrows`
+producers (e.g. the REPL Expr→IR round-trip in
+`vm/builtins_macro/ir_conversion.rs`). `Instr::Test` evaluates its condition
+**before** the instruction runs, so a throwing condition on that path still
+escapes — which is exactly why the `isa` fast path was rerouted through the
+macro-shaped try/catch IR rather than left on `Instr::Test`. New `@test`-family
+lowering MUST go through the recording builtins, not `Instr::Test`.
+
+**Prevention.** `test_harness_entry_point_coverage_10273` in
+`tests/testset_exit_code_8191_tests.rs` enumerates every entry point above as a
+source string and asserts, through a full `vm.run()`, that a *throwing* test
+expression (a) does not propagate out of `vm.run()`, (b) still prints the
+testset summary, and (c) sets `any_test_failed()` for the errored forms. Adding
+a new entry point that bypasses the recorders (e.g. re-introducing a bare
+`Instr::Test` fast path for a throwing condition) fails this test.
+
+### Fixture aggregation (Issue #9671 Phase 3)
+
+Each fixture runs the full parse → lower → compile → VM pipeline, so a category
+of many tiny MWEs pays that per-fixture overhead N times. **Concat-safe**
+fixtures — those whose only top-level content is `using Test`, `@testset` blocks,
+and a trailing `true` (no top-level `struct`/`function`/`const`/global
+assignment; all state lives inside `@testset` scopes) — can be concatenated into
+one aggregate `.jl` with zero name-collision or order-dependence risk. The
+harness `@testset` gate (#9360) still fails the aggregate on any per-`@testset`
+failure, keeping test-level granularity in the failure message.
+
+Rules:
+- Only aggregate **concat-safe** fixtures; keep the per-source banner comment and
+  the original `@testset` names / Issue numbers (e.g. `@testset "resize! (#6621)"`).
+- One manifest `[[tests]]` entry per aggregate (`expected = true`).
+- Verify the aggregate's sjulia pass count equals the sum of its members before
+  landing. Leave fixtures with top-level defs/globals or any order-dependence as
+  standalone files (the #5966 one-process-interaction risk).
+- Also verify the aggregate is green under upstream `julia` before landing.
+  A member fixture that is already red under upstream julia (fixture drift)
+  must stay standalone — folding it in would paint the whole aggregate red for
+  `fixture_julia_parity.sh` and hide which member is at fault.
+- Exclude path-sensitive fixtures: anything asserting on `@__FILE__` /
+  `@__DIR__` or its own on-disk filename (e.g. `isfile(joinpath(@__DIR__,
+  "<self>.jl"))`) breaks when its content moves into an aggregate file.
+**Module-wrap aggregation** (Issue #10238, unblocked by the #9942 fix): fixtures
+with top-level `struct`/`function`/`const`/global definitions cannot be
+concatenated directly (name collisions), but CAN be aggregated by wrapping each
+former fixture body verbatim in its own top-level `module Agg_<stem> ... end`
+inside the aggregate, so definitions stay namespaced. Recipe and rules:
+
+- One `module Agg_<former-fixture-stem>` per source block (`Agg_` prefix so the
+  module name can never collide with a type the fixture defines); banner
+  comment with the source path and the original `@testset` names / Issue
+  numbers preserved. Strip each member's trailing protocol `true`; emit one
+  file-level `true` at the aggregate end. Keep `using Test` (and any other
+  `using`/`import`) INSIDE each module — modules do not inherit imports.
+  Aggregate files are named `<category>_agg_<theme>_NNNN.jl` (NNNN = the
+  aggregation Issue).
+- **Verify each member wrapped ALONE first** (julia + sjulia): several sjulia
+  construct classes are green at top level but diverge inside a `module` —
+  inference/reflection APIs on module-local functions (Issue #10343), VM
+  crashes / compile errors / silent test loss (Issue #10344). A member whose
+  single-module wrap is not pass-count-identical under sjulia AND green under
+  julia stays standalone with the Issue reference. A member that turns
+  julia-red when wrapped relies on `Main`-scope semantics and also stays
+  standalone.
+- **Top-level AND `@testset`-local defined names must be pairwise disjoint
+  across the members of one aggregate**: sjulia's name-keyed lookups let a
+  later sibling module's same-named struct retroactively clobber an earlier
+  module's type identity (Issue #10342) and let same-named `@testset`-local
+  functions leak across sibling modules (Issue #10345). Do not rely on module
+  isolation for same-named definitions until those are fixed.
+- Fixtures that override Base methods on Base argument types (method piracy,
+  e.g. the `dispatch/*_user_method_4276.jl` family) interact process-globally
+  — the combined file is order-dependent even under upstream julia (#5966
+  class). They stay standalone with a comment.
+- Exclusions carried over from the concat-safe pass still apply: upstream-red
+  members, path-sensitive members (`@__FILE__`/`@__DIR__`), fixtures
+  referenced by machine-read lists (`docs/vm/WASM_FIXTURE_SMOKE.tsv`,
+  `docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv`), and generator-managed fixtures
+  (e.g. `types/subtype_matrix_oracle_10049.jl`). Additionally exclude fixtures
+  that use `@__MODULE__`, reference `Main`, call `eval`/`@eval`, or define
+  modules themselves.
+- Landing verification is the same as concat-safe: per aggregate, sjulia pass
+  count == sum of the members' standalone pass counts (re-measure the members
+  from `git show HEAD:` copies), 0 failures, AND the aggregate green under
+  upstream `julia`; then the touched category's `fixture_tests` nextest run.
+
+Pilot: `array` 268 → 213 fixtures (60 concat-safe → 5 themed `array_agg_*_9671.jl`).
+Expansion (2026-07-10): `types` / `dispatch` / `type_inference` / `macros` /
+`strings` / `reflection` — 258 concat-safe fixtures → 18 themed
+`<category>_agg_<theme>_9671.jl` aggregates (suite 3,327 → 3,087 files), each
+verified pass-count-exact under sjulia and green under upstream julia.
+Module-wrap expansion (2026-07-11, Issue #10238): 305 definition-heavy fixtures
+across `array` / `dispatch` / `macros` / `reflection` / `strings` /
+`type_inference` / `types` → 25 themed `<category>_agg_<theme>_10238.jl`
+aggregates (suite 3,103 → 2,823 files), same pass-count-exact + julia-green
+verification on every member (wrapped alone) and every aggregate.
 
 **Example (`tests/fixtures/arithmetic/basic.jl`):**
 

@@ -443,7 +443,7 @@ Combining Pure Julia and Rust builtins, primarily supporting:
 ### Basic I/O
 
 - `print`, `println`
-- `IOBuffer()` with `write(io, x)`, `take!(io)`, `takestring!(io)`
+- `IOBuffer()` with `write(io, x)`, `take!(io)` (`Vector{UInt8}`), `String(take!(io))`
 - `sprint(x)` / `sprint(f, args...)`
   - VM supports user-defined `f(io, args...)` (dedicated instruction)
   - `context`-enabled sprint (`IOContext`) supported

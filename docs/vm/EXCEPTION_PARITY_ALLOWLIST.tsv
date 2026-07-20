@@ -1,0 +1,4 @@
+id	issue	class	reason
+domain_error_log_silent	#11559	silent-error	Real-domain log family returns NaN instead of raising DomainError.
+typed_local_reassign_no_enforcement	#11794	silent-error	Typed local reassignment skips declaration conversion and accepts String into Int64.
+undef_ref_error	#11390	silent-error	Boxed undef storage uses nothing and cannot raise UndefRefError on read.

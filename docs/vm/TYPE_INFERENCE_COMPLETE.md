@@ -18,16 +18,16 @@ The compiler uses type inference in two related places:
 
 | Area | Current path | Notes |
 |------|--------------|-------|
-| Abstract interpretation engine | `subset_julia_vm/src/compile/abstract_interp/engine/` | `InferenceEngine`, return caches, recursion handling, method/global invalidation state |
-| Conditional narrowing | `subset_julia_vm/src/compile/abstract_interp/conditional.rs` | Environment splitting for supported predicates |
-| Loop element analysis | `subset_julia_vm/src/compile/abstract_interp/loop_analysis.rs` | `element_type(...)` for arrays, tuples, ranges, dicts, sets, strings, generators, pairs, and related wrappers |
-| Type environments | `subset_julia_vm/src/compile/abstract_interp/env.rs` | `TypeEnv` and environment merge/refinement helpers |
-| Lattice types | `subset_julia_vm/src/compile/lattice/` | `LatticeType`, `ConcreteType`, join/meet/subtract/widening |
-| Value/lattice bridge | `subset_julia_vm/src/compile/bridge.rs` | `ValueType` <-> `LatticeType` conversion helpers |
-| Transfer functions | `subset_julia_vm/src/compile/tfuncs/` | Metadata-bearing type-level rules registered by `register_all(...)` |
-| Pipeline adapters | `subset_julia_vm/src/compile/inference.rs`, `subset_julia_vm/src/compile/core_compiler.rs` | Shared-engine construction and call-site return inference adapters |
-| Expression inference | `subset_julia_vm/src/compile/expr/infer/` | Value and Julia type inference during bytecode emission |
-| Inference trace | `subset_julia_vm/src/compile/inference_trace.rs` | Developer trace reports for a single function |
+| Abstract interpretation engine | `subset_julia_vm_compile/src/compile/abstract_interp/engine/` | `InferenceEngine`, return caches, recursion handling, method/global invalidation state |
+| Conditional narrowing | `subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs` | Environment splitting for supported predicates |
+| Loop element analysis | `subset_julia_vm_compile/src/compile/abstract_interp/loop_analysis.rs` | `element_type(...)` for arrays, tuples, ranges, dicts, sets, strings, generators, pairs, and related wrappers |
+| Type environments | `subset_julia_vm/src/runtime_types/type_env.rs` | `TypeEnv` and environment merge/refinement helpers; `compile/abstract_interp/env.rs` remains a compatibility re-export |
+| Lattice types | `subset_julia_vm_compile/src/compile/lattice/` | `LatticeType`, `ConcreteType`, join/meet/subtract/widening |
+| Value/lattice bridge | `subset_julia_vm_compile/src/compile/bridge.rs` | `ValueType` <-> `LatticeType` conversion helpers |
+| Transfer functions | `subset_julia_vm_compile/src/compile/tfuncs/` | Metadata-bearing type-level rules registered by `register_all(...)` |
+| Pipeline adapters | `subset_julia_vm_compile/src/compile/inference.rs`, `subset_julia_vm_compile/src/compile/core_compiler.rs` | Shared-engine construction and call-site return inference adapters |
+| Expression inference | `subset_julia_vm_compile/src/compile/expr/infer/` | Value and Julia type inference during bytecode emission |
+| Inference trace | `subset_julia_vm_compile/src/compile/inference_trace.rs` | Developer trace reports for a single function |
 | Shared type core | `subset_julia_vm/src/inference_core/` | Common type operations used by compiler, VM-facing dispatch, and AoT projection |
 
 Do not use old path names such as `compile/abstract_interp/engine.rs` or

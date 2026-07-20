@@ -157,7 +157,7 @@ native-Array push and read routing, Issue #3908):
 - files touching `Value::Array` / `ValueType::Array` / `ArrayValue` /
   `ArrayData`: 75
 
-`subset_julia_vm/src/vm/builtins_dicts.rs` now routes the `DictKeys` /
+`subset_julia_vm_vm/src/vm/builtins_dicts.rs` now routes the `DictKeys` /
 `DictValues` `Vec<Value>` construction through a file-local
 `any_vector_array_value(Vec<Value>) -> Value` helper, and routes the
 `DictKeys` / `DictValues` / `DictPairs` array branches through guarded
@@ -166,7 +166,7 @@ native-Array push and read routing, Issue #3908):
 ceiling for the file dropped from 5 to 2 in
 `scripts/check_value_array_allowlist.sh`.
 
-`subset_julia_vm/src/vm/exec/rng.rs` now routes the three identical
+`subset_julia_vm_vm/src/vm/exec/rng.rs` now routes the three identical
 `Value::Array(new_array_ref(arr))` constructions in the `RandArray`,
 `RandIntArray`, and `RandnArray` handlers through a file-local
 `array_value(arr: ArrayValue) -> Value` helper, mirroring the pattern used by
@@ -176,7 +176,7 @@ helper body's `Value::Array(new_array_ref(arr))` arm (Issue #3908).
 
 ### vm/dynamic_ops/helpers `broadcastable_array_like` delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/dynamic_ops/helpers.rs::broadcastable_array_like`
+`subset_julia_vm_vm/src/vm/dynamic_ops/helpers.rs::broadcastable_array_like`
 previously matched the input value directly with
 `Value::Array(arr) => ...` and `Value::Memory(mem) => ...` arms.
 
@@ -189,7 +189,7 @@ removed.
 
 ### vm/stack_ops `pop_array` delegation + audit cleanup (Issue #3908)
 
-`subset_julia_vm/src/vm/stack_ops.rs::pop_array` previously matched the
+`subset_julia_vm_vm/src/vm/stack_ops.rs::pop_array` previously matched the
 popped value directly with `Value::Array(arr) => Ok(arr)` and
 `Value::Range(r) => Ok(new_array_ref(r.collect()))`. Replace the outer
 match with a `let popped = self.pop()?` and route through
@@ -204,7 +204,7 @@ despite their files having been migrated to 0 in earlier PRs.
 ### Shared `array_ref_from_value` + `legacy_array_value_mut_ref` + 3-file migration (Issue #3908)
 
 Two more shared helpers are added to
-`subset_julia_vm/src/vm/value/array_value/mod.rs` and re-exported from
+`subset_julia_vm_vm/src/vm/value/array_value/mod.rs` and re-exported from
 `vm/value/mod.rs`:
 
 - `pub(crate) fn array_ref_from_value(value: Value) -> Result<ArrayRef, Value>`
@@ -268,7 +268,7 @@ Many VM files keep their own file-local
 
 This slice adds `pub(crate) fn array_value_from_value(arr: ArrayValue)
 -> Value { array_ref_value(new_array_ref(arr)) }` to
-`subset_julia_vm/src/vm/value/array_value/mod.rs`, re-exported via
+`subset_julia_vm_vm/src/vm/value/array_value/mod.rs`, re-exported via
 `vm/value/mod.rs`.
 
 Eleven files are migrated to delegate (or directly use) the shared
@@ -294,7 +294,7 @@ Many VM files keep their own file-local
 counted in the per-file `Value::Array` audit ceiling.
 
 This slice adds a shared `pub(crate) fn array_ref_value(arr: ArrayRef)
--> Value` to `subset_julia_vm/src/vm/value/array_value/mod.rs`,
+-> Value` to `subset_julia_vm_vm/src/vm/value/array_value/mod.rs`,
 re-exported from `vm/value/mod.rs` via
 `pub(crate) use array_value::{array_ref_value, legacy_array_value_ref};`.
 
@@ -323,7 +323,7 @@ ceiling raised from 1 to 2 (two helper bodies now);
 
 ### vm/dynamic_ops shared `legacy_array_value_ref` migration (Issue #3908)
 
-Both `subset_julia_vm/src/vm/dynamic_ops/dispatch.rs` and `mod.rs`
+Both `subset_julia_vm_vm/src/vm/dynamic_ops/dispatch.rs` and `mod.rs`
 previously kept (or matched) the legacy native-array carrier directly:
 `dispatch.rs` had its own file-local
 `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>` helper, and
@@ -341,7 +341,7 @@ the `dynamic_array_value` construction body).
 
 ### vm/mod shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/mod.rs` previously kept its own file-local
+`subset_julia_vm_vm/src/vm/mod.rs` previously kept its own file-local
 `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>` used by
 the `is_legacy_array_value` predicate. The body was identical to the
 shared helper.
@@ -359,7 +359,7 @@ ceiling for the file drops from 7 to 6.
 
 ### vm/formatting shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/formatting.rs` previously kept its own file-local
+`subset_julia_vm_vm/src/vm/formatting.rs` previously kept its own file-local
 `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>` used by
 `value_to_julia_code`. The body was identical to the shared helper.
 
@@ -373,7 +373,7 @@ file drops from 4 to 3.
 
 ### vm/util shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/util.rs` previously kept its own file-local
+`subset_julia_vm_vm/src/vm/util.rs` previously kept its own file-local
 `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>` used by
 `pop_array_or_values`. The body was identical to the shared helper.
 
@@ -388,7 +388,7 @@ file drops from 3 to 2.
 
 ### vm/builtins_reflection/primitives shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_reflection/primitives.rs` previously
+`subset_julia_vm_vm/src/vm/builtins_reflection/primitives.rs` previously
 kept its own file-local `fn legacy_array_value_ref(value: &Value) ->
 Option<&ArrayRef>` used by the `extract_types_from_value` Vector-of-types
 branch. The body was identical to the shared helper.
@@ -402,7 +402,7 @@ ceiling for the file drops from 2 to 1.
 
 ### vm/builtins_linalg shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_linalg.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/builtins_linalg.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by `with_linalg_array` and `linalg_array_wrapper_value`. The body
 was identical to the shared helper.
@@ -417,7 +417,7 @@ from 2 to 1.
 
 ### vm/builtins_types shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_types.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/builtins_types.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by the `Typeof` / `Isa` / `Sizeof` / `Ismutable` / `Objectid` / `In`
 array branches. The body was identical to the shared helper.
@@ -431,7 +431,7 @@ ceiling for the file drops from 2 to 1.
 
 ### vm/builtins_macro shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_macro/mod.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/builtins_macro/mod.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by the `Expr` splat arm. The body was identical to the shared helper.
 
@@ -445,7 +445,7 @@ from 2 to 1.
 
 ### vm/builtins_dicts shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_dicts.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/builtins_dicts.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by the `DictKeys` / `DictValues` / `DictPairs` Array branches.
 The body was identical to the shared helper.
@@ -459,7 +459,7 @@ drops from 2 to 1.
 
 ### vm/type_ops/iteration shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/type_ops/iteration.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/type_ops/iteration.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by eight destructure call sites (matrix shape probes, the
 `_mem::Array` linear getter, the `iterate_first`/`iterate_next` arms, the
@@ -478,7 +478,7 @@ from 2 to 1.
 
 ### vm/exec/array_index_slice shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/array_index_slice.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/exec/array_index_slice.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by four destructure call sites (the `array_wrapper_logical_values`
 `_mem::Array` reader, `value_to_slice_index` Array index source, the
@@ -495,7 +495,7 @@ from 2 to 1.
 
 ### vm/exec/struct_ops shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/struct_ops.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/exec/struct_ops.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by `NewStructSplat` and the Pure Julia Array wrapper `_mem`/`_size`
 bridge in `GetFieldByName`. The body was identical to the shared helper.
@@ -510,7 +510,7 @@ from 2 to 1.
 
 ### vm/exec/call_dynamic shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/call_dynamic.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/exec/call_dynamic.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by `can_score_iterate_dynamic_candidates` and
 `native_array_rank_count`. The body was identical to the shared helper.
@@ -523,7 +523,7 @@ iterate dispatch behavior is unchanged.
 
 ### vm/builtins_equality shared `legacy_array_value_ref` migration (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_equality.rs` previously kept its own
+`subset_julia_vm_vm/src/vm/builtins_equality.rs` previously kept its own
 file-local `fn legacy_array_value_ref(value: &Value) -> Option<&ArrayRef>`
 used by `Isequal`, `Hash`, and `Egal`. The body was identical to the shared
 helper introduced by the previous slice.
@@ -536,7 +536,7 @@ behave the same — the helper is the same function under both names.
 
 ### Shared vm/value `legacy_array_value_ref` helper (Issue #3908)
 
-Around 15 files inside `subset_julia_vm/src/vm/` previously kept their own
+Around 15 files inside `subset_julia_vm_vm/src/vm/` previously kept their own
 file-local `legacy_array_value_ref(&Value) -> Option<&ArrayRef>` helper.
 Their bodies were all identical:
 
@@ -548,7 +548,7 @@ match value {
 ```
 
 A single shared `pub(crate) fn legacy_array_value_ref` now lives in
-`subset_julia_vm/src/vm/value/array_value/mod.rs` and is re-exported from
+`subset_julia_vm_vm/src/vm/value/array_value/mod.rs` and is re-exported from
 `vm/value/mod.rs` via `pub(crate) use array_value::legacy_array_value_ref;`.
 
 The first migration target is `vm/builtins_collections.rs`: its
@@ -563,7 +563,7 @@ migrations will reduce by 1 per migrated file.
 
 ### vm/exec/binary_both is_legacy_array_value delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/binary_both.rs` previously kept the file-local
+`subset_julia_vm_vm/src/vm/exec/binary_both.rs` previously kept the file-local
 predicate `is_legacy_array_value(&Value) -> bool` and the destructure helper
 `legacy_array_ref_from_value(&Value) -> Option<&ArrayRef>` side by side, each
 holding its own native-array match literal (the predicate held
@@ -582,7 +582,7 @@ tuple-pattern arms inside the matmul fallback. No runtime behavior changes.
 
 ### vm/exec/array_basic legacy_array_value_into delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/array_basic.rs` previously kept four
+`subset_julia_vm_vm/src/vm/exec/array_basic.rs` previously kept four
 file-local helpers each holding their own native-array destructure or
 construction literal: `push_array_ref` (stack-push constructor),
 `legacy_array_value_mut_ref` (`&mut Value -> Option<&mut ArrayRef>`),
@@ -602,7 +602,7 @@ No runtime behavior changes.
 
 ### vm/builtins_arrays pop helper delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_arrays.rs` previously kept three direct
+`subset_julia_vm_vm/src/vm/builtins_arrays.rs` previously kept three direct
 native-array sites: the file-local `value_as_array_ref(&Value) ->
 Option<&ArrayRef>` helper body, the `push_array_ref(ArrayRef)` stack push
 constructor body, and a third direct `Value::Array(arr_ref) => Ok(arr_ref)`
@@ -621,7 +621,7 @@ behavior changes.
 
 ### vm/exec/array_index Generator iter + sub_array helper delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/array_index.rs` previously kept two direct
+`subset_julia_vm_vm/src/vm/exec/array_index.rs` previously kept two direct
 native-array match arms outside of its three file-local helpers:
 
 1. `sub_array_parent_array_ref(values: &[Value]) -> Result<ArrayRef, VmError>`
@@ -652,7 +652,7 @@ runtime behavior changes.
 
 ### compile/inference_trace audit cleanup (Issue #3908)
 
-`subset_julia_vm/src/compile/inference_trace.rs` carried one
+`subset_julia_vm_compile/src/compile/inference_trace.rs` carried one
 `Value::Array(entries)` literal inside `serialize_env`, but that match
 was a false positive: the function had a local `use serde_json::{json,
 Value};`, so `Value::Array` referred to `serde_json::Value::Array`, not
@@ -665,12 +665,12 @@ spelled fully qualified, and the array construction switches to
 Into<serde_json::Value>` impl returns `Value::Array(self)`), so the
 emitted JSON is byte-for-byte identical. The file's allowlist entry
 in `scripts/check_value_array_allowlist.sh` is removed entirely —
-`rg 'Value::Array' subset_julia_vm/src/compile/inference_trace.rs`
+`rg 'Value::Array' subset_julia_vm_compile/src/compile/inference_trace.rs`
 now returns zero matches. No runtime behavior changes.
 
 ### vm/exec/hof helper delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/hof.rs` previously held two file-local
+`subset_julia_vm_vm/src/vm/exec/hof.rs` previously held two file-local
 constructors that each produced a `Value::Array` literal: an
 `array_value(ArrayValue) -> Value` helper that called
 `Value::Array(new_array_ref(arr))`, and an
@@ -682,7 +682,7 @@ ceiling for the file drops from 2 to 1. No runtime behavior changes.
 
 ### vm/hof_exec/dispatch helper delegation (Issue #3908)
 
-`subset_julia_vm/src/vm/hof_exec/dispatch.rs` previously held two file-local
+`subset_julia_vm_vm/src/vm/hof_exec/dispatch.rs` previously held two file-local
 constructors that each produced a `Value::Array` literal: an
 `array_value(ArrayValue) -> Value` helper that called
 `Value::Array(new_array_ref(arr))`, and an
@@ -695,20 +695,20 @@ delegation. No runtime behavior changes.
 
 ### compile/expr/coercion comment cleanup (Issue #3908)
 
-`subset_julia_vm/src/compile/expr/coercion.rs` carried one literal
+`subset_julia_vm_compile/src/compile/expr/coercion.rs` carried one literal
 `Value::Array` mention in a regular `//` comment immediately above the
 `Struct -> Array | ArrayOf` coercion arm. Because
 `scripts/check_value_array_allowlist.sh` counts every `Value::Array`
 substring (including comments), that single mention kept the file in the
 allowlist with a ceiling of 1. The comment is rephrased to refer to "the
 legacy native-array container" instead, and the file's allowlist entry is
-removed entirely — `rg 'Value::Array' subset_julia_vm/src/compile/expr/coercion.rs`
+removed entirely — `rg 'Value::Array' subset_julia_vm_compile/src/compile/expr/coercion.rs`
 now returns zero matches, so the file no longer needs classification. No
 runtime behavior changes.
 
 ### vm/type_ops/iteration doc cleanup (Issue #3908)
 
-`subset_julia_vm/src/vm/type_ops/iteration.rs` carried two literal
+`subset_julia_vm_vm/src/vm/type_ops/iteration.rs` carried two literal
 `Value::Array` mentions in the doc comment on its `legacy_array_value_ref`
 helper. Because `scripts/check_value_array_allowlist.sh` counts every
 `Value::Array` substring (including comments), the noise kept the
@@ -720,7 +720,7 @@ constructor body. No runtime behavior changes.
 
 ### vm/exec/binary_both doc cleanup (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/binary_both.rs` carried two `Value::Array`
+`subset_julia_vm_vm/src/vm/exec/binary_both.rs` carried two `Value::Array`
 literal mentions in the doc comments on its `legacy_array_ref_from_value`
 and `array_value` helpers. Because `scripts/check_value_array_allowlist.sh`
 counts every `Value::Array` substring (including comments), the noise kept
@@ -734,7 +734,7 @@ runtime behavior changes.
 
 ### vm/builtins_types doc comment cleanup (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_types.rs` carried two `Value::Array(_)`
+`subset_julia_vm_vm/src/vm/builtins_types.rs` carried two `Value::Array(_)`
 literal mentions in the doc comment on its `legacy_array_value_ref`
 helper. Because `scripts/check_value_array_allowlist.sh` counts every
 `Value::Array` substring (including comments), the noise kept the
@@ -747,7 +747,7 @@ changes.
 
 ### vm/formatting doc comment cleanup (Issue #3908)
 
-`subset_julia_vm/src/vm/formatting.rs` carried a doc comment on the
+`subset_julia_vm_vm/src/vm/formatting.rs` carried a doc comment on the
 `legacy_array_value_ref` helper that mentioned `Value::Array(_)` as a
 literal token. Because `scripts/check_value_array_allowlist.sh` counts
 every `Value::Array` substring (including comments), the noise pushed the
@@ -761,7 +761,7 @@ formatting test constructor body. No runtime behavior changes.
 
 ### vm/exec/call_dynamic Array helpers (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/call_dynamic.rs` now routes the two remaining
+`subset_julia_vm_vm/src/vm/exec/call_dynamic.rs` now routes the two remaining
 native-Array destructure sites through a file-local
 `legacy_array_value_ref(&Value) -> Option<&ArrayRef>` helper. The
 `can_score_iterate_dynamic_candidates` predicate rewrites
@@ -780,7 +780,7 @@ scoring against user `Vector` / `Matrix` iterate methods and the
 
 ### vm/builtins_io Array construction helper (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_io.rs` now routes both
+`subset_julia_vm_vm/src/vm/builtins_io.rs` now routes both
 `self.stack.push(Value::Array(new_array_ref(arr)))` constructions in the
 `Readlines` and `Readdir` handlers through a file-local
 `array_value(arr: ArrayValue) -> Value` helper, mirroring the pattern used by
@@ -795,7 +795,7 @@ match is the helper body's `Value::Array(new_array_ref(arr))` arm
 
 ### vm/exec/range Array construction helper (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/range.rs` now routes both
+`subset_julia_vm_vm/src/vm/exec/range.rs` now routes both
 `self.stack.push(Value::Array(new_array_ref(arr)))` constructions in the
 `MakeRange` (Int64 array materialization) and `MakeRangeF64` (Float64 array
 materialization) handlers through a file-local
@@ -808,7 +808,7 @@ because it pushes `Value::Range`, not `Value::Array` (Issue #3908).
 
 ### vm/frame.rs Array helper (Issue #3908)
 
-`subset_julia_vm/src/vm/frame.rs` now routes both `Value::Array(v.clone())`
+`subset_julia_vm_vm/src/vm/frame.rs` now routes both `Value::Array(v.clone())`
 constructions in `Frame::get_by_tag` (`VarTypeTag::Array` arm) and
 `Frame::get_by_cascade` (`self.locals_array.get(name)` arm) through a single
 file-local `array_value(arr: ArrayRef) -> Value` helper. The helper reuses
@@ -823,7 +823,7 @@ O(1) tag dispatch continues to feed Array reads through the same helper
 
 ### vm/builtins_linalg Array helpers (Issue #3908)
 
-`subset_julia_vm/src/vm/builtins_linalg.rs` now routes the two remaining
+`subset_julia_vm_vm/src/vm/builtins_linalg.rs` now routes the two remaining
 native-Array destructure sites through a file-local
 `legacy_array_value_ref(&Value) -> Option<&ArrayRef>` helper alongside the
 existing `linalg_array_value(ArrayValue) -> Value` constructor. The
@@ -845,7 +845,7 @@ inputs continue to flow through these helpers unchanged (Issue #3908).
 
 ### vm/exec/struct_ops Array helpers (Issue #3908)
 
-`subset_julia_vm/src/vm/exec/struct_ops.rs` now routes the `NewStructSplat`
+`subset_julia_vm_vm/src/vm/exec/struct_ops.rs` now routes the `NewStructSplat`
 `Value::Array(arr) =>` destructure arm through a guarded
 `_ if legacy_array_value_ref(&val).is_some() => { ... }` arm backed by a
 file-local `legacy_array_value_ref(&Value) -> Option<&ArrayRef>` helper
@@ -860,7 +860,7 @@ remaining matches are the two helper bodies (Issue #3908).
 
 ### dynamic_ops/dispatch Array helpers (Issue #3908)
 
-`subset_julia_vm/src/vm/dynamic_ops/dispatch.rs` now routes the three native
+`subset_julia_vm_vm/src/vm/dynamic_ops/dispatch.rs` now routes the three native
 Array destructures inside `should_use_inline_dynamic_op` (the
 `(Value::Array(arr_a), Value::Array(arr_b))` tuple `if let`, the
 `if let Value::Array(arr) = a` arm, and the symmetric
@@ -871,7 +871,7 @@ and `vm/mod.rs`. The audited ceiling for the file dropped from 3 to 1 in
 `scripts/check_value_array_allowlist.sh`; the remaining match is the helper
 body's `Value::Array(arr) => Some(arr)` arm (Issue #3908).
 
-`subset_julia_vm/src/vm/builtins_macro/mod.rs` now routes the `Expr` splat
+`subset_julia_vm_vm/src/vm/builtins_macro/mod.rs` now routes the `Expr` splat
 arm's native-Array destructure through a file-local
 `legacy_array_value_ref(&Value) -> Option<&ArrayRef>` helper (guarded by
 `ref arg_ref if legacy_array_value_ref(arg_ref).is_some()`; the surrounding
@@ -883,7 +883,7 @@ fallback to preserve exhaustiveness), and routes the two identical
 file dropped from 3 to 2 in `scripts/check_value_array_allowlist.sh`; the
 remaining matches are the two helper bodies (Issue #3908).
 
-`subset_julia_vm/src/vm/builtins_collections.rs` now routes the three
+`subset_julia_vm_vm/src/vm/builtins_collections.rs` now routes the three
 remaining native-Array destructures in the `Length` and `Eltype` handlers
 (`Length` direct arm, `Length`'s `Generator`-inner arm, `Eltype` direct arm)
 through a file-local
@@ -893,7 +893,7 @@ the call sites entirely. The audited ceiling for the file dropped from 3 to
 1 in `scripts/check_value_array_allowlist.sh`; the remaining match is the
 helper body's `Value::Array(arr) => Some(arr)` arm (Issue #3908).
 
-`subset_julia_vm/src/vm/builtins_types.rs` now routes the legacy
+`subset_julia_vm_vm/src/vm/builtins_types.rs` now routes the legacy
 native-Array destructure sites in the `Typeof`, `Isa`, `Sizeof`, `Objectid`,
 and `In` handlers, plus the `Ismutable`
 `Value::Array(_) | Value::Memory(_) | Value::Dict(_)` OR pattern, through
@@ -905,7 +905,7 @@ audited ceiling for the file dropped from 7 to 4 in
 the `any_vector_array_value` constructor body, the helper body, and two
 `Value::Array(_)` mentions inside the helper doc comment (Issue #3908).
 
-`subset_julia_vm/src/vm/mod.rs` now routes the Pure Julia Array wrapper
+`subset_julia_vm_vm/src/vm/mod.rs` now routes the Pure Julia Array wrapper
 dispatch guard (`value_matches_param`), the production struct-field egal
 pointer-equality arm (`compare_struct_field_values_egal`), and the
 `cfg(test)` `compare_values_equal` Array/Memory arms through file-local
@@ -1103,7 +1103,7 @@ exhaustiveness without spelling the native carrier directly. The three
 slicing result re-pushes (1D `slice_indices.len() == 1`, 2D matrix slice,
 and the generic N-D fallback) share a single `array_value(ArrayValue) ->
 Value` constructor helper. The audited ceiling for
-`subset_julia_vm/src/vm/exec/array_index_slice.rs` dropped from 7 to 2 in
+`subset_julia_vm_vm/src/vm/exec/array_index_slice.rs` dropped from 7 to 2 in
 `scripts/check_value_array_allowlist.sh`; the remaining 2 matches are the
 helper bodies (`legacy_array_value_ref` and `array_value`).
 
@@ -1125,7 +1125,7 @@ matrix shape probes (`matrix_array_dims_2d`,
 and the `collect_iterator_values` materialize unwrap use guarded
 `_ if legacy_array_value_ref(coll).is_some() => { ... }` arms backed by
 existing `_ =>` fallbacks. The audited ceiling for
-`subset_julia_vm/src/vm/type_ops/iteration.rs` dropped from 21 to 9 (round
+`subset_julia_vm_vm/src/vm/type_ops/iteration.rs` dropped from 21 to 9 (round
 1) and now from 9 to 4 (round 2) in
 `scripts/check_value_array_allowlist.sh`. The remaining 4 matches are the
 two helper bodies (`array_value` and `legacy_array_value_ref`) plus their

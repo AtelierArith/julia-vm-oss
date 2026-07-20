@@ -2,7 +2,7 @@
 
 **Status:** Implemented  
 **Date:** 2026-06-28  
-**Scope:** Add `scripts/sjulia_install.sh` that builds and installs `sjulia` with embedded Base bytecode and prelude Program caches.
+**Scope:** Add `scripts/sjulia_install.sh` and `scripts/sjulia_install.ps1` that build and install `sjulia` with embedded Base bytecode and prelude Program caches.
 
 ## Goal
 
@@ -18,13 +18,12 @@ The installed binary therefore starts faster because Base compilation and prelud
 
 - Remote one-liner installation (`curl | sh`). The user already has the repository cloned.
 - Cross-compilation or iOS builds. This script targets the host platform only.
-- Windows native support. macOS and Linux only.
 - Custom install roots or feature flags beyond `--force-cache`. These are reserved for future extensions.
 
 ## Assumptions
 
 - The script can be run from any directory; it locates the repository from its own path and changes into it.
-- macOS or Linux host.
+- macOS or Linux host for `sjulia_install.sh`; Windows host for `sjulia_install.ps1`.
 - Rust toolchain (`cargo`) is installed and available on `PATH`.
 - `cargo install` default location (`~/.cargo/bin`) is acceptable.
 - The user has network access for crates.io if dependencies are not already cached.
@@ -61,6 +60,11 @@ The script performs the following steps in order:
 
    `--force` makes re-runs idempotent by overwriting an existing `~/.cargo/bin/sjulia`, and `--bin sjulia` is required because `subset_julia_vm/Cargo.toml` defines multiple `[[bin]]` targets.
 
+The PowerShell implementation follows the same four steps, uses `sjulia.exe`,
+and checks `$LASTEXITCODE` after each native command so that it also fails fast
+under Windows PowerShell versions that do not support native-command error
+propagation through `$ErrorActionPreference`.
+
 ### Cache regeneration policy
 
 To make repeated installs fast, the script skips cache generation when the existing cache files are newer than both:
@@ -90,9 +94,9 @@ The user can force regeneration by passing `--force-cache`.
 
 ## Testing
 
-- **Manual smoke test:** run `./scripts/sjulia_install.sh` in a clean checkout and verify that `~/.cargo/bin/sjulia` executes.
+- **Manual smoke test:** run `./scripts/sjulia_install.sh` or `pwsh -File scripts/sjulia_install.ps1` in a clean checkout and verify that the installed `sjulia` executable runs.
 - **Cache embedding verification:** inspect the build output or run a small Julia program and compare cold-start latency against a cache-free build.
-- **CI integration:** consider adding a GitHub Actions job that runs the installer on `ubuntu-latest` and `macos-latest` after the regular test suite. This is left as a follow-up task to keep the initial change small.
+- **CI integration:** consider adding a GitHub Actions job that runs the installer on `ubuntu-latest`, `macos-latest`, and `windows-latest` after the regular test suite. This is left as a follow-up task to keep the initial change small.
 
 ## Future work
 
@@ -105,6 +109,6 @@ The user can force regeneration by passing `--force-cache`.
 - `scripts/test_with_cache.sh`
 - `scripts/wasm_build_with_cache.sh`
 - `subset_julia_vm/build.rs`
-- `subset_julia_vm/src/compile/embedded_cache.rs`
+- `subset_julia_vm_compile/src/compile/embedded_cache.rs`
 - `subset_julia_vm/src/pipeline.rs`
 - `subset_julia_vm/src/bin/sjulia.rs`

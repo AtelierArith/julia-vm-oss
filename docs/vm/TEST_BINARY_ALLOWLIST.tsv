@@ -1,0 +1,53 @@
+# TEST_BINARY_ALLOWLIST.tsv — Issue #9671 Phase 1
+#
+# The authoritative list of permitted integration-test binaries under
+# subset_julia_vm/tests/*.rs. Each `tests/<name>.rs` links the full ~370k-line
+# subset_julia_vm rlib, so every extra binary adds real full-suite BUILD time.
+# `scripts/check_test_binary_budget.sh` fails if a tests/*.rs file appears here
+# that is NOT listed below.
+#
+# Adding a new binary is therefore a reviewable event: prefer adding a `mod` to
+# an existing consolidated binary (regression_*_tests.rs, integration_tests.rs,
+# …). Only add a NEW entry here when process isolation or a distinct
+# required-feature genuinely forces a separate binary — see docs/vm/TESTING_GUIDE.md.
+#
+# One binary basename (without the .rs extension) per line. `#` starts a comment.
+aot_e2e_tests
+base_exports_consistency_tests
+branch_context_lowering_tests
+calc_pi_6293_tests
+code_samples_tests
+core_ir_aot_tests
+core_type_public_tests
+dispatch_tests
+editor_result_value_json_bound_9218
+estimate_pi_6178_tests
+fixture_tests
+handler_table_parity_8562_tests
+hof_specialization_5094_tests
+include_tests
+integration_tests
+ios_samples_tests
+julia_type_comparison_tests
+mandelbrot_tests
+miri_smoke_tests
+panic_free_vm_tests
+parity_dispatch
+parity_subtype
+parser_pure_rust
+plot_artifact_tests
+register_vm_tests
+regression_base_cache_tests
+regression_dispatch_inference_tests
+regression_misc_tests
+regression_runtime_tests
+regression_scope_session_tests
+regression_specialization_tests
+repl_differential_9199_tests
+repl_session_fixture_tests
+sample_source_repl_parity_tests
+sjulia_cli_tests
+sjulia_precompile_determinism_tests
+ssa_pipeline_tests
+testset_exit_code_8191_tests
+unicode_tests

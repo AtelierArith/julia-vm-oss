@@ -33,7 +33,7 @@
 
 ### 1. 型格子（LatticeType）
 
-**ファイル**: `subset_julia_vm/src/compile/lattice/types.rs`
+**ファイル**: `subset_julia_vm_compile/src/compile/lattice/types.rs`
 
 ```rust
 pub enum LatticeType {
@@ -54,7 +54,7 @@ pub enum LatticeType {
 
 ### 2. 具体型（ConcreteType）の詳細度
 
-**ファイル**: `subset_julia_vm/src/compile/lattice/types.rs`
+**ファイル**: `subset_julia_vm_compile/src/compile/lattice/types.rs`
 
 仕様書で要求されている全ての型が実装済み:
 
@@ -75,7 +75,7 @@ pub enum LatticeType {
 
 ### 3. Conditional 型の実装アプローチ
 
-**ファイル**: `subset_julia_vm/src/compile/abstract_interp/conditional.rs`
+**ファイル**: `subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs`
 
 #### 仕様書の提案
 
@@ -156,7 +156,7 @@ pub fn split_env_by_condition(env: &TypeEnv, condition: &Expr) -> SplitEnv
 
 仕様書には記載されていませんが、実装では定数値の型推論がサポートされています。
 
-**ファイル**: `subset_julia_vm/src/compile/lattice/types.rs`
+**ファイル**: `subset_julia_vm_compile/src/compile/lattice/types.rs`
 
 ```rust
 pub enum ConstValue {
@@ -183,7 +183,7 @@ pub enum LatticeType {
 
 ### 転送関数レジストリ（TransferFunctions）
 
-**ファイル**: `subset_julia_vm/src/compile/tfuncs/`
+**ファイル**: `subset_julia_vm_compile/src/compile/tfuncs/`
 
 **実装状況**: 完了
 
@@ -201,7 +201,7 @@ pub enum LatticeType {
 
 ### 抽象解釈エンジン（InferenceEngine）
 
-**ファイル**: `subset_julia_vm/src/compile/abstract_interp/engine.rs`
+**ファイル**: `subset_julia_vm_compile/src/compile/abstract_interp/engine.rs`
 
 **実装状況**: 完了
 
@@ -212,23 +212,23 @@ pub enum LatticeType {
 - 転送関数による組み込み関数の返り値型推論
 - 関数返り値型のキャッシュ
 
-**使用箇所**: `subset_julia_vm/src/compile/mod.rs:1265` で `infer_function_return_type_v2` が呼び出されています。
+**使用箇所**: `subset_julia_vm_compile/src/compile/mod.rs:1265` で `infer_function_return_type_v2` が呼び出されています。
 
 ---
 
 ## 関連ファイル
 
-- `subset_julia_vm/src/compile/lattice/types.rs` - 型格子の定義（Const 型含む）
-- `subset_julia_vm/src/compile/lattice/ops.rs` - 格子演算
-- `subset_julia_vm/src/compile/lattice/widening.rs` - 型拡大ロジック
-- `subset_julia_vm/src/compile/abstract_interp/engine.rs` - 抽象解釈エンジン（InferenceEngine）
-- `subset_julia_vm/src/compile/abstract_interp/conditional.rs` - 条件分岐での型絞り込み
-- `subset_julia_vm/src/compile/abstract_interp/env.rs` - 型環境
-- `subset_julia_vm/src/compile/abstract_interp/loop_analysis.rs` - ループ変数の型推論
-- `subset_julia_vm/src/compile/tfuncs/` - 転送関数レジストリ
-- `subset_julia_vm/src/compile/bridge.rs` - ValueType ↔ LatticeType 変換
-- `subset_julia_vm/src/compile/const_prop/` - 定数伝播
-- `subset_julia_vm/src/compile/inference.rs` - 型推論エントリポイント（`infer_function_return_type_v2`）
+- `subset_julia_vm_compile/src/compile/lattice/types.rs` - 型格子の定義（Const 型含む）
+- `subset_julia_vm_compile/src/compile/lattice/ops.rs` - 格子演算
+- `subset_julia_vm_compile/src/compile/lattice/widening.rs` - 型拡大ロジック
+- `subset_julia_vm_compile/src/compile/abstract_interp/engine.rs` - 抽象解釈エンジン（InferenceEngine）
+- `subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs` - 条件分岐での型絞り込み
+- `subset_julia_vm_compile/src/compile/abstract_interp/env.rs` - 型環境
+- `subset_julia_vm_compile/src/compile/abstract_interp/loop_analysis.rs` - ループ変数の型推論
+- `subset_julia_vm_compile/src/compile/tfuncs/` - 転送関数レジストリ
+- `subset_julia_vm_compile/src/compile/bridge.rs` - ValueType ↔ LatticeType 変換
+- `subset_julia_vm_compile/src/compile/const_prop/` - 定数伝播
+- `subset_julia_vm_compile/src/compile/inference.rs` - 型推論エントリポイント（`infer_function_return_type_v2`）
 - `docs/vm/archived/TYPE_INFERENCE_ENHANCEMENT.md` - 型推論強化計画（設計版）
 - `docs/vm/archived/TYPE_INFERENCE_ENHANCEMENT_20260117.md` - 型推論強化計画（実装完了版）
 - `docs/vm/archived/TYPE_INFERENCE_IMPLEMENTATION_GUIDE.md` - 実装ガイド

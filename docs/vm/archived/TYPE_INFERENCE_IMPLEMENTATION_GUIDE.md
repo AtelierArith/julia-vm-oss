@@ -31,7 +31,7 @@ SubsetJuliaVM の型推論を Julia 本家のアプローチに基づいて強�
 ### 新規ファイル追加
 
 ```
-subset_julia_vm/src/compile/
+subset_julia_vm_compile/src/compile/
 ├── mod.rs                    # 既存（修正）
 ├── types.rs                  # 既存
 ├── inference.rs              # 既存（統合用に修正）
@@ -69,7 +69,7 @@ subset_julia_vm/src/compile/
 ### モジュール宣言の追加
 
 ```rust
-// subset_julia_vm/src/compile/mod.rs に追加
+// subset_julia_vm_compile/src/compile/mod.rs に追加
 
 // 新規モジュール
 pub mod lattice;
@@ -129,7 +129,7 @@ mod method_table;
 ### LatticeType（型格子要素）
 
 ```rust
-// subset_julia_vm/src/compile/lattice/types.rs
+// subset_julia_vm_compile/src/compile/lattice/types.rs
 
 use std::collections::BTreeSet;
 
@@ -377,7 +377,7 @@ impl Default for LatticeType {
 ### 型格子の定数
 
 ```rust
-// subset_julia_vm/src/compile/lattice/widening.rs
+// subset_julia_vm_compile/src/compile/lattice/widening.rs
 
 /// Union 型の最大要素数
 /// これを超えると Top に拡大
@@ -398,7 +398,7 @@ pub const MAX_ITERATIONS: usize = 100;
 ### 格子演算
 
 ```rust
-// subset_julia_vm/src/compile/lattice/ops.rs
+// subset_julia_vm_compile/src/compile/lattice/ops.rs
 
 use super::types::{ConcreteType, LatticeType};
 use super::widening::{MAX_UNION_LENGTH, MAX_UNION_COMPLEXITY};
@@ -668,7 +668,7 @@ mod tests {
 
 **実装状況**: ✅ 実装済み
 
-抽象解釈エンジンは `subset_julia_vm/src/compile/abstract_interp/engine.rs` に `InferenceEngine` として実装されています。
+抽象解釈エンジンは `subset_julia_vm_compile/src/compile/abstract_interp/engine.rs` に `InferenceEngine` として実装されています。
 
 **主な機能**:
 - 不動点反復による型推論
@@ -677,12 +677,12 @@ mod tests {
 - 転送関数による組み込み関数の返り値型推論
 - 関数返り値型のキャッシュ
 
-**使用箇所**: `subset_julia_vm/src/compile/mod.rs:1265` で `infer_function_return_type_v2` が呼び出されています。
+**使用箇所**: `subset_julia_vm_compile/src/compile/mod.rs:1265` で `infer_function_return_type_v2` が呼び出されています。
 
 ### 型環境
 
 ```rust
-// subset_julia_vm/src/compile/abstract_interp/env.rs
+// subset_julia_vm_compile/src/compile/abstract_interp/env.rs
 
 use std::collections::HashMap;
 use crate::compile::lattice::types::LatticeType;
@@ -797,7 +797,7 @@ impl TypeEnv {
 ### 抽象解釈エンジン本体
 
 ```rust
-// subset_julia_vm/src/compile/abstract_interp/engine.rs
+// subset_julia_vm_compile/src/compile/abstract_interp/engine.rs
 
 use std::collections::HashMap;
 use crate::ir::core::{Expr, Stmt, Block, BinaryOp, UnaryOp, Literal};
@@ -1333,7 +1333,7 @@ impl InferenceEngine {
 ### 条件分岐での型絞り込み
 
 ```rust
-// subset_julia_vm/src/compile/abstract_interp/conditional.rs
+// subset_julia_vm_compile/src/compile/abstract_interp/conditional.rs
 
 use crate::ir::core::{Expr, Literal};
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
@@ -1469,7 +1469,7 @@ fn extract_type_from_expr(expr: &Expr) -> Option<LatticeType> {
 ### ループ変数の型推論
 
 ```rust
-// subset_julia_vm/src/compile/abstract_interp/loop_analysis.rs
+// subset_julia_vm_compile/src/compile/abstract_interp/loop_analysis.rs
 
 use std::collections::HashMap;
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
@@ -1588,7 +1588,7 @@ mod tests {
 
 **実装状況**: ✅ 実装済み
 
-転送関数レジストリは `subset_julia_vm/src/compile/tfuncs/` に実装されています。
+転送関数レジストリは `subset_julia_vm_compile/src/compile/tfuncs/` に実装されています。
 以下のモジュールで転送関数が定義されています：
 
 - `registry.rs` - レジストリ本体
@@ -1606,7 +1606,7 @@ mod tests {
 ### レジストリ
 
 ```rust
-// subset_julia_vm/src/compile/tfuncs/registry.rs
+// subset_julia_vm_compile/src/compile/tfuncs/registry.rs
 
 use std::collections::HashMap;
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
@@ -2097,7 +2097,7 @@ impl Default for TransferFunctions {
 ### ValueType ↔ LatticeType ブリッジ
 
 ```rust
-// subset_julia_vm/src/compile/bridge.rs
+// subset_julia_vm_compile/src/compile/bridge.rs
 
 use crate::vm::{ValueType, ArrayElementType};
 use crate::compile::lattice::types::{ConcreteType, LatticeType};
@@ -2232,7 +2232,7 @@ fn concrete_to_array_element(ct: &ConcreteType) -> ArrayElementType {
 ### 統合アダプタ
 
 ```rust
-// subset_julia_vm/src/compile/inference.rs に追加
+// subset_julia_vm_compile/src/compile/inference.rs に追加
 
 use super::lattice::types::LatticeType;
 use super::abstract_interp::engine::{InferenceEngine, StructTypeInfo};
@@ -2290,7 +2290,7 @@ pub fn infer_function_return_type_v2(
 ### ユニットテスト
 
 ```rust
-// subset_julia_vm/src/compile/lattice/tests.rs
+// subset_julia_vm_compile/src/compile/lattice/tests.rs
 
 #[cfg(test)]
 mod tests {
@@ -2450,5 +2450,5 @@ result2 = mixed_return(false)
 
 - [TYPE_INFERENCE_ENHANCEMENT.md](./TYPE_INFERENCE_ENHANCEMENT.md) - 型推論強化計画
 - [docs/aot/IMPLEMENTATION_GUIDE.md](../aot/IMPLEMENTATION_GUIDE.md) - AoT 実装ガイド
-- `subset_julia_vm/src/compile/inference.rs` - 現在の型推論実装
-- `subset_julia_vm/src/compile/expr/infer.rs` - 式の型推論
+- `subset_julia_vm_compile/src/compile/inference.rs` - 現在の型推論実装
+- `subset_julia_vm_compile/src/compile/expr/infer.rs` - 式の型推論

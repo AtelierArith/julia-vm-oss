@@ -1,0 +1,7 @@
+id	issue	route	expr	expected_julia	reason
+d10643_chain	10643	chained-literal	Trio10556{Int64}{Float64,String}	Trio10556{Int64, Float64, String}	direct chained literal T{a}{b} mis-binds the trailing parameters (duplicates the prefix)
+d10654_bare_literal_int	10654	literal	Int64{Float64}	TypeError	literal T{...} on a bare non-parametric base builds a nonsense type (Core.apply_type form fixed by #10587)
+d10654_bare_literal_real	10654	literal	Real{Int64}	TypeError	literal T{...} on a bare non-parametric abstract base builds a nonsense type
+d10586_partial_isa	10586	PushDataType	Array{Float64} isa UnionAll	true	under-applied builtin family is a plain DataType, not a trailing UnionAll
+d10586_partial_apply	10586	ApplyTypeDynamic	(A = Array{Float64}; A{2})	Matrix{Float64}	further application of an under-applied builtin family fails instead of completing
+d10586_partial_at	10586	ApplyTypeDynamic	Core.apply_type(Array{Float64}, 2)	Matrix{Float64}	Core.apply_type on an under-applied builtin family fails instead of completing

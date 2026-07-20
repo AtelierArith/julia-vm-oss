@@ -121,7 +121,7 @@ html(b)
 ## 関連ファイル
 
 - `subset_julia_vm/packages/JSXGraph/src/{JSXGraph,types,api,elements}.jl`
-- `subset_julia_vm/src/plotting/jsxgraph.rs`
+- `subset_julia_vm_vm/src/plotting/jsxgraph.rs`
 - `subset_julia_vm/src/julia/packages/mod.rs`
 - `subset_julia_vm/src/repl/completions.rs`
 - `subset_julia_vm/tests/fixtures/packages/packages_jsxgraph_*.jl`

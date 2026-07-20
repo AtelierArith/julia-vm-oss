@@ -4,7 +4,7 @@ This is the documented inventory for public Base names that still have a Rust
 builtin route or compiler-recognized route in sjulia.
 
 The source of truth is `BASE_FUNCTION_ROUTES` in
-`subset_julia_vm/src/compile/base_functions.rs`. The audit
+`subset_julia_vm_compile/src/compile/base_functions.rs`. The audit
 `scripts/check_base_routing_registry.sh` verifies that this document stays in
 sync with the registry.
 
@@ -51,7 +51,10 @@ sync with the registry.
 | `values` | `DispatchFirst` | `julia/base/abstractdict.jl` |
 | `pairs` | `DispatchFirst` | `julia/base/abstractdict.jl` |
 | `merge!` | `DispatchFirst` | `julia/base/dict.jl` |
-| `Ref` | `CompilerIntrinsic` | `julia/base/refvalue.jl` |
+| `Ref` | `DispatchFirst` | `julia/base/refpointer.jl` |
+| `compose` | `DispatchFirst` | `julia/base/operators.jl` |
+| `deepcopy` | `DispatchFirst` | `julia/base/deepcopy.jl` |
+| `nonmissingtype` | `DispatchFirst` | `julia/base/missing.jl` |
 | `typeof` | `DirectBuiltin` | `julia/base/essentials.jl` |
 | `isa` | `DirectBuiltin` | `julia/base/operators.jl` |
 | `eltype` | `DispatchFirst` | `julia/base/abstractarray.jl` |
@@ -86,8 +89,15 @@ sync with the registry.
 | `codeunit` | `DispatchFirst` | `julia/base/strings/basic.jl` |
 | `codeunits` | `DispatchFirst` | `julia/base/strings/basic.jl` |
 | `isvalid` | `DispatchFirst` | `julia/base/strings/basic.jl` |
-| `string` | `DirectBuiltin` | `julia/base/strings/io.jl` |
-| `sprintf` | `DirectBuiltin` | `julia/stdlib/Printf/src/Printf.jl` |
+| `string` | `DispatchFirst` | `julia/base/strings/io.jl` |
+| `String` | `DispatchFirst` | `julia/base/strings/string.jl` |
+| `Char` | `DispatchFirst` | `julia/base/char.jl` |
+| `Int` | `DispatchFirst` | `julia/base/char.jl` |
+| `_string` | `InternalIntrinsic` | `julia/base/strings/io.jl` |
+| `_string_from_chars` | `InternalIntrinsic` | `julia/base/strings/string.jl` |
+| `_char_to_int` | `InternalIntrinsic` | `julia/base/char.jl` |
+| `_int_to_char` | `InternalIntrinsic` | `julia/base/char.jl` |
+| `sprintf` | `DispatchFirst` | `julia/stdlib/Printf/src/Printf.jl` |
 | `bitstring` | `DispatchFirst` | `julia/base/intfuncs.jl` |
 | `codepoint` | `DispatchFirst` | `julia/base/char.jl` |
 | `isnumeric` | `DispatchFirst` | `julia/base/strings/unicode.jl` |
@@ -95,6 +105,12 @@ sync with the registry.
 | `parse` | `DispatchFirst` | `julia/base/parse.jl` |
 | `tryparse` | `DispatchFirst` | `julia/base/parse.jl` |
 | `_tryparse_float64` | `InternalIntrinsic` | `julia/base/parse.jl` |
+| `_linspace_range_f64` | `InternalIntrinsic` | `julia/base/twiceprecision.jl` |
+| `_try_complex_scale_tp_range_f64` | `InternalIntrinsic` | `julia/base/twiceprecision.jl` |
+| `_try_broadcast_typed_kernel` | `InternalIntrinsic` | `julia/base/broadcast.jl` |
+| `_try_broadcast_binary_arith` | `InternalIntrinsic` | `julia/base/broadcast.jl` |
+| `_range_step` | `InternalIntrinsic` | `julia/base/range.jl` |
+| `step` | `DispatchFirst` | `julia/base/range.jl` |
 | `big` | `DispatchFirst` | `julia/base/gmp.jl` |
 | `convert` | `DispatchFirst` | `julia/base/essentials.jl` |
 | `promote` | `DispatchFirst` | `julia/base/promotion.jl` |

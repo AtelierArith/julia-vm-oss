@@ -1,0 +1,17 @@
+path	owner	classification	authority	issue
+subset_julia_vm_compile/src/compile/context.rs	get_struct_type_id	exact complete-name lookup	StructRegistry::resolve only	#11436
+subset_julia_vm_bytecode/src/struct_registry.rs	StructRegistry::resolve	exact qualified-name authority	qualified spelling resolves by owner module + local name; bare spelling stays lexical	#11436
+subset_julia_vm_compile/src/compile/tfuncs/registry.rs	StructIdLookup	exact complete-name lookup	struct_type_id only; no family selector	#11436
+subset_julia_vm_compile/src/compile/expr/infer/expr_tfuncs.rs	constructor_type_args_are_complete	complete-parameter authority	all inferred constructor parameters are concrete	#11436
+subset_julia_vm_compile/src/compile/tfuncs/complex_ops.rs	tfunc_complex_contextual	dynamic unknown-element transfer	unknown complex element remains Top	#11436
+subset_julia_vm_compile/src/compile/expr/infer/expr_tfuncs.rs	infer_julia_complex_call	dynamic unknown-element return	unknown complex element remains Any	#11436
+subset_julia_vm_compile/src/compile/expr/infer/expr_tfuncs.rs	infer_value_parametric_struct_ctor	exact-or-dynamic return	exact entry or structural instantiation; otherwise Any	#11436
+subset_julia_vm_compile/src/compile/expr/infer/expr_tfuncs.rs	infer_value_rational_ctor	exact-or-dynamic return	exact complete spelling or Any	#11436
+subset_julia_vm_compile/src/compile/expr/infer/expr_tfuncs.rs	infer_value_instantiated_ctor	exact-or-dynamic return	exact entry or structural instantiation; otherwise Any	#11436
+subset_julia_vm_compile/src/compile/expr/infer/julia_type.rs	infer_julia_type	exact owner-qualified JuliaType return	bare and qualified parametric results infer complete parameters from the resolved owner	#11436/#11510
+subset_julia_vm_compile/src/compile/expr/infer/mod.rs	infer_expr_type	exact module-qualified return	qualified owner lookup only; otherwise Any	#11436
+subset_julia_vm_compile/src/compile/core_compiler.rs	julia_type_to_value_type_with_ctx	exact-or-dynamic conversion	exact scoped complete name or Any	#11436
+subset_julia_vm_compile/src/compile/expr/builtin_array.rs	heap_julia_type_array_element_type_resolved	exact typed-array element identity	complete parametric spelling resolves through lexical owner scope and retains its canonical name	#11436/#11511
+subset_julia_vm_compile/src/compile/expr/call/mod.rs	compile_call	exact lexical-owner miss routing	owner DataType runtime dispatch or MethodError; never global same-leaf fallback	#11436
+subset_julia_vm_compile/src/compile/expr/call/dispatch.rs	compile_generic_dispatch_call	dynamic generic return	no struct-family scan may sharpen a generic Any	#11436
+subset_julia_vm_compile/src/compile/expr/call/dispatch.rs	try_struct_field_count_default_ctor_fallback	exact owner allocation	resolved scoped owner only; no short-name candidates	#11436

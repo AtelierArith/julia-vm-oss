@@ -103,13 +103,16 @@ end
 
 ### SubsetJuliaVM Status
 
-**Last updated**: 2026-06-11
+**Last updated**: 2026-07-07
 
 #### Rust Builtins (fully implemented)
 - `print(x...)` - Direct value formatting
 - `println(x...)` - Print with newline
 - `show(x)` - Julia representation (1-arg form)
 - `string(x...)` - String conversion
+- IO stream cursor subset (Issue #8996): `IOBuffer`, `open(path[, mode])`,
+  `write(io, x)`, `flush(io)`, `position(io)`, `seek(io, n)`, `skip(io, n)`,
+  `eof(io)`, `read(io, Char)`, `readline(io)`, `close(io)`, `isopen(io)`
 
 #### Pure Julia Implementation (implemented)
 - `IOContext` - Output context wrapper (`base/io.jl`)
@@ -151,6 +154,8 @@ end
 - `showerror(io, e)` writes through stdout for now instead of mutating arbitrary IO streams (Issue #1217)
 - Full display stack backend selection - Display chooses stdout only
 - `HTML`, `Text` types - Rich media types
+- `redirect_stdout` / `redirect_stderr` / `redirect_stdio` and `Pipe` (Issue #9577)
+- Numeric `write(io, ::Number)` raw-byte semantics; current path writes display text (Issue #9578)
 
 ## Implementation Guidelines
 
@@ -205,9 +210,13 @@ show(IOContext(io, :limit => true), 1:1000)  # "1:1000"
 - #376 - display function with display stack (partial: basic display implemented)
 - #377 - repr function (full implementation with MIME)
 - #378 - Normalize print/show relationship
-- #1217 - IOBuffer mutation limitation affects `showerror(io, e)` and non-stdout display
+- #1217 - `showerror(io, e)` and non-stdout display routing still write through stdout
+- #9577 - redirect_stdout / redirect_stderr / Pipe stream redirection
+- #9578 - numeric `write(io, x)` raw-byte semantics
 
 ### Closed/Partially Resolved Issues
+- #8996 - IO stream cursor subset ✅
+- #9576 - IO stream `===` identity ✅
 - #379 - sprint with function argument ✅
 - #380 - displaysize function ✅
 - #381 - printstyled (ANSI colors) ✅

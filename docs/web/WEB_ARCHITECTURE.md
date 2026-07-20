@@ -269,9 +269,9 @@ async function run() {
 - `web/app.js` - JavaScript 側の実装（WASM 呼び出し）
 - `subset_julia_vm_web/src/lib.rs` - WASM エントリポイント
 - `subset_julia_vm_parser/` - Pure Rust パーサー（WASM 対応）
-- `subset_julia_vm/src/lowering/` - CST → IR 変換（Native/Web 共通）
-- `subset_julia_vm/src/compile/` - IR → バイトコード変換
-- `subset_julia_vm/src/vm/` - バイトコード実行
+- `subset_julia_vm_lowering/src/lowering/` - CST → IR 変換（Native/Web 共通）
+- `subset_julia_vm_compile/src/compile/` - IR → バイトコード変換
+- `subset_julia_vm_vm/src/vm/` - バイトコード実行
 
 ## 移行履歴
 

@@ -8,7 +8,7 @@ This document catalogues all active workarounds in the VM codebase, along with t
 
 ## Compile — Macro Helper Guarded AST Field Access
 
-**File:** `subset_julia_vm/src/compile/expr/struct_.rs`
+**File:** `subset_julia_vm_compile/src/compile/expr/struct_.rs`
 
 ```rust
 // Workaround: defer invalid macro helper field access guarded by `isa(x, QuoteNode)` (Issue #7535).
@@ -30,7 +30,7 @@ dynamic field fallback.
 
 ## VM — Typed Executable Array Store Falls Back to Interpreter
 
-**File:** `subset_julia_vm/src/vm/executable.rs`
+**File:** `subset_julia_vm_vm/src/vm/executable.rs`
 
 ```rust
 // Workaround: the regular VM StoreSlotArray path can fall back
@@ -68,6 +68,53 @@ pub const ASYNCMAP_JL: &str = include_str!("asyncmap.jl");
 **Linked issue:** #3500
 
 **Resolution path:** Replace once a real cooperative/parallel `Task` scheduler lands; the Julia-level `asyncmap` body should then start to exhibit true concurrency without further changes.
+
+---
+
+## Base — Irrational Symbol Extracted via Type-Name String, Not Value-Parameter Reflection
+
+**File:** `subset_julia_vm/src/julia/base/io.jl`
+
+```julia
+# Workaround: `Irrational{sym}`'s bare symbol name (`"π"`, `"ℯ"`, ...), as
+# plain text. Upstream reads this via `sym` directly (`show(io::IO,
+# x::Irrational{sym}) where {sym} = print(io, sym)`,
+# `julia/base/irrationals.jl`) — a Symbol-valued `where`-clause type
+# variable, or equivalently `typeof(x).parameters[1]`. Both currently lose
+# `Symbol` identity for *non-ASCII* symbols in sjulia (`typeof` reports
+# `DataType`, and `print`/`string` render the quoted `:sym` show-form instead
+# of the bare name) — exactly the case that matters here, since every
+# `Irrational` singleton (`π`, `ℯ`, ...) is named with a non-ASCII symbol.
+# Parse the symbol out of `string(typeof(x))` (`"Irrational{:π}"`) instead:
+# that string is built from the correctly-encoded type name text, not the
+# broken value-parameter reflection. (Issue #8869)
+function _irrational_symbol_text(x::AbstractIrrational)
+    type_name = string(typeof(x))
+    # Keep both public range endpoints on character starts (Issue #11618).
+    symbol_start = ncodeunits("Irrational{:") + 1
+    closing_brace = prevind(type_name, ncodeunits(type_name) + 1)
+    symbol_end = prevind(type_name, closing_brace)
+    return type_name[symbol_start:symbol_end]
+end
+```
+
+**Impact:** `show`/`string`/`print`/`repr` for `Irrational` singletons (`π`,
+`ℯ`) parse the symbol out of the type's rendered name string instead of
+reading the value type parameter directly. Functionally equivalent for the
+two symbols that actually exist in Base (`:π`, `:ℯ`), and for any other
+concrete `Irrational{sym}` a user constructs — but it is textual parsing of
+`"Irrational{:sym}"` rather than reading `sym` as a first-class `Symbol`, so
+it silently breaks if the `Irrational` struct or its `show`-form type-name
+rendering is ever renamed/reshaped.
+
+**Linked issue:** #8869 (Symbol-valued `where`-clause / `.parameters[1]`
+type-parameter reflection loses `Symbol` identity for non-ASCII symbols)
+
+**Resolution path:** Once #8869 is fixed (a `where {sym}`-bound or
+`typeof(x).parameters[1]`-reflected Symbol-valued type parameter correctly
+behaves as a `Symbol` for non-ASCII symbols too), replace
+`_irrational_symbol_text` with the upstream-shaped
+`show(io::IO, x::Irrational{sym}) where {sym} = print(io, sym)`.
 
 ---
 
@@ -625,10 +672,454 @@ restore dense matrix storage to typed arrays following upstream
 
 ---
 
+## Plots — `@animate`/`@gif` Frame Counter Held in a `Ref`
+
+`subset_julia_vm/packages/Plots/src/api.jl`, the `@animate` and `@gif` macros.
+
+```julia
+# Workaround: hold the frame counter in a `Ref` so the loop MUTATES its
+# contents (`_anim_counter[] = …`, a `setindex!` — not a rebinding of the
+# `_anim_counter` name) ... (Issue #9476 / #9283)
+local _anim_counter = Ref(1)
+```
+
+The `@animate`/`@gif` expansion appends a per-iteration `frame(_anim, should)`
+plus a counter bump to the user's top-level `for`/`while` loop. Upstream Plots
+uses macro **hygiene** — a `gensym` counter treated as a local — so the counter
+is never a soft-scope-ambiguous global. sjulia's macro system does not apply full
+hygiene, so the counter is a literal `_anim_counter`. Once the C ABI / WASM hosts
+adopted **strict file-mode soft scope** (Issue #9283 / #9210), a plain counter
+assigned before the loop and `+=`-ed inside it is localized to a fresh loop-local,
+and the read-before-write raises `UndefVarError: \`_anim_counter\` not defined` —
+breaking the `plots_animation`, `aizawa_attractor`, and
+`ordinarydiffeq_pendulum_animation` samples. The natural upstream-shaped fixes —
+emit `global _anim_counter` inside the loop, or wrap the counter in a `let` — are
+both rejected by sjulia's macro runtime in expansion output (Issue #9476). Holding
+the counter in a `Ref` and mutating `_anim_counter[]` (a `setindex!`, which the
+soft-scope pass does not treat as a name rebinding) is the upstream-valid shape the
+runtime accepts, and works in every soft-scope mode and scope (top level and inside
+a function).
+
+**Resolution path:** Implement macro-runtime support for returning `Expr(:global,
+…)` / `Expr(:let, …)` (Issue #9476), then restore a plain counter with a `global`
+declaration (or a `let`-scoped counter) matching upstream Plots' hygienic shape.
+
+---
+
+## Base — `checked_mul` Promotion Entry Uses Two-Variable Form (W-58)
+
+`subset_julia_vm/src/julia/base/checked.jl`, the mixed-type `checked_mul`
+promotion entry.
+
+```julia
+# Workaround: written in the two-variable form used by the promote fallbacks in
+# base/promotion.jl instead of upstream's `checked_mul(promote(x, y)...)` splat
+# form — the splatted call re-dispatches to this same method instead of the
+# promoted same-type diagonal method, recursing forever (Issue #9513).
+function checked_mul(x::Integer, y::Integer)
+    px, py = promote(x, y)
+    return checked_mul(px, py)
+end
+```
+
+Upstream (`julia/base/checked.jl`) writes the promotion entry as the one-liner
+`checked_mul(x::Integer, y::Integer) = checked_mul(promote(x,y)...)`. In sjulia
+the splatted self-recursive call re-selects the same `(Integer, Integer)` method
+for the promoted same-type pair instead of the more-specific diagonal
+`checked_mul(x::T, y::T) where {T<:Integer}` method, so any mixed-type call
+(e.g. `checked_mul(4, UInt128(5))`) recursed to a StackOverflow. The
+two-variable form (`px, py = promote(x, y); checked_mul(px, py)`) dispatches
+correctly — the same form all promote fallbacks in `base/promotion.jl` use.
+
+**Resolution path:** Fix splatted-call runtime dispatch to use the tuple's
+runtime element types (Issue #9513), then restore upstream's splat one-liner.
+
+---
+
+## Tests — Array Rank Dispatch Forced Through `Any` (W-59)
+
+**File:** `tests/fixtures/dispatch/dispatch_agg_misc_10238.jl` (former standalone
+`dispatch/array_dimension_dispatch.jl`, module-wrapped into the aggregate by
+Issue #10238)
+
+```julia
+# Workaround: force runtime dispatch for the 3D Array case because static call
+# resolution drops Array rank for similar-created arrays (Issue #9642)
+rank_dispatch_any(x::Any) = rank_dispatch(x)
+```
+
+**Impact:** The fixture routes only the 3D `similar(v, 1, 3, 1)` dispatch check
+through an `Any`-typed wrapper so sjulia uses runtime dispatch and matches
+upstream Julia's `Array{Int64,3}` method selection. Direct static dispatch still
+drops the array rank and selects the 1D method; that compiler bug is tracked in
+#9642.
+
+**Resolution path:** Fix static call resolution to preserve or defer dispatch for
+`Array{T,N}` rank on `similar(a, dims...)` results (Issue #9642), then call
+`rank_dispatch(a3)` directly and remove this wrapper.
+
+---
+
+## Base — UInt128 String Digit Loop Avoids `rem` (W-60)
+
+**File:** `subset_julia_vm/src/julia/base/intfuncs.jl`
+
+```julia
+# Workaround: compute the UInt128 remainder via div/mul/sub. Direct
+# rem(UInt128, UInt128) still errors for large dividends, while mixed
+# UInt128/Int rem can enter user-exported promote_rule fallbacks and
+# recurse. (Issue #9770; Issue #9333)
+q = div(n, b)
+d = n - q * b
+```
+
+**Impact:** `string(n::Integer; base=..., pad=...)` stays in Pure Julia and
+handles full-width `UInt128` values by using the already validated small base
+as a `UInt128` divisor for `div`, then deriving the digit remainder with
+`n - q * b`. This matches the observable digit conversion behavior, but the
+implementation avoids both direct `rem(::UInt128, ::UInt128)` for large
+dividends and mixed `UInt128`/`Int` `rem` dispatch after packages export their
+own `promote_rule`.
+
+**Linked issues:** #9770, #9333
+
+**Resolution path:** Once #9770 fixes `rem(::UInt128, ::UInt128)` for large
+dividends and #9333 fixes promotion fallback isolation, replace the div/mul/sub
+digit remainder with the upstream-shaped integer-to-string helper.
+
+---
+
+## Tests — Generator Trait Matrix Cells Evaluated Through Helpers (W-61)
+
+**File:** `subset_julia_vm/tests/fixtures/generator/generator_trait_matrix_9566.jl`
+
+```julia
+# Workaround: evaluate generated generator cells through function-scope
+# helpers because @testset block scope loses lifted generator body
+# bindings for trait queries (Issue #10137).
+```
+
+**Impact:** The generated #9566 matrix keeps `@testset` grouping, but each cell
+expression is evaluated through a generated helper function instead of directly
+inside the `@testset` block. This preserves the same upstream expression result
+while avoiding the current block-scope lifted-body lookup gap for generator trait
+queries. The workaround is confined to this test fixture generator and does not
+change VM behavior.
+
+**Linked issue:** #10137
+
+**Resolution path:** Once #10137 fixes generator trait queries inside `@testset`
+block scope, regenerate the fixture without per-cell helper functions and remove
+this entry.
+
+---
+
+## VM — Complex{Float64} `*` / `abs2` Fast Path on Abstract `::Complex` Route
+
+**File:** `subset_julia_vm_vm/src/vm/exec/call.rs`, `subset_julia_vm_vm/src/vm/exec/binary_both.rs`
+
+*Resolved by #10530 — the `abs2` side is retired; the `*` side still falls
+back to `CallDynamicBinaryBoth` and normal frame dispatch until the generic
+`Base.*`/`Base.+` bodies can be predecoded. See the Resolved Workarounds
+table below.*
+
+**Linked issue:** #10530
+
+**Resolution path:** `try_complex_f64_resolved_call_fast_path` and
+`try_complex_f64_abs2` were removed. `Base.abs2(::Complex{Float64})` runs
+through the normal `execute_direct_call_fast` →
+`try_execute_typed_scalar_function_call` path because the concrete method
+has a `Struct` parameter and is not a runtime-specialization candidate.
+Generic `Base.*/Base.+` remain out of scope for the typed-scalar path; a
+follow-up Issue tracks making their bodies predecodable.
+
+---
+
+## Base — Rational Raw Allocation Uses a Marker-Token Inner (W-70)
+
+**File:** `subset_julia_vm/src/julia/base/rational.jl`
+
+```julia
+# Workaround: keep raw allocation in a same-name marker-token inner until differently named struct-body helpers can use `new` (Issue #11005).
+```
+
+**Impact:** `Rational{T}` keeps its public two-argument constructor topology
+aligned with upstream dispatch by reserving raw allocation for a private
+three-argument inner constructor whose first argument is an unexported marker.
+`unsafe_rational` supplies that marker after normalization. The extra marker is
+an internal implementation detail and does not alter the public constructor API.
+
+**Linked issue:** #11005
+
+**Resolution path:** Once a differently named helper declared in a struct body
+can use `new`, move raw allocation into the upstream-shaped `unsafe_rational`
+helper and remove the marker type, marker argument, and this entry.
+
+---
+
+## Compiler — Runtime Explicit-Constructor Dispatch Lacks Candidate Bindings (W-71)
+
+**File:** `subset_julia_vm_compile/src/compile/expr/call/constructors.rs`
+
+```rust
+// Workaround: runtime-Any explicit constructor overloads still throw. (Issue #10971)
+```
+
+**Impact:** Explicit parametric constructor overloads dispatch correctly when
+value argument types are statically known. If the value argument is inferred as
+`Any`, sjulia raises a catchable `MethodError` instead of deferring across the
+overload candidates, because the existing runtime typed-dispatch instruction
+cannot attach the selected method's explicit constructor-self bindings.
+
+**Linked issue:** #10971
+
+**Resolution path:** Add a runtime dispatch operand/instruction that carries
+candidate-specific `StaticParamBinding` lists, bind the selected constructor
+self variables after value-signature selection, and add the Issue MWE as a
+fixture before removing this branch/comment.
+
+---
+
+## Compiler — Base Constructor Rows Keep Legacy Callable-Self Identity (W-72)
+
+**Files:** `subset_julia_vm_compile/src/compile/pipeline_ctx.rs`,
+`subset_julia_vm_compile/src/compile/expr/call/constructors.rs`
+
+```rust
+// Workaround: keep Base constructor rows on legacy identity. (Issue #11062)
+```
+
+**Impact:** User-defined explicit and synthesized default inner constructors
+retain their complete callable-self pattern for alias, binder-bound, and
+module-owner identity. Base constructors continue using the projected identity
+path, and synthesized defaults remain user-only; applying either new route to
+Base currently makes value-parameterized carriers such as `SubArray` and
+`HasShape{N}` lose parameters, makes `UnitRange{T}` recursively select itself,
+and causes broad Array/broadcast/Channel stack overflows.
+
+**Linked issue:** #11062
+
+**Resolution path:** Make complete constructor-self identity Base-cache and
+runtime-routing safe, then prove the comprehension MWE plus the full fixture
+and cache-sensitive lanes before removing both comments and this entry.
+
+---
+
+## Bundled StaticArrays — SMatrix Constructor Chain Avoids Splat-Forwarding Into A Value-Parameter Curly (W-74)
+
+**Files:** `subset_julia_vm/packages/StaticArrays/src/SMatrix.jl`
+
+```julia
+# Workaround: pass `xs`/`xs[1]` as a single Tuple argument rather than
+# re-splatting `xs...` forward — splatting a vararg collection into a
+# runtime type-application curly whose trailing slot is a value
+# expression fails to resolve the expression (Issue #11539). (Issue #11539)
+```
+
+**Impact:** `SMatrix{M,N,T}`'s outer constructor forwards to the
+fully-parameterized `SMatrix{M,N,T,L}` constructor by passing the collected
+`xs`/`xs[1]` vararg tuple as a single positional argument, rather than the
+leaner `SMatrix{M,N,T,length(xs)}(xs...)` re-splat form. Both forward the
+same values and produce identical results; the non-splat form costs one
+extra internal single-tuple unwrap/re-dispatch hop per `SMatrix` construction
+call, slightly deepening the sjulia call stack for the many `SMatrix` values
+built through deep interpreter call chains (e.g. Interact/Plots pipelines).
+
+**Linked issue:** #11539 (discovered while implementing #11432)
+
+**Resolution path:** Fix runtime type-application resolution so a splatted
+vararg forward (`Type{...,expr}(xs...)`) resolves a trailing value-parameter
+expression the same way the non-splat form (`Type{...,expr}(xs)`) already
+does, then switch `SMatrix{M,N,T}`/`SMatrix{M,N}` to splat-forward and remove
+this entry and comment.
+
+---
+
+## Base — ParseError Keeps An Explicit Field Constructor Under A Nested Same-Leaf Type (W-75)
+
+**File:** `subset_julia_vm/src/julia/base/error.jl`
+
+```julia
+# Workaround: keep the Base-owned two-field constructor explicit so a same-leaf JuliaSyntax.ParseError does not hide the cached default. (Issue #10445)
+ParseError(msg::AbstractString, detail) = new(msg, detail)
+```
+
+**Impact:** `Base.ParseError` spells out the ordinary two-field inner
+constructor that upstream receives implicitly. Runtime behavior and dispatch
+remain the same, but the explicit row prevents the newly restored nested
+`JuliaSyntax.ParseError` detail type from hiding Base's cached default
+constructor in sjulia's still-partially bare-name constructor tables.
+
+**Linked issue:** #10445 (reconfirmed while implementing #11572)
+
+**Resolution path:** Once constructor-family lookup is owner-scoped for cached
+synthetic defaults as well as explicit inner allocation targets, remove the
+explicit constructor and prove both the #10445 same-leaf MWE and the
+`test_exception_types.jl` / `exceptions_parseerror_detail_11572.jl` fixtures.
+
+---
+
+## Tests — Evaluate `@isdefined` Before `@assert` (W-77)
+
+**File:** `subset_julia_vm/tests/fixtures/types/runtime_nominal_control_flow_11654.jl`
+
+```julia
+# Workaround: evaluate @isdefined outside @assert until nested macro expansion is supported (Issue #11677)
+for_a_defined11654 = @isdefined for_a11654
+@assert !for_a_defined11654
+```
+
+**Impact:** The #11654 parity fixture stores each `@isdefined` result before
+asserting it. This preserves the same boolean check as upstream Julia but does
+not directly exercise an `@isdefined` macro nested inside `@assert`, which
+sjulia currently rejects during lowering.
+
+**Linked issue:** #11677
+
+**Resolution path:** Once #11677 supports nested macro expansion inside
+`@assert`, inline both `@isdefined` calls into their assertions and remove this
+entry.
+
+---
+
+## Bundled StaticArraysCore — SMatrix Constructor Chain Avoids Splat-Forwarding Into A Value-Parameter Curly (W-76)
+
+**Files:** `subset_julia_vm/packages/StaticArraysCore/src/types.jl`
+
+```julia
+# Workaround: pass `xs`/`xs[1]` as a single Tuple argument rather than
+# re-splatting `xs...` forward — splatting a vararg collection into a
+# runtime type-application curly whose trailing slot is a value
+# expression fails to resolve the expression. (Issue #11539)
+```
+
+**Impact:** `SMatrix{M,N,T}`'s outer constructor forwards to the
+fully-parameterized `SMatrix{M,N,T,L}` constructor by passing the collected
+`xs`/`xs[1]` vararg tuple as a single positional argument, rather than the
+leaner `SMatrix{M,N,T,length(xs)}(xs...)` re-splat form (the same shape
+Issue #11539 documents for bundled StaticArrays' independent `SMatrix`, PR
+#11543). Both forward the same values and produce identical results; the
+non-splat form costs one extra internal single-tuple unwrap/re-dispatch hop
+per `SMatrix` construction call.
+
+**Linked issue:** #11539 (discovered while implementing #11432; re-applied
+here for the separate, independent StaticArraysCore package while
+implementing #11542)
+
+**Resolution path:** Fix runtime type-application resolution so a splatted
+vararg forward (`Type{...,expr}(xs...)`) resolves a trailing value-parameter
+expression the same way the non-splat form (`Type{...,expr}(xs)`) already
+does, then switch `SMatrix{M,N,T}`/`SMatrix{M,N}` to splat-forward and remove
+this entry and comment.
+
+---
+
+## Base — SubstitutionString Omits 1-Arg `codeunit` And Adds A 1-Arg `hash` (W-78, W-79)
+
+**File:** `subset_julia_vm/src/julia/base/strings/util.jl`
+
+```julia
+# Workaround: upstream also defines 1-arg `codeunit(s::SubstitutionString) =
+# codeunit(s.string)` (the code-unit *type* query), but sjulia's codeunit
+# builtin rejects the 1-arg form at compile time, so it is omitted here
+# (Issue #11751).
+...
+# Workaround: the 1-arg method is needed because sjulia's `hash(x)` is the
+# `_hash` builtin and does not forward through 2-arg dispatch like upstream's
+# `hash(x) = hash(x, zero(UInt))` (Issue #11754).
+Base.hash(s::SubstitutionString) = hash(s.string)
+```
+
+**Impact:** The SubstitutionString AbstractString surface (Issue #10735)
+diverges from the upstream base/regex.jl method set in two spots: the 1-arg
+code-unit-type query is missing (W-78), and an extra 1-arg `hash` method exists
+that upstream gets generically (W-79). Behavior for all fixture-covered
+operations matches upstream.
+
+**Linked issues:** #11751 (1-arg `codeunit` unsupported), #11754 (1-arg `hash`
+does not forward through 2-arg dispatch)
+
+**Resolution path:** When #11751 lands, add the upstream 1-arg `codeunit`
+method; when #11754 lands, delete the 1-arg `hash` method. Re-run the
+`regex_substitution_string_abstractstring_10735` fixture both times.
+
+---
+
+## Tests — SubstitutionString Fixture Hoists Literals Out Of Macro Arguments (W-80)
+
+**Files:** `subset_julia_vm/tests/fixtures/regex/substitution_string_abstractstring_10735.jl`,
+`subset_julia_vm/tests/fixtures/regex/match_findnext_index_errors_10736.jl`
+
+```julia
+# Workaround: regex and s"..." literals are hoisted to variables because inside
+# a macro call argument an r"..." fails lowering (Issue #11753) and an s"..."
+# silently degrades to a plain String (Issue #11756).
+...
+# Workaround: the expected repr value is hoisted because an escaped-quote
+# string literal inside a macro call argument is mangled (Issue #11757).
+```
+
+**Impact:** The #10735 fixture assigns `r"..."` / `s"..."` / escaped-quote
+string literals to variables before using them in `@assert` expressions. The
+asserted values are identical to the inline upstream form; only the macro-arg
+literal-lowering family of gaps is routed around.
+
+**Linked issues:** #11753 (`r"..."` in macro args fails lowering), #11756
+(`s"..."` in macro args degrades to String), #11757 (escaped quotes in macro
+args mangled)
+
+**Resolution path:** As each issue lands, inline the corresponding literal back
+into the assertions and remove the matching comment; remove this entry when all
+three are inlined.
+
+---
+
+## VM — SubString Conversion Uses The String Carrier (W-81)
+
+**File:** `subset_julia_vm_vm/src/vm/convert.rs`
+
+```rust
+// Workaround: preserve the String carrier until SubString has a runtime value (Issue #11783).
+"SubString{String}" => convert_to_string(value),
+// Workaround: accept the String carrier as a converted SubString Union member (Issue #11783).
+```
+
+**Impact:** `convert(SubString{String}, s::String)` can participate in typed
+literal and Union element conversion, preserving the value and the array's
+logical `SubString{String}` element tag. The returned scalar still uses
+sjulia's String carrier, so direct `typeof(convert(SubString{String}, s))`
+cannot yet expose a distinct upstream SubString value.
+
+**Linked issue:** #11783
+
+**Resolution path:** Add a first-class SubString runtime value plus upstream's
+`base/strings/substring.jl` constructors/conversion methods, then delete this
+VM conversion arm and its registry entry.
+
+---
+
 ## Summary Table
 
 | ID | Category | File | Impact | Linked Issue |
 |----|----------|------|--------|--------------|
+| W-81 | VM | `subset_julia_vm_vm/src/vm/convert.rs` | SubString conversion preserves the String carrier until sjulia models distinct SubString runtime values | #11783 |
+| W-80 | Tests | `tests/fixtures/regex/substitution_string_abstractstring_10735.jl`, `tests/fixtures/regex/match_findnext_index_errors_10736.jl` | #10735/#10736 fixtures hoist r"..."/s"..."/escaped-quote literals out of macro arguments until the macro-arg literal-lowering gaps land | #11753, #11756, #11757 |
+| W-79 | Base | `subset_julia_vm/src/julia/base/strings/util.jl` | SubstitutionString defines a 1-arg `hash` because sjulia's `hash(x)` builtin does not forward through 2-arg dispatch | #11754 |
+| W-78 | Base | `subset_julia_vm/src/julia/base/strings/util.jl` | SubstitutionString omits upstream's 1-arg code-unit-type `codeunit` method until the builtin accepts the 1-arg form | #11751 |
+| W-77 | Tests | `tests/fixtures/types/runtime_nominal_control_flow_11654.jl` | Runtime nominal fixture stores `@isdefined` results before `@assert` until nested macro expansion works | #11677 |
+| W-75 | Base | `subset_julia_vm/src/julia/base/error.jl` | Base.ParseError keeps an explicit two-field constructor so nested JuliaSyntax.ParseError cannot hide its cached default row | #10445 |
+| W-74 | Base | `subset_julia_vm/packages/StaticArrays/src/SMatrix.jl` | SMatrix constructor chain passes a single Tuple argument instead of splat-forwarding into a value-parameter curly slot | #11539 |
+| W-70 | Base | `subset_julia_vm/src/julia/base/rational.jl` | Raw Rational allocation uses a private marker-token inner until differently named struct-body helpers can use `new` | #11005 |
+| W-71 | Compiler | `compile/expr/call/constructors.rs` | Runtime-`Any` explicit constructor overloads raise `MethodError` until typed dispatch can carry candidate-specific self bindings | #10971 |
+| W-72 | Compiler | `compile/pipeline_ctx.rs`, `compile/expr/call/constructors.rs` | Complete callable-self metadata and synthesized default rows remain user-only until Base value parameters and UnitRange/Array routes are cache/runtime safe | #11062 |
+| W-76 | Base | `subset_julia_vm/packages/StaticArraysCore/src/types.jl` | StaticArraysCore SMatrix constructor chain passes a single Tuple argument instead of splat-forwarding into a value-parameter curly slot | #11539 |
+| W-66 | VM | `subset_julia_vm_vm/src/vm/exec/call.rs`, `subset_julia_vm_vm/src/vm/exec/binary_both.rs` | Abstract `::Complex` Mandelbrot loops use a Rust fast path for resolved `*` / `abs2` calls until pure-Julia Complex dispatch is fast enough (#10530) | #10530 |
+| W-61 | Tests | `tests/fixtures/generator/generator_trait_matrix_9566.jl` | Generated #9566 matrix evaluates cells through helper functions until `@testset` block-scope generator trait queries keep lifted body bindings | #10137 |
+| W-60 | Base | `julia/base/intfuncs.jl` | `string(n; base=...)` computes the UInt128 digit remainder via `div`/`mul`/`sub` until `rem(::UInt128, ::UInt128)` works for large values and mixed UInt128/Int `rem` no longer falls into user `promote_rule` recursion | #9770, #9333 |
+| W-59 | Tests | `tests/fixtures/dispatch/dispatch_agg_misc_10238.jl` | 3D Array rank dispatch fixture forces runtime dispatch through `Any` until static call resolution preserves `Array{T,N}` rank for `similar` results (former `array_dimension_dispatch.jl`, module-wrapped into the aggregate by #10238) | #9642 |
+| W-58 | Base | `julia/base/checked.jl` | Mixed-type `checked_mul` promotion entry uses the two-variable `px, py = promote(x, y)` form instead of upstream's `checked_mul(promote(x,y)...)` splat one-liner, because the splatted self-recursive call re-dispatches to the same method (StackOverflow) | #9513 |
+| W-55 | Plots | `packages/Plots/src/api.jl` | `@animate`/`@gif` hold the frame counter in a `Ref` and mutate `_anim_counter[]` (a `setindex!`) instead of a plain `_anim_counter += 1`, because under strict file-mode soft scope a plain top-level counter is localized to a fresh loop-local (`UndefVarError`), and the macro runtime rejects `global`/`let` in expansion output | #9476, #9283 |
+| W-53 | Base | `julia/base/io.jl` | `Irrational` singleton (`π`, `ℯ`) `show`/`string` parses the symbol out of `string(typeof(x))` text instead of reading it as a first-class `Symbol` value parameter | #8869 |
 | W-43 | OrdinaryDiffEq | `packages/OrdinaryDiffEq/src/OrdinaryDiffEq.jl` | `ismutable(u) ? copy(u) : u` inline instead of `SciMLBase._copy_state(u)` because qualified cross-module dispatch fails to select the `AbstractVector` method (all `sol.u` entries aliased to final state) | #8104 |
 | W-39 | JSXGraph | `packages/JSXGraph/src/api.jl` | `board` bounding-box array typed explicitly as `Float64[]` to prevent `Memory{Int64}` specialization from the integer defaults colliding with Float64 call-site args | #8072 |
 | W-35 | OrdinaryDiffEq | `packages/SciMLBase/src/SciMLBase.jl`, `packages/OrdinaryDiffEq/src/OrdinaryDiffEq.jl` | `Tsit5` + `solve(::ODEProblem, ::Tsit5)` live in SciMLBase (facade re-exports `Tsit5`) so the alg registers on `SciMLBase.solve`, since sjulia cannot extend another module's function | #8052 |
@@ -675,6 +1166,24 @@ completeness by #7818):**
 
 | PR | Issue | Description |
 |----|-------|-------------|
+| pending | #9342/#11481 | Complex `sqrt(conj(...))` W-54 removed: the builtin `sqrt` compiler path now emits filtered runtime typed dispatch plus the builtin fallback whenever the operand is not statically proven to be a primitive real numeric value. `asin`/`acos`/`acosh` use the upstream-shaped `sqrt(conj(w))` expressions again, and exact runtime `Complex{T}` values are no longer dependent on a hard-coded constructor inference result. Regression: `complex_inverse_trig_8813`, `constructor_return_exact_or_any_11436`. |
+| pending | #11432 | IFS sample unparameterized-`SMatrix` field annotation (W-73) removed: bundled `StaticArrays.SMatrix` now declares the upstream fourth length parameter (`struct SMatrix{M,N,T,L} <: StaticMatrix{M,N,T}`, `L == M*N`), matching the canonical `StaticArraysCore` alias shape. `SMatrix{M,N,T}` (and narrower spellings) stay constructible via incomplete parameterization — sjulia's existing partial-`UnionAll`-application dispatch already generalizes to the added trailing parameter, so no other `StaticArrays` dispatch site needed a signature change. Two Rust-side fast paths that recognize `SMatrix` by parsing its display-name string had to be updated for the new `"SMatrix{M, N, T, L}"` shape: `try_make_static_array` (`subset_julia_vm_vm/src/vm/exec/struct_ops.rs`, the small-array inline-representation intercept) and the `StaticArrayInlineData`/`StaticRealValue` type-name tables and `elem_type_str` element-type extractor (`subset_julia_vm_bytecode/src/value/static_real.rs`) — both previously assumed exactly three curly parameters. `W::SMatrix{2,2,Float64,4}` restored in all three synchronized IFS sample copies. Regression: `static_arrays_smatrix_four_param_11432`. |
+| #11012 | #10969 | Caller type-binding forwarding W-67 removed: constructor-self family is serialized with each `MethodTable`, and dynamic constructor selection searches the sibling explicit-parametric outer table for both user and cached Base methods. Cached `Rational{T}` normalizes `2//4` to `1//2`; struct-backed UnitRange/StepRange indices are handled through the `AbstractRange` protocol (#10970). |
+| pending | #10298 | WeakKeyDict array-key assertion workaround (W-63) removed: expression inference now treats an array-valued index as proving an array result only when the receiver is known to be array-like. Custom `getindex` receivers remain dynamic, so `wkd[array_key] == "ARRAY-KEY"` executes runtime equality instead of folding to `false`. Regression: `ref_weakref_finalizer_weakkeydict_8990`. |
+| pending | #10261 | W-65 retired: dependent bounds now reference the same owner-scoped runtime TypeVar objects (`B.ub === A`, `C.ub === B`), and `_typejoin_subst_dependent_bound` substitutes by direct `===` identity. The whole-result subtype guard remains as a general fail-closed check. Regression: `types_typejoin_dependent_bound_name_collision_10252`. |
+| pending | #10530 | Complex{Float64} `*` / `abs2` resolved-call fast path (W-66) retired: `try_complex_f64_resolved_call_fast_path` and `try_complex_f64_abs2` removed. `Base.abs2(::Complex{Float64})` runs through the normal `execute_direct_call_fast` → `try_execute_typed_scalar_function_call` path; the concrete method has a `Struct` parameter and is not a runtime-specialization candidate, so no guard bypass was needed. Generic `Base.*/Base.+` still fall back to `CallDynamicBinaryBoth` and normal frame dispatch until their bodies can be predecoded (follow-up Issue). Regression: `mandelbrot_tests`, `benchmarks/mandelbrot_bench_untyped.jl`. |
+| pending | #10631 | Partition-destructuring fixture workaround (W-69) removed after tuple equality began recursively comparing array-valued elements across concrete element-type differences. Regression: `flat_nonliteral_destructure_ir_10464` now directly compares the yielded chunk tuple with `([1, 2], [3, 4])`. |
+| pending | #10558 | Zero-argument concrete-type `Core.apply_type` workaround (W-68) removed: `Core.TypeName.wrapper` now projects the generic struct or abstract-type `UnionAll` needed by `typejoin`, and `Core.apply_type(concrete)` consistently raises `TypeError`. Canonical `wrapper === original_wrapper` identity remains open under #10558. Regression: `types_apply_type_dynamic_splat_10191`. |
+| pending | #10191 | Dynamic-base `Core.apply_type` splat workaround (W-64) removed: `ApplyTypeDynamicSplat` expands the complete call-argument splat mask, selects the base after flattening (#10555), and applies the remaining flat parameter list to the runtime `UnionAll` with bound/arity/concrete-base validation (#10554), so `typejoin` now uses the upstream-shaped `Core.apply_type(wrapper, subst...)` directly. Regression: `types_apply_type_dynamic_splat_10191`, including negative parity cases and a 17-parameter wrapper. |
+| pending | #10242 | Test macro `__test_*`-prefixed quote-internal names (W-67) removed: `collect_introduced_vars` (`subset_julia_vm_lowering/src/lowering/expr/quote/handlers.rs`) now has an `ExprHead::Try` arm that registers the `catch` variable as a hygiene-renamed local (gensym'd) the same way `local`/assignment targets already were, closing the gap where the static stdlib-macro quote expansion left `catch e` unrenamed. `Test.@test`/`@test_throws`/`@test_broken` in `julia/stdlib/Test/src/Test.jl` reverted to natural names (`result`, `threw`, `e`, ...); the renamed catch variable can no longer collide with a same-named user/global (e.g. `Base.MathConstants.e`). Regression: `tests/testset_exit_code_8191_tests.rs::test_macro_catch_variable_does_not_shadow_user_e_10242`, `tests/fixtures/stdlib/test_errored_expr_10093.jl`, and the new `tests/fixtures/stdlib/test_catch_hygiene_10242.jl`. |
+| pending | #10208 | `Test.@test` nested if/else workaround (W-66) removed: the static stdlib-macro quote expansion (`lowering/expr/quote/code_generation.rs`, `handlers.rs`) and the nested-macro-calling-macro path (`lowering/expr/macros/nested.rs`) both gained `Expr(:elseif, ...)` handling — the wrapped `Expr(:block, condition)` unwraps through the existing single-statement block handling, and the clause lowers identically to a plain `if` nested in the parent's else-branch position, matching upstream's `elseif` desugaring. `Test.@test`'s errored-outcome expansion restored the natural `if/elseif/else` form. Regression: `lowering::expr::macros::nested::tests::test_qctc_if_*` / `test_qctc_elseif_*` (unit), `testset_exit_code_8191_tests.rs` (`errored_test_does_not_propagate_and_flags_failure_10093`, `nonbool_test_records_errored_outcome_10093`) exercise the restored `elseif` chain end-to-end. |
+| pending | #10164 | Batched prelude doc-registration filter (W-62) removed: `Lowering::lower_source_file_inner` now captures a top-level docstring into `pending_doc` the same way `LoweringWithInclude::lower_source_file_inner` already did, so both lowering paths agree and `merge_program_fragment_into` no longer needs to filter `__sjulia_doc_*` statements back out of the batched per-file prelude. A shared second bug was fixed alongside it: neither lowering path's `ConstStatement` arm called `push_doc_registration`, so a docstring preceding a top-level `const` (e.g. Base's `VERSION`) leaked past the const into whatever later definition consumed `pending_doc` next instead of documenting the const itself. A blanket `if is_docstring_target_kind(kind) { pending_doc = None; }` safety net closes the same bug class for the remaining docstring-target kinds whose arms still don't call `push_doc_registration` (non-`const` type-alias `Assignment`, the plain-`Assignment`/`MacroCall` catch-all, `@kwdef`) — no occurrence currently exists in Base source, but a leftover docstring there is now dropped instead of risking misattribution. Base's own docstrings (`Val`, `Exception`, `BoundsError`, `VERSION`, etc.) are now registered and retrievable via `@doc`. Regression: `lowering::tests::lower_source_file_captures_top_level_docstring_10164` (unit), `lowering::tests::dangling_docstring_before_plain_assignment_does_not_leak_to_next_definition_10164` (safety net, red/green verified), `pipeline::tests::prelude_batched_lowering_matches_whole_text_lowering_10119` (parity, now with real doc-registration content instead of both sides filtered), `macros_base_docstring_registration_10164` (fixture). |
+| pending | #9782 | String keyword-default workaround (W-61) removed: HOF/callback dispatch and generator-fused composed calls now bind keyword defaults through the regular `bind_kwargs_defaults` path before entering methods such as `string(n::Integer; base=10, pad=1)`. Regression: `hof/builtin_as_hof_argument.jl`, `hof/hof_arity_resolution.jl`, and `generator/map_over_eager_generator_5138.jl` cover `map(string, ...)`. |
+| pending | #9533 | Varargs `hypot` W-56 restored to upstream's `float.(promote(x, y, xs...))` spelling after tuple-only broadcast began materializing `Tuple` results instead of `Vector`/`BitVector` or unary tuple-literal MethodError. Regression: `broadcast/tuple_materialize_shape_9533.jl`. |
+| pending | #9460/#9564 | VersionNumber show-form workaround (W-57) removed: the VM records `Base.print(io::IO, ::T)` methods separately from `Base.show(io::IO, ::T)`, print paths prefer print methods and fall back to show, and display registry keys now feed candidate lists into runtime method specificity instead of overwriting duplicate keys. Regression: `version/prerelease_show_9371_9372.jl`, `io/print_show_dispatch_split_9460.jl`, `io/display_registry_method_dispatch_9564.jl`. |
+| pending | #8848 | `Vector{Any}` erased-element dispatch (W-52) restored to full array invariance: the two explicit `if matches!(pattern_elem, …Any) { return true; }` exception blocks in `comparison.rs` and `core_match.rs` were removed, and the six sjulia Base methods in `set.jl` (`union`, `intersect`, `setdiff`, `symdiff`, `unique`, `unique(f,…)`) widened from `Vector{Any}` to `AbstractVector`; the three redundant `Vector{Any}` rotation overloads in `array.jl` removed (already covered by `Array` / generic fallbacks). `Vector{String} <: Vector{Any}` is now correctly false in dispatch (Issue #8848 fixed). Regression: `dispatch_vector_any_erased_element_invariance_8848`. |
+| pending | #8539 | HCubature dimension-via-`length(a)` (W-51) restored to the direct `where`-clause value parameter: `cubrule(N, T)`, `if N == 0`, `fill(1, N)`, and the `1:N` odometer loop now use `N` from the `SVector{N,T}` signature. Two compile positions were fixed: (a) a call argument whose static type is `DataType` but whose expression is a bare type-parameter variable no longer compiles to a guaranteed `ThrowMethodError` on a static dispatch miss — it routes to runtime typed dispatch, where `bind_type_params` has already bound the integer value (Issue #6625); (b) `compile_expr_as(…, I64)` accepts `DataType -> I64` via `DynamicToI64` (pass-through for the runtime `I64`, runtime error for a genuine type object — matching Julia's runtime MethodError timing for e.g. `1:Float64` range endpoints and `Vector{T}(undef, N)` dims). Regression: `types_value_type_param_positions_8539`, `packages_hcubature_ndim_8524`, `packages_hcubature_smoke_8506`. |
+| pending | #8516 | DataStructures `BinaryMaxHeap` W-50 helper removed: qualified explicit parametric constructors now fall back from `Module.Type{T}` to the short constructor method table when the module-defined parametric struct has inner constructors, dotted type arguments stay static, and `typeof(local)` folds to a static type argument when the local has a known concrete type. `DataStructures.BinaryMaxHeap{T}()` and HCubature's upstream-style `DataStructures.BinaryMaxHeap{typeof(firstbox)}()` now dispatch to the Julia constructor method directly. Regression: `packages_data_structures_binary_max_heap_8509`, `packages_hcubature_smoke_8506`. |
 | pending | #8435 | `retry(f; check=...)` now uses upstream-style `rethrow()` again when `check` rejects a retry. Direct `rethrow()` calls compile to the VM `RethrowCurrent` primitive before the documented Base stubs can win method dispatch, and catch blocks keep the caught exception available after `ClearError` so nested catches propagate to the outer handler. Regression: `exceptions_rethrow_nested_8435`, existing `exceptions/rethrow.jl`, and `retry_8371`. |
 | pending | #8313 | Imported bare-name dispatch for exported parametric inner constructors now tries the visible qualified module constructor chain (`M.T`) before unqualified dispatch. The milestone fixture `milestone55_imported_parametric_inner_constructor_8313` covers `using .M; Perm([1,2,3])` selecting the imported inner constructor. |
 | pending | #5005 | `isdefined` (W-07) restored to upstream two-method form: `isdefined(m::Module, ::Symbol)` and `isdefined(x, ::Symbol)` are now separate methods instead of one method branching on `isa(x, Module)`. A `::Module`-typed parameter now wins dispatch specificity over an untyped parameter, so the dedicated module method is selected (verified: `g(m::Module,::Symbol)` beats `g(x,::Symbol)` for `g(Base, :sin)`). Retired under the #7812 / #7816 audit. Regression: `reflection::` category. |

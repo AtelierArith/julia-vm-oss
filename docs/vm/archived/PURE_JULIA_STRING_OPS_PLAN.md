@@ -207,5 +207,5 @@ end
 ## 参考資料
 
 - Julia 公式実装: `julia/base/strings/util.jl`
-- 現在の Rust 実装: `subset_julia_vm/src/vm/builtins_exec.rs`
+- 現在の Rust 実装: `subset_julia_vm_vm/src/vm/builtins_exec.rs`
 - Pure Julia 文字列関数: `subset_julia_vm/src/julia/base/strings.jl`

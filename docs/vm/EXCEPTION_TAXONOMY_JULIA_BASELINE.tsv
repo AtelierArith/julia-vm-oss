@@ -1,0 +1,34 @@
+# Julia-layer exception-taxonomy ratchet (Issue #11146, Phase 2a of #10813).
+#
+# Each row: a pure-Julia source file under subset_julia_vm/src/julia/ that still
+# raises a Julia exception class by NAMING it in an `error("<Class>: ...")`
+# message — which throws an `ErrorException`, so `typeof(caught)` contradicts the
+# message and an `isa`-dispatching `catch` takes the wrong branch. The same
+# defect the Rust-side funnel (VmError::exception_class) makes impossible.
+#
+# The message-only classes (ArgumentError, DimensionMismatch — 64 sites) were
+# converted to `throw(<Class>("msg"))` in Issue #11146; their rendered output is
+# byte-identical (ErrorException's showerror prints the bare message, so the
+# "<Class>: " prefix was already doing the class's job in text only).
+#
+# The classes below need CONSTRUCTOR ARGUMENTS the raise site does not currently
+# carry (`BoundsError(a, i)` wants the container and the index; `DomainError(val,
+# msg)` the offending value; `InexactError(func, args)` the conversion), so they
+# are a mechanical-but-not-trivial retirement tracked as a follow-up rather than
+# smuggled into the funnel PR.
+#
+# Issue #11146 also retired the 2 DomainError sites in base/range.jl's LogRange
+# constructor (10 -> 8): upstream raises DomainError there, and the fixture that
+# asserted ErrorException was wrong in the same direction, so both were fixed.
+#
+# RATCHET: check_exception_taxonomy_funnel.sh fails if any count GROWS or a new
+# file appears. It never passes on an increase — the divergence count cannot
+# drift back up silently while the retirement is pending.
+#
+# file	count	classes	issue
+subset_julia_vm/src/julia/base/subarray.jl	31	BoundsError	#11146
+subset_julia_vm/src/julia/base/range.jl	8	BoundsError	#11146
+subset_julia_vm/src/julia/base/iterators.jl	9	BoundsError	#11146
+subset_julia_vm/src/julia/stdlib/LinearAlgebra/src/LinearAlgebra.jl	5	BoundsError	#11146
+subset_julia_vm/src/julia/base/array.jl	2	InexactError	#11146
+subset_julia_vm/src/julia/base/pair.jl	1	BoundsError	#11146

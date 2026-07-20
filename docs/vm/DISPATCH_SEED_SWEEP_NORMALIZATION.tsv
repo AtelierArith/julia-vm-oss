@@ -1,0 +1,14 @@
+# DISPATCH_SEED_SWEEP_NORMALIZATION.tsv — Issue #11474
+#
+# Fixtures whose output is INTENTIONALLY nondeterministic across processes
+# for reasons unrelated to HashMap/HashSet seed behavior, with the narrow
+# normalization scripts/dispatch_seed_sweep.sh applies before hashing.
+# Columns (tab-separated): fixture-path <TAB> normalization-kind
+#
+# Kinds:
+#   elapsed-time  mask sjulia @time's "  <float> seconds" line only
+#
+# The sweep FAILS on entries whose fixture no longer exists or whose kind is
+# unknown, so this registry cannot go stale silently. Exit status and all
+# semantic output remain covered for every listed fixture.
+subset_julia_vm/tests/fixtures/closures/time_block_closure_capture_6288.jl	elapsed-time

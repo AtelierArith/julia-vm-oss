@@ -1,0 +1,17 @@
+# Intentional per-surface omissions for scripts/check_sample_body_consistency.sh (Issue #9278).
+#
+# The audit treats the iOS .jl resource as canonical and compares sample BODIES
+# across surfaces (iOS .jl / iOS Swift `code:` fallback / mobile .jl). A surface
+# that is simply MISSING a sample produces a WARN; a row here suppresses that
+# warn and records the omission with a linked Issue. Body MISMATCHES are never
+# allowlistable — they always FAIL (fix the surface to match the iOS .jl).
+#
+# Columns (tab-separated):
+#   id       samples.json id (must exist in the iOS catalog)
+#   surface  which surface omits it: mobile | swift
+#   issue    #NNNN tracking the decision to add it or keep it omitted
+#   reason   short human note
+#
+# Web (web/samples_ir.js) stores lowered IR, not raw .jl, and is intentionally
+# out of scope for the body-diff gate — it is not represented here.
+id	surface	issue	reason

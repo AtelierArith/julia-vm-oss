@@ -1,8 +1,626 @@
 # 未実装機能一覧
 
-**最終更新**: 2026-06-30. 未実装および残スコープは下の日付別「最新対応」セクションを正とし、先頭メタデータには長い issue 要約を重複させない。
+**最終更新**: 2026-07-19. 未実装および残スコープは下の日付別「最新対応」セクションを正とし、先頭メタデータには長い issue 要約を重複させない。
 
 > 実装済みの機能は [STATUS.md](./STATUS.md) と [DONE.md](./DONE.md) を参照してください。
+
+## 最新対応 (2026-07-19)
+
+### top-level control-flow nominal definitions の残スコープ (Issue #11654)
+
+top-level から到達する `if` / `for` / `while` / `try` 内の non-parametric
+`struct`、`abstract type`、`primitive type`、`@enum` は、compile-time hoist
+ではなく inert bytecode template として保持し、実行が宣言位置へ到達した時だけ
+VM registry と lexical module binding を publish するようになった。未到達 branch / zero
+iteration は未定義のまま、親型不在は `UndefVarError` として catch 可能かつ
+non-publishing、非型の親・未解決 field type・不正 primitive width も mutation 前に
+catchable error として検証する。到達型は同じ入力の後続 method signature から参照でき、
+REPL は到達した定義だけを次 eval の compiler snapshot に採用する。
+後続の distinct root nominal declaration と混在する入力では registry ID を予約し、
+fresh/full compile でも実測 registry start ID から activation prefix を検証する。
+runtime site ID は rebase 済み definition chronology を使い、runtime enum を含む
+live delta は enum registry rollback transaction を必ず開始する。4 family とも
+source-order activation を維持する。parity fixtures:
+`types_runtime_nominal_control_flow_11654`、
+`types_runtime_nominal_control_flow_edges_11654`。
+
+残スコープは次の独立 Issue に限定する。
+
+- #11678: control-flow 内 parametric struct の explicit constructor activation。
+- #11683: 到達 runtime nominal と未到達 root nominal の間で uncaught error が出た
+  REPL input の exact-prefix recovery / registry ID remap。
+- #11697: `x::typeof(1)` のような runtime-computed field annotation を宣言時に
+  評価して layout/reflection へ採用する。現状は誤った `Any` publish を避け、到達時に
+  catchable `NotImplemented` として non-publishing にする。
+
+### REPL full-recompile retirement の残スコープ (Issue #9784)
+
+通常の lambda/HOF、do-block、generator body/predicate helper は activation
+index set による live install と exact-prefix recovery を実装済みのため、
+full-recompile の残スコープから外す。
+
+今後も fail-closed fallback に残るのは Base/preload-owned method extension、
+parametric / inner-constructor / redefined type、package module、inner `using` /
+`import`、module-level macro/type alias、`baremodule`、non-mirrorable module
+binding、opaque runtime `eval`、および完全な target/alignment surface を
+構造的に証明できない将来の helper lowering 形。これらを live
+transaction へ移した後、global 再注入・蓄積 definition・module mirror を
+削除するまで #9784 は open のままとする。
+
+## 最新対応 (2026-07-18)
+
+### REPL live definition transaction の残スコープ (Issue #9784)
+
+新規 Main abstract type、非 parametric primitive type、`@enum` は Issue #11635
+の修正で source-order live activation、後続 eval の held-VM 再利用、catchable
+error 後の exact-prefix recovery まで実装済みとなったため、未実装一覧から外す。
+
+Issue #9784 に残るのは、parametric / inner-constructor struct、既存 type の
+redefinition、Base/preload-owned method mutation、module / `using` / `import` /
+macro / type alias / `baremodule`、opaque runtime `eval` を同じ構造的 transaction
+へ載せる作業と、それらの完了後に full-recompile fallback の再注入・host mirror
+を削除する作業。未対応形は silent shortcut を使わず、従来どおり保守的な full
+recompile へ送る。
+
+## 最新対応 (2026-07-12)
+
+### Dict-op loops in the typed-loop recognizer (Issue #10560) — measured, not implemented
+
+Split from #10477 scope item 3: `haskey`/`getindex`/`setindex!` over `Dict`
+inside a recognized loop. Investigated and measured, but not implemented this
+round.
+
+Measurement (`benchmarks/dict_typed_loop_bench.jl`, verified against upstream
+`julia`; release-fast, same binary, min timing): a `d[k] = get(d, k, 0) + 1`
+histogram loop over 100,000 iterations takes 18.3s, a `haskey(d, k)` loop
+10.4s, and a `d[k]` (getindex) lookup loop 13.8-14.9s, versus 0.2s for an
+equivalent plain-scalar typed loop of the same iteration count — Dict
+operations are **50-90x slower** than the interpreter's own scalar typed-loop
+path today. The overhead is NOT hashing (`hash()` is already a Rust builtin)
+but interpreter dispatch cost through `get`/`setindex!`/`haskey`'s
+multi-level pure-Julia call chain in
+`subset_julia_vm/src/julia/base/dict.jl` (`ht_keyindex2!`, `_setindex!`,
+`hashindex`, ...). So unlike the String case (#10559, 2-4.5x), the *potential*
+win here is large — this is a real, not speculative, opportunity, deferred
+for structural reasons below, not because the win is small.
+
+Blockers:
+
+1. **No slot class exists** for a generic `Value::StructRef` local in the
+   typed-loop IR. A `Dict` local is rejected at the very first instruction
+   that touches it (`SJULIA_TYPED_LOOP_DEBUG=1` shows
+   `unsupported-instr:LoadSlotStruct`). Array (`ArrayRef`) and String
+   (`Rc<str>`) have dedicated `Value` variants with dedicated typed-loop slot
+   classes (`array_slots`/`str_slots`); Dict does not — it was deliberately
+   migrated off `Value::Dict` onto pure-Julia `StructRef` dispatch in Issue
+   #6731, so there is no native Rust Dict representation left to bridge from.
+2. Two implementation strategies were considered and both rejected for this
+   round:
+   - **(a) Reimplement the linear-probe/rehash hash-table algorithm natively
+     as new Rust `TypedLoopOp`s.** Rejected: this violates design principle 3
+     ("Pure Julia First — avoid new Rust intrinsics") and reverses #6731's
+     deliberate migration to a single pure-Julia source of truth for Dict
+     semantics. It would create a second implementation of probing/rehashing
+     that must never diverge from `dict.jl` — exactly the maintenance risk
+     #6731 eliminated.
+   - **(b) Inline the actual `dict.jl` bytecode** (`get`/`setindex!`/`haskey`/
+     `ht_keyindex`) into the typed loop via generic struct-field load/store +
+     generic `Memory{T}` load/store typed-loop ops. Architecturally sound
+     (keeps `dict.jl` as the single source of truth) but needs prerequisite
+     typed-loop IR capabilities that do not exist yet: no generic struct-field
+     slot class, no generic `Memory{T}` ops (today's array bridge is specific
+     to the `Vector{T}`-from-`x[i]`-syntax shape), and no nested-loop inlining
+     (`ht_keyindex`/`ht_keyindex2!` are themselves `while true` probing loops
+     nested inside the recognized outer loop — nested-loop nativization is
+     #10477 scope item 5 / tracked at #10561, where a related nested-loop
+     entry-cache idea was already found NOT a net win).
+3. Both paths risk shipping a subtly-wrong hash-table/probe/rehash
+   implementation that silently returns wrong values rather than crashing —
+   the same "silent corruption is worse than not implementing" concern the
+   #10504 bail guard exists to prevent, and it applies to a mismatched read
+   path just as much as to an unsound mutation/bail interaction.
+
+Follow-ups filed: #10743 (generic struct-field / `Memory{T}` load-store ops in
+the typed-loop IR — the shared prerequisite), #10744 (re-attempt Dict-op
+typed-loop recognition once #10743 lands; also specifies deferring
+`setindex!`/mutation transactionality to a later step — reject loops
+containing Dict mutation for the first cut, which is sanctioned by the
+#10504 bail guard's "stay REJECTED or become transactional" rule). Full
+investigation notes:
+`memory/project/project_10560_dict_typed_loop_not_implemented.md`.
+
+## 最新対応 (2026-07-11)
+
+### Qualified `Base.Bottom` / `Base.BitSigned` 等の Base const alias アクセス (Issue #10579)
+
+upstream は非 export の Base const 型 alias にも qualified アクセスできる
+(`Base.Bottom === Union{}`、`Base.BitSigned`)が、sjulia の `Base.X` メンバー
+解決は prelude レベルの const 型 alias を知らず
+`Compilation error: Msg("Base has no function named Bottom")` になる。
+alias table が flat・非 qualified なため。関連: bare 非 export alias の
+Main へのリーク (Issue #10578、`BitSigned` 等 — `Bottom` 自体は #10304 で
+prelude 定義を撤去して解消)。
+
+### struct definition nested in a top-level if/for/while/try body (Issue #10401) — 解決済み
+
+Issue #11654 の runtime nominal template / reached-only publication により解消。
+残る parametric / inner-constructor / REPL error-prefix / same-site identity は
+上記 #11678 / #11679 / #11683 に分離済み。
+
+## 最新対応 (2026-07-10)
+
+## 最新対応 (2026-07-07)
+
+### Invalid UTF-8 byte strings (Issue #8995) — 解決済み
+
+`String(UInt8[0xff, 0x61])` は raw bytes を保持する byte-backed `String` として
+表現できるようになった。`ncodeunits`, `codeunit`, `codeunits` は upstream と同じ byte
+列を観測し、typed string slot でも invalid bytes を replacement character に潰さない。
+再オープン分 (2026-07-16): iterate は upstream の byte-offset state で正確な
+malformed Char (`Value::CharMalformed`) を線形 yield し、getindex / length /
+splat / repr / 等値 / 1引数 isvalid / `'\xff'`・`"\xff"` リテラル / concat・
+`print(io, s)` のバイト保存まで対応済み。stdout 系 sink への print は host
+出力パイプラインが String 型のため replacement character 表示のまま (意図的
+divergence)。`UInt8(::Char)` 等は Issue #11406 として分離。残スコープなし。
+
+## 最新対応 (2026-07-03)
+
+### Quoted macro definitions in quote expressions (Issue #9134) — 解決済み
+
+`quote` body 内の `macro ... end` は upstream 形状の
+`Expr(:macro, signature, body)` に lower されるようになった。AbstractAlgebra.jl
+の `Assertions.jl` include path を塞いでいた
+`quote for macro_definition not yet supported` は解消済み。残スコープなし。
+
+### `MersenneTwister(seed)` random stream diverges from upstream dSFMT (Issue #8998) — 恒久 divergence として文書化
+
+sjulia の `MersenneTwister` は MT19937-64 (`vm/rng.rs`) でバックされており、upstream Julia
+の dSFMT (SIMD-oriented Fast MT、`julia/stdlib/Random/src/RNGs.jl`) とは同一 seed から
+異なるビット列を生成する。実装の完全互換には dSFMT 2.2 + Julia 側の `MTCache` バッファリング
+挙動の完全移植が必要であり、工数が大きいため現時点では対応を保留する。
+
+**divergence の具体例 (seed=42):**
+- upstream Julia: `0.7108238673434464`, `0.0644852510983267`
+- sjulia: `0.755155532954539`, `0.6390313938546974`
+
+デフォルト RNG (Xoshiro256++) と StableRNG は upstream 忠実移植であり影響しない。
+再現性が必要なコードは `StableRNG(seed)` の使用を推奨する。
+
+Fixture `tests/fixtures/stdlib/mersenne_twister_stream_8998.jl` が sjulia の現行ストリームを
+固定しており、意図せぬ変更を検出する。dSFMT 実装時はこの fixture を upstream 値で置き換える。
+
+**補足 (Issue #9265, 解決済み):** #8998 で付記されていた「型指定 rand の別ギャップ」
+(`rand(rng, UInt32)` がエラー、`rand(rng, Int)` / `rand(Int)` が Float/0次元配列を返す) は
+スカラー型指定 rand — `rand([rng], ::Type{T})` — として独立に修正済み。整数/`Bool`/浮動小数点の
+具象型を、リテラル型・実行時型値(型のタプルを走査する等)の双方、明示 RNG とグローバル RNG の
+双方で正しい型で返す。ストリーム値そのものの dSFMT 一致は引き続き本 issue で保留。
+
+### Static unary negation for call-returned structs (Issue #9059) — 解決済み
+
+Call-returned concrete structs now recover their Julia struct type before the
+unary `-` fallback errors, so `Base.:-(::T)` dispatch works for direct call
+operands such as `-sin(x)`. No remaining scope is tracked under #9059.
+
+### MacroTools @assert @capture binding scope (Issue #9055) — 解決済み
+
+Empty-binding begin-style `LetBlock` values no longer restore assignments after
+evaluation, while actual macro-produced `Expr(:let, ...)` blocks keep a
+synthetic scope marker. No remaining scope is tracked under #9055.
+
+### REPL timing macro assignment persistence (Issue #9044) — 解決済み
+
+Assignments nested inside Pure-Julia `@time` macro result capture now persist
+as REPL globals, while ordinary `let` assignments remain local. No remaining
+scope is tracked under #9044.
+
+### Explicit @doc module lowering (Issue #9041) — 解決済み
+
+Explicit doc macrocalls wrapping module or baremodule definitions now lower the
+module target directly, so package module headers no longer fail on
+`quote for module_definition not yet supported`. No remaining scope is tracked
+under #9041.
+
+### Test.@test_throws catch-state recording (Issue #9023) — 解決済み
+
+`@test_throws` now records the thrown case directly from `catch`, so
+catch-scope restoration no longer turns a thrown `DivideError` into a failed
+test. No remaining scope is tracked under #9023.
+
+### Numeric specialization and Rational BigInt predicate parity (Issue #8987) — 解決済み
+
+Specialized `Int64 ^ Int64` calls and `Rational{BigInt}` zero/one predicates
+now match upstream Julia; no remaining scope is tracked under #8987.
+
+### Chained where operator assign-form lowering (Issue #8948) — 解決済み
+
+Operator assign-form definitions such as
+`*(a::Wrap{T}, b::Wrap{S}) where S<:Number where T = ...` now keep the chained
+`where` clauses as separate method type parameters instead of folding `where T`
+into `S`'s upper bound.
+
+### Int64 div signed-min overflow exception parity (Issue #8896) — 解決済み
+
+`div(typemin(Int64), Int64(-1))` now throws upstream-compatible `DivideError`
+instead of aborting the VM through Rust signed-division overflow. The native
+Int128 intrinsic path uses the same checked-division guard.
+
+### Post-typemap dispatch heuristic leftovers (Issue #8999) — 解決済み
+
+The documented leftovers are now either shrunk or retired: `DeferImprecise`
+uses conservative intersection to reject proven-disjoint non-nominal candidates,
+`SJULIA_DISPATCH_COMPARE=1` emits per-verdict counts for future sweeps, and the
+obsolete `resolve_runtime_type_pattern_candidates*()` string-channel runtime
+resolver wrappers were removed after production `CallDynamic*` paths were
+confirmed to use structured `core_signature` candidates. Remaining scoring
+constants still serve deferred ranking and should be retired only under new
+targeted issues with sweep evidence.
+
+### Direct Memory lattice tracking (Issue #9034) — 解決済み (tracking option 実装)
+
+Issue #9034 offered two options — add `Memory{T}` lattice tracking or formalize
+the limitation. The **tracking option is now implemented** (PR #9052):
+`ConcreteType::Memory { element, ndims }` mirrors `ConcreteType::Array`, so
+`ValueType::Memory` / `ValueType::MemoryOf(T)` map to a concrete lattice value
+instead of widening to `LatticeType::Top`. `m::Memory{Int64}` parameter
+annotations now type the slot as `MemoryOf(I64)` (previously `Any`), verified in
+`sjulia_cli_dump_bytecode_tests::direct_memory_user_functions_track_memory_lattice_issue_9034`
+and `bridge::test_memory_values_map_to_concrete_lattice_issue_9034`. Runtime
+behavior is unchanged (`memory_direct_lattice_boundary_9034` fixture). Residual
+precision gap: `Memory{T}(undef, n)` constructor calls and indexed-load *return*
+types still widen to `Any` in the abstract interpreter — the same gap that
+`Array{T}(undef, n)` has — because parametric built-in constructors are not
+inferred; this is a shared Array/Memory follow-up, not Memory-specific.
+
+### MustAlias narrowing for indexed loads and fresh aliases (Issue #9035) — 解決済み
+
+The documented limitations are now formalized as intentional compatibility
+boundaries: upstream Julia 1.12.6 keeps both mutable indexed-load guards and
+fresh aliases after field guards conservative. The
+`type_inference_mustalias_narrowing_limits_9035` fixture pins the expected
+`Union{Nothing, Int64}` inference result and runtime behavior. No remaining
+implementation scope is tracked under #9035; future precision work needs a new
+upstream-compatible MustAlias/ConditionalsLattice design issue.
+
+### Inference limitation tracking audit (Issue #9009) — 解決済み
+
+The two documented-but-untracked inference limitations now have dedicated child
+issues: the now-formalized direct Memory lattice precision boundary (Issue
+#9034), and the now-formalized MustAlias compatibility boundary (Issue #9035).
+No remaining implementation decision is tracked under #9009.
+
+### UB detection layer (Issue #9004) — 初期ゲート実装済み
+
+The initial UB detection layer is in place: unsafe inventory ratchet, focused
+miri smoke, and FFI sanitizer harness. Remaining expansion is incremental:
+audit existing unsafe sites and replace baseline entries with `Safety:`
+comments, then add more focused miri tests for newly audited unsafe-heavy VM
+internals.
+
+### Int64 fld/cld zero-denominator exception parity (Issue #8901) — 解決済み
+
+`fld(::Int64, ::Int64)` and `cld(::Int64, ::Int64)` now route through integer
+`div`/`rem` rounding formulas, so zero denominators throw `DivideError` instead
+of `InexactError`.
+
+### const builtin-operator alias callable globals (Issues #8911, #8907, #8902, #8904) — 解決済み
+
+Top-level const aliases to builtin operator/function values, including
+`const lt = (<:)` and `const is_a = isa`, are now visible as callable globals
+inside user function bodies. On the merged branch,
+`ssa_pipeline_parity_dispatch_issue_8552` also passes again, so #8904's `lt`
+import-resolution failure is no longer an open scope.
+
+### Extended Unicode lexer coverage (Issue #8751) — 解決済み
+
+Emoji identifiers, prime/modifier-letter identifier suffixes, miscellaneous
+Unicode operators, middle-dot aliases, `⁝`, and Julia operator suffix forms
+such as `+̂`, `+̂′`, `+⁽¹⁾`, and `+₍₀₎` now lex and parse in the focused parser
+coverage.
+
+No remaining parser-corpus scope is tracked under #8751. The files that still
+fail after removing the lexer errors now fail on non-lexer `UnexpectedToken`
+syntax families and are tracked under #8759.
+
+### compile→VM bytecode crate split / generic backend IR (Issue #8837) — 一部進捗
+
+`ARCHITECTURE_OVERVIEW.md` now includes the layered crate diagram and explains
+how the current `src/bytecode.rs` and `src/runtime_types.rs` staging facades map
+to the planned `subset_julia_vm_bytecode`, `subset_julia_vm_compile`, and
+`subset_julia_vm_vm` crates. Peephole optimization is now owned by
+`subset_julia_vm_bytecode`. Stack-bytecode finalization ownership now covers
+both peephole optimization and slotization; the crate-internal bytecode facade
+only adapts the remaining VM-owned `KwParamInfo`/`CompiledProgram` shapes during
+the transition.
+The runtime parametric-constructor fallback now uses the
+`runtime_types::parametric` owner for `infer_parametric_type_args`, and
+`ExceptionType` plus `Effects`/`EffectBit` are owned below `compile/`; the direct
+`vm_to_compile` audit baseline remains 0 runtime references plus 4 test-only
+references.
+
+Remaining scope is implementation, not overview documentation: extract the
+bytecode facade into its planned crate without changing serialized bytecode or
+cache enum order, and make the stack and register VM backends lower from one
+shared generic IR.
+
+### Parser additional corpus gaps (Issue #8759) — 一部進捗
+
+The representative #8759 syntax list now parses: named-tuple `for`
+destructuring, inline-semicolon abstract type declarations, `function @main`,
+nested/typed tuple `for` bindings, `;;`, keyword `@nospecialize(type)`,
+operator-suffix imports such as `import Base.<`, range splatting, comma-separated
+`=` bindings including newline-split loop headers, generator comma-bindings, and
+labeled `break` / `continue`. This slice also accepts statement forms inside
+grouped quote/parenthesis contexts, including `:(const ...)`, `:(global ...)`,
+`:(export ...)`, and `(@eval (using ...))`, plus operator-like quoted symbols
+such as `:(.)`, `Base.:(:)`, `:+=`, and adjacent-identifier symbols like
+`:maximum!_fast`. Statement forms now also parse in ordinary expression bodies,
+including short-form function RHS and arrow bodies such as
+`f(a) = for ... end`, `c -> for ... end`, and `() -> global loaded = true`.
+
+The parser corpus allowlist for #8759 was reduced from 96 to 38 entries after
+the representative parser slice, #8751 reattribution, dotted/broadcast operator
+follow-up (`.===`, `.!==`, `.<<`, `.∈`, `.≈`), and type-position postfix
+`where` support, then to 37 entries after tuple-destructuring parameters with
+default values removed `base/regex.jl`, and to 35 entries after adjacent `∘`
+composition forms removed `base/precompilation.jl` and `test/operators.jl`.
+It then fell to 34 entries after Unicode assignment quoted-symbol forms removed
+`stdlib/REPL/test/docview.jl`, and to 33 entries after `≲` comparison operator
+support removed `base/version.jl`, and to 32 entries after qualified parameter
+metadata annotations removed `base/Base_compiler.jl`, and to 31 entries after
+bang-mid field-name support removed `base/sysinfo.jl`, then to 30 entries after
+nested RHS tuple-assignment support removed `base/strings/util.jl`, and to 28
+entries after invalid-byte character literal support removed
+`test/strings/search.jl` and `test/strings/util.jl`, then to 27 entries after
+short `\x` / `\U` character escape support removed `test/char.jl`, and to 25
+entries after ternary then-branch assignment/pair support removed
+`test/project/Rot13/src/Rot13.jl` and `test/sets.jl`, then to 24 entries after
+identifier-suffix juxtaposition support removed `test/rational.jl`. Those
+remaining #8759 entries then fell to 22 after parametric/interpolated primitive
+type support removed `base/Enums.jl` and `test/intrinsics.jl`, then to 20 after
+interpolated `for` binding/import name support removed `base/cartesian.jl` and
+`stdlib/TOML/src/TOML.jl`, and to 18 after function-head type-expression
+parameter support removed `base/iterators.jl` and
+`test/testhelpers/OffsetArrays.jl`, then to 17 after macro comma-newline
+arguments removed `test/llvmcall2.jl`, and to 16 after do-block vararg
+parameter support removed `test/opaque_closure.jl`, then to 15 after
+line-leading binary continuation removed `stdlib/Sockets/src/IPAddr.jl`.
+Removing seven already-clean stale rows from the same allowlist section brings
+it to 8 files, and typed-comprehension newline support removed
+`stdlib/Dates/src/parse.jl`, bringing it to 7 files. Typed trailing ncat
+separator support removed `test/fastmath.jl`, bringing it to 6 files. The
+doc-macro/empty-quote/return-delimiter slice removed `base/shell.jl`, bringing
+it to 5 files. Quoted operator-symbol support removed `base/show.jl`, bringing
+it to 4 files. Local tuple declarations and macrocall comprehension bodies then
+removed `stdlib/Sockets/test/runtests.jl`, bringing it to 3 files. Newline-split
+`for` headers and untyped hvncat separators then removed
+`test/abstractarray.jl`, bringing it to 2 files. Follow-up quoted-name and
+quoted-expression slices then reduced `test/show.jl` from 22 remaining
+divergence records to zero and removed it from the allowlist. The remaining
+#8759 allowlist scope is now `test/syntax.jl`, which still fails on follow-on
+parser families exposed after the initial representative gaps.
+
+## 最新対応 (2026-07-02)
+
+### Float remainder zero-denominator NaN parity (Issues #8895, #8892) — 解決済み
+
+Float-involved `rem` / `mod` / `%` calls now return NaN for zero denominators,
+including `Float64 % Int64(0)` and `Int64 % Float64(0.0)`. Pure integer
+remainder by zero remains `DivideError`.
+
+### Bare tuple expression statements (Issue #8908) — 解決済み
+
+Statement-level comma tails without `=` now parse as tuple expressions, while
+comma tails followed by `=` remain tuple assignments. No remaining parser scope
+is tracked under this issue.
+
+### Parser implicit line continuation corpus gap (Issue #8753) — 一部進捗
+
+The parser now handles the issue's representative `import`, arrow-function,
+`let`, and `return a,\n b` forms, plus split `export` / `public` lists and
+binary / pair operator RHS continuation, multi-line signature defaults, and
+final newlines before closing `)` / `}` in parameter and type-parameter lists.
+It also handles delimited-context ternary continuation before `?` / `:` and
+generator binding continuation after `in` / `=` / `∈`. The remaining #8753
+allowlist entries still need reduction: several are true newline-continuation
+gaps, while others are separate parser gaps exposed by the corpus sweep. The
+separated bare tuple expression statement blocker is resolved under Issue
+#8908.
+
+### Parser minor corpus gaps (Issue #8756) — 解決済み
+
+The parser now accepts the #8756 corpus families that upstream Julia parses:
+`const global`, `function in(...)`, parenthesized `for`/`while` block
+expressions, splatted tuple loop bindings, and const aliases for Unicode
+operators. No remaining parser-corpus scope is tracked under this issue.
+
+### Higher-order print/println show dispatch (Issue #8878) — 解決済み
+
+`print` and `println` used as function values now dispatch through
+user-defined `show(io::IO, ::T)` in `sprint(print, x)`,
+`sprint(println, x)`, and `f = print` / `g = println` IOBuffer calls.
+
+### Module-qualified abstract ancestry collision (Issue #8858) — 解決済み
+
+The fixture harness no longer lets a package-local abstract family share Base
+ancestry just because it has the same bare name. `AbstractAlgebra.Set` remains
+separate from Base `Set`, so `AbstractAlgebra.Integers{BigInt}` is not treated
+as an `AbstractSet` during `show` dispatch.
+
+### `var"..."` non-standard identifier parser compatibility (Issue #8754) — 解決済み
+
+Parser-corpus `var"..."` identifier forms now parse in assignment, call,
+quoted-symbol, module-qualified quoted-field, and function-parameter contexts.
+The parser merges `var"name"` into a full-span `Identifier` leaf and name
+extraction strips the wrapper (`strip_var_quotes`), so lowering, dispatch,
+`struct`/`abstract`/`module` names, `:var"..."` symbols, and `Meta.parse`
+treat it as an ordinary identifier end-to-end. No remaining scope is tracked
+under this issue.
+
+### `where` soft-keyword parser compatibility (Issue #8755) — 解決済み
+
+`where` can now be used as an ordinary identifier outside where-clause
+positions. No remaining parser scope is tracked under this issue.
+
+### `Vector{Any}` erased-element dispatch compatibility (Issue #8848) — 未解決
+
+sjulia still treats a plain `Vector{Any}` method parameter as an erased-element
+catch-all in method applicability: `f(::Vector{Any}); f(["a"])` reaches the
+`Vector{Any}` method, while upstream Julia falls through because array element
+parameters are invariant. Issue #8806 fixed ordinary invariant element slots
+(`Vector{Number}`, nested `Vector{Complex{Real}}`) but preserved this behavior
+as documented workaround W-52 until Base/package broad receiver signatures can
+be audited.
+
+### Function definition named `e` (Issue #8852) — 解決済み
+
+Top-level and method-body calls to a user-defined function named `e` now resolve
+through the user method table instead of loading stale `Base.MathConstants.e`
+global type metadata. The fixture `function_e_name_shadowed_global_8852` covers
+direct calls, wrapper-method calls, and a Float64 overload. A bare ASCII `e`
+without a user binding remains undefined, matching upstream Julia.
+
+### Nested where binding inside parametric slot (Issue #8853) — 未解決
+
+sjulia can select a method such as `nested_where(x::Box{Wrap{T}}) where
+{T<:Number}`, but the method body cannot read `T` and raises
+`UndefVarError(:T)`. Simpler top-level parametric bindings (`Box{T}` and
+`Complex{T}`) work; the gap is recovering a nested static parameter from inside
+another invariant parametric slot for body use.
+
+### Complex Mandelbrot hot loop performance bug (Issue #8796) — 解決済み
+
+`c::Complex` 注釈付き escape loop は runtime specialization と executable block
+recognizer の両方で処理される。#8796 に残スコープはない。
+
+### broadcast HOF Complex escape performance bug (Issue #8797) — 解決済み
+
+`mandelbrot_escape.(C, maxiter)` は runtime callable 経由でも `ComplexF64`
+executable block を利用する。#8797 に残スコープはない。
+
+### Long-session runtime heap growth bug (Issue #8610) — 解決済み
+
+runtime cache 上限と `ExprArgs` cycle guard を実装済み。#8610 に残スコープはない。
+
+### HCubature non-Float64 endpoint support (Issue #8541) — 解決済み / 性能は #8603
+
+The accepted correctness scope for non-Float64 bundled package endpoints is now
+implemented: QuadGK `cachedrule(Float32, 7)` preserves `Vector{Float32}`,
+HCubature's one-dimensional Gauss-Kronrod path uses the floated endpoint scalar
+type, and BigFloat package execution has the required `float`, `sqrt`,
+boxed-array assignment, and StaticArrays copy support. Remaining BigFloat
+cubature runtime cost is not a correctness gap and is tracked separately by
+Issue #8603.
+
+### Fused Int64 global-slot reads inside typed functions (Issue #8598) — 解決済み
+
+`LoadAddI64` / `LoadSubI64` / `LoadMulI64` / `LoadModI64` now read
+module-level globals through the same slot-aware current/global lookup as
+`LoadI64`. No remaining scope is tracked for #8598; the fixture
+`scope_fused_i64_global_slot_8598` guards the affected fused integer ops.
+
+### Partial-return if inference joins implicit tail (Issue #8600) — 解決済み
+
+Non-final `if` statements with only partial explicit returns now preserve the
+fallthrough path as `MaybeReturn`, so later implicit tail values stay in the
+inferred function return type. No remaining scope is tracked for #8600; the
+fixture `type_inference_partial_return_if_implicit_tail_8600` guards the
+behavior.
+
+### Parametric default-constructor reflection re-inference (Issue #8638) — 解決済み
+
+Reflection return-type inference now re-runs the matched body when a fully typed
+method uses a parametric default constructor, and the bytecode fallback now
+recognizes concrete `NewStruct(...); ReturnAny` tails. This recovers constructor
+returns such as `PW9_8638{Float64}`. No remaining scope is tracked for #8638;
+the fixture `reflection_parametric_default_ctor_reflection_8638` guards the
+typed, untyped, and post-execution query paths.
+
+## 最新対応 (2026-07-01)
+
+### Register VM prototype and cross-target measurements (Issue #8448) — 一部進捗
+
+The #8448 design-decision slice is implemented in
+[REGISTER_VM.md](./REGISTER_VM.md): SubsetJuliaVM should pursue a register VM as
+the preferred long-term iOS/WebAssembly interpreter shape, while keeping the
+current stack VM as the default until measurements justify switching. The first
+host-only prototype foundation also exists as `subset_julia_vm::register_vm`,
+covering a small straight-line `Int64` stack-bytecode subset plus local metrics.
+Remaining #8448 scope: lower real compiled fixtures, run at least one fixture on
+host, iOS Simulator, and WebAssembly, and publish bytecode-size,
+dispatch-count, VM-only timing, and frame/register-memory comparisons.
+
+### Precise world-age backedge invalidation (Issue #8442) — 一部進捗
+
+The first #8442 slice is implemented: method mutation invalidation now has an
+explicit callee-to-cache-key backedge index for return-type, partial-struct,
+tentative, limited, and seeded return-cache entries. The index preserves the
+existing precise method-edge signature filtering and prunes expired keys after
+invalidation. Remaining #8442 scope: persist/reuse CodeInstance-like identity
+across the Base cache boundary, replace the `promote_rule`/iterator/dict-view
+Base-cache bypasses with targeted invalidation, and add coverage for method
+deletion if/when deletion is supported.
+
+### SSA IR optimization layer (Issue #8440) — 一部進捗
+
+The SSA pipeline is now the default (Issue #8832 default flip; set
+`SJULIA_SSA_PIPELINE=0` for the legacy path). The durable representation
+(`SsaFunction`/`SsaBlock`/`SsaValue`/`PhiNode`), full optimization passes
+(constant folding/DCE/CSE), phi-copy coalescing, and stack-bytecode lowering
+are implemented. The temporary `ir_opt` bridge (`fold_identical_branch_assignments`)
+has been retired. Remaining scope: lift the opaque-barrier constructs
+(`for`/`try`/closures/destructuring) and the runtime-specializer fallback
+(source-named slots needed).
+
+### Parser default `::Type` argument in where signatures (Issue #8514) — 解決済み
+
+Short-form and block-form signatures such as
+`f(v::Val{N}, ::Type{T}=Float64) where {N,T<:Real}` now parse and run with both
+the omitted default type argument and an explicit type argument.
+
+### Typemap matcher migration (Issue #8438) — 一部進捗
+
+Callable-value dispatch now uses the shared CoreType-native signature matcher
+for `where`-candidate diagonal and explicit-bound gates, so the local
+callable-value diagonal/bounds helper predicates are gone. `Type{Any}` singleton
+matching is also exact in the shared JuliaType/CoreType matchers, so the
+transitional non-exact scoring penalty and duplicate helper predicates are gone.
+Remaining #8438 scope: design the overlay method-table shape, retire the
+production `Bottom` placeholder path, and continue replacing score-first
+selection with an upstream-compatible typemap/morespecific ordering.
+
+### Eliminate hand-coded subtyping and upstream divergence (Issue #8439) — 解決済み
+
+The accepted #8439 scope is implemented: the upstream-comparison subtype
+harness is in place, production dispatch no longer accepts unknown struct names
+as subtypes of arbitrary abstract bounds, and the former
+`morespecific` case-H divergence is inverted to assert upstream parity. Broader
+subtype algorithm unification can continue as future incremental parity work.
+
+### Constant propagation beyond literal arithmetic (Issue #8443) — 解決済み
+
+The accepted #8443 slice is implemented: optimized `f(41)` add-one calls fold
+to an immediate integer return, pure constant tuple returns remain tuple-literal
+bytecode, and literal `typeof` calls fold to static `DataType` objects. Broader
+SSA-IR/interpreter-style constant propagation remains tracked by Issue #8440.
+
+### HCubature full upstream parity (Issue #8524) — n-D 解決済み / non-Float64 は #8541 で解決済み
+
+Generic n-dimensional cubature is now supported (Issue #8524): Genz-Malik point
+generation uses upstream's `combos`/`signcombos` (Combinatorics + gray-code sign
+flips) for any `n >= 2`, endpoint conversion builds `SVector{n,F}` for arbitrary
+`n`, and the adaptive subdivision / `initdiv` loops are dimension-generic
+(`packages_hcubature_ndim_8524` covers 3-D/4-D/5-D integrals and 3-D/7-D
+Genz-Malik evaluation counts). The former non-Float64 endpoint follow-up
+(`Float32`, `BigFloat`) is resolved by Issue #8541; BigFloat cubature
+performance remains tracked by Issue #8603. The `length(a)` dimension
+workaround (W-51) was retired when Issue #8539 fixed value type parameters in
+call-argument and range-endpoint positions.
+
+### `include(...)` eval with `using` statements (Issue #8474) — 解決済み
+
+Runtime eval now accepts the `usingstatement` Expr head produced while
+evaluating included files. `sjulia -e 'println(include("file.jl"))'` works when
+the included file contains `using LinearAlgebra` followed by a final expression.
 
 ## 最新対応 (2026-06-30)
 
@@ -1447,8 +2065,9 @@ display, and dispatch-visible parametric type metadata を AoT runtime/codegen �
 ### AoT parameterized Complex codegen (Issue #6965)
 
 Rust backend の generated `Complex` struct は現時点で `Float64` field layout の
-monomorphic 型である。`Complex` / `Complex{Float64}` / `ComplexF64` / legacy
-`Complex64` はこの layout へ投影するが、`Complex{Float32}` / `Complex{Int64}` など
+monomorphic 型である。`Complex` / `Complex{Float64}` / `ComplexF64` はこの
+layout へ投影するが、upstream に存在しない旧 `Complex64` alias は受け付けない
+(Issue #9695)。`Complex{Float32}` / `Complex{Int64}` など
 non-`Float64` parameterized Complex の static `+` / `-` / `*` は diagnostic gate
 にしている。
 
@@ -1694,7 +2313,7 @@ runtime candidate 選択との相互作用を見ながら段階移行する。
 ### 型表現変換の重複削減 (Issue #5916) — 部分解決
 
 `compile::abstract_interp::engine` に残っていた `LatticeType` / `ConcreteType`
-→ `JuliaType` 変換コピーは正準 `compile::bridge::lattice_to_julia_type` へ
+→ `JuliaType` 変換コピーは正準 `runtime_types::bridge::lattice_to_julia_type` へ
 委譲済み。これで engine 内の戻り型 cache invalidation と `Pair{K,V}` 型名補助は
 同じ bridge を使う。`TypeExpr` → `JuliaType` projection も
 `TypeExpr::{to_julia_type_lossy, substitute_to_julia_type_lossy}` へ集約済みで、
@@ -1927,6 +2546,14 @@ Bundled `Plots` は `heatmap` / `heatmap!` を export し、`heatmap(z)` と
 変換するようになった。matrix z orientation と 2D `aspect_ratio` layout 反映も
 covered。この concrete scope に残る未実装項目はない。Full upstream Plots.jl の
 recipe/attribute parity は別スコープとして扱う。
+
+### Plots `contour` support (Issue #9940) — 解決済み
+
+Bundled `Plots` は `contour` / `contour!` を export し、`contour(z)`、
+`contour(x, y, z)`、`contour(x, y, f::Function)` を `:contour` series と
+Plotly `"type":"contour"` trace へ変換するようになった。`levels` keyword と
+bang append もこの issue の concrete scope で covered。この scope に残る未実装項目はない。
+Full upstream Plots.jl の recipe/attribute parity は別スコープとして扱う。
 
 ### Plots histogram `weights(...)` wrapper (Issue #6451) — 解決済み
 
@@ -3442,13 +4069,14 @@ isbits/immutable struct の `fieldoffset(T, i)` / `sizeof(T)` が本家 1.12 と
 本 Issue の範囲外として以下が残る:
 
 - **`Core.TypeName` オブジェクトの完全な同一性共有モデル**: SubsetJuliaVM は
-  TypeName を正準基底名**シンボル**で表現するため、`getfield(T, :name)` が本家の
-  `Core.TypeName` オブジェクト(`.name`/`.module`/`.wrapper` などのフィールドを
-  持つ)を返す挙動は未対応。観測可能な等価性(`typename(Foo{Int}) === typename(Foo)`、
+  TypeName を正準基底名**シンボル**で表現する。`getfield(T, :name)` は本家の
+  `Core.TypeName` を模した射影を返し、`.name`(シンボル)と `.wrapper`
+  (正準ジェネリック UnionAll ラッパー、`Foo{Int}.name.wrapper === Foo`、
+  Issue #10558)を公開する。`.module` など残りのフィールドや完全な同一性共有
+  モデルは未対応。観測可能な等価性(`typename(Foo{Int}) === typename(Foo)`、
   `nameof` 一致)は成立する。
-- **`nameof(::Module)`**: 本 Issue 以前から未実装(`nameof(Base)` は
-  `NoMethodFound`)。`nameof(::Function)` / 値・関数形は Issue #5580 の
-  regression fix 後も成立する。
+- **`nameof(::Module)`**: Issue #11171 で実装済み。`nameof(::Function)` /
+  値・関数形は Issue #5580 の regression fix 後も成立する。
 ### subtypes の内部 Base 型はレジストリ範囲外で繰り延べ (Issue #5057)
 
 `subtypes(T)` をソート・重複排除・パラメトリック基底名対応で本家
@@ -4674,7 +5302,7 @@ Pure Julia `Array{T,N}` wrapper 経由でのみ `methods(f, [T1, T2])` 経路を
 2026-05-24: `vm/builtins_types.rs` の `Subtypes` builtin は empty-result と
 populated-result の両分岐を共有の Memory-first `any_vector_array_value`
 helper 経由で構築し、`Value::Array` 直接構築を 1 箇所に集約した。
-`subset_julia_vm/src/vm/builtins_types.rs` の allowlist 上限は 8 から 7 に
+`subset_julia_vm_vm/src/vm/builtins_types.rs` の allowlist 上限は 8 から 7 に
 下げた。残りは `TypeOf`/`Isa`/`Sizeof`/`Ismutable`/`Objectid`/`In` などの
 Array 判別 arm を Pure Julia wrapper dispatch や共通 trait helper へさらに
 寄せ、native `Value::Array` discriminant branch を順次縮小することである。
@@ -5515,6 +6143,10 @@ inner method mutation が outer PartialStruct cache まで targeted に届く。
 2026-06-07 (#5939): `limited_results` / `tentative_results` でも `DispatchedMethodEdge`
 による signature-aware invalidation を fixture 化し、`callee(::Float64)` mutation では
 `callee(::Int64)` dependency を持つ side-cache entry を retire しないことを固定した。
+2026-07-02 (#8739): `partial_struct_return_cache` / `CachedConstructorPartial` サイドキャッシュ
+自体を撤去。PartialStruct fact は通常の `CachedReturn` に乗るため、上記 #5603/#5939 の
+world/backedge invalidation セマンティクスは main return cache がそのまま提供する
+(cache_invalidation.rs の PartialStruct テスト群を regular-cache 上へ移行して固定)。
 2026-06-05 (#5603): method-table return inference は `DispatchError::AmbiguousMethod` を
 unknown fallback ではなく `LatticeType::Bottom` として扱うようになった。`Base.infer_return_type`
 は ambiguous dispatch を本家 Julia と同じ `Union{}` として報告し、非曖昧 signature の selected-method
@@ -7319,7 +7951,7 @@ All `panic!()` calls have been removed from the VM runtime:
 
 ## Julia Base 未実装関数一覧（完全版）
 
-**最終更新**: 2026-01-07 (Missing/Val/Some/Returns 反映・exports 統計再集計)
+**最終更新**: 2026-07-07 (Threads single-thread shim は Issue #8991 で実装済み)
 
 Julia の Base モジュール（`julia/base/exports.jl`）からエクスポートされている 998 項目のうち、SubsetJuliaVM で未実装のものを網羅的にリストアップ。
 
@@ -7331,8 +7963,8 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 | `StackTraces` | スタックトレース | ❌ |
 | `Sys` | システム情報 | ⚠️ 部分実装（`WORD_SIZE` module binding; `Sys.is*` は `@static` 条件のみ） |
 | `Libc` | C ライブラリバインディング | ❌ |
-| `Docs` | ドキュメント | ❌ |
-| `Threads` | マルチスレッド | ❌ |
+| `Docs` | ドキュメント | ⚠️ plain-text `@doc(f)` retrieval のみ (Issue #8997)。Markdown metadata / REPL `?` rendering は未対応。 |
+| `Threads` | single-thread compatibility shim は実装済み（`nthreads/threadid/maxthreadid`, `@threads`, `@spawn`, `Atomic`, `SpinLock`; Issue #8991）。真のマルチスレッドは [SINGLE_THREADED_VM.md](./SINGLE_THREADED_VM.md) の設計判断どおり未対応。 | ⚠️ shim のみ |
 | `Iterators` | イテレータモジュール | ⚠️ 一部関数のみ（`enumerate`, `zip`, `rest`, `countfrom`, `take`, `drop`, `takewhile`, `dropwhile`, `cycle`, `repeated`, `product`, `flatten`, `flatmap`, `partition`, `peel`, `nth`, `filter`, `map`, `reverse`, `accumulate`） |
 
 ---
@@ -7358,7 +7990,7 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 | `IdDict`, `IdSet` | ID ベース辞書/集合 |
 | `IndexStyle` | インデックススタイル |
 | `InsertionSort`, `MergeSort`, `QuickSort`, `PartialQuickSort` | ソートアルゴリズム型 |
-| `IOStream` | I/O ストリーム |
+| `IOStream` | I/O ストリーム（✅ IOBuffer + file-backed cursor subset: `open`/`close`/`isopen`/`eof`/`flush`/`position`/`seek`/`skip`/`read(io, Char)` は Issue #8996 で実装。`redirect_*` / `Pipe` / full concrete `IOStream` surface は #9577） |
 | `LazyString` | 遅延文字列 |
 | `Lockable`, `OncePerProcess`, `OncePerTask`, `OncePerThread` | 同期プリミティブ |
 | `NTuple` | N 要素タプル |
@@ -7370,7 +8002,6 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 | `SubString` | サブ文字列 |
 | `SubstitutionString` | 置換文字列 |
 | `Timer` | タイマー |
-| `WeakKeyDict` | 弱参照辞書 |
 
 #### 実装済みの具象型（以前は未実装としてリストされていた）
 | 型 | 説明 |
@@ -7379,6 +8010,7 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 | `Float16` | 16ビット浮動小数点（`Value::F16` として VM で完全サポート） |
 | `Enum` | 列挙型（`@enum` マクロ、VM・コンパイラ対応） |
 | `Channel{T}` | 並行処理チャンネル（parametric struct, cooperative blocking, Issues #348/#445/#3450/#3451）。真の非同期コルーチン基盤は未実装 |
+| `WeakKeyDict` | 弱参照辞書（Issue #8990/#10088）。基本的な `setindex!` / `getindex` / `get` / `haskey` / `delete!` / `iterate` / GC 後 cleanup と bracket syntax `d[k]` / `d[k] = v` をサポート |
 
 #### 未実装の Ccall 型（全20種）
 `Cchar`, `Cdouble`, `Cfloat`, `Cint`, `Cintmax_t`, `Clong`, `Clonglong`, `Cptrdiff_t`, `Cshort`, `Csize_t`, `Cssize_t`, `Cuchar`, `Cuint`, `Cuintmax_t`, `Culong`, `Culonglong`, `Cushort`, `Cwchar_t`, `Cstring`, `Cwstring`
@@ -7582,60 +8214,57 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 #### 実装済み (Issue #348)
 | 型/関数 | 状態 |
 |---------|------|
-| `Task` | ✅ 簡易 Task 型 |
+| `Task` | ✅ VM frame/stack continuation を持つ cooperative Task (Issue #10349) |
 | `@task` | ✅ thunk を `Task` に包む compiler macro (Issue #3432) |
-| `@async` | ✅ `Task` を作成して即時 `schedule` する compiler macro (Issue #3432) |
-| `@sync` | ✅ 逐次互換の同期ブロック compiler macro。standalone / 単一 expression / 単純代入 RHS `@async` の失敗は `CompositeException` に集約 (Issue #3432) |
-| `schedule` | ✅ 即時実行（scheduler queue なし） |
+| `@async` | ✅ `Task` を作成して VM の FIFO runnable queue に `schedule` する compiler macro (Issues #3432, #8989, #10349) |
+| `@sync` | ✅ body 内の実 Task 集合を待機し、失敗を `CompositeException` に集約 (Issues #3432, #10349) |
+| `schedule` | ✅ VM task table / runnable queue 登録。body は scheduler yield point で開始 (Issue #10349) |
 | `fetch` | ✅ `Task` 結果取得、非 Task は恒等 |
-| `wait(::Task)` | ✅ 完了済み Task の確認（未完了時はブロックせずエラー） |
+| `wait(::Task)` | ✅ 現 Task を park し、対象 Task 完了時に continuation を wake (Issue #10349) |
 | `istaskdone`, `istaskstarted`, `istaskfailed` | ✅ Task 状態確認 |
-| `yield()` | ✅ no-op |
-| `yield(::Task)` | ✅ `schedule(t)` 相当 |
+| `yield()` | ✅ 呼び出し位置で continuation を suspend し次の runnable task へ切替 (Issue #10349) |
+| `yield(::Task)` | ✅ 対象 Task を schedule して cooperative wait (Issue #10349) |
 | `ReentrantLock`, `SpinLock` | ✅ 単一スレッド向け簡易 lock |
 | `lock`, `unlock`, `trylock`, `islocked` | ✅ lock 操作 |
-| `Condition` | △ 型のみ実装 |
-| `notify(::Condition)` | △ no-op |
+| `Condition` | ✅ waiter continuation queue (Issue #10349) |
+| `notify(::Condition)` | ✅ one/all waiter wake と通知値 (Issue #10349) |
 
 #### 制限
-- 実スケジューラ、task queue、task switching は未実装。
-- `schedule(t)` は非同期に積まず、その場で `t.func()` を実行する。
-- `@async` は現行 `schedule(t)` に従い、作成した Task を即時実行して返す。
-- `@sync` は逐次互換ブロック。standalone / 単一 expression / 単純代入 RHS `@async` の失敗は `CompositeException(count, "async task failed")` に集約するが、実際の async wait queue は未実装。
-- `wait(::Task)` はブロッキング待機ではなく、未完了 Task にはエラーを返す。
-- `wait(::Condition)` は未対応でエラー。
+- native Rust re-entry (`run_until_frame_return` を使う eval / HOF / show / iteration 等) の内側では continuation を capture できず、明示的で catch 可能な `cannot suspend task across a native VM call boundary` を返す。
+- 全 Task が block した場合、upstream の無期限待機ではなく CI/iOS 向けに catch 可能な deadlock error を返す。
 
 #### 未実装
-`current_task`, `task_local_storage`, `yieldto`, `waitany`, `waitall`, `asyncmap!`, `errormonitor`
+`asyncmap!` (`yieldto` は FIFO scheduler 経由の部分互換)
 
-> `asyncmap` は #3500 で逐次近似（cooperative single-thread / `ntasks` は no-op）として実装済み。真の並列化は実 Task scheduler 待ち。
+> `current_task`, `task_local_storage`, `waitany`, `waitall`, `errormonitor` は VM task completion と連動する。
+> `asyncmap` は #3500 で cooperative single-thread 実装済み。OS-thread parallelism は対象外。
 
 ---
 
-### 19. チャンネル（一部実装）
+### 19. チャンネル
 
 > **関連 Issue**: [#348](https://github.com/AtelierArith/ailujsoi/issues/348) (基本API実装済み), [#445](https://github.com/AtelierArith/ailujsoi/issues/445) (大部分解決済み)
 
-#### 実装済み (Issue #348 + #445 + #3450 + #3451 + #3454 + #3455 + #3456)
+#### 実装済み (Issue #348 + #445 + #3450 + #3451 + #3454 + #3455 + #3456 + #10349)
 | 型/関数 | 状態 |
 |---------|------|
 | `Channel{T}` | ✅ 型パラメータ付き parametric struct (Issue #3450) |
-| `put!` | ✅ バッファへ追加。満杯時は `pending_puts` キューへ退避（協調ブロッキング, Issue #3451） |
-| `take!` | ✅ FIFO 取り出し。取り出し後に `pending_puts` から 1 件ドレイン（Issue #3451） |
-| `fetch` | ✅ 先頭要素を非破壊で取得。バッファ空時は `pending_puts` を参照（Issue #3451） |
+| `put!` | ✅ buffered full / unbuffered rendezvous で現 Task を park (Issue #10349) |
+| `take!` | ✅ 空なら park、FIFO 値取得後に blocked putter を wake (Issue #10349) |
+| `fetch` | ✅ 空なら park、先頭値を非破壊取得 (Issue #10349) |
 | `isopen`, `isbuffered` | ✅ 状態確認 |
 | `isfull` | ✅ 状態確認。unbuffered channel で常に `true` を返すバグ修正済み (Issue #3456) |
-| `isready`, `isempty` | ✅ `pending_puts` を含めて判定（Issue #3451） |
+| `isready`, `isempty` | ✅ 即時取得可能な buffer 値で判定 (Issue #10349) |
 | `close` | ✅ close と close with exception |
-| `length` | ✅ `length(c.data) + length(c.pending_puts)` — `pending_puts` を含めたカウント (Issue #3454) |
+| `length` | ✅ sjulia compatibility extension: 即時取得可能な buffer 値数 |
 | `iterate`, `push!`, `popfirst!` | ✅ collection 互換 API |
-| `empty!` | ✅ バッファと `pending_puts` をクリア (Issue #445, #3451) |
+| `empty!` | ✅ buffer を空にし blocked putter を wake (Issue #10349) |
 | `bind(c, task)` | ✅ タスク完了時にチャンネル自動クローズ (Issue #445) |
-| `Channel(func, size)` | ✅ do-ブロック producer 構文。producer が例外を投げた場合は呼び出し元に即時伝播 (Issue #445, #3455) |
+| `Channel(func, size)` | ✅ live producer Task。完了時 close、失敗時は buffered 値消費後に `TaskFailedException` (Issues #3455, #10349) |
 
 #### 残制限
-- `put!` / `take!` は真のコルーチン非同期ではなく `pending_puts` キューによる擬似ブロッキング。コルーチン基盤（`setjmp`/asyncify）があれば完全な Julia 意味論を実現可能。
-- unbuffered channel の同期 rendezvous は近似実装（最初の put がデータバッファに、2 件目以降が `pending_puts` に入る）。
+- native Rust re-entry floor 内の blocking operation は Task section 記載の明示エラーになる。
+- 全 Task block 時は無期限 hang ではなく deadlock error を返す。
 
 ---
 
@@ -7699,17 +8328,37 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 
 ---
 
-### 27. RTS 内部（全て未実装）
+### 27. RTS 内部（部分実装）
 
-`GC`, `finalizer`, `finalize`, `precompile`
+`precompile`
+
+`GC.gc` / `GC.safepoint` / `GC.in_finalizer` と `finalizer` / `finalize` は
+Issue #8990 で基本実装済み。
 
 ---
 
 ### 28. I/O・イベント（大部分未実装）
 
-> **関連 Issue**: [#347](https://github.com/AtelierArith/ailujsoi/issues/347)
+> **関連 Issue**: [#347](https://github.com/AtelierArith/ailujsoi/issues/347), [#9577](https://github.com/AtelierArith/ailujsoi/issues/9577), [#9578](https://github.com/AtelierArith/ailujsoi/issues/9578)
 
-`close`, `closewrite`, `countlines`, `eachline`, `readeach`, `eof`, `fd`, `fdio`, `flush`, `gethostname`, `htol`, `hton`, `ltoh`, `ntoh`, `ismarked`, `isopen`, `isreadonly`, `mark`, `unmark`, `reset`, `bytesavailable`, `open`, `peek`, `pipeline`, `Pipe`, `PipeBuffer`, `position`, `seek`, `seekend`, `seekstart`, `skip`, `skipchars`, `RawFD`, `read`, `read!`, `readavailable`, `readbytes!`, `readchomp`, `readdir`, `readline`, `readlines`, `readuntil`, `copyuntil`, `copyline`, `redirect_stdio`, `redirect_stderr`, `redirect_stdin`, `redirect_stdout`, `truncate`, `unsafe_read`, `unsafe_write`
+#### 実装済み / 部分実装
+
+- IO stream cursor subset (Issue #8996): `IOBuffer`, `open(path[, mode])`, `close(io)`,
+  `isopen(io)`, `eof(io)`, `flush(io)`, `position(io)`, `seek(io, n)`,
+  `skip(io, n)`, `read(io, Char)`, `readline(io)`。
+- File path helpers: `countlines`, `eachline`, `readdir`, `readline(path)`,
+  `readlines(path)` は既存実装済み。
+- `write(io, x)` は IOBuffer/file/stdout/stderr/devnull に書き込み byte count を返す。
+  ただし numeric raw-byte semantics は未対応 (#9578)。
+- `redirect_stdout(stream)` / `redirect_stderr(stream)` と do-block 形式
+  `redirect_stdout(f, stream)` / `redirect_stderr(f, stream)` は stdout/stderr の
+  VM sink を一時差し替える。`redirect_stdio(f; stdout=..., stderr=...)` は
+  stdout/stderr subset を合成する。`Pipe()` は最小 IO subtype surface として利用可能
+  (Issue #9577)。stdin redirection と libuv pipe I/O は未実装。
+
+#### 未実装 / 残スコープ
+
+`closewrite`, `readeach`, `fd`, `fdio`, `gethostname`, `htol`, `hton`, `ltoh`, `ntoh`, `ismarked`, `isreadonly`, `mark`, `unmark`, `reset`, `bytesavailable`, `peek`, `pipeline`, full libuv `Pipe` I/O, `PipeBuffer`, `seekend`, `seekstart`, `skipchars`, `RawFD`, `read!`, `readavailable`, `readbytes!`, `readchomp`, `readuntil`, `copyuntil`, `copyline`, `redirect_stdin`, full `redirect_stdio` stdin/path/file-descriptor support, `truncate`, `unsafe_read`, `unsafe_write`
 
 ---
 
@@ -7786,7 +8435,8 @@ Julia の Base モジュール（`julia/base/exports.jl`）からエクスポー
 #### 未実装（タスク）
 `@threadcall`
 
-> **実装済み**: `@task`, `@async`, `@sync` (Issue #3432; 逐次・協調モデル互換)
+> **実装済み**: `@task`, `@async`, `@sync` (Issue #3432; 逐次・協調モデル互換)、
+> `Threads.@threads`, `Threads.@spawn` (Issue #8991; single-thread compatibility shim)
 
 #### 未実装（パフォーマンス）
 `@fastmath`, `@specialize`, `@polly`

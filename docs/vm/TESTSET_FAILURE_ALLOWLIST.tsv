@@ -1,0 +1,25 @@
+# @testset-failure allowlist (Issue #9360 gate; umbrella tracker: Issue #9472)
+#
+# The fixture harness (subset_julia_vm/tests/fixture_tests.rs::run_test_case)
+# fails any registered fixture whose run records a @test/@testset failure
+# (Vm::any_test_failed()), UNLESS its manifest `file` path appears below. This
+# is a TWO-SIDED RATCHET:
+#   * a NEW fixture that is green-in-harness but red-on-CLI cannot land;
+#   * an entry here whose fixture STOPS failing turns the suite red as a stale
+#     entry -- remove it (the list must monotonically shrink as bugs are fixed).
+#
+# These rows GRANDFATHER the broken-but-green fixtures that already existed when
+# the gate was introduced (2026-07-06). The authoritative set is the harness's
+# own SJULIA_TESTSET_GATE_LOG output, not a CLI sweep (the harness parse_and_lower
+# path can fail @tests that the CLI passes, and vice versa). Do NOT add rows to
+# silence a new failure; fix the fixture or the VM bug instead.
+#
+# Columns (tab-separated): file<TAB>class<TAB>issue<TAB>reason
+#   file  = manifest `file` value (category-prefixed, e.g. io/show_array.jl)
+#   class = sjulia-bug  (upstream julia passes; sjulia records a @test failure)
+#         | bad-fixture (upstream julia ALSO fails: wrong/non-portable assertion)
+#
+# Tracker sync (Issue #9698): the GitHub umbrella Issue #9472 body is a DERIVED
+# snapshot of this file. After ANY row change here, regenerate and update it:
+#   bash scripts/gen_testset_allowlist_tracker.sh > /tmp/tracker_9472.md
+#   gh issue edit 9472 --repo AtelierArith/ailujsoi --body-file /tmp/tracker_9472.md

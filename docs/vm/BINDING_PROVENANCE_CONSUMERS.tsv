@@ -1,0 +1,7 @@
+path	owner	classification	authority	issue
+subset_julia_vm_lowering/src/lowering/expr/quote/code_generation.rs	collect_local_decl_and_assignment_names	test assertion collects user-explicit quote declarations and excludes compiler-enclosing locals	exhaustive LocalDeclKind match	#11317
+subset_julia_vm_lowering/src/lowering/scope_bindings.rs	collect_stmt	scope binding inventory separates user-explicit from compiler-enclosing locals	exhaustive LocalDeclKind match	#11317
+subset_julia_vm_types/src/ir/free_vars.rs	collect_function_local_bindings_stmt	function lexical predeclaration treats both variants as bindings	exhaustive LocalDeclKind match	#11317
+subset_julia_vm_types/src/ir/free_vars.rs	analyze_stmt_free_vars	closure analysis treats both variants as lexical locals	exhaustive LocalDeclKind match	#11317
+subset_julia_vm_vm/src/vm/builtins_macro/ir_conversion.rs	ir_stmt_to_value	macro IR roundtrip renders both variants as local declarations	exhaustive LocalDeclKind match	#11317
+subset_julia_vm/src/aot/analyze/ir_converter/stmt.rs	convert_stmt_expanded	AoT consumes declarations before assignment conversion without erasing provenance classification	exhaustive LocalDeclKind match	#11317

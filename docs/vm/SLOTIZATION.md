@@ -12,7 +12,7 @@ The VM compiler applies a lightweight local-variable optimization called **sloti
 each compiled function. It replaces named-load/store instructions with indexed slot accesses,
 which are faster and avoid repeated string lookups at runtime.
 
-The pass lives in `subset_julia_vm/src/vm/slot.rs` and consists of two phases:
+The pass lives in `subset_julia_vm_vm/src/vm/slot.rs` and consists of two phases:
 
 ### Phase 1 – `build_slot_info`
 
@@ -161,8 +161,8 @@ true
 
 ## Reference
 
-- `subset_julia_vm/src/vm/slot.rs` — slotization implementation
-- `subset_julia_vm/src/compile/expr/builtin.rs` — mutation builtins + helper methods
-- `subset_julia_vm/src/compile/stmt.rs` lines 1160–1228 — `IndexAssign` with same `is_global` pattern
+- `subset_julia_vm_vm/src/vm/slot.rs` — slotization implementation
+- `subset_julia_vm_compile/src/compile/expr/builtin.rs` — mutation builtins + helper methods
+- `subset_julia_vm_compile/src/compile/stmt.rs` lines 1160–1228 — `IndexAssign` with same `is_global` pattern
 - Issue #3121 — original bug report
 - Issue #3127 — prevention / refactoring tracking issue

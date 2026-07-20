@@ -1,0 +1,117 @@
+# Parser corpus divergence allowlist (Issue #8636).
+# Every failing file from the corpus sweep must have an entry here,
+# classified as (a) intentional-subset-exclusion, (b) unsupported-feature, or (c) bug.
+# All entries are (b) unsupported-feature — the Issues above track them.
+# No (c) bug entries: sjulia never "silently mis-parses" a clean file (oracle check shows
+# no case where sjulia returns OK but JuliaSyntax sees errors on the same source).
+# (a) intentional-subset-exclusion: none — sjulia targets full Julia syntax by design.
+#
+# Ratchet: scripts/check_parser_corpus_allowlist.sh enforces this list only grows
+# by removal (Issue #8637).
+#
+# Schema per entry:
+#   file = "julia/relative/path.jl"
+#   classification = "unsupported-feature"  # (a)/(b)/(c) — see header
+#   issue = "#NNNN"  # GitHub Issue tracking this gap
+#   family = "short-family-slug"  # internal grouping key
+#   reason = "one-line English description"
+
+# --- additional-parser-gaps (0 files) ---
+
+[[allowlist]]
+file = 'julia/base/broadcast.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix (dotted-operator issues, ;;, etc.)'
+
+[[allowlist]]
+file = 'julia/base/logging/logging.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix (global @constprop, etc.)'
+
+[[allowlist]]
+file = 'julia/stdlib/InteractiveUtils/src/macros.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/stdlib/Profile/src/Allocs.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/stdlib/Profile/src/Profile.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/stdlib/REPL/src/LineEdit.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/stdlib/REPL/src/REPL.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/test/arrayops.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/test/broadcast.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/test/core.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix (statement definitions in expression position, destructuring for targets, @UnionAll braces)'
+
+[[allowlist]]
+file = 'julia/test/docs.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/test/reduce.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/test/sorting.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix'
+
+[[allowlist]]
+file = 'julia/test/subtype.jl'
+classification = 'unsupported-feature'
+issue = '#8753'
+family = 'newline-continuation'
+reason = 'Remaining parser gaps after #8753 partial fix (@UnionAll, etc.)'

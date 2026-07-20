@@ -1,0 +1,31 @@
+signature	locations	issue	reason
+IteratorEltype(::Type{StepRange{T,S}}) where {T,S}	generator.jl:326;range.jl:294	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+IteratorEltype(::Type{UnitRange{T}}) where {T}	generator.jl:322;range.jl:293	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+IteratorSize(::Type{StepRange{T,S}}) where {T,S}	generator.jl:231;range.jl:290	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+IteratorSize(::Type{UnitRange{T}}) where {T}	generator.jl:227;range.jl:289	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+SpinLock()	lock.jl:169;threads.jl:48	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+argmax(Any)	array.jl:1486;reduce.jl:227	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+argmin(Any)	array.jl:1472;reduce.jl:241	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+binomial(Any, Any)	combinatorics.jl:48;intfuncs.jl:468	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+copysign(Any, Any)	math.jl:744;operators.jl:77	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+fused(Any, Any)	broadcast.jl:2607;broadcast.jl:2625;broadcast.jl:2643;broadcast.jl:2661	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+fused(Any, Any, Any)	broadcast.jl:2616;broadcast.jl:2634;broadcast.jl:2652;broadcast.jl:2671;broadcast.jl:2681	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+fused(Any, Any, Any, Any)	broadcast.jl:2691;broadcast.jl:2701;broadcast.jl:2710;broadcast.jl:2719;broadcast.jl:2729;broadcast.jl:2739	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+invperm(Any)	array.jl:3958;combinatorics.jl:148	#10089	Divergent return type was fixed in #10089; keep type-sensitive fixture coverage when changing either definition.
+isequal(::Missing, ::Missing)	missing.jl:71;missing.jl:110	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+isequal(::Missing, Any)	missing.jl:76;missing.jl:113	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+isequal(Any, ::Missing)	missing.jl:81;missing.jl:116	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+isone(::BigInt)	gmp.jl:123;number.jl:23	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+isperm(Any)	array.jl:3930;combinatorics.jl:95	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+iszero(::BigInt)	gmp.jl:118;number.jl:13	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+lock(::SpinLock)	lock.jl:179;threads.jl:53	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+minmax(Any, Any)	math.jl:730;operators.jl:67	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+notify(::Condition)	lock.jl:149;lock.jl:153	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+range(Any, Any, Any)	range.jl:757;range.jl:763	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+sel(Any)	broadcast.jl:2514;broadcast.jl:2521;broadcast.jl:2528;broadcast.jl:2535	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+sign(::BigInt)	gmp.jl:128;math.jl:35	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+trylock(::SpinLock)	lock.jl:205;threads.jl:69	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+typemax(::Type{Int64})	floatfuncs.jl:341;int.jl:381	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+typemin(::Type{Int64})	floatfuncs.jl:322;int.jl:391	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+unlock(::SpinLock)	lock.jl:192;threads.jl:61	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.
+xor(::Int64, ::Int64)	bool.jl:36;int.jl:622	#10185	Existing duplicate baseline; changing either definition requires semantic and return-type review.

@@ -1,8 +1,31 @@
 # Binary Operator Dispatch
 
-*Last updated: 2026-06-28*
+*Last updated: 2026-07-02*
 
 This document covers the binary operator compiler dispatch paths, result type coverage, and related checklists.
+
+## Executable documentation sweep status (Issue #8721)
+
+Initial sweep date: 2026-07-02.
+
+- Reviewed as one of the five major docs named by #8694/#8721.
+- Checked the main behavior-claim sections against current dispatch structure:
+  the shared typed scalar table, runtime specializer path, promote-then-same-type
+  runtime layer, and `BinaryBothFallback:` inventory are still current.
+- No stale behavior claim was changed in this initial pass.
+- Representative executable dispatch behavior is now covered by
+  `julia-doctest`; codegen and inventory examples remain explanatory
+  Rust/policy snippets.
+
+```julia-doctest
+println(1 + 2)
+println(1.0 + 2)
+println(typeof(1.0 + 2))
+# output
+3
+3.0
+Float64
+```
 
 ## Two Binary-Op *Codegen* Paths — Keep Them In Sync (Issue #8192)
 
@@ -20,8 +43,8 @@ This document covers the binary operator compiler dispatch paths, result type co
 ### Single source of truth for the typed instruction (Issue #8192)
 
 Both paths now resolve the typed `Int64`/`Float64` instruction through one shared
-table, `compile::typed_scalar_binary_instr(op, result_is_float) -> Option<Instr>`
-(defined in `compile/expr/binary/mod.rs`). `typed_instr_for_intrinsic` (main
+table, `subset_julia_vm_bytecode::typed_scalar_binary_instr(op, result_is_float) -> Option<Instr>`
+(defined in `subset_julia_vm_bytecode/src/typed_scalar_ops.rs`). `typed_instr_for_intrinsic` (main
 path) is a thin adapter over it, and the specializer's `emit_binary_op` calls it
 directly. **Add or change a typed scalar binary instruction in exactly one
 place — that helper.** Ops with no single typed I64/F64 instruction (`÷`, `^`,
@@ -65,12 +88,13 @@ The native typed-loop fast path (`vm/executable.rs`,
 - `vm::executable::tests::shared_binary_table_only_emits_typed_loop_recognized_instrs_issue_8192`
   — unit tripwire: every instruction `typed_scalar_binary_instr` can emit is
   accepted by the typed-loop recognizer.
+- `subset_julia_vm_bytecode::typed_scalar_ops::tests`
 - `compile::expr::binary::tests::{typed_scalar_binary_instr_table_matches_per_op_expectations_8192, typed_instr_for_intrinsic_delegates_to_shared_table_8192}`
   — pin the shared table and the main-path adapter.
 
 ## Three Dispatch Code Paths (Issue #1783, #1785)
 
-The binary operator compiler in `subset_julia_vm/src/compile/expr/binary/` (`mod.rs`, `builtin.rs`, `user_defined.rs`) uses multiple dispatch code paths depending on method table state.
+The binary operator compiler in `subset_julia_vm_compile/src/compile/expr/binary/` (`mod.rs`, `builtin.rs`, `user_defined.rs`) uses multiple dispatch code paths depending on method table state.
 
 ### 1. `all_base_extensions()=true` Path
 
@@ -165,7 +189,7 @@ Both functions must cover the **same set of numeric types**. When adding a new n
 
 ## `CallDynamicBinaryBoth` Fallback Inventory (Issue #4262)
 
-`subset_julia_vm/src/vm/exec/binary_both.rs` uses the shared runtime resolver
+`subset_julia_vm_vm/src/vm/exec/binary_both.rs` uses the shared runtime resolver
 before falling back to Rust. The remaining branches are explicit compatibility
 owners, not places to add new public arithmetic policy by default.
 
@@ -183,15 +207,13 @@ fallback chain below:
    (currently the Float64-promoting group: Float16×Float64, Float32×Float64,
    Int64×Float64; and the Float32-promoting group: Float16×Float32,
    Float32×Int64, Float32×Int128). Promotion rules match
-   `compile/promotion.rs` / docs/vm/PROMOTION.md. `same_type_fast_path` also
+   `promotion.rs` / docs/vm/PROMOTION.md. `same_type_fast_path` also
    owns the Float32×Float32 and Float16×Float16 same-type tables, which the
    `float32-intrinsics` / `float16-intrinsics` arms delegate to (those arms
    still exist because the small-int normalization prologue runs after the
    promote interception and can re-create e.g. Float32×Int64 from
-   Float32×Bool). Behavior-exception pairs (Bool operands, Float16×Int
-   result-narrowing — narrowing the RESULT, not the operand, differs from true
-   promotion by double rounding —, unsigned widths, Int128×Int64/Float64,
-   BigInt/BigFloat, Char) intentionally stay on their explicit arms — folding
+   Float32×Bool). Behavior-exception pairs (Bool operands, unsigned widths,
+   Int128×Int64/Float64, BigInt/BigFloat, Char) intentionally stay on their explicit arms — folding
    a pair whose current behavior diverges from promote-then-same-type would be
    an observable change, and a pair that silently loses coverage can reach the
    Pure Julia promote fallback and recurse unboundedly (Issue #5966).
@@ -221,12 +243,14 @@ Classification:
 | `BinaryBothFallback: array-wrapper-equality` | compatibility | `julia/base/array.jl` | Transitional native/wrapper array equality still needs representation-aware comparison. |
 | `BinaryBothFallback: unsigned-comparison` | bootstrap | `julia/base/int.jl` | `UInt64` / `UInt128` comparisons must avoid lossy `Int64` conversion. |
 | `BinaryBothFallback: uint128-arithmetic` | bootstrap | `julia/base/int.jl` | `UInt128` arithmetic preserves full-width behavior before generic fallback. |
+| `BinaryBothFallback: i128-u64-arithmetic` | bootstrap | `julia/base/int.jl` | `Int128` × `UInt64` arithmetic preserves signed/unsigned promotion behavior without lossy narrowing. |
+| `BinaryBothFallback: u128-float-arithmetic` | bootstrap | `julia/base/float.jl`, `julia/base/promotion.jl` | `UInt128` × float arithmetic uses the same explicit promotion boundary as other wide integer/float pairs. |
 | `BinaryBothFallback: uint64-arithmetic` | bootstrap | `julia/base/int.jl` | `UInt64` arithmetic preserves full-width behavior before generic fallback. |
 | `BinaryBothFallback: small-int-normalization` | bootstrap | `julia/base/int.jl` | Bool and narrow integer VM values normalize before primitive intrinsic execution. |
 | `BinaryBothFallback: primitive-intrinsic-dispatch` | bootstrap | `julia/src/builtins.c`, `julia/base/int.jl`, `julia/base/float.jl` | Primitive arithmetic and comparisons remain runtime intrinsic-owned. |
 | `BinaryBothFallback: int128-intrinsics` | bootstrap | `julia/base/int.jl` | `Int128` operations must preserve `Int128` where Julia does. |
 | `BinaryBothFallback: float16-intrinsics` | bootstrap | `julia/base/float.jl` | `Float16` same-type arm; the table itself lives in `same_type_fast_path` (Issue #6338). |
-| `BinaryBothFallback: mixed-float16-intrinsics` | bootstrap | `julia/base/float.jl`, `julia/base/promotion.jl` | `Float16×Int` result-narrowing exception (true promotion would double-round); `Float16×Float64/Float32` moved to `promote_numeric_pair` (Issue #6338). |
+| `BinaryBothFallback: mixed-float16-intrinsics` | bootstrap | `julia/base/float.jl`, `julia/base/promotion.jl` | `Float16×Int` promotes the integer operand to `Float16` before arithmetic (Issue #9717); `Float16×Float64/Float32` moved to `promote_numeric_pair` (Issue #6338). |
 | `BinaryBothFallback: float32-intrinsics` | bootstrap | `julia/base/float.jl` | `Float32` same-type + normalized `Float32×Int64` arm, delegating to `promote_numeric_pair`/`same_type_fast_path` (Issue #6338). |
 | `BinaryBothFallback: generic-float-rem` | bootstrap | `julia/base/float.jl` | `%` / `rem` for float operands uses Julia's remainder formula. |
 | `BinaryBothFallback: generic-primitive-intrinsic` | bootstrap | `julia/src/builtins.c`, `julia/base/operators.jl` | Remaining primitive I64/F64 intrinsic path. |
@@ -347,10 +371,10 @@ the generic Float64 `floor(x / y)` fallback; see
 
 | Operator | I64 operand_ty | F64 operand_ty |
 |----------|---------------|----------------|
-| `+`      | `AddInt`      | `AddFloat`     |
-| `-`      | `SubInt`      | `SubFloat`     |
-| `*`      | `MulInt`      | `MulFloat`     |
-| `/`      | `DivFloat`    | `DivFloat`     |
+| `+`      | `AddInt`      | `DynamicAdd`   |
+| `-`      | `SubInt`      | `DynamicSub`   |
+| `*`      | `MulInt`      | `DynamicMul`   |
+| `/`      | `DynamicDiv`  | `DynamicDiv`   |
 | `^`      | `DynamicPow`  | `DynamicPow`   |
 | `%`      | `SremInt`     | `DynamicMod`   |
 | `div`      | `SdivInt`     | `DynamicIntDiv`|
@@ -376,12 +400,11 @@ All runtime dispatch handlers select the most specific matching method through t
 | Function | Purpose |
 |----------|---------|
 | `resolve_runtime_core_signature_candidates(hierarchy, candidates, actual_cores, subtype_matches)` | **Primary (Issue #6502 slice 2)**: structured `core_signature`-based candidate selection over `RuntimeCoreCandidate` (per-slot `CoreType`s with `where` bounds embedded + optional full-signature gate enforcing bounds and cross-slot typevar binding consistency, Issue #6536). Used by `CallDynamicBinaryBoth` / `CallDynamicBinaryNoFallback` / `CallDynamicBinary` / `CallDynamicOrBuiltin` |
+| `resolve_runtime_core_signature_slice_candidates_with_family_fallback(hierarchy, candidates, actual_cores, family_matches, subtype_matches)` | Structured slice-backed candidate selection for variable-arity runtime fallback tiers (`CallDynamic` / iterator sentinels) with the same bare-family fallback tier, without string candidate reparsing |
 | `runtime_core_pattern_score(hierarchy, expected, actual, subtype_matches)` | Score a structured signature: per-argument hierarchy-aware `CoreType::dispatch_pattern_score_in()` summed, with score=1 subtype fallback per argument |
 | `embed_type_param_bounds` / `runtime_core_signature` / `runtime_candidate_core_type` | Candidate derivation: re-attach `where` bounds to typevars, build the `core_signature`-shaped gate, and project a declared `JuliaType` onto the matching `CoreType` (legacy parse kept for `AbstractUser`/`Module` divergent shapes) |
-| `runtime_type_pattern_score(expected, actual, subtype_matches)` | String-channel score: per-argument `CoreType::dispatch_pattern_score()` summed, with score=1 subtype fallback per argument |
-| `resolve_runtime_type_pattern_candidates(candidates, actual, subtype_matches)` | String channel: pick the best-scoring candidate; ties keep the first candidate (residual users: `CallDynamic` family-fallback tiers) |
-| `resolve_runtime_type_pattern_candidates_with_family_fallback(…)` | Same, with an extra same-family fallback (score=2) for string-encoded wrapper families CoreType does not fully know |
-| `resolve_callable_value_candidates(…)` | Callable function-variable dispatch (arity, vararg, exact-match bonuses, diagonal rule — Issue #5050; `where` bound enforcement gap: Issue #6539) |
+| `runtime_type_pattern_score(expected, actual, subtype_matches)` | Legacy string score helper retained for typed/callable compatibility tests; the old `resolve_runtime_type_pattern_candidates*()` argmax wrappers have no production caller and were removed in Issue #8999 |
+| `resolve_callable_value_candidates(…)` | Callable function-variable dispatch (arity, vararg, exact-match bonuses, diagonal rule — Issue #5050; `where` bounds — Issue #6539). Equal top-score/fixedness rows use structured strict dominance before the legacy stable-row fallback (Issue #11252) |
 
 ### Shared Helpers (`vm/util.rs`)
 
@@ -451,19 +474,19 @@ than a scalar tag can represent safely, so they continue through L2/L3.
 Verify no inline `extract_base` functions exist (should be 0 results):
 
 ```bash
-rg -n "fn extract_base" subset_julia_vm/src/vm/exec/
+rg -n "fn extract_base" subset_julia_vm_vm/src/vm/exec/
 ```
 
 Verify break statements in dispatch are only exact-match early exits:
 
 ```bash
 rg -n "break;" \
-  subset_julia_vm/src/vm/exec/call_dynamic.rs \
-  subset_julia_vm/src/vm/exec/call_dynamic_binary.rs \
-  subset_julia_vm/src/vm/exec/call_dynamic_typed.rs \
-  subset_julia_vm/src/vm/exec/binary_both.rs \
-  subset_julia_vm/src/vm/exec/binary_no_fallback.rs \
-  subset_julia_vm/src/vm/exec/call_function_variable.rs
+  subset_julia_vm_vm/src/vm/exec/call_dynamic.rs \
+  subset_julia_vm_vm/src/vm/exec/call_dynamic_binary.rs \
+  subset_julia_vm_vm/src/vm/exec/call_dynamic_typed.rs \
+  subset_julia_vm_vm/src/vm/exec/binary_both.rs \
+  subset_julia_vm_vm/src/vm/exec/binary_no_fallback.rs \
+  subset_julia_vm_vm/src/vm/exec/call_function_variable.rs
 ```
 
 ### Code Review Checklist
@@ -564,6 +587,17 @@ The method-selection *control flow* — candidate enumeration → match → domi
 
 The runtime `call_dynamic*` entry points adopted the same core in the second slice (Issue #6502, wave 2) via two additional monomorphized primitives: `pick_max_score()` is the runtime winnowing skeleton (first candidate attaining the strictly maximal score — earlier candidates win ties), used by `Instr::CallTypedDispatch`'s runtime function-name search in `vm/exec/call_dynamic_typed.rs`, and `pick_first_tier()` owns ordered tier fallback (first tier producing a winner; errors propagate immediately), used by `Instr::CallDynamic`'s metadata candidate tiers (all candidates → user-defined only → Base `empty` allowlist) in `vm/exec/call_dynamic.rs` with tier index lists still built lazily. Value-dependent VM representation filters (Dict/Range/struct-Dict mismatches) stay at the call sites as candidate pre-filters by design. The remaining gap to full unification: the per-resolver argmax loops inside `inference_core/dispatch_resolver.rs` (same `pick_max_score` skeleton, conversion owned by the #5915 matcher rewrite) and the runtime tie-breaker ladder in `vm/mod.rs::find_best_method_index_from_candidates`; the formerly deferred slice (b) — string-encoded candidate lists in serialized `Instr::CallDynamic*` payloads — shipped as structured index/enum payloads (Issue #6496, see migration item 6 below). `vm/exec/call_dynamic_binary.rs` and `vm/dynamic_ops/dispatch.rs` carry no local selection loops (the binary path fully delegates scoring to the shared resolver since Issue #3910; `dynamic_ops/dispatch.rs` only gates the inline fast path).
 
+Candidate storage order is not a specificity rule (Issue #11252). The fixed
+`RuntimeCoreCandidate`, slice-backed `RuntimeCoreSliceCandidate`, typed
+`RuntimeTypedCoreCandidate`, and `CallableValueCandidate` adapters are covered
+by one forward/reverse permutation matrix using a user abstract below a builtin
+abstract family. Callable-value dispatch keeps its allocation-free common path;
+only equal top-score candidates of the same fixed/vararg class allocate a small
+tie set and invoke structured `unique_dominant_index`. A proven unique dominant
+signature wins in either order. Equivalent or incomparable legacy rows retain
+their established stable-row precedence until the shared ambiguity protocol in
+#10461 owns that residual policy.
+
 Since Issue #6336, the specificity module performs **no ad-hoc type-name string parsing**: abstract container parameters spelled as string-encoded `JuliaType::Struct` names (`AbstractVector{T}`, `AbstractArray{T,N}`, ...) are structured once through the central `CoreType::from` bridge and then inspected as `CoreType` values, and the diagonal patterns carry their `where`-clause upper bounds as structured `CoreType`s (`type_param_upper_bound_core`) instead of raw `&str` bound names. The retired helpers (`parse_diagonal_container_param`, `split_diagonal_container_params`, `bound_subtypes(&str, &str)`) no longer exist; the only name→structure step left in these paths is the shared `CoreType::from_julia_name` parser at the `TypeParam`/`JuliaType` boundary.
 
 ### State of the #6336 structured-signature migration
@@ -647,6 +681,298 @@ When modifying `CallDynamic*` handlers:
 - [ ] Check if the modification could cause diagonal rule violations at runtime
 - [ ] If adding new method matching logic, consider whether type variables need consistency checks
 - [ ] Test with `f(x::T, y::T) where T` and mixed-type arguments (e.g., `f(1, 1.0)`)
+
+## Typemap Candidate Filter and Compare Mode (Issue #8548, parent #8438)
+
+`MethodTable::dispatch_inner` stage-1 candidacy is decided by the
+CoreType-native typemap filter
+(`inference_core/dispatch_resolver.rs::typemap_candidate_verdict`), the
+upstream-`findall`-style relation `Tuple{args...} <: (Tuple{params...} where
+{vars...})` over the arity-expanded canonical `core_signature`:
+
+- **`Accept` / `Reject`** — definitive, only for *precise* call tuples
+  (`core_type_is_dispatch_precise`: concrete primitives, fully-instantiated
+  containers, tuples thereof, ground `Type{...}` objects).
+- **`DeferImprecise`** — the call tuple has statically-unknown components
+  (`Any`, abstract supertypes, `DataType` type objects, bare parametric
+  families, `Union`s, `Named` user types, `Bool`-element arrays — the Issue
+  #6663 `BitArray` tag ambiguity). Upstream answers these with
+  `jl_type_intersection`; sjulia now uses conservative `type_intersect` only in
+  the safe non-nominal direction: a proven `Bottom` for primitive/abstract
+  shapes rejects the candidate, while nominal/container shapes or every
+  non-Bottom result remain `DeferImprecise` and the scoring matcher's
+  runtime-deferral policies keep deciding.
+- **`DeferSignature`** — the signature has a shape the subtype engine does
+  not decide faithfully yet, or a deliberate scoring looseness the verdict
+  would overturn: nested `where`-variable occurrences, anonymous `{<:X}`
+  bounds, lower-bounded / var-dependent `where` clauses, value-parameterized
+  abstract families (Issue #7960 — the parameters live inside the
+  `AbstractUser` name string, opaque to the engine), bare array-family
+  parameters (Issue #8804 — the tuple-wrapped pattern matcher erases
+  dimensionality, including under `Type{...}`, even though #8560 fixed the
+  bare arm), abstract-element containers (historically Issue #8806 — the
+  #9567 negative oracle now pins that `Vector{Int64}` must NOT match
+  `Vector{Number}`), non-top-level `Union` components (engine fixed by Issue #8582;
+  retirement of the deferral is tracked by Issue #8817 — it needs a
+  signature-side ground predicate split from the arg-side
+  `core_type_is_dispatch_precise`).
+
+Each engine gap closed shrinks the deferral set. The scoring constants
+themselves were audited for retirement on 2026-07-02 (Issue #8438): none is
+retirable while the deferral sets stand — each constant's firing domain was
+shown (by removal experiments swept over the full fixture tree) to rank the
+deferred regions the verdict does not own. The per-constant evidence lives as
+doc notes on the constants in `inference_core/dispatch_resolver.rs`; the
+`DeferImprecise` `Named`-precision shrink (classifying registered
+non-parametric user structs as precise call-tuple components) needs the
+struct/abstract origin distinction plumbed into the verdict and is the next
+tractable slice.
+
+**Compare mode**: `SJULIA_DISPATCH_COMPARE=1` re-runs every uncached
+`dispatch_inner` under the other filter and prints greppable
+`SJULIA_DISPATCH_COMPARE candidate-diff` / `selection-diff` lines to stderr.
+Since Issue #8999 it also emits `SJULIA_DISPATCH_COMPARE verdict-count` with
+`accept` / `reject` / `defer_imprecise` / `defer_signature` counts per
+dispatch, so sweeps can inventory remaining deferral reasons. Sweep fixtures
+with `SJULIA_DISPATCH_COMPARE=1 target/dev-fast/sjulia <fixture.jl>` and grep;
+the flip evidence for Issue #8548 was a zero-diff sweep over the
+dispatch-heavy fixture categories plus the dispatch parity harness
+(`cargo nextest run --test parity_dispatch`).
+
+**Negative oracle**: the dispatch parity corpus includes explicit
+`expected = "MethodError"` cells for loose-match families (Issue #9567):
+invariant container parameters, abstract annotation non-matches, diagonal
+type-variable mismatches, and keyword mismatch. `scripts/check_dispatch_negative_oracle.sh`
+ratchets those cells so the corpus cannot drift back to positive-only dispatch
+coverage; run it with the parity harness after touching `method_table.rs`,
+`dispatch_resolver.rs`, call dispatch, or keyword dispatch. Keyword calls with
+no candidate at all and arity-mismatched calls still compile-error before
+try/catch today; those stricter runtime-`MethodError` cells are tracked by
+Issues #9709 and #9710.
+
+### Overlay method tables — design sketch (Issue #8438 acceptance item)
+
+Upstream keeps per-world method tables and supports overlay tables
+(`Base.Experimental.@overlay`) that shadow entries during lookup without
+mutating the base table. The typemap filter slots into that shape naturally
+because candidacy is now a *pure function* of `(canonical signature, call
+tuple)`:
+
+1. **Table stack, not table mutation.** `MethodTable` grows an optional
+   `overlay: Option<Arc<MethodTable>>` (or the resolver takes an ordered
+   `&[&MethodTable]`). `dispatch_inner` stage 1 enumerates the overlay's
+   methods first, then the base table's, skipping base methods whose
+   canonical signature is `==`/dedup-equal to an overlay entry (same
+   last-definition-wins rule as `add_method`).
+2. **Filtering is table-agnostic.** `typemap_candidate_verdict` consumes
+   only the expanded signature and call tuple, so overlay candidates go
+   through the identical accept/reject/defer relation — no scoring-side
+   special cases. Dominance prechecks and the morespecific relation already
+   operate on `matches` (whatever tables its entries came from).
+3. **Cache keying.** The per-table `dispatch_cache` moves up to the stack
+   level (key = argument tuple type + overlay identity/epoch), since the same
+   base table can answer differently under different overlays.
+4. **Origin fences.** The Issue #5926 Base-vs-user dominance fences read
+   `base_function_count`; overlay methods carry their own origin marker so a
+   Base-origin overlay (e.g. a GPU-backend stdlib overlay) does not
+   masquerade as user code.
+
+## Binary Dispatch Resolver Adapter (Issues #8619–#8622, parent #8609)
+
+This track unified the two binary operator dispatch decisions — compile-time
+JuliaType-level heuristics in `compile_binary_op` and the static lattice
+resolver `binary_static_verdict` — so that a primitive-numeric pair always
+takes the fast builtin path, regardless of which JuliaType-level inference
+branch the compiler was in.
+
+### Problem: Dual-Decision Divergence
+
+`compile_binary_op` (in `compile/expr/binary/mod.rs`) uses `JuliaType`-level
+inference to decide between builtin intrinsics and `CallDynamicBinaryBoth`.
+When operands are statically typed at the `ValueType` level (e.g. a struct
+field access infers `I64` via `infer_expr_type`) but the JuliaType-level
+returns `Any` (generic `T` parameter), the compiler was emitting the slow
+`CallDynamicBinaryBoth` even when both operands are concrete primitive
+numerics. Given the same `ValueType` pair, the lattice resolver would return
+`UniqueBuiltin`.
+
+### Resolver Layer (Issue #8619): `BinaryStaticVerdict`
+
+`inference_core/dispatch_resolver.rs` defines:
+
+```rust
+pub enum BinaryStaticVerdict { UniqueBuiltin, NeedsRuntime, NoCandidates }
+pub fn binary_static_verdict(left: &LatticeType, right: &LatticeType) -> BinaryStaticVerdict;
+```
+
+`binary_static_verdict` returns `UniqueBuiltin` when both operands are
+primitive numerics (`Bool`, `Int8`/`Int16`/`Int32`/`Int64`,
+`UInt8`/`UInt16`/`UInt32`/`UInt64`, `Float16`/`Float32`/`Float64`) per the
+internal `core_is_primitive_numeric_for_binary_dispatch` predicate.
+Non-primitive types (`BigInt`, `BigFloat`, `String`, `Char`, `Symbol`,
+`Nothing`, `Missing`) and `Any` produce `NeedsRuntime`.
+
+`LatticeType` (in `runtime_types/lattice.rs`) is the compile-time type
+lattice. The bridge `LatticeType::from(&ValueType)` (in `compile/bridge.rs`)
+converts a `ValueType` to a `LatticeType` for resolver input.
+
+### Differential Compare Mode (Issue #8620): `SJULIA_BINARY_DISPATCH_COMPARE=1`
+
+Setting `SJULIA_BINARY_DISPATCH_COMPARE=1` enables the `binary_compare_check()`
+annotations at every bytecode-emitting call site without changing any bytecode.
+Each annotated site logs to stderr:
+
+```
+sjulia_binary_dispatch_compare op=Add left=I64 right=I64 compile=NeedsRuntime resolver=UniqueBuiltin
+```
+
+Instrumented call sites:
+
+| Location | Logged decision |
+|----------|----------------|
+| `needs_runtime_dispatch && has_base_extensions` block (`mod.rs`) | `NeedsRuntime` |
+| `has_any \|\| needs_mixed_dispatch` path (`mod.rs`) | `NeedsRuntime` |
+| Main numeric intrinsic path, before `result_ty` (`mod.rs`) | `UniqueBuiltin` |
+| Entry of `compile_builtin_binary_op` (`builtin.rs`) | `UniqueBuiltin` |
+
+The full-fixture sweep script is `scripts/sweep_binary_dispatch_compare.sh`.
+Initial sweep (2026-07-02) over ~400 fixture files found **3 312 divergences**
+in two patterns:
+
+| Divergence pattern | Cause |
+|-------------------|-------|
+| `compile=NeedsRuntime resolver=UniqueBuiltin` | JuliaType says Any but both `infer_expr_type` operands are concrete primitive numerics. The adapter (below) eliminates these for covered operators. |
+| `compile=UniqueBuiltin resolver=NeedsRuntime` | ~9 cases where the main numeric annotation fires for an `F64×Array` pair that escapes early-exit guards; the resolver correctly says NeedsRuntime for a non-primitive operand. Annotation placement artifact, not a dispatch error. |
+
+### Resolver Adapter (Issues #8621, #8622): `resolver_overrides_to_builtin`
+
+Inside the `needs_runtime_dispatch && has_base_extensions` block, after the
+conservative JuliaType-level decision would emit `CallDynamicBinaryBoth`, the
+adapter re-checks using `infer_expr_type`-level types through the resolver:
+
+```rust
+let resolver_overrides_to_builtin = matches!(
+    op,
+    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+        | BinaryOp::Pow | BinaryOp::IntDiv | BinaryOp::Mod   // Issue #8621
+        | BinaryOp::Eq  | BinaryOp::Ne  | BinaryOp::Lt       // Issue #8622
+        | BinaryOp::Le  | BinaryOp::Gt  | BinaryOp::Ge       // Issue #8622
+) && matches!(
+    binary_static_verdict(
+        &LatticeType::from(&self.infer_expr_type(left)),
+        &LatticeType::from(&self.infer_expr_type(right)),
+    ),
+    BinaryStaticVerdict::UniqueBuiltin
+);
+```
+
+When `resolver_overrides_to_builtin` is `true`, `CallDynamicBinaryBoth` is
+skipped and execution falls through to the typed-intrinsic path. This is safe
+because `UniqueBuiltin` is returned only for primitive-numeric pairs where the
+builtin path is always correct.
+
+Issue #8621 covered arithmetic operators; Issue #8622 extended coverage to
+comparison operators.
+
+### Single-Source Audit Ratchet (Issue #8622)
+
+`scripts/audit_binary_dispatch_single_source.sh` enforces 13 invariants as a
+CI ratchet:
+
+1. All resolver functions declared in `dispatch_resolver.rs`
+   (`binary_dispatch_compare_enabled`, `binary_dispatch_compare_log`,
+   `binary_static_verdict`, `BinaryStaticVerdict`)
+2. The adapter covers arithmetic **and** comparison operators (source-level
+   pattern match on `resolver_overrides_to_builtin` and `BinaryOp::Eq` /
+   `BinaryOp::Ge`)
+3. Compare-mode annotations present at all four instrumented call sites
+4. `LatticeType::from` bridge used in `binary_compare_check`
+5. Sweep script exists and is executable
+
+Run after touching any of: `binary/mod.rs`, `binary/builtin.rs`,
+`dispatch_resolver.rs`.
+
+```bash
+bash scripts/audit_binary_dispatch_single_source.sh
+```
+
+### Code Review Checklist for Adapter Changes
+
+- [ ] When adding a new `BinaryOp` variant, determine whether the resolver can
+  decide `UniqueBuiltin` for it and add it to the `resolver_overrides_to_builtin`
+  match arm if so.
+- [ ] After any change, run `bash scripts/audit_binary_dispatch_single_source.sh`
+  (13 checks must all pass).
+- [ ] After a fixture change, run
+  `SJULIA_BINARY_DISPATCH_COMPARE=1 target/dev-fast/sjulia <fixture.jl>` to
+  verify no new `compile=NeedsRuntime resolver=UniqueBuiltin` divergences appear.
+- [ ] Do **not** add new ops to the adapter match arm without verifying that
+  `binary_static_verdict` returns `UniqueBuiltin` only when the builtin path
+  is unconditionally correct for that op (check mixed-type edge cases).
+
+## Adding a New Type's `==` to Both Dispatch Paths (Issue #5666)
+
+`compile_binary_op` (`compile/expr/binary/mod.rs`) resolves `==`/comparisons through
+**two** distinct paths, and a new type's equality needs handling in **both**:
+
+1. **Compile-time / static path** — when operand types are statically known, typed
+   intrinsics or early interceptions (near line 428, after `Egal`/`Subtype`) handle the
+   common cases. Add an early interception here for types the numeric fast-path cannot
+   handle (the numeric fast-path coerces to `I64` and errors "Cannot convert X to I64"
+   for non-numeric operands — that's the tell). Look up the `==` method table and emit
+   `Instr::Call` to the pure-Julia method with an `Egal` fallback.
+2. **Runtime (Any, Any) dispatch path** (~line 1684) — used inside pure-Julia `in` /
+   `findfirst` / Any-typed containers. Builds candidate methods filtered by
+   `is_binary_runtime_dispatch_candidate_type`. A `Value` whose runtime type is not
+   resolved here defaults to `false` for `==`.
+
+**Ordering (`<`/`<=`/`>`/`>=`) for a new type**: fix in the Rust runtime binary-op
+fallback (`vm/exec/binary_both.rs`) by extending the per-type-pair comparison branch.
+Do NOT define a pure-Julia `<(::T,::T)` method — `<`/`>` are builtin-backed, so a user
+method reroutes the operator for ALL types and breaks others (e.g. `complex(1,2) < 3`
+becomes `true`). `isless` is a normal pure-Julia generic and is safe to extend, but
+extending it alone does not help `sort`/`cmp`/`max` (they call the operators, not `isless`).
+
+## Owner-Aware Struct-Parameter Matching (Issue #11076)
+
+`Vm::type_matches` (`vm/dispatch.rs`) is the runtime string-based matcher
+between a call argument's rendered type name and a method's declared
+`JuliaType::Struct(name)` parameter. Its general `JuliaType::Struct` arm used
+to strip module qualification from BOTH sides unconditionally before
+comparing (a module-stripped fast-path equality, then a `check_subtype`
+mutual-subtype fallback) — legitimate only when a BARE reference denotes the
+SAME declaration as a qualified one (Issue #8100), never when two
+DIFFERENTLY-qualified names happen to share a bare tail. Two sibling modules
+each declaring `struct Box{T} ... end` and each used bare
+(`f(x::A1x.Box) = ...` / `f(x::A2x.Box) = ...`) made every call "ambiguous"
+instead of resolving to the one method whose owner matched.
+
+Fixed with the same asymmetric rule Issue #11021 established for type
+identity (`type_utils::type_objects_equal` et al.): a guard at the top of
+`type_matches`'s general Struct arm calls
+`subset_julia_vm_types::types::struct_owners_compatible` (made `pub`,
+reused rather than re-derived in the `subset_julia_vm` crate) and rejects
+the candidate outright when both the declared parameter name and the actual
+runtime type name carry a module-owner prefix and those owners differ —
+before the module-stripped fast path or `check_subtype` (which routes
+through `CoreType` and has already lost owner information at construction
+time) gets a chance to wrongly conclude a match.
+
+**Scope boundary (important):** this guard only reaches the shape where the
+struct itself is generic (`struct Box{T} ... end`) and referenced BARE (no
+explicit `{...}`) in the parameter annotation — that is the one case where
+`CoreType::from_julia_name_uncached` preserves the qualifier via its
+`CoreType::Named` fallback instead of stripping it into a bare
+`CoreType::Struct{name, ..}` at construction time. A non-generic
+sibling-module struct, an EXPLICITLY parametric annotation
+(`x::A1x.Box{Int}`), or a bare name colliding with the internal
+`is_known_struct_family` builtin-container list all strip qualification
+earlier — at `MethodSig`/`core_signature` construction — so the SECOND
+same-family method silently overwrites the first at
+`MethodTable::add_method`'s redefinition-dedup check (`method_table.rs`),
+before dispatch or this guard ever runs. That is a distinct, deeper bug
+(Issue #11094), deferred to Issue #11078's `CoreType` module-awareness
+continuation, not fixed by this guard.
 
 ## Related Documentation
 

@@ -47,7 +47,7 @@ The compiler detects float operand types and emits appropriate instructions:
 The VM executes float intrinsics and must preserve type through the result:
 
 - **`pop_f64_or_i64()` hazard**: This helper converts F32 values to f64, losing the original type. It is acceptable for operations that return a different type (e.g., comparisons return Bool), but must NOT be used when the result should preserve the input float type.
-- **Arithmetic intrinsics** (`AddFloat`, `SubFloat`, `MulFloat`, `DivFloat`): Check for F32 operand pairs and push `Value::F32` results.
+- **Arithmetic intrinsics** (`DynamicAdd`, `DynamicSub`, `DynamicMul`, `DynamicDiv`): Check for F32 operand pairs and push `Value::F32` results.
 - **Unary math intrinsics** (`SqrtLlvm`, `FloorLlvm`, `CeilLlvm`, `TruncLlvm`, `AbsFloat`): Use `apply_unary_float_op_with_heap` helper for type-preserving dispatch.
 - Fixed in #2219.
 
@@ -167,20 +167,20 @@ timeout 1800 cargo nextest run --release --test fixture_tests types_typed_f32_f1
 
 ```bash
 # Check for uses of pop_f64_or_i64 in arithmetic intrinsics (potential type loss)
-rg -n "pop_f64_or_i64" subset_julia_vm/src/vm/intrinsics_exec.rs
+rg -n "pop_f64_or_i64" subset_julia_vm_vm/src/vm/intrinsics_exec.rs
 
 # Verify F32/F16 parity in dynamic dispatch
-rg -c "F32|Float32" subset_julia_vm/src/vm/dynamic_ops/ subset_julia_vm/src/vm/exec/binary_both.rs
-rg -c "F16|Float16" subset_julia_vm/src/vm/dynamic_ops/ subset_julia_vm/src/vm/exec/binary_both.rs
+rg -c "F32|Float32" subset_julia_vm_vm/src/vm/dynamic_ops/ subset_julia_vm_vm/src/vm/exec/binary_both.rs
+rg -c "F16|Float16" subset_julia_vm_vm/src/vm/dynamic_ops/ subset_julia_vm_vm/src/vm/exec/binary_both.rs
 
 # Check compiler float type detection
-rg -n "both_f32|both_f16|has_f32|has_f16" subset_julia_vm/src/compile/expr/binary/
+rg -n "both_f32|both_f16|has_f32|has_f16" subset_julia_vm_compile/src/compile/expr/binary/
 
 # Verify apply_unary_float_op_with_heap is used in both static and dynamic paths
-rg -n "apply_unary_float_op_with_heap" subset_julia_vm/src/vm/intrinsics_exec.rs subset_julia_vm/src/vm/exec/call_dynamic.rs
+rg -n "apply_unary_float_op_with_heap" subset_julia_vm_vm/src/vm/intrinsics_exec.rs subset_julia_vm_vm/src/vm/exec/call_dynamic.rs
 
 # Flag any unconditional Value::F64 push after math operations (type erasure risk)
-rg -n "push\\(Value::F64\\(result\\)\\)" subset_julia_vm/src/vm/exec/binary_both.rs subset_julia_vm/src/vm/intrinsics_exec.rs
+rg -n "push\\(Value::F64\\(result\\)\\)" subset_julia_vm_vm/src/vm/exec/binary_both.rs subset_julia_vm_vm/src/vm/intrinsics_exec.rs
 ```
 
 ## Part 2: Integer Type Preservation (Issue #2278)

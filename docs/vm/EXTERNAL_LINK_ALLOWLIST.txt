@@ -1,0 +1,14 @@
+# External hosts allowed by scripts/docs_vm_link_check.py.
+# Keep this list intentionally small; internal docs/vm links are checked for
+# file/anchor existence, while external URLs are treated as policy-controlled
+# references rather than fetched during CI/nightly.
+docs.julialang.org
+developer.apple.com
+github.com
+jsxgraph.org
+en.wikipedia.org
+opensource.apple.com
+opensource.org
+spec.commonmark.org
+support.apple.com
+www.unicode.org
