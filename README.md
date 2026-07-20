@@ -9,7 +9,7 @@ It also provides a C ABI for iOS and WebAssembly bindings for the web.
 To use `sjulia`, you need to embed caches into the binary. It works without caches, but cold start is very slow, so caches are practically required.
 
 ```bash
-$ ./scripts/sjulia_install.sh
+$ ./scripts/sjulia_install.sh   # Windows: pwsh -File scripts/sjulia_install.ps1
 $sjulia examples/mandelbrot.jl
   0.027875 seconds
 Mandelbrot Set (50x25):
