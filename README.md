@@ -1,111 +1,111 @@
 # SubsetJuliaVM
 
-SubsetJuliaVM は、Julia の厳格な部分集合を Rust で実行する実装です。
+SubsetJuliaVM is a Rust implementation that runs a static subset of Julia without a JIT. It parses Julia source with a pure Rust parser and executes it through a pipeline of lowering → Core IR → bytecode compiler → stack VM.
 
-既定の実行経路は、Julia ソースを pure Rust parser で解析し、lowering、Core IR、bytecode compiler を経て stack VM で解釈します。
-
-C ABI 経由の iOS ホストと wasm-bindgen 経由の WebAssembly ホストは、この既定のバイトコード VM を使います。
-
-この経路は実行時のネイティブコード生成に依存しません。
-
-AoT と Cranelift は opt-in の別経路です。
-
-AoT は Rust ソースを生成し、cranelift feature は object 出力とデスクトップ向け JIT API を追加します。
-
-これらの feature は、既定の iOS または WebAssembly 実行経路には含まれません。
-
-## Linux のビルド依存関係
-
-Linux ではリンカーとして `clang` と LLVM の `lld` を使います。
-
-Raspberry Pi OS、Debian、Ubuntu では、ビルド前に両方をインストールしてください。
-
-```bash
-sudo apt update
-sudo apt install clang lld
-```
-
-`clang: error: invalid linker name in argument '-fuse-ld=lld'` と表示された場合は、`lld` がインストールされているか確認します。
-
-```bash
-clang --version
-ld.lld --version
-```
+It also provides a C ABI for iOS and WebAssembly bindings for the web.
 
 ## Quick Start
 
-`sjulia` を使うには、cache をバイナリに埋め込む必要があります。cache なしでも動作しますが、冷起動が非常に遅いため、実用には必須です。
-
-インストールスクリプトは cache の生成と埋め込みを自動化します。
+To use `sjulia`, you need to embed caches into the binary. It works without caches, but cold start is very slow, so caches are practically required.
 
 ```bash
-# macOS / Linux
-./scripts/sjulia_install.sh
+$ ./scripts/sjulia_install.sh
+$sjulia examples/mandelbrot.jl
+  0.027875 seconds
+Mandelbrot Set (50x25):
+
+                              .
+                              . .
+                              .+
+                             ###+.
+                        .   .####.
+                       .#++#########....
+                      ..##############.
+            .        ..################..
+             ...... .##################.
+            .#######.###################
+          ...##########################.
+#####################################..
+          ...##########################.
+            .#######.###################
+             ...... .##################.
+            .        ..################..
+                      ..##############.
+                       .#++#########....
+                        .   .####.
+                             ###+.
+                              .+
+                              . .
+                              .
+
+
 ```
 
-```powershell
-# Windows
-pwsh -File scripts/sjulia_install.ps1
-```
+## AoT Compile Mandelbrot
 
-cache を強制的に再生成する場合は、どちらのスクリプトにも `--force-cache` を渡します。
-
-手動でビルドする場合は、以下を実行します。
+To compile `examples/mandelbrot.jl` ahead of time into a native binary, build
+`juliars` with the AoT feature and use the minimal AoT prelude:
 
 ```bash
-cargo build --release -p subset_julia_vm --bin sjulia --features repl
-mkdir -p target
-./target/release/sjulia --precompile-prelude target/prelude_program_cache.bin
-./target/release/sjulia --precompile-base target/base_cache.bin
+$ cargo build --release -p subset_julia_vm --features aot --bin juliars
+$ target/release/juliars --minimal-prelude examples/mandelbrot.jl \
+    --emit-binary target/mandelbrot_aot
+$ target/mandelbrot_aot
+  9.4e-5 seconds
+Mandelbrot Set (50x25):
 
-SJULIA_PRELUDE_PROGRAM_CACHE="$(pwd)/target/prelude_program_cache.bin" \
-SJULIA_BASE_CACHE="$(pwd)/target/base_cache.bin" \
-  cargo build --release -p subset_julia_vm --bin sjulia --features repl
+                              .
+                              . .
+                              .+
+                             ###+.
+                        .   .####.
+                       .#++#########....
+                      ..##############.
+            .        ..################..
+             ...... .##################.
+            .#######.###################
+          ...##########################.
+#####################################..
+          ...##########################.
+            .#######.###################
+             ...... .##################.
+            .        ..################..
+                      ..##############.
+                       .#++#########....
+                        .   .####.
+                             ###+.
+                              .+
+                              . .
+                              .
+
 ```
 
-2 回目の build 後の `target/release/sjulia` が cache 埋め込み済みバイナリです。
+`--minimal-prelude` is currently required for this example. The full prelude
+still includes Base paths that reach unsupported AoT `BigInt`/parametric
+constructor code, even though the Mandelbrot program itself can compile through
+the minimal AoT prelude.
+
+For the full set of AoT options (Cranelift backend, object/library output, C ABI exports, etc.), see [`docs/CLI.md`](docs/CLI.md) or run `juliars --help`.
+
+## Building the WebAssembly Package
+
+Build the WASM package for the Web Playground as follows.
 
 ```bash
-./target/release/sjulia path/to/file.jl
-./target/release/sjulia -e 'println(1 + 2)'
+$ scripts/wasm_build_with_cache.sh --target web --out-dir ./web/pkg
+$ cd web
+$ python3 server.py
+Serving at http://localhost:8080
 ```
 
-## WebAssembly package のビルド
+This script generates and embeds the prelude/Base caches, then builds `subset_julia_vm_web` with `wasm-pack`. See [`docs/CLI.md`](docs/CLI.md) for details.
 
-Web Playground 用の WASM package は以下で build します。
+## Documentation
 
-```bash
-scripts/wasm_build_with_cache.sh --target web --out-dir ./web/pkg
-```
+- [`docs/CLI.md`](docs/CLI.md): detailed CLI reference, cache instructions, Rust API, C ABI / iOS, WebAssembly, tests, audits
+- [`docs/vm/`](docs/vm/): architecture, implementation status, testing and audit policies, etc.
 
-このスクリプトは prelude/Base cache を生成・埋め込み、`subset_julia_vm_web` を `wasm-pack` で build します。詳細は [`docs/CLI.md`](docs/CLI.md) を参照。
-
-## SubsetJuliaVM とは
-
-- **既定パイプライン**: Julia source → parser → lowering → Core IR → bytecode compiler → stack VM
-- **iOS と WebAssembly**: 同じバイトコード VM を C ABI または wasm-bindgen から呼び出す
-- **opt-in 経路**: AoT feature は Rust を生成し、cranelift feature は object 出力とデスクトップ JIT API を追加する
-- **Julia 互換を目指す**: 対応範囲は `subset_julia_vm/tests/fixtures/`、`subset_julia_vm/src/julia/`、`docs/vm/STATUS.md`、`docs/vm/UNIMPLEMENTED.md` を参照
-
-Workspace は以下の crate で構成されています。
-
-```text
-subset_julia_vm/          Core VM, compiler, lowering, CLI
-subset_julia_vm_bytecode/ Shared Instr, Value, CompiledProgram, wire IDs
-subset_julia_vm_types/    Julia type system and inference primitives
-subset_julia_vm_ir/       Shared source spans and errors
-subset_julia_vm_ffi/      C ABI staticlib/cdylib (iOS / native)
-subset_julia_vm_parser/   pure Rust Julia parser
-subset_julia_vm_web/      wasm-bindgen bindings
-subset_julia_vm_runtime/  AoT compiled code 用 runtime crate
-```
-
-## ドキュメント
-
-- [`docs/CLI.md`](docs/CLI.md): 詳細な CLI リファレンス、cache 手順、Rust API、C ABI / iOS、WebAssembly、Tests、Audits
-- [`docs/vm/`](docs/vm/): アーキテクチャ、実装状況、テスト・監査ポリシーなど
-
-主要なドキュメント:
+Key documents:
 
 - `docs/vm/ARCHITECTURE_OVERVIEW.md`
 - `docs/vm/CHECKLISTS.md`
