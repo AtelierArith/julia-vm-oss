@@ -8,7 +8,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
-use crate::test_runtime::compile_core_source;
+use crate::test_runtime::{compile_core_source, compile_repl_core_source};
 use crate::types::JuliaType;
 use crate::vm::value::GeneratorCallable;
 use std::rc::Rc;
@@ -5116,6 +5116,109 @@ fn repl_definition_prefix_requires_exact_function_struct_order_9784() {
             &[0],
         )
         .is_none());
+}
+
+#[test]
+fn repl_synthetic_prefix_cannot_activate_pending_type_11564() {
+    let compiled = compile_repl_core_source(
+        "replayed_constructor_hidden_11564 = try\n\
+           ActivationType11564(41)\n\
+           false\n\
+         catch e\n\
+           e isa UndefVarError\n\
+         end\n\
+         activation_f_11564(x) = x + 1\n\
+         struct ActivationType11564\n\
+           x::Int\n\
+         end\n\
+         activation_g_11564(x) = ActivationType11564(x)\n\
+         activation_g_11564(activation_f_11564(40)).x",
+    );
+    assert!(
+        compiled.is_ok(),
+        "REPL source failed to compile: {compiled:?}"
+    );
+    let Ok(compiled) = compiled else {
+        return;
+    };
+    let expected = compiled.code[compiled.entry..]
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instr::DefineEvalFunction(index) => Some(ReplDefinitionActivation::Function(*index)),
+            Instr::DefineEvalStruct(type_id) => Some(ReplDefinitionActivation::Struct(*type_id)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        expected.as_slice(),
+        [
+            ReplDefinitionActivation::Function(_),
+            ReplDefinitionActivation::Struct(_),
+            ReplDefinitionActivation::Function(_)
+        ]
+    ));
+    let named_expected = expected
+        .iter()
+        .map(|activation| match activation {
+            ReplDefinitionActivation::Function(index) => {
+                format!("function:{}", compiled.functions[*index].name)
+            }
+            ReplDefinitionActivation::Struct(type_id) => {
+                format!("struct:{}", compiled.struct_defs[*type_id].name)
+            }
+            other => format!("unexpected:{other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        named_expected,
+        [
+            "function:activation_f_11564",
+            "struct:ActivationType11564",
+            "function:activation_g_11564",
+        ]
+    );
+
+    let first_activation_ip = compiled.code[compiled.entry..]
+        .iter()
+        .position(|instruction| {
+            matches!(
+                instruction,
+                Instr::DefineEvalFunction(_) | Instr::DefineEvalStruct(_)
+            )
+        })
+        .map(|offset| compiled.entry + offset);
+    assert!(
+        first_activation_ip.is_some(),
+        "interleaved source must emit activation markers"
+    );
+    let Some(first_activation_ip) = first_activation_ip else {
+        return;
+    };
+    let mut prefix_only = compiled.clone();
+    let prefix_exit = prefix_only.code.len();
+    prefix_only.code[first_activation_ip] = Instr::Jump(prefix_exit);
+    prefix_only
+        .code
+        .extend([Instr::PushNothing, Instr::ReturnAny]);
+    prefix_only.source_map.extend([None, None]);
+
+    let mut prefix_vm = Vm::new_program(prefix_only, StableRng::new(0));
+    assert!(matches!(prefix_vm.run(), Ok(Value::Nothing)));
+    assert!(matches!(
+        prefix_vm.get_global("replayed_constructor_hidden_11564"),
+        Some(Value::Bool(true))
+    ));
+    assert!(prefix_vm.eval_struct_type_name_is_pending("ActivationType11564"));
+    assert!(prefix_vm.repl_definition_activations.is_empty());
+
+    let mut full_vm = Vm::new_program(compiled, StableRng::new(0));
+    let full_result = full_vm.run();
+    assert!(
+        matches!(full_result, Ok(Value::I64(41))),
+        "unexpected full result: {full_result:?}"
+    );
+    assert_eq!(full_vm.repl_definition_activations, expected);
+    assert!(!full_vm.eval_struct_type_name_is_pending("ActivationType11564"));
 }
 
 include!("../../tests/internal/repl_activation_indices_9784_test.rs");

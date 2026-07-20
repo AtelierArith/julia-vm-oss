@@ -1,6 +1,6 @@
 [package]
 name = "subset_julia_vm"
-version = "0.10.3"
+version = "0.11.1"
 edition = "2021"
 rust-version.workspace = true
 license = "MIT OR Apache-2.0"

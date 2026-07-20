@@ -480,6 +480,11 @@ fn main() {
         return;
     }
 
+    if args.len() > 1 && matches!(args[1].as_str(), "-v" | "--version") {
+        print_version();
+        return;
+    }
+
     // Overlap the Base-cache deserialize and Base IR clones with the
     // prelude-load/merge window on the main thread (Issue #6348). Harmless
     // for non-run subcommands: unconsumed prefetch results are dropped.
@@ -827,6 +832,7 @@ USAGE:
     sjulia --precompile-seeded <out.bin> Generate seeded PROGRAM_CACHE entries for embedding
 
 OPTIONS:
+    -v, --version         Show version information
     -e <code>             Execute code string
     -c, --compile <file>  Compile source to Core IR file
         --run-ir          Execute a Core IR file produced by --compile
@@ -865,6 +871,10 @@ EXAMPLES:
     sjulia --dump-bytecode -e "f(x)=x+1; f(41)"
 "#
     );
+}
+
+fn print_version() {
+    println!("sjulia — SubsetJuliaVM REPL v{}", VERSION);
 }
 
 fn print_cache_status() {

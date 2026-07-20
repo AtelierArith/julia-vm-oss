@@ -1800,7 +1800,7 @@ fn operator_call_inference_types_collatz_condition_issue_7504() {
 }
 
 #[test]
-fn test_broadcast_call_site_specializes_mandelbrot_escape_complex_param() {
+fn broadcast_ref_specializes_all_args_and_result_issue_11812() {
     let src = r#"
 function mandelbrot_escape(c, maxiter)
     z = 0.0 + 0.0im
@@ -1852,6 +1852,37 @@ end
         engine
             .specializations
             .observed_args_for("mandelbrot_escape")
+    );
+    assert_eq!(
+        sig.param_types,
+        vec![
+            StaticType::Struct {
+                type_id: 0,
+                name: "Complex{Float64}".to_string(),
+            },
+            StaticType::I64,
+        ],
+        "Issue #11812: Ref(maxiter) must specialize the scalar argument"
+    );
+    assert_eq!(
+        sig.return_type,
+        StaticType::I64,
+        "Issue #11812: scalar specialization must preserve the I64 return type"
+    );
+
+    let grid_sig = &typed
+        .get_functions("mandelbrot_grid")
+        .expect("mandelbrot_grid")
+        .first()
+        .expect("first")
+        .signature;
+    assert_eq!(
+        grid_sig.return_type,
+        StaticType::Array {
+            element: Box::new(StaticType::I64),
+            ndims: Some(2),
+        },
+        "Issue #11812: broadcast result must preserve the callee return type"
     );
 }
 

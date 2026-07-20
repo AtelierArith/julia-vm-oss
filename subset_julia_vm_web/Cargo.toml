@@ -1,6 +1,6 @@
 [package]
 name = "subset_julia_vm_web"
-version = "0.10.3"
+version = "0.11.1"
 edition = "2021"
 rust-version.workspace = true
 description = "WebAssembly binding for SubsetJuliaVM - Julia subset interpreter"

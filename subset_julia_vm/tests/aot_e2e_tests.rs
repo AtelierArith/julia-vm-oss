@@ -706,30 +706,47 @@ fn test_aot_toplevel_time_no_trailing_path_statement_issue_8150() {
 }
 
 #[test]
-fn test_aot_e2e_time_assignment_preserves_timing_side_effect() {
-    let source = r#"
-@time x = 42
-println(x)
+fn aot_time_noncopy_assignment_avoids_dead_passthrough_move_issue_8499() {
+    std::thread::Builder::new()
+        .name("aot-time-noncopy-8499".to_string())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let source = r#"
+@time xs = [41, 42]
+println(xs[2])
 "#;
-    let result = compile_to_rust(source);
-    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
+            let result = compile_to_rust(source);
+            assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 
-    let rust_code = result.unwrap();
-    assert!(
-        rust_code.contains("seconds"),
-        "Generated code should preserve @time timing output, got:\n{}",
-        rust_code
-    );
-    assert!(
-        rust_code.contains("let mut x: i64 = 42i64;"),
-        "Generated code should preserve the assignment inside @time, got:\n{}",
-        rust_code
-    );
-    assert!(
-        rust_code.contains("println!(\"{}\", x);"),
-        "Generated code should preserve downstream uses of the assigned value, got:\n{}",
-        rust_code
-    );
+            let rust_code = result.unwrap();
+            assert!(
+                rust_code.contains("seconds"),
+                "Generated code should preserve @time timing output, got:\n{}",
+                rust_code
+            );
+            assert!(
+                rust_code.contains("let mut xs: Vec<i64> = vec![41i64, 42i64];"),
+                "Generated code should preserve the assignment inside @time, got:\n{}",
+                rust_code
+            );
+            assert!(
+                !rust_code.lines().any(|line| {
+                    let line = line.trim();
+                    line.starts_with("let mut result__time_") && line.ends_with(" = xs;")
+                }),
+                "statement-position @time must not move xs into a dead result slot, got:\n{}",
+                rust_code
+            );
+            assert!(
+                rust_code.contains("let _sjulia_arr = &xs"),
+                "Generated code should preserve downstream uses of the assigned value, got:\n{}",
+                rust_code
+            );
+            assert_generated_rust_compiles(&rust_code, "aot_time_noncopy_assignment_8499");
+        })
+        .expect("spawn AoT regression with a large parser/lowering stack")
+        .join()
+        .expect("AoT regression thread panicked");
 }
 
 #[test]
@@ -921,6 +938,43 @@ println(mandelbrot_grid(50, 40, 50))
     );
 
     assert_generated_rust_compiles(&rust_code, "aot_mandelbrot_broadcast_8790");
+}
+
+#[test]
+fn aot_mandelbrot_ref_broadcast_result_drives_bool_condition_issue_11812() {
+    let source = r#"
+function mandelbrot_escape(c, maxiter)
+    z = 0.0 + 0.0im
+    for k in 1:maxiter
+        if abs2(z) > 4.0
+            return k
+        end
+        z = z^2 + c
+    end
+    return maxiter
+end
+
+function mandelbrot_grid(width, height, maxiter)
+    xs = range(-2.0, 1.0; length=width)
+    ys = range(1.2, -1.2; length=height)
+    C = xs' .+ im .* ys
+    mandelbrot_escape.(C, Ref(maxiter))
+end
+
+function main()
+    grid = mandelbrot_grid(2, 2, 5)
+    n = grid[1, 1]
+    if n > 0
+        println("inside")
+    end
+end
+
+main()
+"#;
+
+    let rust_code = compile_to_rust_with_base_optimized(source)
+        .expect("Ref-protected Mandelbrot broadcast should compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_mandelbrot_ref_result_11812", "inside");
 }
 
 #[test]

@@ -1686,7 +1686,7 @@ dependencies = [
 
 [[package]]
 name = "subset_julia_vm"
-version = "0.10.3"
+version = "0.11.1"
 dependencies = [
  "astro-float",
  "bincode",
@@ -1748,7 +1748,7 @@ dependencies = [
 
 [[package]]
 name = "subset_julia_vm_compile"
-version = "0.10.3"
+version = "0.11.1"
 dependencies = [
  "astro-float",
  "bincode",
@@ -1848,7 +1848,7 @@ dependencies = [
 
 [[package]]
 name = "subset_julia_vm_vm"
-version = "0.10.3"
+version = "0.11.1"
 dependencies = [
  "astro-float",
  "half",
@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "subset_julia_vm_web"
-version = "0.10.3"
+version = "0.11.1"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",

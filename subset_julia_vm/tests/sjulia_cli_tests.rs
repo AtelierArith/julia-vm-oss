@@ -60,6 +60,30 @@ mod sjulia_cli_cache_status_tests {
             );
         }
     }
+
+    #[test]
+    fn version_flags_report_current_repl_package_version_11813() {
+        let expected = format!(
+            "sjulia — SubsetJuliaVM REPL v{}\n",
+            env!("CARGO_PKG_VERSION")
+        );
+
+        for flag in ["-v", "--version"] {
+            let output = Command::new(sjulia_bin())
+                .arg(flag)
+                .output()
+                .unwrap_or_else(|err| panic!("spawn sjulia {flag}: {err}"));
+            assert!(
+                output.status.success(),
+                "sjulia {flag} failed (status={:?})\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+            assert!(output.stderr.is_empty(), "sjulia {flag} wrote to stderr");
+        }
+    }
 }
 
 mod sjulia_cli_dump_bytecode_tests {

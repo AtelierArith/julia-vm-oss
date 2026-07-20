@@ -3750,6 +3750,7 @@ mod tests {
                 ],
                 span,
             },
+            published_members: None,
             span,
         });
         program.functions.push(Arc::new(Function {

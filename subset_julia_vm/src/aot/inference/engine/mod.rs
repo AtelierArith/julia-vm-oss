@@ -49,6 +49,29 @@ pub(crate) fn collect_enum_defs_in_block<'a>(block: &'a Block, out: &mut Vec<&'a
     }
 }
 
+/// If a lowered broadcast operand is `Ref(x)`, return the scalar-protected
+/// value `x`; otherwise return the original expression. Lowering currently
+/// emits ordinary `Expr::Call` nodes for source-level `Ref(x)`, while cached
+/// or synthesized IR may carry the dedicated builtin form. Both represent the
+/// same broadcast scalar boundary and must feed identical types into call-site
+/// specialization and result inference (Issue #11812).
+fn unwrap_broadcast_ref_expr(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Call {
+            function,
+            args,
+            kwargs,
+            ..
+        } if function == "Ref" && args.len() == 1 && kwargs.is_empty() => &args[0],
+        Expr::Builtin {
+            name: crate::ir::core::BuiltinOp::Ref,
+            args,
+            ..
+        } if args.len() == 1 => &args[0],
+        _ => expr,
+    }
+}
+
 pub struct TypeInferenceEngine {
     /// Built-in function signatures (name -> return type for common arities)
     pub(crate) builtins: HashMap<String, Vec<(Vec<StaticType>, StaticType)>>,
@@ -567,20 +590,7 @@ impl TypeInferenceEngine {
                                 .iter()
                                 .map(|arg| {
                                     // Ref(x) is scalar-protection in broadcast; treat as x.
-                                    let ty = if let Expr::Builtin {
-                                        name: crate::ir::core::BuiltinOp::Ref,
-                                        args,
-                                        ..
-                                    } = arg
-                                    {
-                                        if args.len() == 1 {
-                                            self.infer_expr_type(&args[0])
-                                        } else {
-                                            self.infer_expr_type(arg)
-                                        }
-                                    } else {
-                                        self.infer_expr_type(arg)
-                                    };
+                                    let ty = self.infer_expr_type(unwrap_broadcast_ref_expr(arg));
 
                                     // Broadcasted functions are applied element-wise.
                                     match ty {
@@ -1924,20 +1934,6 @@ impl TypeInferenceEngine {
             other => vec![other],
         };
 
-        fn unwrap_ref_expr(expr: &Expr) -> &Expr {
-            if let Expr::Builtin {
-                name: crate::ir::core::BuiltinOp::Ref,
-                args,
-                ..
-            } = expr
-            {
-                if args.len() == 1 {
-                    return &args[0];
-                }
-            }
-            expr
-        }
-
         fn array_ndims(ty: &StaticType) -> usize {
             match ty {
                 StaticType::Array { ndims: Some(n), .. } => *n,
@@ -1965,7 +1961,7 @@ impl TypeInferenceEngine {
 
         // Unary broadcast: f.(v) -> Array{result_elem}
         if bc_args.len() == 1 {
-            let arg_ty = self.infer_expr_type_with_env(unwrap_ref_expr(bc_args[0]), env);
+            let arg_ty = self.infer_expr_type_with_env(unwrap_broadcast_ref_expr(bc_args[0]), env);
             let ndims = array_ndims(&arg_ty);
             if ndims > 0 {
                 let elem = self.element_type(&arg_ty);
@@ -1982,8 +1978,8 @@ impl TypeInferenceEngine {
             return StaticType::Any;
         }
 
-        let lhs_ty = self.infer_expr_type_with_env(unwrap_ref_expr(bc_args[0]), env);
-        let rhs_ty = self.infer_expr_type_with_env(unwrap_ref_expr(bc_args[1]), env);
+        let lhs_ty = self.infer_expr_type_with_env(unwrap_broadcast_ref_expr(bc_args[0]), env);
+        let rhs_ty = self.infer_expr_type_with_env(unwrap_broadcast_ref_expr(bc_args[1]), env);
 
         let lhs_ndims = array_ndims(&lhs_ty);
         let rhs_ndims = array_ndims(&rhs_ty);

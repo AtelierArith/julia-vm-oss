@@ -38,7 +38,13 @@ impl<'a> IrConverter<'a> {
                         ..
                     },
                 span,
-            } => self.convert_nested_assignment(var, inner_var, inner_value, *span, true),
+            } => self.convert_nested_assignment(
+                var,
+                inner_var,
+                inner_value,
+                *span,
+                !self.is_discarded_statement_let_passthrough(var),
+            ),
             Stmt::Expr {
                 expr: Expr::LetBlock { bindings, body, .. },
                 ..
@@ -217,9 +223,21 @@ impl<'a> IrConverter<'a> {
         body: &Block,
     ) -> AotResult<Vec<AotStmt>> {
         self.enter_lexical_scope(bindings, body);
+        let passthrough = discarded_statement_let_passthrough(bindings, body);
+        self.statement_let_passthrough_stack.push(passthrough);
         let result = self.convert_let_block_stmt_inner(bindings, body);
+        self.statement_let_passthrough_stack.pop();
         self.exit_lexical_scope(None);
         result
+    }
+
+    fn is_discarded_statement_let_passthrough(&self, name: &str) -> bool {
+        name.starts_with('#')
+            || self
+                .statement_let_passthrough_stack
+                .last()
+                .and_then(Option::as_deref)
+                == Some(name)
     }
 
     fn convert_let_block_stmt_inner(
@@ -256,7 +274,7 @@ impl<'a> IrConverter<'a> {
                             inner_var,
                             inner_value,
                             *span,
-                            !is_statement_let_passthrough_slot(var),
+                            !self.is_discarded_statement_let_passthrough(var),
                         )?);
                         continue;
                     }
@@ -773,6 +791,102 @@ impl<'a> IrConverter<'a> {
     }
 }
 
-fn is_statement_let_passthrough_slot(name: &str) -> bool {
-    name.starts_with('#')
+fn discarded_statement_let_passthrough(
+    bindings: &[(crate::ir::core::InternedStr, Expr)],
+    body: &Block,
+) -> Option<String> {
+    let (last, prefix) = body.stmts.split_last()?;
+    let Stmt::Expr {
+        expr: Expr::Var(name, _),
+        ..
+    } = last
+    else {
+        return None;
+    };
+    let name = name.to_string();
+
+    // A binding inherited from the enclosing scope remains observable after
+    // this value-discarded `let`, so only a scope-local passthrough may vanish.
+    let is_local = bindings.iter().any(|(binding, _)| binding.as_ref() == name)
+        || contains_transparent_local_decl(prefix, &name);
+    if !is_local {
+        return None;
+    }
+
+    (!crate::ir::free_vars::statements_reference_name(prefix, &name)).then_some(name)
+}
+
+fn contains_transparent_local_decl(stmts: &[Stmt], name: &str) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::LocalDecl { var, .. } => var == name,
+        Stmt::Block(block) => contains_transparent_local_decl(&block.stmts, name),
+        _ => false,
+    })
+}
+
+#[cfg(test)]
+mod passthrough_tests {
+    use super::*;
+
+    fn span() -> Span {
+        Span::new(0, 0, 1, 1, 1, 1)
+    }
+
+    fn local_and_assignment() -> Vec<Stmt> {
+        vec![
+            Stmt::LocalDecl {
+                var: "result".to_string(),
+                kind: LocalDeclKind::Explicit,
+                span: span(),
+            },
+            Stmt::Assign {
+                var: "result".to_string(),
+                value: Expr::AssignExpr {
+                    var: "xs".into(),
+                    value: Box::new(Expr::Literal(Literal::Int(1), span())),
+                    span: span(),
+                },
+                span: span(),
+            },
+        ]
+    }
+
+    #[test]
+    fn statement_let_only_discards_unread_local_passthrough_issue_8499() {
+        let mut stmts = local_and_assignment();
+        stmts.push(Stmt::Expr {
+            expr: Expr::var("result", span()),
+            span: span(),
+        });
+        let body = Block {
+            stmts,
+            span: span(),
+        };
+        assert_eq!(
+            discarded_statement_let_passthrough(&[], &body).as_deref(),
+            Some("result")
+        );
+
+        let mut observed = local_and_assignment();
+        observed.push(Stmt::Expr {
+            expr: Expr::Call {
+                function: "println".into(),
+                args: vec![Expr::var("result", span())],
+                kwargs: vec![],
+                splat_mask: vec![false],
+                kwargs_splat_mask: vec![],
+                span: span(),
+            },
+            span: span(),
+        });
+        observed.push(Stmt::Expr {
+            expr: Expr::var("result", span()),
+            span: span(),
+        });
+        let body = Block {
+            stmts: observed,
+            span: span(),
+        };
+        assert_eq!(discarded_statement_let_passthrough(&[], &body), None);
+    }
 }

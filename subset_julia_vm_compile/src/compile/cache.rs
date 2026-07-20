@@ -2522,18 +2522,18 @@ pub fn compile_with_cache_with_globals(
 /// pipeline reuse the WHOLE `bundle.compiled` as the precompiled prefix and
 /// append only the freshly-compiled new input — exactly how the Base cache reuse
 /// already works, with the accumulated bundle standing in for the Base cache.
-/// Module-surface metadata (function names, constant names, exports) for the
-/// USER modules realized in the accumulated program (Issue #9199 LV5). Built
-/// once per full recompile from the merged program's modules via
-/// `collect_module_info`, and carried into the relocatable-delta compile so a
-/// later delta that only REFERENCES a prior simple user module (`M.f()`,
-/// `M.const`) resolves against the live VM's already-installed module functions
+/// Module-surface metadata (function names, constant names, exports) for modules
+/// realized in the accumulated bytecode prefix (Issues #9199/#11584). Built
+/// once per full recompile from the Base IR plus the merged program's user
+/// modules via `collect_module_info`, and carried into the relocatable-delta
+/// compile so a later delta that REFERENCES an existing module (`GC.gc()`,
+/// `M.f()`, `M.const`) resolves against the live VM's installed module functions
 /// (in `bundle.method_tables` / the prefix) and its module-constant globals (in
 /// frame-0), WITHOUT re-emitting the module body. Keyed by qualified module path
-/// (`M`, `M.Sub`), exactly like the pipeline's own `module_functions` etc. Empty
-/// for a session with no modules (the `Default`), so a non-module delta compile
-/// is unaffected. Only module RESOLUTION metadata — never bodies — is carried;
-/// the module's compiled function bodies already live verbatim in `bundle`.
+/// (`M`, `M.Sub`), exactly like the pipeline's own `module_functions` etc. Only
+/// module RESOLUTION metadata — never bodies — is carried; the module's compiled
+/// function bodies already live verbatim in `bundle`. Base roots are bare Main
+/// bindings only when Base exports them; internal Base modules remain qualified.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ReplModuleMetadata {
     pub module_functions: HashMap<String, HashSet<String>>,
@@ -2666,25 +2666,27 @@ impl ReplMethodSourceSnapshot {
 }
 
 impl ReplModuleMetadata {
-    /// Build the module surface from a compiled program's modules (Issue #9199
-    /// LV5). `modules` is the merged program's module list (user modules +
-    /// any loaded package modules); the caller decides — via the session
-    /// eligibility gate — whether the delta path is taken, so carrying every
-    /// module here is safe (an ineligible session never consults it).
+    /// Build a module surface from source modules. Callers separately decide
+    /// which roots are lexically bound in Main and whether the session is
+    /// eligible for live delta compilation.
     fn from_modules(modules: &[crate::ir::core::Module]) -> Self {
         let mut meta = ReplModuleMetadata::default();
+        meta.extend_from_modules(modules);
+        meta
+    }
+
+    fn extend_from_modules(&mut self, modules: &[crate::ir::core::Module]) {
         for module in modules {
-            meta.toplevel_module_bindings.insert(module.name.clone());
-            crate::compile::collect_module_publics(module, "", &mut meta.module_publics);
+            self.toplevel_module_bindings.insert(module.name.clone());
+            crate::compile::collect_module_publics(module, "", &mut self.module_publics);
             crate::compile::collect::collect_module_info(
                 module,
                 "",
-                &mut meta.module_functions,
-                &mut meta.module_exports,
-                &mut meta.module_constants,
+                &mut self.module_functions,
+                &mut self.module_exports,
+                &mut self.module_constants,
             );
         }
-        meta
     }
 
     fn is_empty(&self) -> bool {
@@ -2699,10 +2701,10 @@ pub struct ReplPersistentCompile {
     /// tables/snapshot seed the next compile so the prior prefix is neither
     /// re-inferred nor re-emitted.
     bundle: super::pipeline_ctx::CoreCompileOutput,
-    /// Module-surface metadata for the accumulated program's modules (Issue #9199
-    /// LV5). Consulted by `repl_relocatable_delta_compile` so a delta that
-    /// references a prior simple user module resolves against the live VM instead
-    /// of erroring "Unknown module". Empty for a module-free session.
+    /// Module-surface metadata for modules realized in the accumulated prefix
+    /// (Issues #9199/#11584). Consulted by `repl_relocatable_delta_compile` so a
+    /// delta that references an exported Base module or prior simple user module
+    /// resolves against the live VM instead of erroring "Unknown module".
     module_metadata: ReplModuleMetadata,
     /// User/session imports already executed in the reused prefix. Delta IR
     /// omits those prior statements, but name resolution still needs their
@@ -3590,9 +3592,18 @@ pub(crate) fn repl_full_compile(
     );
     let type_names = collect_type_names(&compiled);
     let inner_constructor_type_names = collect_inner_constructor_type_names(&merged);
-    // Module surface for a later delta that references a prior module (Issue
-    // #9199 LV5). `merged.modules` holds every module realized this eval.
-    let module_metadata = ReplModuleMetadata::from_modules(&merged.modules);
+    // Module surface for a later delta that references a module already present
+    // in the reused prefix (Issues #9199/#11584). `merge_with_precompiled_base`
+    // deliberately leaves Base modules out of `merged.modules`, even though the
+    // cached prefix realizes them. Carry those bindings (for example `GC`) from
+    // the authoritative Base IR alongside modules realized by this session.
+    let mut module_metadata = crate::base_loader::get_base_program()
+        .map(|base| ReplModuleMetadata::from_modules(&base.modules))
+        .unwrap_or_default();
+    module_metadata
+        .toplevel_module_bindings
+        .retain(|name| crate::julia::base::is_exported(name));
+    module_metadata.extend_from_modules(&merged.modules);
     let method_sources = ReplMethodSourceSnapshot::from_functions(
         program
             .functions

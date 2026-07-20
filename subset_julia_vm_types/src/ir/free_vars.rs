@@ -90,6 +90,235 @@ pub fn collect_referenced_names(func: &Function) -> HashSet<String> {
     names
 }
 
+/// Test whether a statement slice reads `needle` without recursive descent.
+/// Macro-expanded Core IR can be deeply nested, so this targeted walker keeps
+/// its work stack on the heap (Issue #8499).
+pub fn statements_reference_name(stmts: &[Stmt], needle: &str) -> bool {
+    enum Work<'a> {
+        Stmt(&'a Stmt),
+        Expr(&'a Expr),
+    }
+
+    let mut work: Vec<Work<'_>> = stmts.iter().map(Work::Stmt).collect();
+    while let Some(item) = work.pop() {
+        match item {
+            Work::Stmt(stmt) => match stmt {
+                Stmt::Block(block)
+                | Stmt::Timed { body: block, .. }
+                | Stmt::TestSet { body: block, .. } => {
+                    work.extend(block.stmts.iter().map(Work::Stmt));
+                }
+                Stmt::Assign { value, .. } => work.push(Work::Expr(value)),
+                Stmt::AddAssign { var, value, .. } => {
+                    if var == needle {
+                        return true;
+                    }
+                    work.push(Work::Expr(value));
+                }
+                Stmt::Return {
+                    value: Some(value), ..
+                } => work.push(Work::Expr(value)),
+                Stmt::Expr { expr, .. } => {
+                    work.push(Work::Expr(expr));
+                }
+                Stmt::TestThrows { expr, .. } => work.push(Work::Expr(expr.as_ref())),
+                Stmt::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    work.push(Work::Expr(condition));
+                    work.extend(then_branch.stmts.iter().map(Work::Stmt));
+                    if let Some(block) = else_branch {
+                        work.extend(block.stmts.iter().map(Work::Stmt));
+                    }
+                }
+                Stmt::For {
+                    start,
+                    end,
+                    step,
+                    body,
+                    ..
+                } => {
+                    work.extend([Work::Expr(start), Work::Expr(end)]);
+                    work.extend(step.iter().map(Work::Expr));
+                    work.extend(body.stmts.iter().map(Work::Stmt));
+                }
+                Stmt::ForEach { iterable, body, .. }
+                | Stmt::ForEachTuple { iterable, body, .. } => {
+                    work.push(Work::Expr(iterable));
+                    work.extend(body.stmts.iter().map(Work::Stmt));
+                }
+                Stmt::While {
+                    condition, body, ..
+                } => {
+                    work.push(Work::Expr(condition));
+                    work.extend(body.stmts.iter().map(Work::Stmt));
+                }
+                Stmt::Try {
+                    try_block,
+                    catch_block,
+                    else_block,
+                    finally_block,
+                    ..
+                } => {
+                    work.extend(try_block.stmts.iter().map(Work::Stmt));
+                    for block in [catch_block, else_block, finally_block]
+                        .into_iter()
+                        .flatten()
+                    {
+                        work.extend(block.stmts.iter().map(Work::Stmt));
+                    }
+                }
+                Stmt::FunctionDef { func, .. } | Stmt::EvalFunctionDef { func, .. } => {
+                    work.extend(func.body.stmts.iter().map(Work::Stmt));
+                }
+                Stmt::DictAssign {
+                    dict, key, value, ..
+                } => {
+                    if dict == needle {
+                        return true;
+                    }
+                    work.extend([Work::Expr(key), Work::Expr(value)]);
+                }
+                Stmt::IndexAssign {
+                    array,
+                    indices,
+                    value,
+                    ..
+                } => {
+                    if array == needle {
+                        return true;
+                    }
+                    work.extend(indices.iter().map(Work::Expr));
+                    work.push(Work::Expr(value));
+                }
+                Stmt::FieldAssign { object, value, .. } => {
+                    if object == needle {
+                        return true;
+                    }
+                    work.push(Work::Expr(value));
+                }
+                Stmt::DestructuringAssign { value, .. } => work.push(Work::Expr(value)),
+                Stmt::Test { condition, .. } => work.push(Work::Expr(condition)),
+                Stmt::Return { value: None, .. }
+                | Stmt::Break { .. }
+                | Stmt::Continue { .. }
+                | Stmt::Meta { .. }
+                | Stmt::LocalDecl { .. }
+                | Stmt::Using { .. }
+                | Stmt::Export { .. }
+                | Stmt::Label { .. }
+                | Stmt::Goto { .. }
+                | Stmt::Global { .. }
+                | Stmt::EnumDef { .. }
+                | Stmt::RuntimeNominalDef { .. } => {}
+            },
+            Work::Expr(expr) => match expr {
+                Expr::FunctionRef { name, .. } | Expr::Var(name, _) if name.as_ref() == needle => {
+                    return true;
+                }
+                Expr::FunctionRef { .. } | Expr::Var(_, _) | Expr::Literal(_, _) => {}
+                Expr::BinaryOp { left, right, .. } => {
+                    work.extend([Work::Expr(left), Work::Expr(right)]);
+                }
+                Expr::UnaryOp { operand, .. }
+                | Expr::FieldAccess {
+                    object: operand, ..
+                }
+                | Expr::QuoteLiteral {
+                    constructor: operand,
+                    ..
+                }
+                | Expr::Convert { operand, .. } => work.push(Work::Expr(operand)),
+                Expr::Call { args, kwargs, .. } | Expr::ModuleCall { args, kwargs, .. } => {
+                    work.extend(args.iter().map(Work::Expr));
+                    work.extend(kwargs.iter().map(|(_, value)| Work::Expr(value)));
+                }
+                Expr::Builtin { args, .. } | Expr::New { args, .. } => {
+                    work.extend(args.iter().map(Work::Expr));
+                }
+                Expr::Index { array, indices, .. } => {
+                    work.push(Work::Expr(array));
+                    work.extend(indices.iter().map(Work::Expr));
+                }
+                Expr::Range {
+                    start, step, stop, ..
+                } => {
+                    work.extend([Work::Expr(start), Work::Expr(stop)]);
+                    work.extend(step.iter().map(|expr| Work::Expr(expr.as_ref())));
+                }
+                Expr::Comprehension {
+                    body, iter, filter, ..
+                }
+                | Expr::Generator {
+                    body, iter, filter, ..
+                } => {
+                    work.extend([Work::Expr(body), Work::Expr(iter)]);
+                    work.extend(filter.iter().map(|expr| Work::Expr(expr.as_ref())));
+                }
+                Expr::MultiComprehension {
+                    body,
+                    iterations,
+                    filter,
+                    ..
+                } => {
+                    work.push(Work::Expr(body));
+                    work.extend(iterations.iter().map(|(_, iter)| Work::Expr(iter)));
+                    work.extend(filter.iter().map(|expr| Work::Expr(expr.as_ref())));
+                }
+                Expr::Ternary {
+                    condition,
+                    then_expr,
+                    else_expr,
+                    ..
+                } => work.extend([
+                    Work::Expr(condition),
+                    Work::Expr(then_expr),
+                    Work::Expr(else_expr),
+                ]),
+                Expr::LetBlock { bindings, body, .. } => {
+                    work.extend(bindings.iter().map(|(_, value)| Work::Expr(value)));
+                    work.extend(body.stmts.iter().map(Work::Stmt));
+                }
+                Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+                    work.extend(elements.iter().map(Work::Expr));
+                }
+                Expr::NamedTupleLiteral { fields, .. } => {
+                    work.extend(fields.iter().map(|(_, value)| Work::Expr(value)));
+                }
+                Expr::DictLiteral { pairs, .. } => {
+                    for (key, value) in pairs {
+                        work.extend([Work::Expr(key), Work::Expr(value)]);
+                    }
+                }
+                Expr::StringConcat { parts, .. } => work.extend(parts.iter().map(Work::Expr)),
+                Expr::DynamicTypeConstruct {
+                    base_expr,
+                    type_args,
+                    ..
+                } => {
+                    work.extend(base_expr.iter().map(|expr| Work::Expr(expr.as_ref())));
+                    work.extend(type_args.iter().map(Work::Expr));
+                }
+                Expr::AssignExpr { value, .. } => work.push(Work::Expr(value)),
+                Expr::ReturnExpr { value, .. } => {
+                    work.extend(value.iter().map(|expr| Work::Expr(expr.as_ref())));
+                }
+                Expr::Pair { key, value, .. } => {
+                    work.extend([Work::Expr(key), Work::Expr(value)]);
+                }
+                Expr::SliceAll { .. }
+                | Expr::TypedEmptyArray { .. }
+                | Expr::BreakExpr { .. }
+                | Expr::ContinueExpr { .. } => {}
+            },
+        }
+    }
+    false
+}
+
 fn collect_referenced_names_block(block: &Block, names: &mut HashSet<String>) {
     for stmt in &block.stmts {
         collect_referenced_names_stmt(stmt, names);
@@ -1154,6 +1383,56 @@ mod tests {
 
     fn var_expr(name: &str) -> Expr {
         Expr::var(name, span())
+    }
+
+    #[test]
+    fn targeted_statement_reads_ignore_writes_and_find_transparent_block_reads_issue_8499() {
+        let stmts = vec![
+            Stmt::Assign {
+                var: "result".to_string(),
+                value: int_lit(1),
+                span: span(),
+            },
+            Stmt::Block(Block {
+                stmts: vec![Stmt::Expr {
+                    expr: var_expr("observed"),
+                    span: span(),
+                }],
+                span: span(),
+            }),
+        ];
+
+        assert!(!statements_reference_name(&stmts, "result"));
+        assert!(statements_reference_name(&stmts, "observed"));
+
+        let mutations = vec![
+            Stmt::AddAssign {
+                var: "result".to_string(),
+                value: int_lit(1),
+                span: span(),
+            },
+            Stmt::IndexAssign {
+                array: "array".to_string(),
+                indices: vec![int_lit(1)],
+                value: int_lit(2),
+                span: span(),
+            },
+            Stmt::FieldAssign {
+                object: "object".to_string(),
+                field: "field".to_string(),
+                value: int_lit(3),
+                span: span(),
+            },
+            Stmt::DictAssign {
+                dict: "dict".to_string(),
+                key: int_lit(1),
+                value: int_lit(4),
+                span: span(),
+            },
+        ];
+        for name in ["result", "array", "object", "dict"] {
+            assert!(statements_reference_name(&mutations, name), "{name}");
+        }
     }
 
     fn int_lit(n: i64) -> Expr {

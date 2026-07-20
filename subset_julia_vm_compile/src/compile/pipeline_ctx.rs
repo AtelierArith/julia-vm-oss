@@ -99,6 +99,64 @@ fn repl_current_input_source_function_indices(
     })
 }
 
+/// One authority for whether a compiled callable participates in Julia's
+/// source-ordered REPL definition world (Issue #11544, part of #9784).
+///
+/// Lowering helpers are values created by their containing expression and are
+/// immediately callable. Module-owned and nested methods have their own
+/// publication paths. Only a current-fragment Main method or a source-collected
+/// inline Main method receives a dormant world and `DefineEvalFunction` marker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReplSourceOrderClass {
+    NotSourceDefinition,
+    CurrentInputTopLevel,
+    SourceOrderedInline,
+}
+
+impl ReplSourceOrderClass {
+    fn requires_source_order(self) -> bool {
+        !matches!(self, Self::NotSourceDefinition)
+    }
+}
+
+fn classify_repl_source_ordered_function(
+    all_funcs_idx: usize,
+    first_user_function_idx: usize,
+    inline_start_idx: usize,
+    module_owned: bool,
+    nested: bool,
+    current_input_source_function_indices: Option<&HashSet<usize>>,
+    is_lowering_helper: bool,
+    function_span: &crate::span::Span,
+    root_main_span: &crate::span::Span,
+    has_repl_current_function_count: bool,
+) -> ReplSourceOrderClass {
+    if module_owned || nested || is_lowering_helper {
+        return ReplSourceOrderClass::NotSourceDefinition;
+    }
+    let class = if all_funcs_idx >= inline_start_idx {
+        ReplSourceOrderClass::SourceOrderedInline
+    } else if all_funcs_idx >= first_user_function_idx
+        && current_input_source_function_indices
+            .is_none_or(|indices| indices.contains(&all_funcs_idx))
+    {
+        ReplSourceOrderClass::CurrentInputTopLevel
+    } else {
+        ReplSourceOrderClass::NotSourceDefinition
+    };
+    let structurally_current_repl = has_repl_current_function_count
+        && matches!(class, ReplSourceOrderClass::CurrentInputTopLevel);
+    let within_root_main_span = function_span.start >= root_main_span.start
+        && function_span.end <= root_main_span.end
+        && function_span.start_line >= root_main_span.start_line
+        && function_span.end_line <= root_main_span.end_line;
+    if structurally_current_repl || within_root_main_span {
+        class
+    } else {
+        ReplSourceOrderClass::NotSourceDefinition
+    }
+}
+
 /// Names of the parameters whose slot must stay generic because their declared
 /// type is an abstract numeric supertype that can hold a `BigInt`/`BigFloat`
 /// value (`Integer`/`Real`/`Number`/`Signed`/`Unsigned`/`AbstractFloat`, or a
@@ -3976,6 +4034,7 @@ impl<'a> CorePipeline<'a> {
         let cached_base_len = self.cached_base_len;
         let first_user_function_idx = self.first_user_function_idx;
         let inline_start_idx = self.inline_start_idx;
+        let has_repl_current_function_count = self.repl_current_function_count.is_some();
         let current_input_source_function_indices = repl_current_input_source_function_indices(
             &self.all_functions,
             first_user_function_idx,
@@ -4716,24 +4775,18 @@ impl<'a> CorePipeline<'a> {
                     return_type.clone()
                 };
                 let normalized_type_params = shared_ctx.expand_type_param_bounds(&func.type_params);
-                let is_top_level_user_function = all_funcs_idx >= first_user_function_idx
-                    && all_funcs_idx < inline_start_idx
-                    && module_path.is_none()
-                    && nested_qualified_name.is_none();
-                let is_current_input_top_level_user_function = is_top_level_user_function
-                    && current_input_source_function_indices
-                        .as_ref()
-                        .is_none_or(|indices| indices.contains(&all_funcs_idx))
-                    // Lowered arrows/do-blocks are callable values created by
-                    // their containing expression, not Julia-visible generic
-                    // definitions. They must be callable inside that same
-                    // statement instead of waiting for a later top-level
-                    // source-order marker (Issue #11477).
-                    && !crate::compile::ir_inline::is_markerless_lowered_function(func);
-                let is_source_ordered_inline_function = all_funcs_idx >= inline_start_idx
-                    && module_path.is_none()
-                    && nested_qualified_name.is_none()
-                    && !crate::compile::ir_inline::is_markerless_lowered_function(func);
+                let source_order_class = classify_repl_source_ordered_function(
+                    all_funcs_idx,
+                    first_user_function_idx,
+                    inline_start_idx,
+                    module_path.is_some(),
+                    nested_qualified_name.is_some(),
+                    current_input_source_function_indices.as_ref(),
+                    crate::compile::ir_inline::is_markerless_lowered_function(func),
+                    &func.span,
+                    &root_main_span,
+                    has_repl_current_function_count,
+                );
                 // Hoisted top-level functions disappear from `program.main`, so
                 // its span cannot prove that a current REPL input function is
                 // root-source (definition-only and trailing definitions are the
@@ -4741,27 +4794,17 @@ impl<'a> CorePipeline<'a> {
                 // source-index set is authoritative for those functions. Keep
                 // the span check for inline/source-collected functions outside
                 // that set (Issues #9784/#11477).
-                let is_structurally_current_repl_function =
-                    self.repl_current_function_count.is_some()
-                        && is_current_input_top_level_user_function;
-                let is_root_source_function = is_structurally_current_repl_function
-                    || (func.span.start >= root_main_span.start
-                        && func.span.end <= root_main_span.end
-                        && func.span.start_line >= root_main_span.start_line
-                        && func.span.end_line <= root_main_span.end_line);
-                if is_current_input_top_level_user_function && is_root_source_function {
+                if matches!(
+                    source_order_class,
+                    ReplSourceOrderClass::CurrentInputTopLevel
+                ) {
                     shared_ctx
                         .source_world_function_names
                         .insert(func.name.clone());
                 }
-                let source_visibility_start = if (is_current_input_top_level_user_function
-                    || is_source_ordered_inline_function)
-                    && is_root_source_function
-                {
-                    Some(func.span.start)
-                } else {
-                    None
-                };
+                let source_visibility_start = source_order_class
+                    .requires_source_order()
+                    .then_some(func.span.start);
                 for table_name in table_names {
                     if !is_lowering_helper {
                         if let Some(existing) = method_tables.get_mut(&table_name) {
@@ -5112,26 +5155,21 @@ impl<'a> CorePipeline<'a> {
                 } else {
                     func.name.clone()
                 };
-                let is_top_level_user_function_info = all_funcs_idx >= first_user_function_idx
-                    && all_funcs_idx < inline_start_idx
-                    && module_path.is_none()
-                    && !func_idx_to_parent.contains_key(&all_funcs_idx);
-                let is_current_input_top_level_user_function_info = is_top_level_user_function_info
-                    && current_input_source_function_indices
-                        .as_ref()
-                        .is_none_or(|indices| indices.contains(&all_funcs_idx))
-                    && !crate::compile::ir_inline::is_markerless_lowered_function(func);
-                let is_source_ordered_inline_function_info = all_funcs_idx >= inline_start_idx
-                    && module_path.is_none()
-                    && !func_idx_to_parent.contains_key(&all_funcs_idx)
-                    && !crate::compile::ir_inline::is_markerless_lowered_function(func);
-                let is_root_source_function_info = func.span.start >= root_main_span.start
-                    && func.span.end <= root_main_span.end
-                    && func.span.start_line >= root_main_span.start_line
-                    && func.span.end_line <= root_main_span.end_line;
-
                 let is_lowering_helper =
                     crate::compile::ir_inline::is_markerless_lowered_function(func);
+                let source_order_class = classify_repl_source_ordered_function(
+                    all_funcs_idx,
+                    first_user_function_idx,
+                    inline_start_idx,
+                    module_path.is_some(),
+                    func_idx_to_parent.contains_key(&all_funcs_idx),
+                    current_input_source_function_indices.as_ref(),
+                    is_lowering_helper,
+                    &func.span,
+                    &root_main_span,
+                    has_repl_current_function_count,
+                );
+
                 function_infos.push(std::rc::Rc::new(FunctionInfo {
                     name: function_name,
                     params: vm_params,
@@ -5151,9 +5189,7 @@ impl<'a> CorePipeline<'a> {
                         func.span.definition_order
                     },
                     min_world: if is_runtime_eval_function
-                        || ((is_current_input_top_level_user_function_info
-                            || is_source_ordered_inline_function_info)
-                            && is_root_source_function_info)
+                        || source_order_class.requires_source_order()
                     {
                         u64::MAX
                     } else {
@@ -7419,22 +7455,19 @@ impl<'a> CorePipeline<'a> {
             .iter()
             .enumerate()
             .filter_map(|(all_funcs_idx, (func, module_path))| {
-                let is_top_level_user_function = all_funcs_idx >= self.first_user_function_idx
-                    && all_funcs_idx < self.inline_start_idx
-                    && module_path.is_none()
-                    && !self.func_idx_to_parent.contains_key(&all_funcs_idx);
-                let is_current_input_top_level_user_function = is_top_level_user_function
-                    && current_input_source_function_indices
-                        .as_ref()
-                        .is_none_or(|indices| indices.contains(&all_funcs_idx))
-                    && !crate::compile::ir_inline::is_markerless_lowered_function(func);
-                let is_source_ordered_inline_function = all_funcs_idx >= self.inline_start_idx
-                    && module_path.is_none()
-                    && !self.func_idx_to_parent.contains_key(&all_funcs_idx)
-                    && !crate::compile::ir_inline::is_markerless_lowered_function(func);
-                ((is_current_input_top_level_user_function || is_source_ordered_inline_function)
-                    && func.span.start >= user_main_start
-                    && func.span.end <= user_main_end
+                let source_order_class = classify_repl_source_ordered_function(
+                    all_funcs_idx,
+                    self.first_user_function_idx,
+                    self.inline_start_idx,
+                    module_path.is_some(),
+                    self.func_idx_to_parent.contains_key(&all_funcs_idx),
+                    current_input_source_function_indices.as_ref(),
+                    crate::compile::ir_inline::is_markerless_lowered_function(func),
+                    &func.span,
+                    &program.main.span,
+                    self.repl_current_function_count.is_some(),
+                );
+                (source_order_class.requires_source_order()
                     && !conditionally_gated_function_starts.contains(&func.span.start))
                 .then(|| TopLevelDefinitionActivation::Function {
                     source_start: func.span.start,
@@ -11076,6 +11109,232 @@ fn collect_current_type_definition_positions(
 
 #[cfg(test)]
 mod lowering_helper_provenance_11685_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_repl_callable_worlds_match_activation_markers_11544() -> Result<(), String> {
+        let program = crate::pipeline::parse_and_lower(
+            r#"
+named_current_11544(x) = x + 1
+qualified_parent_11544() = map(x -> x + 5, [1])
+arrow_value_11544 = map(x -> x + 2, [1])
+do_value_11544 = map([1]) do x
+    x + 3
+end
+generator_value_11544 = collect(x + 4 for x in 1:3 if x > 1)
+"#,
+        )
+        .map_err(|error| format!("parse/lower callable matrix: {error:?}"))?;
+        let output = compile_core_program_internal(
+            &program,
+            &HashMap::new(),
+            &HashMap::new(),
+            CompilerCacheInput {
+                repl_current_function_count: Some(2),
+                ..Default::default()
+            },
+        )
+        .map_err(|error| format!("compile callable matrix: {error:?}"))?;
+
+        let activation_counts = output.compiled.code.iter().fold(
+            HashMap::<usize, usize>::new(),
+            |mut counts, instruction| {
+                if let Instr::DefineEvalFunction(index) = instruction {
+                    *counts.entry(*index).or_default() += 1;
+                }
+                counts
+            },
+        );
+        for name in ["named_current_11544", "qualified_parent_11544"] {
+            let named = output
+                .compiled
+                .functions
+                .iter()
+                .enumerate()
+                .find(|(_, function)| function.name == name)
+                .ok_or_else(|| format!("missing compiled named source method {name:?}"))?;
+            assert_eq!(named.1.min_world, u64::MAX);
+            assert_eq!(activation_counts.get(&named.0), Some(&1));
+        }
+        for (index, dormant) in output
+            .compiled
+            .functions
+            .iter()
+            .enumerate()
+            .filter(|(_, function)| function.min_world == u64::MAX)
+        {
+            assert_eq!(
+                activation_counts.get(&index),
+                Some(&1),
+                "every dormant function needs exactly one activation marker: {:?}",
+                dormant.name
+            );
+        }
+        for (&index, &count) in &activation_counts {
+            let activated = output
+                .compiled
+                .functions
+                .get(index)
+                .ok_or_else(|| format!("activation references missing function {index}"))?;
+            assert_eq!(count, 1, "duplicate activation for {:?}", activated.name);
+            assert_eq!(activated.min_world, u64::MAX);
+        }
+
+        let generated: Vec<_> = output
+            .compiled
+            .functions
+            .iter()
+            .enumerate()
+            .filter(|(_, function)| {
+                let leaf = function.name.rsplit('#').next().unwrap_or(&function.name);
+                ["__lambda_", "__do_block_", "__gen_body_", "__gen_pred_"]
+                    .iter()
+                    .any(|prefix| leaf.starts_with(prefix))
+            })
+            .collect();
+        let generated_names: Vec<_> = generated
+            .iter()
+            .map(|(_, function)| function.name.as_str())
+            .collect();
+        assert!(
+            generated_names.contains(&"__lambda_0")
+                && generated_names.contains(&"__lambda_1"),
+            "the standalone arrow and do-block must each lower to a distinct bare helper; generated={generated_names:?}"
+        );
+        for family in ["__gen_body_", "__gen_pred_"] {
+            assert!(
+                generated_names.iter().any(|name| name.contains(family)),
+                "missing {family} lowering-helper family; generated={generated_names:?}"
+            );
+        }
+        assert!(
+            generated_names
+                .iter()
+                .any(|name| name.starts_with("qualified_parent_11544#")),
+            "missing qualified nested generated callable; generated={generated_names:?}"
+        );
+        for (index, helper) in generated {
+            assert!(
+                helper.is_lowering_helper,
+                "generated callable {:?} lost helper provenance",
+                helper.name
+            );
+            assert_eq!(
+                helper.min_world, 1,
+                "lowering helper {:?} must be immediately callable",
+                helper.name
+            );
+            assert_eq!(
+                activation_counts.get(&index),
+                None,
+                "lowering helper {:?} must not receive source-definition activation",
+                helper.name
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod repl_source_world_classifier_11544_tests {
+    use super::*;
+
+    #[test]
+    fn repl_source_world_classifier_matrix_11544() {
+        use ReplSourceOrderClass::{
+            CurrentInputTopLevel, NotSourceDefinition, SourceOrderedInline,
+        };
+
+        let current = HashSet::from([10usize]);
+        let root = crate::span::Span::new(0, 100, 1, 10, 1, 1);
+        let inside = crate::span::Span::new(10, 20, 2, 2, 1, 10);
+        let classify = |index, module_owned, nested, helper| {
+            classify_repl_source_ordered_function(
+                index,
+                10,
+                20,
+                module_owned,
+                nested,
+                Some(&current),
+                helper,
+                &inside,
+                &root,
+                true,
+            )
+        };
+        let cases = [
+            (
+                "named top-level method",
+                classify(10, false, false, false),
+                CurrentInputTopLevel,
+            ),
+            (
+                "prior REPL method",
+                classify(11, false, false, false),
+                NotSourceDefinition,
+            ),
+            (
+                "source-collected inline method",
+                classify(20, false, false, false),
+                SourceOrderedInline,
+            ),
+            (
+                "arrow helper",
+                classify(10, false, false, true),
+                NotSourceDefinition,
+            ),
+            (
+                "do-block helper",
+                classify(20, false, false, true),
+                NotSourceDefinition,
+            ),
+            (
+                "generator body",
+                classify(10, false, false, true),
+                NotSourceDefinition,
+            ),
+            (
+                "generator predicate",
+                classify(20, false, false, true),
+                NotSourceDefinition,
+            ),
+            (
+                "nested source method",
+                classify(10, false, true, false),
+                NotSourceDefinition,
+            ),
+            (
+                "module source method",
+                classify(10, true, false, false),
+                NotSourceDefinition,
+            ),
+        ];
+
+        for (name, observed, expected) in cases {
+            assert_eq!(observed, expected, "{name}");
+        }
+        let outside = crate::span::Span::new(200, 210, 20, 20, 1, 10);
+        assert_eq!(
+            classify_repl_source_ordered_function(
+                20,
+                10,
+                20,
+                false,
+                false,
+                Some(&current),
+                false,
+                &outside,
+                &root,
+                true,
+            ),
+            NotSourceDefinition,
+            "an inline method outside the root fragment must not enter its world",
+        );
+    }
+}
+
+#[cfg(test)]
+mod nested_lowering_helper_provenance_11685_tests {
     use super::*;
 
     #[test]

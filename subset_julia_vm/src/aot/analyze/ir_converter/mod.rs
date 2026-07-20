@@ -44,6 +44,9 @@ pub(crate) struct IrConverter<'a> {
     /// sibling scopes are kept independent instead of being unified under the
     /// first-seen static type (Issue #10251).
     scope_stack: Vec<LexicalScopeFrame>,
+    /// Innermost statement-position `let` value slot whose final value is
+    /// discarded and otherwise unread (Issue #8499).
+    statement_let_passthrough_stack: Vec<Option<String>>,
     /// Monotonic suffix shared by collision-proof AoT internal locals.
     internal_local_counter: usize,
     /// Rust identifiers already claimed by user bindings or generated locals.
@@ -169,6 +172,7 @@ impl<'a> IrConverter<'a> {
             current_return_type: None,
             abstract_types,
             scope_stack: Vec::new(),
+            statement_let_passthrough_stack: Vec::new(),
             internal_local_counter: 0,
             reserved_rust_locals,
         }

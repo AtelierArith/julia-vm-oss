@@ -136,6 +136,46 @@ fn classify_error(err: &str) -> String {
     err.split(':').next().unwrap_or(err).trim().to_string()
 }
 
+/// Base-owned modules already realized in the reused compile/VM prefix remain
+/// resolvable from later live REPL fragments (Issue #11584).
+#[test]
+fn base_gc_module_survives_live_delta_11584() {
+    run_with_large_stack(|| {
+        let mut session = new_session();
+        assert!(session.eval("x = 1").success);
+
+        let collected = session.eval("GC.gc()");
+        assert!(collected.success, "{:?}", collected.error);
+        assert!(matches!(collected.value, None | Some(Value::Nothing)));
+        assert_eq!(
+            session.last_vm_build_nanos(),
+            Some(0),
+            "GC.gc() must resolve against the reused live prefix"
+        );
+    });
+}
+
+/// Carrying Base module metadata must not create a bare Main binding for a
+/// non-exported Base submodule (Issue #11584 negative control).
+#[test]
+fn base_internal_module_stays_hidden_from_live_delta_11584() {
+    run_with_large_stack(|| {
+        let mut session = new_session();
+        assert!(session.eval("x = 1").success);
+
+        let hidden = session.eval("JuliaSyntax.ParseError");
+        assert!(!hidden.success, "non-exported Base module leaked into Main");
+        assert!(
+            hidden
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("UndefVarError")),
+            "{:?}",
+            hidden.error
+        );
+    });
+}
+
 // --- Display projection, mirroring `repl_session_fixture_tests.rs` (#8714) so
 // --- goldens are shared-shaped with the existing harness. ------------------
 
@@ -251,6 +291,352 @@ fn run_with_large_stack<F: FnOnce() + Send + 'static>(f: F) {
     if let Err(e) = handler.join() {
         std::panic::resume_unwind(e);
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivationSeamValueClass {
+    Scalar,
+    Array,
+    ConcreteStruct,
+    ImportedStruct,
+    NonReconstructable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivationSeamBindingUse {
+    Rebind,
+    OldValueRhs,
+    Untouched,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivationSeamDefinitionShape {
+    None,
+    StructBeforeUse,
+    StructAfterUse,
+    InterleavedFunctionStruct,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivationSeamExecutionPath {
+    Live,
+    FullFallback,
+    ErrorBeforeActivation,
+    ErrorAfterActivation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivationSeamReplayPrefix {
+    Plain,
+    Import,
+    Enum,
+}
+
+#[derive(Clone, Copy)]
+enum ActivationSeamExpectation {
+    Value(&'static str),
+    Error(&'static str),
+}
+
+struct ActivationSeamCase {
+    label: &'static str,
+    setup: &'static [&'static str],
+    input: &'static str,
+    later: &'static str,
+    immediate: ActivationSeamExpectation,
+    later_display: &'static str,
+    value_class: ActivationSeamValueClass,
+    binding_use: ActivationSeamBindingUse,
+    definition_shape: ActivationSeamDefinitionShape,
+    execution_path: ActivationSeamExecutionPath,
+    replay_prefix: ActivationSeamReplayPrefix,
+}
+
+fn assert_activation_seam_coverage_11564(cases: &[ActivationSeamCase]) {
+    let missing = |present: bool, dimension: &str| {
+        assert!(present, "activation seam matrix misses {dimension}");
+    };
+    for value in [
+        ActivationSeamValueClass::Scalar,
+        ActivationSeamValueClass::Array,
+        ActivationSeamValueClass::ConcreteStruct,
+        ActivationSeamValueClass::ImportedStruct,
+        ActivationSeamValueClass::NonReconstructable,
+    ] {
+        missing(
+            cases.iter().any(|case| case.value_class == value),
+            &format!("value class {value:?}"),
+        );
+    }
+    for value in [
+        ActivationSeamBindingUse::Rebind,
+        ActivationSeamBindingUse::OldValueRhs,
+        ActivationSeamBindingUse::Untouched,
+    ] {
+        missing(
+            cases.iter().any(|case| case.binding_use == value),
+            &format!("binding use {value:?}"),
+        );
+    }
+    for value in [
+        ActivationSeamDefinitionShape::None,
+        ActivationSeamDefinitionShape::StructBeforeUse,
+        ActivationSeamDefinitionShape::StructAfterUse,
+        ActivationSeamDefinitionShape::InterleavedFunctionStruct,
+    ] {
+        missing(
+            cases.iter().any(|case| case.definition_shape == value),
+            &format!("definition shape {value:?}"),
+        );
+    }
+    for value in [
+        ActivationSeamExecutionPath::Live,
+        ActivationSeamExecutionPath::FullFallback,
+        ActivationSeamExecutionPath::ErrorBeforeActivation,
+        ActivationSeamExecutionPath::ErrorAfterActivation,
+    ] {
+        missing(
+            cases.iter().any(|case| case.execution_path == value),
+            &format!("execution path {value:?}"),
+        );
+    }
+    for value in [
+        ActivationSeamReplayPrefix::Plain,
+        ActivationSeamReplayPrefix::Import,
+        ActivationSeamReplayPrefix::Enum,
+    ] {
+        missing(
+            cases.iter().any(|case| case.replay_prefix == value),
+            &format!("replay prefix {value:?}"),
+        );
+    }
+}
+
+#[test]
+fn activation_seam_matrix_11564() {
+    run_with_large_stack(|| {
+        let cases = [
+            ActivationSeamCase {
+                label: "scalar live old-value RHS",
+                setup: &["scalar11564 = 40"],
+                input: "scalar11564 = scalar11564 + 1",
+                later: "scalar11564 + 1",
+                immediate: ActivationSeamExpectation::Value("41"),
+                later_display: "42",
+                value_class: ActivationSeamValueClass::Scalar,
+                binding_use: ActivationSeamBindingUse::OldValueRhs,
+                definition_shape: ActivationSeamDefinitionShape::None,
+                execution_path: ActivationSeamExecutionPath::Live,
+                replay_prefix: ActivationSeamReplayPrefix::Plain,
+            },
+            ActivationSeamCase {
+                label: "array rebind after struct-before-use",
+                setup: &["array11564 = [1, 2]"],
+                input: "macro force_array11564(); :(1); end; struct ArrayFence11564; x::Int; end; array11564 = [41, 1]; sum(array11564)",
+                later: "sum(array11564)",
+                immediate: ActivationSeamExpectation::Value("42"),
+                later_display: "42",
+                value_class: ActivationSeamValueClass::Array,
+                binding_use: ActivationSeamBindingUse::Rebind,
+                definition_shape: ActivationSeamDefinitionShape::StructBeforeUse,
+                execution_path: ActivationSeamExecutionPath::FullFallback,
+                replay_prefix: ActivationSeamReplayPrefix::Plain,
+            },
+            // The full merge places current structs before accumulated prior
+            // structs. Before #11547, the current marker therefore made the
+            // prior `PriorBox11564` constructor private too, and reconstructing
+            // `box11564` before user main never reached this old-value RHS.
+            ActivationSeamCase {
+                label: "concrete struct old-value RHS before struct-after-use",
+                setup: &[
+                    "struct PriorBox11564; x::Int; end",
+                    "box11564 = PriorBox11564(40)",
+                ],
+                input: "macro force_box11564(); :(1); end; box11564 = PriorBox11564(box11564.x + 1); struct AfterBoxFence11564; x::Int; end; box11564.x",
+                later: "box11564.x",
+                immediate: ActivationSeamExpectation::Value("41"),
+                later_display: "41",
+                value_class: ActivationSeamValueClass::ConcreteStruct,
+                binding_use: ActivationSeamBindingUse::OldValueRhs,
+                definition_shape: ActivationSeamDefinitionShape::StructAfterUse,
+                execution_path: ActivationSeamExecutionPath::FullFallback,
+                replay_prefix: ActivationSeamReplayPrefix::Plain,
+            },
+            ActivationSeamCase {
+                label: "import replay before untouched package struct",
+                setup: &[
+                    "using LinearAlgebra",
+                    "diag11564 = Diagonal([20, 22])",
+                ],
+                input: "macro force_diag11564(); :(1); end; diag11564[1, 1] + diag11564[2, 2]",
+                later: "sum(diag11564.diag)",
+                immediate: ActivationSeamExpectation::Value("42"),
+                later_display: "42",
+                value_class: ActivationSeamValueClass::ImportedStruct,
+                binding_use: ActivationSeamBindingUse::Untouched,
+                definition_shape: ActivationSeamDefinitionShape::None,
+                execution_path: ActivationSeamExecutionPath::FullFallback,
+                replay_prefix: ActivationSeamReplayPrefix::Import,
+            },
+            ActivationSeamCase {
+                label: "non-reconstructable rebind across interleaved definitions",
+                setup: &[
+                    "struct PairHolder11564; data; tag; end",
+                    "makeholder11564(; kw...) = PairHolder11564(kw, 9)",
+                    "holder11564 = makeholder11564()",
+                ],
+                input: "macro force_holder11564(); :(1); end; function holder_before11564(x); x + 1; end; struct HolderFence11564; x::Int; end; holder11564 = makeholder11564(); function holder_after11564(x); HolderFence11564(x); end; holder11564.tag + holder_before11564(32) + holder_after11564(1).x",
+                later: "holder11564.tag",
+                immediate: ActivationSeamExpectation::Value("43"),
+                later_display: "9",
+                value_class: ActivationSeamValueClass::NonReconstructable,
+                binding_use: ActivationSeamBindingUse::Rebind,
+                definition_shape: ActivationSeamDefinitionShape::InterleavedFunctionStruct,
+                execution_path: ActivationSeamExecutionPath::FullFallback,
+                replay_prefix: ActivationSeamReplayPrefix::Plain,
+            },
+            ActivationSeamCase {
+                label: "catchable error before struct activation",
+                setup: &[
+                    "struct ErrorBox11564; x::Int; end",
+                    "error_box11564 = ErrorBox11564(40)",
+                ],
+                input: "error(\"before activation 11564\"); struct UnreachedFence11564; x::Int; end",
+                later: "error_box11564.x + (isdefined(Main, :UnreachedFence11564) ? 100 : 0)",
+                immediate: ActivationSeamExpectation::Error("before activation 11564"),
+                later_display: "40",
+                value_class: ActivationSeamValueClass::ConcreteStruct,
+                binding_use: ActivationSeamBindingUse::Untouched,
+                definition_shape: ActivationSeamDefinitionShape::StructAfterUse,
+                execution_path: ActivationSeamExecutionPath::ErrorBeforeActivation,
+                replay_prefix: ActivationSeamReplayPrefix::Plain,
+            },
+            ActivationSeamCase {
+                label: "catchable error after struct activation",
+                setup: &[
+                    "struct ErrorAfterBox11564; x::Int; end",
+                    "after_box11564 = ErrorAfterBox11564(40)",
+                ],
+                input: "struct ReachedFence11564; x::Int; end; global after_box11564 = ErrorAfterBox11564(after_box11564.x + 1); error(\"after activation 11564\")",
+                later: "after_box11564.x + (isdefined(Main, :ReachedFence11564) ? 1 : 0)",
+                immediate: ActivationSeamExpectation::Error("after activation 11564"),
+                later_display: "42",
+                value_class: ActivationSeamValueClass::ConcreteStruct,
+                binding_use: ActivationSeamBindingUse::OldValueRhs,
+                definition_shape: ActivationSeamDefinitionShape::StructBeforeUse,
+                execution_path: ActivationSeamExecutionPath::ErrorAfterActivation,
+                replay_prefix: ActivationSeamReplayPrefix::Plain,
+            },
+            ActivationSeamCase {
+                label: "enum replay before interleaved definitions",
+                setup: &[
+                    "@enum ReplayEnum11564 enum_left11564=20 enum_right11564=22",
+                    "enum_values11564 = [enum_left11564, enum_right11564]",
+                ],
+                input: "macro force_enum11564(); :(1); end; function enum_before11564(x); x + 1; end; struct EnumFence11564; x::Int; end; function enum_after11564(x); EnumFence11564(x); end; Int(enum_values11564[1]) + Int(enum_values11564[2]) + enum_before11564(0) + enum_after11564(1).x",
+                later: "Int(enum_values11564[2])",
+                immediate: ActivationSeamExpectation::Value("44"),
+                later_display: "22",
+                value_class: ActivationSeamValueClass::Array,
+                binding_use: ActivationSeamBindingUse::Untouched,
+                definition_shape: ActivationSeamDefinitionShape::InterleavedFunctionStruct,
+                execution_path: ActivationSeamExecutionPath::FullFallback,
+                replay_prefix: ActivationSeamReplayPrefix::Enum,
+            },
+        ];
+
+        assert_activation_seam_coverage_11564(&cases);
+        for case in cases {
+            let mut side_a = new_session();
+            let mut side_b = new_session();
+            for setup in case.setup {
+                let action = Action::Eval((*setup).to_string());
+                let observed_a = observe(&mut side_a, &action);
+                let observed_b = observe(&mut side_b, &action);
+                assert_eq!(observed_a, observed_b, "{} setup: {setup}", case.label);
+                assert!(
+                    observed_a.success,
+                    "{} setup: {:?}",
+                    case.label, observed_a.error
+                );
+            }
+
+            let input = Action::Eval(case.input.to_string());
+            let immediate_a = observe(&mut side_a, &input);
+            let immediate_b = observe(&mut side_b, &input);
+            assert_eq!(immediate_a, immediate_b, "{} immediate", case.label);
+            match case.immediate {
+                ActivationSeamExpectation::Value(display) => {
+                    assert!(
+                        immediate_a.success,
+                        "{}: {:?}",
+                        case.label, immediate_a.error
+                    );
+                    assert_eq!(
+                        immediate_a.display.as_deref(),
+                        Some(display),
+                        "{}",
+                        case.label
+                    );
+                }
+                ActivationSeamExpectation::Error(fragment) => {
+                    assert!(
+                        !immediate_a.success,
+                        "{} unexpectedly succeeded",
+                        case.label
+                    );
+                    assert!(
+                        immediate_a
+                            .error
+                            .as_deref()
+                            .is_some_and(|error| error.contains(fragment)),
+                        "{}: {:?}",
+                        case.label,
+                        immediate_a.error
+                    );
+                }
+            }
+            match case.execution_path {
+                ActivationSeamExecutionPath::Live => {
+                    assert_eq!(side_a.last_vm_build_nanos(), Some(0), "{}", case.label);
+                    assert_eq!(side_b.last_vm_build_nanos(), Some(0), "{}", case.label);
+                }
+                ActivationSeamExecutionPath::FullFallback => {
+                    assert!(
+                        side_a.last_vm_build_nanos().is_some_and(|nanos| nanos > 0),
+                        "{} did not force a full fallback",
+                        case.label
+                    );
+                    assert!(side_b.last_vm_build_nanos().is_some_and(|nanos| nanos > 0));
+                }
+                ActivationSeamExecutionPath::ErrorBeforeActivation
+                | ActivationSeamExecutionPath::ErrorAfterActivation => {
+                    assert!(
+                        side_a.has_live_vm(),
+                        "{} did not recover its VM",
+                        case.label
+                    );
+                    assert!(
+                        side_b.has_live_vm(),
+                        "{} did not recover its VM",
+                        case.label
+                    );
+                }
+            }
+
+            let later = Action::Eval(case.later.to_string());
+            let later_a = observe(&mut side_a, &later);
+            let later_b = observe(&mut side_b, &later);
+            assert_eq!(later_a, later_b, "{} later", case.label);
+            assert!(later_a.success, "{} later: {:?}", case.label, later_a.error);
+            assert_eq!(
+                later_a.display.as_deref(),
+                Some(case.later_display),
+                "{} later",
+                case.label
+            );
+        }
+    });
 }
 
 fn fixtures_root() -> PathBuf {

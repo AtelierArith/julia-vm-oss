@@ -53,6 +53,28 @@ pub mod test_runtime {
         subset_julia_vm_compile::compile::integration_support::compile_core_program(&lower(source))
             .expect("compile source")
     }
+
+    pub fn compile_repl_core_source(source: &str) -> Result<CompiledProgram, String> {
+        let program = lower(source);
+        let function_count =
+            subset_julia_vm_compile::compile::repl_support::source_function_count(&program);
+        let struct_count = program.structs.len();
+        let type_names =
+            subset_julia_vm_compile::compile::repl_support::current_type_names(&program);
+        let runtime_nominal_names =
+            subset_julia_vm_compile::compile::repl_support::current_runtime_nominal_names(&program);
+        subset_julia_vm_compile::compile::repl_support::full_compile(
+            &program,
+            &Default::default(),
+            &Default::default(),
+            function_count,
+            struct_count,
+            &type_names,
+            &runtime_nominal_names,
+        )
+        .map(|(compiled, _)| compiled)
+        .map_err(|error| format!("{error:?}"))
+    }
 }
 
 #[cfg(test)]
