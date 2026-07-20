@@ -1,0 +1,4939 @@
+[
+  {
+    "name": "Modules",
+    "source": "module A\n\nbaremodule B end\n\nmodule C\nend\n\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 45
+        },
+        "children": [
+          {
+            "kind": "ModuleDefinition",
+            "span": {
+              "start": 0,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 7,
+                  "end": 8
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "A"
+                },
+                "flags": []
+              },
+              {
+                "kind": "ModuleDefinition",
+                "span": {
+                  "start": 10,
+                  "end": 26
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 21,
+                      "end": 22
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "B"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "ModuleDefinition",
+                "span": {
+                  "start": 28,
+                  "end": 40
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 35,
+                      "end": 36
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "C"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Abstract type definitions",
+    "source": "abstract type T end\n\nabstract type T{N} end\nabstract type T{X, Y,} end\nabstract type T{S <: U} end\n\nabstract type T <: S end\nabstract type T{N} <: S end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 152
+        },
+        "children": [
+          {
+            "kind": "AbstractDefinition",
+            "span": {
+              "start": 0,
+              "end": 19
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 14,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "T"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AbstractDefinition",
+            "span": {
+              "start": 21,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 35,
+                  "end": 39
+                },
+                "children": [
+                  {
+                    "kind": "ParametrizedExpression",
+                    "span": {
+                      "start": 35,
+                      "end": 39
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 35,
+                          "end": 36
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "BraceExpression",
+                        "span": {
+                          "start": 36,
+                          "end": 39
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 37,
+                              "end": 38
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "N"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AbstractDefinition",
+            "span": {
+              "start": 44,
+              "end": 70
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 58,
+                  "end": 66
+                },
+                "children": [
+                  {
+                    "kind": "ParametrizedExpression",
+                    "span": {
+                      "start": 58,
+                      "end": 66
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 58,
+                          "end": 59
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "BraceExpression",
+                        "span": {
+                          "start": 59,
+                          "end": 66
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 60,
+                              "end": 61
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "X"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 63,
+                              "end": 64
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Y"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AbstractDefinition",
+            "span": {
+              "start": 71,
+              "end": 98
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 85,
+                  "end": 94
+                },
+                "children": [
+                  {
+                    "kind": "ParametrizedExpression",
+                    "span": {
+                      "start": 85,
+                      "end": 94
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 85,
+                          "end": 86
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "BraceExpression",
+                        "span": {
+                          "start": 86,
+                          "end": 94
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 87,
+                              "end": 93
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 87,
+                                  "end": 88
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "S"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 89,
+                                  "end": 91
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "<:"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 92,
+                                  "end": 93
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "U"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AbstractDefinition",
+            "span": {
+              "start": 100,
+              "end": 124
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 114,
+                  "end": 120
+                },
+                "children": [
+                  {
+                    "kind": "TypeHeadSubtype",
+                    "span": {
+                      "start": 114,
+                      "end": 120
+                    },
+                    "children": [
+                      {
+                        "kind": "TypeHeadSubtypeLhs",
+                        "span": {
+                          "start": 114,
+                          "end": 118
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 114,
+                              "end": 115
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 116,
+                              "end": 118
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "<:"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "TypeHeadSubtypeRhs",
+                        "span": {
+                          "start": 119,
+                          "end": 120
+                        },
+                        "children": [
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 119,
+                              "end": 120
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 119,
+                                  "end": 120
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "S"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AbstractDefinition",
+            "span": {
+              "start": 125,
+              "end": 152
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 139,
+                  "end": 148
+                },
+                "children": [
+                  {
+                    "kind": "TypeHeadSubtype",
+                    "span": {
+                      "start": 139,
+                      "end": 148
+                    },
+                    "children": [
+                      {
+                        "kind": "TypeHeadSubtypeLhs",
+                        "span": {
+                          "start": 139,
+                          "end": 146
+                        },
+                        "children": [
+                          {
+                            "kind": "ParametrizedExpression",
+                            "span": {
+                              "start": 139,
+                              "end": 143
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 139,
+                                  "end": 140
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "T"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "BraceExpression",
+                                "span": {
+                                  "start": 140,
+                                  "end": 143
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 141,
+                                      "end": 142
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "N"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 144,
+                              "end": 146
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "<:"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "TypeHeadSubtypeRhs",
+                        "span": {
+                          "start": 147,
+                          "end": 148
+                        },
+                        "children": [
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 147,
+                              "end": 148
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 147,
+                                  "end": 148
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "S"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Primitive type definitions",
+    "source": "primitive type T 8 end\nprimitive type T <: S 16 end\nprimitive type Ptr{T} 32 end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 80
+        },
+        "children": [
+          {
+            "kind": "PrimitiveDefinition",
+            "span": {
+              "start": 0,
+              "end": 22
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 15,
+                  "end": 16
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 15,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "T"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 17,
+                  "end": 18
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "8"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "PrimitiveDefinition",
+            "span": {
+              "start": 23,
+              "end": 51
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 38,
+                  "end": 44
+                },
+                "children": [
+                  {
+                    "kind": "TypeHeadSubtype",
+                    "span": {
+                      "start": 38,
+                      "end": 44
+                    },
+                    "children": [
+                      {
+                        "kind": "TypeHeadSubtypeLhs",
+                        "span": {
+                          "start": 38,
+                          "end": 42
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 38,
+                              "end": 39
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 40,
+                              "end": 42
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "<:"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "TypeHeadSubtypeRhs",
+                        "span": {
+                          "start": 43,
+                          "end": 44
+                        },
+                        "children": [
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 43,
+                              "end": 44
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 43,
+                                  "end": 44
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "S"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 45,
+                  "end": 47
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "16"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "PrimitiveDefinition",
+            "span": {
+              "start": 52,
+              "end": 80
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 67,
+                  "end": 73
+                },
+                "children": [
+                  {
+                    "kind": "ParametrizedExpression",
+                    "span": {
+                      "start": 67,
+                      "end": 73
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 67,
+                          "end": 70
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Ptr"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "BraceExpression",
+                        "span": {
+                          "start": 70,
+                          "end": 73
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 71,
+                              "end": 72
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 74,
+                  "end": 76
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "32"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Struct definitions",
+    "source": "struct Unit end\n\nstruct MyInt; field::Int end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 45
+        },
+        "children": [
+          {
+            "kind": "StructDefinition",
+            "span": {
+              "start": 0,
+              "end": 15
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 7,
+                  "end": 11
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 7,
+                      "end": 11
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "Unit"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "StructDefinition",
+            "span": {
+              "start": 17,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 24,
+                  "end": 29
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 24,
+                      "end": 29
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "MyInt"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 31,
+                  "end": 41
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 31,
+                      "end": 36
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "field"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 36,
+                      "end": 38
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 38,
+                      "end": 41
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 38,
+                          "end": 41
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Int"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Mutable struct definitions",
+    "source": "mutable struct Bar\n  baz\n  qux::Float64\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 43
+        },
+        "children": [
+          {
+            "kind": "StructDefinition",
+            "span": {
+              "start": 0,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 15,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 15,
+                      "end": 18
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "Bar"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 21,
+                  "end": 24
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "baz"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 27,
+                  "end": 39
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 27,
+                      "end": 30
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "qux"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 30,
+                      "end": 32
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 32,
+                      "end": 39
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 32,
+                          "end": 39
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Float64"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Parametric struct definitions",
+    "source": "struct Point{T}\n  x::T\n  y::T\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 33
+        },
+        "children": [
+          {
+            "kind": "StructDefinition",
+            "span": {
+              "start": 0,
+              "end": 33
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 7,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "ParametrizedExpression",
+                    "span": {
+                      "start": 7,
+                      "end": 15
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 7,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Point"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "BraceExpression",
+                        "span": {
+                          "start": 12,
+                          "end": 15
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 13,
+                              "end": 14
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 18,
+                  "end": 22
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 18,
+                      "end": 19
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 19,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 21,
+                      "end": 22
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 21,
+                          "end": 22
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 25,
+                  "end": 29
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 25,
+                      "end": 26
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 26,
+                      "end": 28
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 28,
+                      "end": 29
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 28,
+                          "end": 29
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Parametric struct definitions with subtyping",
+    "source": "struct Rational{T<:Integer} <: Real\n  num::T\n  den::T\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 57
+        },
+        "children": [
+          {
+            "kind": "StructDefinition",
+            "span": {
+              "start": 0,
+              "end": 57
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 7,
+                  "end": 35
+                },
+                "children": [
+                  {
+                    "kind": "TypeHeadSubtype",
+                    "span": {
+                      "start": 7,
+                      "end": 35
+                    },
+                    "children": [
+                      {
+                        "kind": "TypeHeadSubtypeLhs",
+                        "span": {
+                          "start": 7,
+                          "end": 30
+                        },
+                        "children": [
+                          {
+                            "kind": "ParametrizedExpression",
+                            "span": {
+                              "start": 7,
+                              "end": 27
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 7,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "Rational"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "BraceExpression",
+                                "span": {
+                                  "start": 15,
+                                  "end": 27
+                                },
+                                "children": [
+                                  {
+                                    "kind": "BinaryExpression",
+                                    "span": {
+                                      "start": 16,
+                                      "end": 26
+                                    },
+                                    "children": [
+                                      {
+                                        "kind": "Identifier",
+                                        "span": {
+                                          "start": 16,
+                                          "end": 17
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Identifier": "T"
+                                        },
+                                        "flags": []
+                                      },
+                                      {
+                                        "kind": "Operator",
+                                        "span": {
+                                          "start": 17,
+                                          "end": 19
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Operator": "<:"
+                                        },
+                                        "flags": []
+                                      },
+                                      {
+                                        "kind": "Identifier",
+                                        "span": {
+                                          "start": 19,
+                                          "end": 26
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Identifier": "Integer"
+                                        },
+                                        "flags": []
+                                      }
+                                    ],
+                                    "value": null,
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 28,
+                              "end": 30
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "<:"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "TypeHeadSubtypeRhs",
+                        "span": {
+                          "start": 31,
+                          "end": 35
+                        },
+                        "children": [
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 31,
+                              "end": 35
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 31,
+                                  "end": 35
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "Real"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 38,
+                  "end": 44
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 38,
+                      "end": 41
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "num"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 41,
+                      "end": 43
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 43,
+                      "end": 44
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 43,
+                          "end": 44
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 47,
+                  "end": 53
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 47,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "den"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 50,
+                      "end": 52
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 52,
+                      "end": 53
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 52,
+                          "end": 53
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Parametric struct fields",
+    "source": "mutable struct Foo <: Bar\n  asd::Vector{Bar}\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 48
+        },
+        "children": [
+          {
+            "kind": "StructDefinition",
+            "span": {
+              "start": 0,
+              "end": 48
+            },
+            "children": [
+              {
+                "kind": "TypeHead",
+                "span": {
+                  "start": 15,
+                  "end": 25
+                },
+                "children": [
+                  {
+                    "kind": "TypeHeadSubtype",
+                    "span": {
+                      "start": 15,
+                      "end": 25
+                    },
+                    "children": [
+                      {
+                        "kind": "TypeHeadSubtypeLhs",
+                        "span": {
+                          "start": 15,
+                          "end": 21
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 15,
+                              "end": 18
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Foo"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 19,
+                              "end": 21
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "<:"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "TypeHeadSubtypeRhs",
+                        "span": {
+                          "start": 22,
+                          "end": 25
+                        },
+                        "children": [
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 22,
+                              "end": 25
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 22,
+                                  "end": 25
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "Bar"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 28,
+                  "end": 44
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 28,
+                      "end": 31
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "asd"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 31,
+                      "end": 33
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 33,
+                      "end": 44
+                    },
+                    "children": [
+                      {
+                        "kind": "ParametrizedExpression",
+                        "span": {
+                          "start": 33,
+                          "end": 44
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 33,
+                              "end": 39
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Vector"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BraceExpression",
+                            "span": {
+                              "start": 39,
+                              "end": 44
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 40,
+                                  "end": 43
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "Bar"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions",
+    "source": "function nop() end\n\nfunction I(x) x end\n\nfunction Base.rand(n::MyInt)\n    return 4\nend\n\nfunction Γ(z)\n    gamma(z)\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 119
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 18
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 14
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 14
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "nop"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 12,
+                          "end": 14
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 20,
+              "end": 39
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 29,
+                  "end": 33
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 29,
+                      "end": 33
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 29,
+                          "end": 30
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "I"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 30,
+                          "end": 33
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 31,
+                              "end": 32
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 34,
+                  "end": 35
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 41,
+              "end": 86
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 50,
+                  "end": 69
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 50,
+                      "end": 69
+                    },
+                    "children": [
+                      {
+                        "kind": "FieldExpression",
+                        "span": {
+                          "start": 50,
+                          "end": 59
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 50,
+                              "end": 54
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Base"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Field",
+                            "span": {
+                              "start": 55,
+                              "end": 59
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 55,
+                                  "end": 59
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "rand"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 59,
+                          "end": 69
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 60,
+                              "end": 68
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 60,
+                                  "end": 61
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "n"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 61,
+                                  "end": 63
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 63,
+                                  "end": 68
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 63,
+                                      "end": 68
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "MyInt"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "ReturnStatement",
+                "span": {
+                  "start": 74,
+                  "end": 82
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 81,
+                      "end": 82
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "4"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 88,
+              "end": 119
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 97,
+                  "end": 102
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 97,
+                      "end": 102
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 97,
+                          "end": 99
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Γ"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 99,
+                          "end": 102
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 100,
+                              "end": 101
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "z"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 107,
+                  "end": 115
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 107,
+                      "end": 112
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "gamma"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 112,
+                      "end": 115
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 113,
+                          "end": 114
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "z"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Operators",
+    "source": "function ⊕(x, y)\n    x + y\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 32
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 32
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 18
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 9,
+                          "end": 12
+                        },
+                        "children": [
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 9,
+                              "end": 12
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "⊕"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 12,
+                          "end": 18
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 13,
+                              "end": 14
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 16,
+                              "end": 17
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 23,
+                  "end": 28
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 23,
+                      "end": 24
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 25,
+                      "end": 26
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "+"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 27,
+                      "end": 28
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Callable structs",
+    "source": "function (foo::Foo)()\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 25
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 21
+                    },
+                    "children": [
+                      {
+                        "kind": "ParenExpression",
+                        "span": {
+                          "start": 9,
+                          "end": 19
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 10,
+                              "end": 18
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 10,
+                                  "end": 13
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "foo"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 13,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 15,
+                                  "end": 18
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 15,
+                                      "end": 18
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "Foo"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 19,
+                          "end": 21
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "function definitions - Zero method definitions",
+    "source": "function f end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 14
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 14
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 9,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Anonymous functions",
+    "source": "function fix2(f, x)\n    return function(y)\n        f(x, y)\n    end\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 70
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 70
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 19
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 13
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "fix2"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 13,
+                          "end": 19
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 14,
+                              "end": 15
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "f"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 17,
+                              "end": 18
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "ReturnStatement",
+                "span": {
+                  "start": 24,
+                  "end": 66
+                },
+                "children": [
+                  {
+                    "kind": "FunctionDefinition",
+                    "span": {
+                      "start": 31,
+                      "end": 66
+                    },
+                    "children": [
+                      {
+                        "kind": "Signature",
+                        "span": {
+                          "start": 39,
+                          "end": 42
+                        },
+                        "children": [
+                          {
+                            "kind": "TupleExpression",
+                            "span": {
+                              "start": 39,
+                              "end": 42
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 40,
+                                  "end": 41
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "CallExpression",
+                        "span": {
+                          "start": 51,
+                          "end": 58
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 51,
+                              "end": 52
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "f"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Arguments",
+                            "span": {
+                              "start": 52,
+                              "end": 58
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 53,
+                                  "end": 54
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 56,
+                                  "end": 57
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Anonymous functions with no parameters",
+    "source": "function() end\n\nfunction()\n  code\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 37
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 14
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 8,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "TupleExpression",
+                    "span": {
+                      "start": 8,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 16,
+              "end": 37
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 24,
+                  "end": 26
+                },
+                "children": [
+                  {
+                    "kind": "TupleExpression",
+                    "span": {
+                      "start": 24,
+                      "end": 26
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 29,
+                  "end": 33
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "code"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Return type annotations # FIXME",
+    "source": "function f()::T end\n\nfunction f()::Int\n  code\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 49
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 19
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 12
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 12
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 10,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "UnaryExpression",
+                "span": {
+                  "start": 12,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 12,
+                      "end": 14
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 14,
+                          "end": 15
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "T"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 21,
+              "end": 49
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 30,
+                  "end": 33
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 30,
+                      "end": 33
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 30,
+                          "end": 31
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 31,
+                          "end": 33
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "UnaryExpression",
+                "span": {
+                  "start": 33,
+                  "end": 38
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 33,
+                      "end": 35
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 35,
+                      "end": 38
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 35,
+                          "end": 38
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Int"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 41,
+                  "end": 45
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "code"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Signature with `where` expression # FIXME",
+    "source": "function f()::T where T\nend\n\nfunction f(n::N)::S where {N <: Number, S}\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 75
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 27
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 12
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 12
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 10,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "UnaryExpression",
+                "span": {
+                  "start": 12,
+                  "end": 23
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 12,
+                      "end": 14
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 14,
+                      "end": 23
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 14,
+                          "end": 23
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 14,
+                              "end": 15
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "T"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 22,
+                              "end": 23
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 22,
+                                  "end": 23
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "T"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 29,
+              "end": 75
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 38,
+                  "end": 45
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 38,
+                      "end": 45
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 38,
+                          "end": 39
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 39,
+                          "end": 45
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 40,
+                              "end": 44
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 40,
+                                  "end": 41
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "n"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 41,
+                                  "end": 43
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 43,
+                                  "end": 44
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 43,
+                                      "end": 44
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "N"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "UnaryExpression",
+                "span": {
+                  "start": 45,
+                  "end": 71
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 45,
+                      "end": 47
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "::"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Type",
+                    "span": {
+                      "start": 47,
+                      "end": 71
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 47,
+                          "end": 71
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 47,
+                              "end": 48
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "S"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 55,
+                              "end": 71
+                            },
+                            "children": [
+                              {
+                                "kind": "BraceExpression",
+                                "span": {
+                                  "start": 55,
+                                  "end": 71
+                                },
+                                "children": [
+                                  {
+                                    "kind": "BinaryExpression",
+                                    "span": {
+                                      "start": 56,
+                                      "end": 67
+                                    },
+                                    "children": [
+                                      {
+                                        "kind": "Identifier",
+                                        "span": {
+                                          "start": 56,
+                                          "end": 57
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Identifier": "N"
+                                        },
+                                        "flags": []
+                                      },
+                                      {
+                                        "kind": "Operator",
+                                        "span": {
+                                          "start": 58,
+                                          "end": 60
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Operator": "<:"
+                                        },
+                                        "flags": []
+                                      },
+                                      {
+                                        "kind": "Identifier",
+                                        "span": {
+                                          "start": 61,
+                                          "end": 67
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Identifier": "Number"
+                                        },
+                                        "flags": []
+                                      }
+                                    ],
+                                    "value": null,
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 69,
+                                      "end": 70
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "S"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Typed parameters",
+    "source": "function name(arg::T, ::S)\n  code\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 37
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 37
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 26
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 26
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 13
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "name"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 13,
+                          "end": 26
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 14,
+                              "end": 20
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 14,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "arg"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 17,
+                                  "end": 19
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 19,
+                                  "end": 20
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 19,
+                                      "end": 20
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "T"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "UnaryExpression",
+                            "span": {
+                              "start": 22,
+                              "end": 25
+                            },
+                            "children": [
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 22,
+                                  "end": 24
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 24,
+                                  "end": 25
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 24,
+                                      "end": 25
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "S"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 29,
+                  "end": 33
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "code"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Typed parameters with FieldExpression type",
+    "source": "function name(param::Type.Some) end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 35
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 35
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 31
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 31
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 13
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "name"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 13,
+                          "end": 31
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 14,
+                              "end": 30
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 14,
+                                  "end": 19
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "param"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 19,
+                                  "end": 21
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 21,
+                                  "end": 30
+                                },
+                                "children": [
+                                  {
+                                    "kind": "FieldExpression",
+                                    "span": {
+                                      "start": 21,
+                                      "end": 30
+                                    },
+                                    "children": [
+                                      {
+                                        "kind": "Identifier",
+                                        "span": {
+                                          "start": 21,
+                                          "end": 25
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "Identifier": "Type"
+                                        },
+                                        "flags": []
+                                      },
+                                      {
+                                        "kind": "Field",
+                                        "span": {
+                                          "start": 26,
+                                          "end": 30
+                                        },
+                                        "children": [
+                                          {
+                                            "kind": "Identifier",
+                                            "span": {
+                                              "start": 26,
+                                              "end": 30
+                                            },
+                                            "children": [],
+                                            "value": {
+                                              "Identifier": "Some"
+                                            },
+                                            "flags": []
+                                          }
+                                        ],
+                                        "value": null,
+                                        "flags": []
+                                      }
+                                    ],
+                                    "value": null,
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - optional parameters",
+    "source": "function f(x, y=2)\n  x, y\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 29
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 29
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 18
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 10,
+                          "end": 18
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 11,
+                              "end": 12
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "KwArg",
+                            "span": {
+                              "start": 14,
+                              "end": 17
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 14,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 15,
+                                  "end": 16
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "="
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 16,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "2"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "OpenTuple",
+                "span": {
+                  "start": 21,
+                  "end": 25
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 21,
+                      "end": 22
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 24,
+                      "end": 25
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - exploded parameters",
+    "source": "function f((x,(y1,y2)), (u,v)=2)\n  x, y\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 43
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 32
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 32
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 10,
+                          "end": 32
+                        },
+                        "children": [
+                          {
+                            "kind": "TupleExpression",
+                            "span": {
+                              "start": 11,
+                              "end": 22
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 12,
+                                  "end": 13
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "TupleExpression",
+                                "span": {
+                                  "start": 14,
+                                  "end": 21
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 15,
+                                      "end": 17
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "y1"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 18,
+                                      "end": 20
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "y2"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "KwArg",
+                            "span": {
+                              "start": 24,
+                              "end": 31
+                            },
+                            "children": [
+                              {
+                                "kind": "TupleExpression",
+                                "span": {
+                                  "start": 24,
+                                  "end": 29
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 25,
+                                      "end": 26
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "u"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 27,
+                                      "end": 28
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "v"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 29,
+                                  "end": 30
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "="
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 30,
+                                  "end": 31
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "2"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "OpenTuple",
+                "span": {
+                  "start": 35,
+                  "end": 39
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 35,
+                      "end": 36
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 38,
+                      "end": 39
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - keyword parameters",
+    "source": "function a(; x, y) end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 22
+        },
+        "children": [
+          {
+            "kind": "FunctionDefinition",
+            "span": {
+              "start": 0,
+              "end": 22
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 9,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 18
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 10,
+                          "end": 18
+                        },
+                        "children": [
+                          {
+                            "kind": "KeywordArguments",
+                            "span": {
+                              "start": 11,
+                              "end": 17
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 13,
+                                  "end": 14
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 16,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function definitions - Anonymous function with keyword parameters # BROKEN",
+    "source": "#=\nfunction (x; y) end\n= =>\nProgram(\n  FunctionDefinition(\n    function,\n    Signature(TupleExpression(Identifier, Identifier)),\n    end\n  )\n)\n=#",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 145
+        },
+        "children": [
+          {
+            "kind": "BlockComment",
+            "span": {
+              "start": 0,
+              "end": 145
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Macro definitions",
+    "source": "macro name(s::Symbol)\n    String(s)\nend\n\nmacro count(args...); length(args) end\n\nmacro Mod.mac() end\n\nmacro wow end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 115
+        },
+        "children": [
+          {
+            "kind": "MacroDefinition",
+            "span": {
+              "start": 0,
+              "end": 39
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 6,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 6,
+                      "end": 21
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 6,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "name"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 10,
+                          "end": 21
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 11,
+                              "end": 20
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 11,
+                                  "end": 12
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "s"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 12,
+                                  "end": 14
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "::"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Type",
+                                "span": {
+                                  "start": 14,
+                                  "end": 20
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 14,
+                                      "end": 20
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "Symbol"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 26,
+                  "end": 35
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 26,
+                      "end": 32
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "String"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 32,
+                      "end": 35
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 33,
+                          "end": 34
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "s"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroDefinition",
+            "span": {
+              "start": 41,
+              "end": 79
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 47,
+                  "end": 61
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 47,
+                      "end": 61
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 47,
+                          "end": 52
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "count"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 52,
+                          "end": 61
+                        },
+                        "children": [
+                          {
+                            "kind": "SplatExpression",
+                            "span": {
+                              "start": 53,
+                              "end": 60
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 53,
+                                  "end": 57
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "args"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 63,
+                  "end": 75
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 63,
+                      "end": 69
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "length"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 69,
+                      "end": 75
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 70,
+                          "end": 74
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "args"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroDefinition",
+            "span": {
+              "start": 81,
+              "end": 100
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 87,
+                  "end": 96
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 87,
+                      "end": 96
+                    },
+                    "children": [
+                      {
+                        "kind": "FieldExpression",
+                        "span": {
+                          "start": 87,
+                          "end": 94
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 87,
+                              "end": 90
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Mod"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Field",
+                            "span": {
+                              "start": 91,
+                              "end": 94
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 91,
+                                  "end": 94
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "mac"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 94,
+                          "end": 96
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroDefinition",
+            "span": {
+              "start": 102,
+              "end": 115
+            },
+            "children": [
+              {
+                "kind": "Signature",
+                "span": {
+                  "start": 108,
+                  "end": 111
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 108,
+                      "end": 111
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "wow"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  }
+]

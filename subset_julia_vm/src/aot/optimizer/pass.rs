@@ -431,7 +431,7 @@ impl DeadCodeElimination {
                 Instruction::TypeAssert { dest, .. } => Some(dest),
                 Instruction::Phi { dest, .. } => Some(dest),
                 // These may have side effects or modify state
-                Instruction::Call { dest: _, .. } | Instruction::CallMulti { .. } => {
+                Instruction::Call { .. } | Instruction::CallMulti { .. } => {
                     // Keep calls even if result is unused (may have side effects)
                     return true;
                 }
@@ -1342,7 +1342,7 @@ mod tests {
         assert!(
             matches!(&block.instructions[2], Instruction::LoadConst { .. }),
             "Expected LoadConst instruction, got {:?}",
-            &block.instructions[2]
+            block.instructions[2]
         );
         if let Instruction::LoadConst { value, .. } = &block.instructions[2] {
             assert_eq!(*value, ConstValue::Int64(5));
@@ -1589,7 +1589,7 @@ mod tests {
                 }
             ),
             "Expected hoisted LoadConst(42), got {:?}",
-            &preheader.instructions[0]
+            preheader.instructions[0]
         );
 
         // Preheader should jump to the loop header
@@ -1900,7 +1900,7 @@ mod tests {
                 }
             ),
             "Expected hoisted BinOp(Add), got {:?}",
-            &preheader.instructions[0]
+            preheader.instructions[0]
         );
     }
 

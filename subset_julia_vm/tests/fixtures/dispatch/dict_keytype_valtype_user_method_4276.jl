@@ -1,3 +1,7 @@
+# Kept standalone: overrides Base methods on Base argument types, so the method
+# table interaction is process-global and aggregation is order-dependent even
+# under upstream julia (#5966 class; excluded from Issue #10238 module-wrap
+# aggregation).
 using Test
 
 import Base: keytype, valtype

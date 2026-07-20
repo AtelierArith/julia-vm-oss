@@ -59,3 +59,15 @@ name = "bool_bitwise_bool_8197"
 file = "bitwise_bool_8197.jl"
 expected = true
 description = "Bool-Bool bitwise operators &, |, ⊻ (and the xor function form) per upstream base/bool.jl: (&)(x::Bool,y::Bool)=and_int(x,y), (|)=or_int, xor=(x!=y). ⊻ and xor are distinct functions in sjulia so both get the Bool method; and_int/or_int intrinsics return Bool for Bool operands (Issue #8197)"
+
+[[tests]]
+name = "bool_strongzero_char_eq_9343"
+file = "strongzero_char_eq_9343.jl"
+expected = true
+description = "Bool strong-zero multiply (false * Inf === 0.0, false * -Inf === -0.0, Float32 too) per upstream base/bool.jl *(x::Bool, y::AbstractFloat)=ifelse(x,y,copysign(zero(y),y)); and Char is not a Number so 'a' == 97 is false (=== fallback) while char arithmetic 'a'+1/'b'-'a' is preserved (Issue #9343)"
+
+[[tests]]
+name = "bool_missing_bitwise_10692"
+file = "missing_bitwise_10692.jl"
+expected = true
+description = "Bitwise &, |, xor/⊻ over Bool/Integer and Missing follow upstream's three-valued Kleene logic (false & missing === false, true | missing === true, everything else missing), registered after int.jl so Int64 stays the mixed-type dispatch fallback per the #8197 contract (Issue #10692)"

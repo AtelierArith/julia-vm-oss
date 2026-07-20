@@ -1,0 +1,83 @@
+id	category	left_expr	right_expr	status	result	exception_type
+S001	concrete_numeric	Int64	Real	ok	true	none
+S002	concrete_numeric	Int64	Integer	ok	true	none
+S003	concrete_numeric	Int64	Float64	ok	false	none
+S004	concrete_numeric	Float64	AbstractFloat	ok	true	none
+S005	concrete_numeric	Bool	Integer	ok	true	none
+S006	concrete_numeric	Bool	Int64	ok	false	none
+S007	concrete_numeric	Int64	Int64	ok	true	none
+S008	concrete_numeric	Int8	Signed	ok	true	none
+S009	concrete_numeric	UInt8	Unsigned	ok	true	none
+S010	concrete_numeric	UInt8	Signed	ok	false	none
+S011	concrete_numeric	Complex{Float64}	Complex	ok	true	none
+S012	concrete_numeric	Complex	Complex{Float64}	ok	false	none
+S013	concrete_numeric	Rational{Int64}	Rational	ok	true	none
+S014	concrete_numeric	Rational{Int64}	Real	ok	true	none
+S015	concrete_numeric	BigInt	Integer	ok	true	none
+S016	concrete_numeric	BigFloat	AbstractFloat	ok	true	none
+S020	abstract_hierarchy	Integer	Real	ok	true	none
+S021	abstract_hierarchy	Real	Number	ok	true	none
+S022	abstract_hierarchy	AbstractFloat	Real	ok	true	none
+S023	abstract_hierarchy	Signed	Integer	ok	true	none
+S024	abstract_hierarchy	Unsigned	Integer	ok	true	none
+S025	abstract_hierarchy	Number	Real	ok	false	none
+S026	abstract_hierarchy	Real	Integer	ok	false	none
+S027	abstract_hierarchy	AbstractString	Any	ok	true	none
+S028	abstract_hierarchy	Any	AbstractString	ok	false	none
+S029	abstract_hierarchy	Animal10049	Any	ok	true	none
+S030	abstract_hierarchy	Dog10049	Animal10049	ok	true	none
+S031	abstract_hierarchy	Cat10049	Animal10049	ok	true	none
+S032	abstract_hierarchy	Dog10049	Cat10049	ok	false	none
+S040	invariant_params	Wrap10049{Int64}	Wrap10049{Int64}	ok	true	none
+S041	invariant_params	Wrap10049{Int64}	Wrap10049{Real}	ok	false	none
+S042	invariant_params	Wrap10049{Int64}	Wrap10049	ok	true	none
+S043	invariant_params	Wrap10049	Wrap10049{Int64}	ok	false	none
+S044	invariant_params	Wrap10049{Int64}	Wrap10049{Number}	ok	false	none
+S050	array_family	Vector{Int64}	Vector{Number}	ok	false	none
+S051	array_family	Vector{Int64}	AbstractVector{Int64}	ok	true	none
+S052	array_family	Vector{Int64}	AbstractVector	ok	true	none
+S053	array_family	Vector{Int64}	Matrix	ok	false	none
+S054	array_family	Matrix{Int64}	Vector	ok	false	none
+S055	array_family	Vector{Int64}	Array	ok	true	none
+S056	array_family	Array{Int64,1}	Vector{Int64}	ok	true	none
+S057	array_family	Tuple{Vector{Int64}}	Tuple{Matrix}	ok	false	none
+S058	array_family	Tuple{Matrix{Int64}}	Tuple{Vector}	ok	false	none
+S059	array_family	Tuple{Int64,Int64}	Tuple{Real,Real}	ok	true	none
+S060	array_family	Tuple{Int64}	Tuple{Int64,Int64}	ok	false	none
+S061	array_family	Tuple{Int64,Float64}	Tuple{Real,Real}	ok	true	none
+S062	array_family	Tuple{}	Tuple{}	ok	true	none
+S063	array_family	Tuple{Int64,Vararg{Int64}}	Tuple{Vararg{Integer}}	ok	true	none
+S064	array_family	Tuple{Int64,String}	Tuple{Vararg{Any}}	ok	true	none
+S070	union	Union{Int64,Float64}	Real	ok	true	none
+S071	union	Real	Union{Int64,Float64}	ok	false	none
+S072	union	Int64	Union{Int64,String}	ok	true	none
+S073	union	String	Union{Int64,Float64}	ok	false	none
+S074	union	Union{Int64,String}	Any	ok	true	none
+S075	union	Union{}	Int64	ok	true	none
+S076	union	Int64	Union{}	ok	false	none
+S080	unionall_bounds	Vector{Int64}	(Vector{T} where T<:Integer)	ok	true	none
+S081	unionall_bounds	Vector{Float64}	(Vector{T} where T<:Integer)	ok	false	none
+S082	unionall_bounds	Vector{Int64}	(Vector{T} where T<:Real)	ok	true	none
+S083	unionall_bounds	Vector{Int64}	(Vector{T} where Int64<:T<:Real)	ok	true	none
+S084	unionall_bounds	Vector{Float32}	(Vector{T} where Int64<:T<:Real)	ok	false	none
+S085	unionall_bounds	Circle10049{Real}	Shape10049{>:Int64}	ok	true	none
+S086	unionall_bounds	Circle10049{Number}	Shape10049{>:Int64}	ok	true	none
+S087	unionall_bounds	Circle10049{Any}	Shape10049{>:Int64}	ok	true	none
+S088	unionall_bounds	Circle10049{Int64}	Shape10049{>:Int64}	ok	true	none
+S089	unionall_bounds	Circle10049{Int32}	Shape10049{>:Int64}	ok	false	none
+S090	unionall_bounds	Vector{Real}	Vector{>:Int64}	ok	true	none
+S091	unionall_bounds	Vector{Any}	Vector{>:Int64}	ok	true	none
+S092	unionall_bounds	Vector{Int32}	Vector{>:Int64}	ok	false	none
+S100	type_of	Type{Int64}	Type{Int64}	ok	true	none
+S101	type_of	Type{Int64}	Type{Real}	ok	false	none
+S102	type_of	Type{Int64}	Type{<:Real}	ok	true	none
+S103	type_of	Type{String}	Type{<:Real}	ok	false	none
+S104	type_of	DataType	Type	ok	true	none
+S105	type_of	Type{Int64}	DataType	ok	true	none
+S110	diagonal_rule	Tuple{Int64,Int64}	(Tuple{T,T} where T)	ok	true	none
+S111	diagonal_rule	Tuple{Int64,String}	(Tuple{T,T} where T)	ok	false	none
+S120	unionall_vs_unionall	(Vector{T} where T<:Integer)	(Vector{S} where S<:Real)	ok	true	none
+S121	unionall_vs_unionall	(Vector{T} where T<:Real)	(Vector{S} where S<:Integer)	ok	false	none
+S130	nested_where	(PairT10049{A,B} where {A<:Integer,B<:Real})	(PairT10049{A,B} where {A<:Real,B<:Real})	ok	true	none
+S131	nested_where	PairT10049{Int64,Float64}	(PairT10049{A,B} where {A<:Integer,B<:Real})	ok	true	none
+S132	nested_where	PairT10049{Float64,Float64}	(PairT10049{A,B} where {A<:Integer,B<:Real})	ok	false	none

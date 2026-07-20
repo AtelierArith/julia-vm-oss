@@ -1,0 +1,5501 @@
+[
+  {
+    "name": "Identifiers",
+    "source": "abc_123_ABC\n_fn!\nρ; φ; z\nℝ\nx′\nθ̄\nlogŷ\nϵ\nŷ\n∫\n🙋\n🦀",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 67
+        },
+        "children": [
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 0,
+              "end": 11
+            },
+            "children": [],
+            "value": {
+              "Identifier": "abc_123_ABC"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 12,
+              "end": 16
+            },
+            "children": [],
+            "value": {
+              "Identifier": "_fn!"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 17,
+              "end": 19
+            },
+            "children": [],
+            "value": {
+              "Identifier": "ρ"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 21,
+              "end": 23
+            },
+            "children": [],
+            "value": {
+              "Identifier": "φ"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 25,
+              "end": 26
+            },
+            "children": [],
+            "value": {
+              "Identifier": "z"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 27,
+              "end": 30
+            },
+            "children": [],
+            "value": {
+              "Identifier": "ℝ"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 31,
+              "end": 35
+            },
+            "children": [],
+            "value": {
+              "Identifier": "x′"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 36,
+              "end": 40
+            },
+            "children": [],
+            "value": {
+              "Identifier": "θ̄"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 41,
+              "end": 47
+            },
+            "children": [],
+            "value": {
+              "Identifier": "logŷ"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 48,
+              "end": 50
+            },
+            "children": [],
+            "value": {
+              "Identifier": "ϵ"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 51,
+              "end": 53
+            },
+            "children": [],
+            "value": {
+              "Identifier": "ŷ"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 54,
+              "end": 57
+            },
+            "children": [],
+            "value": {
+              "Identifier": "∫"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 58,
+              "end": 62
+            },
+            "children": [],
+            "value": {
+              "Identifier": "🙋"
+            },
+            "flags": []
+          },
+          {
+            "kind": "Identifier",
+            "span": {
+              "start": 63,
+              "end": 67
+            },
+            "children": [],
+            "value": {
+              "Identifier": "🦀"
+            },
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Keywords as identifiers - Valid variable names",
+    "source": "where = Any\n\nwhere where where",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 30
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 11
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 5
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "where"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 6,
+                  "end": 7
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 8,
+                  "end": 11
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Any"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 13,
+              "end": 30
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 13,
+                  "end": 18
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "where"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Type",
+                "span": {
+                  "start": 25,
+                  "end": 30
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 25,
+                      "end": 30
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "where"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Field expressions",
+    "source": "foo.x\nbar.x.y.z\n\nBase.:+\nBase.:(==)\ndf.\"a\"\nBase.r\"foo\"\n\n(a[1].b().c).d",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 70
+        },
+        "children": [
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 0,
+              "end": 5
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "foo"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 4,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 4,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 6,
+              "end": 15
+            },
+            "children": [
+              {
+                "kind": "FieldExpression",
+                "span": {
+                  "start": 6,
+                  "end": 13
+                },
+                "children": [
+                  {
+                    "kind": "FieldExpression",
+                    "span": {
+                      "start": 6,
+                      "end": 11
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 6,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "bar"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Field",
+                        "span": {
+                          "start": 10,
+                          "end": 11
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 10,
+                              "end": 11
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Field",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 12,
+                          "end": 13
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 14,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "z"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 17,
+              "end": 24
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 17,
+                  "end": 21
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Base"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 22,
+                  "end": 24
+                },
+                "children": [
+                  {
+                    "kind": "Symbol",
+                    "span": {
+                      "start": 22,
+                      "end": 24
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 23,
+                          "end": 24
+                        },
+                        "children": [
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 23,
+                              "end": 24
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "+"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 25,
+              "end": 35
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 25,
+                  "end": 29
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Base"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 30,
+                  "end": 35
+                },
+                "children": [
+                  {
+                    "kind": "QuoteExpression",
+                    "span": {
+                      "start": 30,
+                      "end": 35
+                    },
+                    "children": [
+                      {
+                        "kind": "ParenExpression",
+                        "span": {
+                          "start": 31,
+                          "end": 35
+                        },
+                        "children": [
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 32,
+                              "end": 34
+                            },
+                            "children": [
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 32,
+                                  "end": 34
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "=="
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 36,
+              "end": 42
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 36,
+                  "end": 38
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "df"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 39,
+                  "end": 42
+                },
+                "children": [
+                  {
+                    "kind": "StringExpression",
+                    "span": {
+                      "start": 39,
+                      "end": 42
+                    },
+                    "children": [
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 40,
+                          "end": 41
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "a"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 43,
+              "end": 54
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 43,
+                  "end": 47
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Base"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 48,
+                  "end": 54
+                },
+                "children": [
+                  {
+                    "kind": "NsStringExpression",
+                    "span": {
+                      "start": 48,
+                      "end": 54
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 48,
+                          "end": 49
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "r"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 50,
+                          "end": 53
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "foo"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 56,
+              "end": 70
+            },
+            "children": [
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 56,
+                  "end": 68
+                },
+                "children": [
+                  {
+                    "kind": "FieldExpression",
+                    "span": {
+                      "start": 57,
+                      "end": 67
+                    },
+                    "children": [
+                      {
+                        "kind": "CallExpression",
+                        "span": {
+                          "start": 57,
+                          "end": 65
+                        },
+                        "children": [
+                          {
+                            "kind": "FieldExpression",
+                            "span": {
+                              "start": 57,
+                              "end": 63
+                            },
+                            "children": [
+                              {
+                                "kind": "IndexExpression",
+                                "span": {
+                                  "start": 57,
+                                  "end": 61
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 57,
+                                      "end": 58
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "a"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "VectorExpression",
+                                    "span": {
+                                      "start": 58,
+                                      "end": 61
+                                    },
+                                    "children": [
+                                      {
+                                        "kind": "IntegerLiteral",
+                                        "span": {
+                                          "start": 59,
+                                          "end": 60
+                                        },
+                                        "children": [],
+                                        "value": {
+                                          "IntegerLiteral": "1"
+                                        },
+                                        "flags": []
+                                      }
+                                    ],
+                                    "value": null,
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              },
+                              {
+                                "kind": "Field",
+                                "span": {
+                                  "start": 62,
+                                  "end": 63
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 62,
+                                      "end": 63
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "b"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Arguments",
+                            "span": {
+                              "start": 63,
+                              "end": 65
+                            },
+                            "children": [],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Field",
+                        "span": {
+                          "start": 66,
+                          "end": 67
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 66,
+                              "end": 67
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 69,
+                  "end": 70
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 69,
+                      "end": 70
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "d"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Keywords as identifiers - keywords as field names",
+    "source": "obj.if\nobj.begin\nobj.end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 24
+        },
+        "children": [
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 0,
+              "end": 6
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "obj"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 4,
+                  "end": 6
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 4,
+                      "end": 6
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "if"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 7,
+              "end": 16
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 7,
+                  "end": 10
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "obj"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 11,
+                  "end": 16
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 11,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "begin"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 17,
+              "end": 24
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 17,
+                  "end": 20
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "obj"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 21,
+                  "end": 24
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 21,
+                      "end": 24
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "end"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Index expressions",
+    "source": "a[]\na[1, :]\n\"foo\"[1]\nxs[i += 1]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 31
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 3
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 4,
+              "end": 11
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 4,
+                  "end": 5
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 5,
+                  "end": 11
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 6,
+                      "end": 7
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 9,
+                      "end": 10
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 9,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": ":"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 12,
+              "end": 20
+            },
+            "children": [
+              {
+                "kind": "StringExpression",
+                "span": {
+                  "start": 12,
+                  "end": 17
+                },
+                "children": [
+                  {
+                    "kind": "StringFragment",
+                    "span": {
+                      "start": 13,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "StringFragment": "foo"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 17,
+                  "end": 20
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 18,
+                      "end": 19
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 21,
+              "end": 31
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 21,
+                  "end": 23
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 23,
+                  "end": 31
+                },
+                "children": [
+                  {
+                    "kind": "Assignment",
+                    "span": {
+                      "start": 24,
+                      "end": 30
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 24,
+                          "end": 25
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "i"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 26,
+                          "end": 28
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 29,
+                          "end": 30
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Keywords as identifiers - begin/end indexing",
+    "source": "xs[begin]\nxs[begin + 1]\nxs[end]\nxs[end - 1]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 43
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 9
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 2
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 2,
+                  "end": 9
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 10,
+              "end": 23
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 10,
+                  "end": 12
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 12,
+                  "end": 23
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 13,
+                      "end": 22
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 19,
+                          "end": 20
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 21,
+                          "end": 22
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 24,
+              "end": 31
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 24,
+                  "end": 26
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 26,
+                  "end": 31
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 32,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 32,
+                  "end": 34
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 34,
+                  "end": 43
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 35,
+                      "end": 42
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 39,
+                          "end": 40
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "-"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 41,
+                          "end": 42
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Keywords as identifiers - begin/end indexing with range operators",
+    "source": "xs[begin:end]\nxs[begin..end]\ndata[begin:2:end]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 46
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 13
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 2
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 2,
+                  "end": 13
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 3,
+                      "end": 12
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 8,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": ":"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 14,
+              "end": 28
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 14,
+                  "end": 16
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "xs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 16,
+                  "end": 28
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 17,
+                      "end": 27
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 22,
+                          "end": 24
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": ".."
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 29,
+              "end": 46
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 29,
+                  "end": 33
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "data"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 33,
+                  "end": 46
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 34,
+                      "end": 45
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 34,
+                          "end": 41
+                        },
+                        "children": [
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 39,
+                              "end": 40
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": ":"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 40,
+                              "end": 41
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "2"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 41,
+                          "end": 42
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": ":"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Keywords as identifiers - begin/end indexing nested in larger expressions - issue #15",
+    "source": "data[max(begin, i - 1)]\ndata[min(end, i + 1)]\nx[(begin)]\nx[f(a = end)]\nx[(() -> begin)()]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 89
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 23
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 4
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "data"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 4,
+                  "end": 23
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 5,
+                      "end": 22
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 5,
+                          "end": 8
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "max"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 8,
+                          "end": 22
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 16,
+                              "end": 21
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 16,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "i"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 18,
+                                  "end": 19
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "-"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 20,
+                                  "end": 21
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "1"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 24,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 24,
+                  "end": 28
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "data"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 28,
+                  "end": 45
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 29,
+                      "end": 44
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 29,
+                          "end": 32
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "min"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 32,
+                          "end": 44
+                        },
+                        "children": [
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 38,
+                              "end": 43
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 38,
+                                  "end": 39
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "i"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 40,
+                                  "end": 41
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "+"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 42,
+                                  "end": 43
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "1"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 46,
+              "end": 56
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 46,
+                  "end": 47
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 47,
+                  "end": 56
+                },
+                "children": [
+                  {
+                    "kind": "ParenExpression",
+                    "span": {
+                      "start": 48,
+                      "end": 55
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 57,
+              "end": 70
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 57,
+                  "end": 58
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 58,
+                  "end": 70
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 59,
+                      "end": 69
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 59,
+                          "end": 60
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 60,
+                          "end": 69
+                        },
+                        "children": [
+                          {
+                            "kind": "KwArg",
+                            "span": {
+                              "start": 61,
+                              "end": 68
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 61,
+                                  "end": 62
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "a"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 63,
+                                  "end": 64
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "="
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 71,
+              "end": 89
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 71,
+                  "end": 72
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 72,
+                  "end": 89
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 73,
+                      "end": 88
+                    },
+                    "children": [
+                      {
+                        "kind": "ParenExpression",
+                        "span": {
+                          "start": 73,
+                          "end": 86
+                        },
+                        "children": [
+                          {
+                            "kind": "LambdaExpression",
+                            "span": {
+                              "start": 74,
+                              "end": 85
+                            },
+                            "children": [
+                              {
+                                "kind": "TupleExpression",
+                                "span": {
+                                  "start": 74,
+                                  "end": 76
+                                },
+                                "children": [],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 86,
+                          "end": 88
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Compound statements inside index brackets",
+    "source": "x[let\n  2\nend]\nx[if a\n  1\nelse\n  2\nend]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 39
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 14
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 1,
+                  "end": 14
+                },
+                "children": [
+                  {
+                    "kind": "LetExpression",
+                    "span": {
+                      "start": 2,
+                      "end": 13
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 8,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 15,
+              "end": 39
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 15,
+                  "end": 16
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 16,
+                  "end": 39
+                },
+                "children": [
+                  {
+                    "kind": "IfStatement",
+                    "span": {
+                      "start": 17,
+                      "end": 38
+                    },
+                    "children": [
+                      {
+                        "kind": "Condition",
+                        "span": {
+                          "start": 20,
+                          "end": 22
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 20,
+                              "end": 21
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "a"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 24,
+                          "end": 25
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "ElseClause",
+                        "span": {
+                          "start": 26,
+                          "end": 35
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 33,
+                              "end": 34
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "2"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Type parametrized expressions",
+    "source": "Vector{Int}\nT{S, U}\nVector{<:Number}\n$(usertype){T}\n\n## Gen.jl DSL with tilde syntax\n{:x} ~ normal(0, 1)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 104
+        },
+        "children": [
+          {
+            "kind": "ParametrizedExpression",
+            "span": {
+              "start": 0,
+              "end": 11
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 6
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Vector"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BraceExpression",
+                "span": {
+                  "start": 6,
+                  "end": 11
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 7,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "Int"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParametrizedExpression",
+            "span": {
+              "start": 12,
+              "end": 19
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 12,
+                  "end": 13
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "T"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BraceExpression",
+                "span": {
+                  "start": 13,
+                  "end": 19
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "S"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 17,
+                      "end": 18
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "U"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParametrizedExpression",
+            "span": {
+              "start": 20,
+              "end": 36
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 20,
+                  "end": 26
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Vector"
+                },
+                "flags": []
+              },
+              {
+                "kind": "BraceExpression",
+                "span": {
+                  "start": 26,
+                  "end": 36
+                },
+                "children": [
+                  {
+                    "kind": "UnaryExpression",
+                    "span": {
+                      "start": 27,
+                      "end": 35
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 27,
+                          "end": 29
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "<:"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 29,
+                          "end": 35
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "Number"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParametrizedExpression",
+            "span": {
+              "start": 37,
+              "end": 51
+            },
+            "children": [
+              {
+                "kind": "Interpolation",
+                "span": {
+                  "start": 37,
+                  "end": 48
+                },
+                "children": [
+                  {
+                    "kind": "ParenExpression",
+                    "span": {
+                      "start": 38,
+                      "end": 48
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 39,
+                          "end": 47
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "usertype"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BraceExpression",
+                "span": {
+                  "start": 48,
+                  "end": 51
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 49,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "T"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 53,
+              "end": 84
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 85,
+              "end": 104
+            },
+            "children": [
+              {
+                "kind": "BraceExpression",
+                "span": {
+                  "start": 85,
+                  "end": 89
+                },
+                "children": [
+                  {
+                    "kind": "Symbol",
+                    "span": {
+                      "start": 86,
+                      "end": 88
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 87,
+                          "end": 88
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 90,
+                  "end": 91
+                },
+                "children": [],
+                "value": {
+                  "Operator": "~"
+                },
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 92,
+                  "end": 104
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 92,
+                      "end": 98
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "normal"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 98,
+                      "end": 104
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 99,
+                          "end": 100
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "0"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 102,
+                          "end": 103
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions",
+    "source": "f()\ng(\"hi\", 2)\nh(d...)\nnew{typeof(xs)}(xs)\nf(g())",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 49
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 3
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 4,
+              "end": 14
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 4,
+                  "end": 5
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "g"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 5,
+                  "end": 14
+                },
+                "children": [
+                  {
+                    "kind": "StringExpression",
+                    "span": {
+                      "start": 6,
+                      "end": 10
+                    },
+                    "children": [
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 7,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "hi"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 15,
+              "end": 22
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 15,
+                  "end": 16
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "h"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 16,
+                  "end": 22
+                },
+                "children": [
+                  {
+                    "kind": "SplatExpression",
+                    "span": {
+                      "start": 17,
+                      "end": 21
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 17,
+                          "end": 18
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "d"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 23,
+              "end": 42
+            },
+            "children": [
+              {
+                "kind": "ParametrizedExpression",
+                "span": {
+                  "start": 23,
+                  "end": 38
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 23,
+                      "end": 26
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "new"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "BraceExpression",
+                    "span": {
+                      "start": 26,
+                      "end": 38
+                    },
+                    "children": [
+                      {
+                        "kind": "CallExpression",
+                        "span": {
+                          "start": 27,
+                          "end": 37
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 27,
+                              "end": 33
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "typeof"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Arguments",
+                            "span": {
+                              "start": 33,
+                              "end": 37
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 34,
+                                  "end": 36
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "xs"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 38,
+                  "end": 42
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 39,
+                      "end": 41
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "xs"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 43,
+              "end": 49
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 43,
+                  "end": 44
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 44,
+                  "end": 49
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 45,
+                      "end": 48
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 45,
+                          "end": 46
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "g"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 46,
+                          "end": 48
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions - Broadcasting",
+    "source": "f.(xs)\nfoo!.(ys)\n.⋆(ys)\n.!isnan.(zs)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 38
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 6
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 2,
+                  "end": 6
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 3,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "xs"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 7,
+              "end": 16
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 7,
+                  "end": 11
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "foo!"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 12,
+                  "end": 16
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 13,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "ys"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 17,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 17,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 17,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": ".⋆"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 21,
+                  "end": 25
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 22,
+                      "end": 24
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "ys"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "UnaryExpression",
+            "span": {
+              "start": 26,
+              "end": 38
+            },
+            "children": [
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 26,
+                  "end": 28
+                },
+                "children": [],
+                "value": {
+                  "Operator": ".!"
+                },
+                "flags": []
+              },
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 28,
+                  "end": 38
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 28,
+                      "end": 33
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "isnan"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 34,
+                      "end": 38
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 35,
+                          "end": 37
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "zs"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions - Keyword arguments",
+    "source": "f(e; f = g)\ng(arg; kwarg)\nh(; x, y)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 35
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 11
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 11
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 2,
+                      "end": 3
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "e"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "KeywordArguments",
+                    "span": {
+                      "start": 3,
+                      "end": 10
+                    },
+                    "children": [
+                      {
+                        "kind": "KwArg",
+                        "span": {
+                          "start": 5,
+                          "end": 10
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 5,
+                              "end": 6
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "f"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 7,
+                              "end": 8
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 9,
+                              "end": 10
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "g"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 12,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 12,
+                  "end": 13
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "g"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 13,
+                  "end": 25
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 14,
+                      "end": 17
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "arg"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "KeywordArguments",
+                    "span": {
+                      "start": 17,
+                      "end": 24
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 19,
+                          "end": 24
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "kwarg"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 26,
+              "end": 35
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 26,
+                  "end": 27
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "h"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 27,
+                  "end": 35
+                },
+                "children": [
+                  {
+                    "kind": "KeywordArguments",
+                    "span": {
+                      "start": 28,
+                      "end": 34
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 30,
+                          "end": 31
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 33,
+                          "end": 34
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions with do blocks",
+    "source": "reduce(xs) do x, (y,(z,w))\n  f(x, y)\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 40
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 40
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 6
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "reduce"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 6,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 7,
+                      "end": 9
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "xs"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 11,
+                  "end": 40
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 14,
+                      "end": 26
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 14,
+                          "end": 15
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "TupleExpression",
+                        "span": {
+                          "start": 17,
+                          "end": 26
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 18,
+                              "end": 19
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "TupleExpression",
+                            "span": {
+                              "start": 20,
+                              "end": 25
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 21,
+                                  "end": 22
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "z"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 23,
+                                  "end": 24
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "w"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 29,
+                      "end": 36
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 29,
+                          "end": 30
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "f"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 30,
+                          "end": 36
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 31,
+                              "end": 32
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 34,
+                              "end": 35
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions with do blocks - no parameters",
+    "source": "f() do; end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 11
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 11
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 4,
+                  "end": 11
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 6,
+                      "end": 6
+                    },
+                    "children": [],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions with do blocks - single line without semicolon",
+    "source": "f() do x end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 12
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 12
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 4,
+                  "end": 12
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 7,
+                      "end": 8
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 7,
+                          "end": 8
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions with do blocks - typed parameter",
+    "source": "f(xs) do x::Int; end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 20
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 20
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 2,
+                      "end": 4
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "xs"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 6,
+                  "end": 20
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 9,
+                      "end": 15
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 9,
+                          "end": 15
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 9,
+                              "end": 10
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 10,
+                              "end": 12
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "::"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 12,
+                              "end": 15
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 12,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "Int"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Function call expressions with do blocks - typed and exploded parameter",
+    "source": "f(xs) do (x,y)::Int; end",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 24
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 24
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 2,
+                      "end": 4
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "xs"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 6,
+                  "end": 24
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 9,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 9,
+                          "end": 19
+                        },
+                        "children": [
+                          {
+                            "kind": "TupleExpression",
+                            "span": {
+                              "start": 9,
+                              "end": 14
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 10,
+                                  "end": 11
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 12,
+                                  "end": 13
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 14,
+                              "end": 16
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "::"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Type",
+                            "span": {
+                              "start": 16,
+                              "end": 19
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 16,
+                                  "end": 19
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "Int"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Quote expressions and symbols",
+    "source": ":foo\n:if\n\n:(x; y)\n:(x, y)\n:[x, y, z]\n\n:+\n:->\n:(=)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 49
+        },
+        "children": [
+          {
+            "kind": "Symbol",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 1,
+                  "end": 4
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "foo"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Symbol",
+            "span": {
+              "start": 5,
+              "end": 8
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 6,
+                  "end": 8
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "if"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "QuoteExpression",
+            "span": {
+              "start": 10,
+              "end": 17
+            },
+            "children": [
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 11,
+                  "end": 17
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 15,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "QuoteExpression",
+            "span": {
+              "start": 18,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "TupleExpression",
+                "span": {
+                  "start": 19,
+                  "end": 25
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 20,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 23,
+                      "end": 24
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "QuoteExpression",
+            "span": {
+              "start": 26,
+              "end": 36
+            },
+            "children": [
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 27,
+                  "end": 36
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 28,
+                      "end": 29
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 31,
+                      "end": 32
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 34,
+                      "end": 35
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "z"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Symbol",
+            "span": {
+              "start": 38,
+              "end": 40
+            },
+            "children": [
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 39,
+                  "end": 40
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 39,
+                      "end": 40
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "+"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Symbol",
+            "span": {
+              "start": 41,
+              "end": 44
+            },
+            "children": [
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 42,
+                  "end": 44
+                },
+                "children": [],
+                "value": {
+                  "Operator": "->"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "QuoteExpression",
+            "span": {
+              "start": 45,
+              "end": 49
+            },
+            "children": [
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 46,
+                  "end": 49
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 47,
+                      "end": 48
+                    },
+                    "children": [
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 47,
+                          "end": 48
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Keywords as identifiers - Quoted keywords",
+    "source": ":if\n\nif x == :end\n  1\nelse\n  2\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 34
+        },
+        "children": [
+          {
+            "kind": "Symbol",
+            "span": {
+              "start": 0,
+              "end": 3
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 1,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "if"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IfStatement",
+            "span": {
+              "start": 5,
+              "end": 34
+            },
+            "children": [
+              {
+                "kind": "Condition",
+                "span": {
+                  "start": 8,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 8,
+                      "end": 17
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 8,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 10,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "=="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Symbol",
+                        "span": {
+                          "start": 13,
+                          "end": 17
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 14,
+                              "end": 17
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "end"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 20,
+                  "end": 21
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "1"
+                },
+                "flags": []
+              },
+              {
+                "kind": "ElseClause",
+                "span": {
+                  "start": 22,
+                  "end": 31
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 29,
+                      "end": 30
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Interpolation expressions",
+    "source": "$foo\n$obj.field\n$(obj.field)\n$f(x)\n$f[1, 2]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 43
+        },
+        "children": [
+          {
+            "kind": "Interpolation",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 1,
+                  "end": 4
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "foo"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "FieldExpression",
+            "span": {
+              "start": 5,
+              "end": 15
+            },
+            "children": [
+              {
+                "kind": "Interpolation",
+                "span": {
+                  "start": 5,
+                  "end": 9
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 6,
+                      "end": 9
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "obj"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Field",
+                "span": {
+                  "start": 10,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 10,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "field"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Interpolation",
+            "span": {
+              "start": 16,
+              "end": 28
+            },
+            "children": [
+              {
+                "kind": "ParenExpression",
+                "span": {
+                  "start": 17,
+                  "end": 28
+                },
+                "children": [
+                  {
+                    "kind": "FieldExpression",
+                    "span": {
+                      "start": 18,
+                      "end": 27
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 18,
+                          "end": 21
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "obj"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Field",
+                        "span": {
+                          "start": 22,
+                          "end": 27
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 22,
+                              "end": 27
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "field"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 29,
+              "end": 34
+            },
+            "children": [
+              {
+                "kind": "Interpolation",
+                "span": {
+                  "start": 29,
+                  "end": 31
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 30,
+                      "end": 31
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 31,
+                  "end": 34
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 32,
+                      "end": 33
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 35,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "Interpolation",
+                "span": {
+                  "start": 35,
+                  "end": 37
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 36,
+                      "end": 37
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 37,
+                  "end": 43
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 38,
+                      "end": 39
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 41,
+                      "end": 42
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Interpolation expressions - Interpolation in hcat # BROKEN",
+    "source": "#=\n[x $y z]\n\n= =>\nProgram(\n  MatrixExpression(MatrixRow(Identifier, InterpExpression(Identifier), Identifier)),\n)\n=#",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 116
+        },
+        "children": [
+          {
+            "kind": "BlockComment",
+            "span": {
+              "start": 0,
+              "end": 116
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Adjoint expressions",
+    "source": "[u, v]'\n(x, y)'\nA'[i]\nf'(x)\n:a'\na' * b",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 38
+        },
+        "children": [
+          {
+            "kind": "AdjointExpression",
+            "span": {
+              "start": 0,
+              "end": 7
+            },
+            "children": [
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 0,
+                  "end": 6
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 2
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "u"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 4,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "v"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AdjointExpression",
+            "span": {
+              "start": 8,
+              "end": 15
+            },
+            "children": [
+              {
+                "kind": "TupleExpression",
+                "span": {
+                  "start": 8,
+                  "end": 14
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 9,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 16,
+              "end": 21
+            },
+            "children": [
+              {
+                "kind": "AdjointExpression",
+                "span": {
+                  "start": 16,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 16,
+                      "end": 17
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "A"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "VectorExpression",
+                "span": {
+                  "start": 18,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 19,
+                      "end": 20
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "i"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 22,
+              "end": 27
+            },
+            "children": [
+              {
+                "kind": "AdjointExpression",
+                "span": {
+                  "start": 22,
+                  "end": 24
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 22,
+                      "end": 23
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 24,
+                  "end": 27
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 25,
+                      "end": 26
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "AdjointExpression",
+            "span": {
+              "start": 28,
+              "end": 31
+            },
+            "children": [
+              {
+                "kind": "Symbol",
+                "span": {
+                  "start": 28,
+                  "end": 30
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 29,
+                      "end": 30
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 32,
+              "end": 38
+            },
+            "children": [
+              {
+                "kind": "AdjointExpression",
+                "span": {
+                  "start": 32,
+                  "end": 34
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 32,
+                      "end": 33
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 35,
+                  "end": 36
+                },
+                "children": [],
+                "value": {
+                  "Operator": "*"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 37,
+                  "end": 38
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "b"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  }
+]

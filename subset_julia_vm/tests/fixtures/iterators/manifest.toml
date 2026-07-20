@@ -113,3 +113,9 @@ name = "iterators_hasshape_collect_dispatch_5850"
 file = "iterators_hasshape_collect_dispatch_5850.jl"
 expected = true
 description = "IteratorSize over a statically-ranked array infers the concrete HasShape{N} (mirroring IteratorSize(::AbstractArray{T,N})=HasShape{N}()), so Base._collect statically dispatches to the ::HasShape method instead of the ::IteratorSize catch-all and collect preserves array shape. Sharpened in both the Expr::Call and Expr::ModuleCall (Base.IteratorSize) inference arms (Issue #5850)."
+
+[[tests]]
+name = "iterators_flatten_generator_eltype_9438"
+file = "iterators_flatten_generator_eltype_9438.jl"
+expected = true
+description = "collect of a flatten-over-generators recovers the concrete eltype (Vector{Int64} / promoted Vector{Float64}) via value-based grow_to! widening rather than Vector{Any}: IteratorEltype(::Flatten) now mirrors upstream _flatteneltype trait algebra (EltypeUnknown when the outer or its element type has unknown eltype, e.g. Generator inners) instead of hardcoding HasEltype() (Issue #9438; iterator-trait algebra of #10050/#10463)."

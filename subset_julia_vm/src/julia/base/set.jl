@@ -112,6 +112,34 @@ end
 iterate(s::Set) = iterate(KeySet(s.dict))
 iterate(s::Set, state) = iterate(KeySet(s.dict), state)
 
+function sum(s::Set; dims=0, init=nothing)
+    if dims != 0
+        error("sum: dims must be 1 or 2 for matrices")
+    end
+    return _sum_iterable(s, init)
+end
+
+function prod(s::Set; dims=0, init=nothing)
+    if dims != 0
+        error("prod: dims must be 1 or 2 for matrices")
+    end
+    return _prod_iterable(s, init)
+end
+
+function minimum(s::Set; dims=0, init=nothing)
+    if dims != 0
+        error("minimum: dims must be 1 or 2 for matrices")
+    end
+    return _minimum_iterable(s, init)
+end
+
+function maximum(s::Set; dims=0, init=nothing)
+    if dims != 0
+        error("maximum: dims must be 1 or 2 for matrices")
+    end
+    return _maximum_iterable(s, init)
+end
+
 # eltype for sets (Issue #5116).  Upstream
 # (julia/base/abstractset.jl:3) defines
 # `eltype(::Type{<:AbstractSet{T}}) where {T} = @isdefined(T) ? T : Any` and the
@@ -130,7 +158,7 @@ eltype(s::Set) = eltype(typeof(s))
 # union(s1::Set, s2::Set) - set union
 # Reference: julia/base/abstractset.jl:18
 function union(s1::Set, s2::Set)
-    result = Set()
+    result = _set_from_eltype(promote_type(eltype(s1), eltype(s2)))
     for x in s1
         result = push!(result, x)
     end
@@ -143,7 +171,7 @@ end
 # intersect(s1::Set, s2::Set) - set intersection
 # Reference: julia/base/abstractset.jl:157
 function intersect(s1::Set, s2::Set)
-    result = Set()
+    result = _set_from_eltype(promote_type(eltype(s1), eltype(s2)))
     for x in s1
         if x in s2
             result = push!(result, x)
@@ -155,7 +183,7 @@ end
 # setdiff(s1::Set, s2::Set) - set difference
 # Reference: julia/base/abstractset.jl:277
 function setdiff(s1::Set, s2::Set)
-    result = Set()
+    result = _set_from_eltype(eltype(s1))
     for x in s1
         if !(x in s2)
             result = push!(result, x)
@@ -167,7 +195,7 @@ end
 # symdiff(s1::Set, s2::Set) - symmetric difference
 # Reference: julia/base/abstractset.jl:318
 function symdiff(s1::Set, s2::Set)
-    result = Set()
+    result = _set_from_eltype(promote_type(eltype(s1), eltype(s2)))
     for x in s1
         if !(x in s2)
             result = push!(result, x)
@@ -208,6 +236,11 @@ end
 function issetequal(a::Set, b::Set)
     length(a) == length(b) && issubset(a, b)
 end
+
+==(a::Set{T}, b::Set{S}) where {T,S} = issetequal(a, b)
+==(a::Set, b::Set) = issetequal(a, b)
+isequal(a::Set{T}, b::Set{S}) where {T,S} = issetequal(a, b)
+isequal(a::Set, b::Set) = issetequal(a, b)
 
 # =============================================================================
 # In-place Set operations - Pure Julia (Issue #2575)
@@ -361,7 +394,7 @@ union(a::Vector{UInt32}, b::Vector{UInt32}) = _union_vector_into!(similar(a, 0),
 union(a::Vector{UInt64}, b::Vector{UInt64}) = _union_vector_into!(similar(a, 0), a, b)
 union(a::Vector{Float32}, b::Vector{Float32}) = _union_vector_into!(similar(a, 0), a, b)
 union(a::Vector{Symbol}, b::Vector{Symbol}) = _union_vector_into!(similar(a, 0), a, b)
-union(a::Vector{Any}, b::Vector{Any}) = _union_vector_into!(similar(a, 0), a, b)
+union(a::AbstractVector, b::AbstractVector) = _union_vector_into!(similar(a, 0), a, b)
 
 intersect(a::Vector{Int64}, b::Vector{Int64}) = _intersect_vector_into!(similar(a, 0), a, b)
 intersect(a::Vector{Float64}, b::Vector{Float64}) = _intersect_vector_into!(similar(a, 0), a, b)
@@ -377,7 +410,7 @@ intersect(a::Vector{UInt32}, b::Vector{UInt32}) = _intersect_vector_into!(simila
 intersect(a::Vector{UInt64}, b::Vector{UInt64}) = _intersect_vector_into!(similar(a, 0), a, b)
 intersect(a::Vector{Float32}, b::Vector{Float32}) = _intersect_vector_into!(similar(a, 0), a, b)
 intersect(a::Vector{Symbol}, b::Vector{Symbol}) = _intersect_vector_into!(similar(a, 0), a, b)
-intersect(a::Vector{Any}, b::Vector{Any}) = _intersect_vector_into!(similar(a, 0), a, b)
+intersect(a::AbstractVector, b::AbstractVector) = _intersect_vector_into!(similar(a, 0), a, b)
 
 setdiff(a::Vector{Int64}, b::Vector{Int64}) = _setdiff_vector_into!(similar(a, 0), a, b)
 setdiff(a::Vector{Float64}, b::Vector{Float64}) = _setdiff_vector_into!(similar(a, 0), a, b)
@@ -393,7 +426,7 @@ setdiff(a::Vector{UInt32}, b::Vector{UInt32}) = _setdiff_vector_into!(similar(a,
 setdiff(a::Vector{UInt64}, b::Vector{UInt64}) = _setdiff_vector_into!(similar(a, 0), a, b)
 setdiff(a::Vector{Float32}, b::Vector{Float32}) = _setdiff_vector_into!(similar(a, 0), a, b)
 setdiff(a::Vector{Symbol}, b::Vector{Symbol}) = _setdiff_vector_into!(similar(a, 0), a, b)
-setdiff(a::Vector{Any}, b::Vector{Any}) = _setdiff_vector_into!(similar(a, 0), a, b)
+setdiff(a::AbstractVector, b::AbstractVector) = _setdiff_vector_into!(similar(a, 0), a, b)
 
 symdiff(a::Vector{Int64}, b::Vector{Int64}) = _symdiff_vector_into!(similar(a, 0), a, b)
 symdiff(a::Vector{Float64}, b::Vector{Float64}) = _symdiff_vector_into!(similar(a, 0), a, b)
@@ -409,7 +442,7 @@ symdiff(a::Vector{UInt32}, b::Vector{UInt32}) = _symdiff_vector_into!(similar(a,
 symdiff(a::Vector{UInt64}, b::Vector{UInt64}) = _symdiff_vector_into!(similar(a, 0), a, b)
 symdiff(a::Vector{Float32}, b::Vector{Float32}) = _symdiff_vector_into!(similar(a, 0), a, b)
 symdiff(a::Vector{Symbol}, b::Vector{Symbol}) = _symdiff_vector_into!(similar(a, 0), a, b)
-symdiff(a::Vector{Any}, b::Vector{Any}) = _symdiff_vector_into!(similar(a, 0), a, b)
+symdiff(a::AbstractVector, b::AbstractVector) = _symdiff_vector_into!(similar(a, 0), a, b)
 
 function issubset(a::Vector, b::Vector)
     for x in a
@@ -444,13 +477,54 @@ function _set_to_vector(s::Set)
     return collect(s)
 end
 
-union(s::Set, v::Vector) = union(s, Set(v))
+function union(s::Set, v::Vector)
+    result = _set_from_eltype(promote_type(eltype(s), eltype(v)))
+    for x in s
+        result = push!(result, x)
+    end
+    for x in v
+        result = push!(result, x)
+    end
+    return result
+end
 union(v::Vector, s::Set) = union(v, _set_to_vector(s))
-intersect(s::Set, v::Vector) = intersect(s, Set(v))
+
+function intersect(s::Set, v::Vector)
+    result = _set_from_eltype(promote_type(eltype(s), eltype(v)))
+    for x in s
+        if x in v
+            result = push!(result, x)
+        end
+    end
+    return result
+end
 intersect(v::Vector, s::Set) = intersect(v, _set_to_vector(s))
-setdiff(s::Set, v::Vector) = setdiff(s, Set(v))
+
+function setdiff(s::Set, v::Vector)
+    result = _set_from_eltype(eltype(s))
+    for x in s
+        if !(x in v)
+            result = push!(result, x)
+        end
+    end
+    return result
+end
 setdiff(v::Vector, s::Set) = setdiff(v, _set_to_vector(s))
-symdiff(s::Set, v::Vector) = symdiff(s, Set(v))
+
+function symdiff(s::Set, v::Vector)
+    result = _set_from_eltype(promote_type(eltype(s), eltype(v)))
+    for x in s
+        if !(x in v)
+            result = push!(result, x)
+        end
+    end
+    for x in v
+        if !(x in s)
+            result = push!(result, x)
+        end
+    end
+    return result
+end
 symdiff(v::Vector, s::Set) = symdiff(v, _set_to_vector(s))
 issubset(s::Set, v::Vector) = issubset(_set_to_vector(s), v)
 issubset(v::Vector, s::Set) = issubset(v, _set_to_vector(s))
@@ -514,7 +588,7 @@ unique(arr::Vector{UInt32}) = _unique_into!(similar(arr, 0), arr)
 unique(arr::Vector{UInt64}) = _unique_into!(similar(arr, 0), arr)
 unique(arr::Vector{Float32}) = _unique_into!(similar(arr, 0), arr)
 unique(arr::Vector{Symbol}) = _unique_into!(similar(arr, 0), arr)
-unique(arr::Vector{Any}) = _unique_into!(similar(arr, 0), arr)
+unique(arr::AbstractVector) = _unique_into!(similar(arr, 0), arr)
 
 function unique(arr)
     return _unique_into!([], arr)
@@ -558,7 +632,7 @@ unique(f::Function, arr::Vector{UInt32}) = _unique_f_into!(similar(arr, 0), f, a
 unique(f::Function, arr::Vector{UInt64}) = _unique_f_into!(similar(arr, 0), f, arr)
 unique(f::Function, arr::Vector{Float32}) = _unique_f_into!(similar(arr, 0), f, arr)
 unique(f::Function, arr::Vector{Symbol}) = _unique_f_into!(similar(arr, 0), f, arr)
-unique(f::Function, arr::Vector{Any}) = _unique_f_into!(similar(arr, 0), f, arr)
+unique(f::Function, arr::AbstractVector) = _unique_f_into!(similar(arr, 0), f, arr)
 
 function unique(f::Function, arr)
     return _unique_f_into!([], f, arr)

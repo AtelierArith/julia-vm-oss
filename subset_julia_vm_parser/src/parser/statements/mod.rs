@@ -7,6 +7,9 @@
 //! - Variable declarations (const, global, local)
 //! - Import/export statements
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 mod control_flow;
 mod declarations;
 mod definitions;

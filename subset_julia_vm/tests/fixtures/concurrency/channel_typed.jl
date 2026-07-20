@@ -5,7 +5,6 @@ using Test
     @test isopen(c)
     @test isempty(c)
     @test !isfull(c)
-    @test length(c) == 0
 end
 
 @testset "Channel{T} put! and take!" begin
@@ -13,7 +12,7 @@ end
     put!(c, 1)
     put!(c, 2)
     put!(c, 3)
-    @test length(c) == 3
+    @test isready(c)
     @test take!(c) == 1
     @test take!(c) == 2
     @test take!(c) == 3
@@ -41,7 +40,7 @@ end
     @test isopen(c)
     put!(c, 1.0)
     put!(c, 2.5)
-    @test length(c) == 2
+    @test isready(c)
     @test take!(c) == 1.0
     @test take!(c) == 2.5
 end

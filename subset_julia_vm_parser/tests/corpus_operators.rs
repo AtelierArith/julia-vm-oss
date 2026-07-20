@@ -1,6 +1,6 @@
 //! Tests migrated from tree-sitter-julia/test/corpus/operators.txt
 
-use subset_julia_vm_parser::{parse, NodeKind};
+use subset_julia_vm_parser::{parse, NodeKind, ParseError};
 
 fn assert_parses(source: &str) {
     let result = parse(source);
@@ -36,21 +36,21 @@ fn test_assignment_simple() {
 
 #[test]
 fn test_assignment_to_bare_operator_before_separator_issue_6394() {
-    let cst = parse("f = +; println(f(1, 2))")
-        .expect("parse semicolon-separated assignment to bare operator");
+    let source = "f = +; println(f(1, 2))";
+    let cst = parse(source).expect("parse semicolon-separated assignment to bare operator");
     assert_eq!(cst.children.len(), 2);
     let assignment = &cst.children[0];
     assert_eq!(assignment.kind, NodeKind::Assignment);
     assert_eq!(assignment.children[2].kind, NodeKind::Operator);
-    assert_eq!(assignment.children[2].text.as_deref(), Some("+"));
+    assert_eq!(assignment.children[2].text_from_source(source), "+");
 
-    let cst = parse("f = +\nprintln(f(1, 2))")
-        .expect("parse newline-separated assignment to bare operator");
+    let source = "f = +\nprintln(f(1, 2))";
+    let cst = parse(source).expect("parse newline-separated assignment to bare operator");
     assert_eq!(cst.children.len(), 2);
     let assignment = &cst.children[0];
     assert_eq!(assignment.kind, NodeKind::Assignment);
     assert_eq!(assignment.children[2].kind, NodeKind::Operator);
-    assert_eq!(assignment.children[2].text.as_deref(), Some("+"));
+    assert_eq!(assignment.children[2].text_from_source(source), "+");
 
     let cst = parse("x = + 1").expect("parse unary plus expression");
     let assignment = &cst.children[0];
@@ -146,6 +146,39 @@ fn test_comparison_unicode() {
     assert_root_child_kind("a ≤ b", NodeKind::BinaryExpression);
     assert_root_child_kind("a ≥ b", NodeKind::BinaryExpression);
     assert_root_child_kind("a ≠ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a ≲ b", NodeKind::BinaryExpression);
+}
+
+#[test]
+fn test_extended_unicode_operators_issue_8751() {
+    assert_parses("⟷(a, b) = a === b");
+    assert_parses("⊊(a, b) = a ⊆ b");
+    assert_root_child_kind("a ⟷ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a ± b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a +̂ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a +̂′ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a +⁽¹⁾ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a +₍₀₎ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a ⁝ b", NodeKind::BinaryExpression);
+    assert_parses("(·)");
+    assert_parses("(·)");
+}
+
+#[test]
+fn test_dotted_extended_operators_issue_8759() {
+    assert_root_child_kind("a .=== b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a .!== b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a .∈ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a .≈ b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a .<< b", NodeKind::BinaryExpression);
+    assert_root_child_kind("a .>>> b", NodeKind::BinaryExpression);
+}
+
+#[test]
+fn test_adjacent_composition_operator_issue_8759() {
+    assert_root_child_kind("!isempty∘last", NodeKind::BinaryExpression);
+    assert_root_child_kind("textwidth∘last", NodeKind::BinaryExpression);
+    assert_parses("(@inferred (g∘g)(1)) == 1");
 }
 
 #[test]
@@ -425,6 +458,378 @@ fn test_operator_as_value() {
     assert_root_child_kind("(-)", NodeKind::ParenthesizedExpression);
     assert_root_child_kind("(*)", NodeKind::ParenthesizedExpression);
     assert_root_child_kind("(/)", NodeKind::ParenthesizedExpression);
+    assert_root_child_kind("(√)", NodeKind::ParenthesizedExpression);
+    assert_root_child_kind("(∛)", NodeKind::ParenthesizedExpression);
+    assert_root_child_kind("(∪)", NodeKind::ParenthesizedExpression);
+}
+
+#[test]
+fn test_bare_arrow_is_not_an_unquoted_operator_identifier_issue_10917() {
+    for (source, expected_span, expected_message) in [
+        ("->", 0..2, "invalid identifier"),
+        ("(->)", 1..3, "invalid identifier"),
+        ("f = ->", 4..6, "invalid identifier"),
+        ("[->]", 1..3, "invalid identifier"),
+        ("map(->, xs)", 4..6, "invalid identifier"),
+        ("->{T}", 0..2, "invalid identifier"),
+        ("->(x)", 0..2, "invalid identifier"),
+        ("- ->", 2..4, "invalid identifier"),
+        ("x -> ->", 5..7, "invalid identifier"),
+        ("->\nx", 0..2, "invalid identifier"),
+        ("->(x) = x", 0..2, "invalid identifier"),
+        ("function ->(x)\nend", 9..11, "invalid identifier"),
+        ("const -> = f", 6..8, "invalid identifier"),
+        ("import Base: ->", 13..15, "invalid identifier"),
+        ("import Base: (->)", 13..17, "expected identifier"),
+        ("using Base: (->)", 12..16, "expected identifier"),
+        ("export (->)", 7..11, "expected identifier"),
+    ] {
+        let error = parse(source).expect_err("bare `->` must not be a first-class value");
+        let span = error
+            .span()
+            .expect("syntax error must carry the arrow span");
+        assert_eq!(span.start..span.end, expected_span, "source: {source:?}");
+        if source == "->" {
+            assert_eq!(
+                (
+                    span.start_line,
+                    span.start_column,
+                    span.end_line,
+                    span.end_column,
+                ),
+                (1, 1, 1, 3)
+            );
+        }
+        assert!(
+            matches!(
+                &error,
+                ParseError::InvalidSyntax { message, .. } if message == expected_message
+            ),
+            "source: {source:?}, error: {error:?}"
+        );
+        assert!(!error.is_incomplete_input(), "source: {source:?}");
+    }
+
+    // Quoting an operator-like symbol is a separate grammar path and remains valid.
+    assert_parses(":->");
+    assert_parses(":(->)");
+    assert_parses("Base.:->");
+    assert_parses("Base.:(->)");
+    assert_parses("function Base.:(->)(x)\n    x\nend");
+
+    for source in [
+        "x -> x + 1",
+        "(x, y) -> x + y",
+        "() -> 1",
+        "a |> x -> b",
+        "+",
+        "(==)",
+        "map(|>, xs)",
+        "import Base: (:)",
+        "..",
+        "=>",
+        "-->",
+        "(-->)",
+    ] {
+        assert_parses(source);
+    }
+}
+
+// =============================================================================
+// Syntactic-operator role inventory (Issues #10932 / #10940)
+//
+// Derived from upstream `julia/src/julia-parser.scm`:
+//   (define syntactic-operators
+//     (append! (add-dots '(&& || = += -= *= /= //= \= ^= ÷= %= <<= >>= >>>= |= &= ⊻=))
+//              '(:= $= |.| ... ->)))
+//
+// In this lexer the assignment members, `:=`, `$=`, `.`, and `...` are not
+// operator-classified tokens at all (see the token-level contract
+// `test_syntactic_operator_role_split_is_exhaustive_issue_10940`), so the
+// operator-token members are exactly `->`, `&&`, `||`, `.&&`, `.||`.
+// Every unquoted-name shortcut routes through the single authority
+// `Token::is_operator_identifier` / `reject_invalid_operator_identifier`;
+// this inventory pins the roles per token:
+//   (a) infix/prefix grammar participation
+//   (b) unquoted operator identifier/value            -> rejected
+//   (c) operator method-name definition               -> rejected
+//   (d) import/export names incl. parenthesized forms -> rejected
+//   (e) quoted symbol forms                           -> accepted
+// =============================================================================
+
+/// One syntactic operator's full role classification. All expectations were
+/// verified against upstream Julia 1.12.6 (`Meta.parse`).
+struct SyntacticOperatorRoles {
+    /// Operator spelling, for constructing sources and error messages.
+    op: &'static str,
+    /// (a) valid grammar participation — must keep parsing.
+    grammar_ok: &'static [&'static str],
+    /// (b)-(d) unquoted identifier/value forms — must reject with
+    /// `invalid identifier` at exactly the operator's span.
+    invalid_identifier: &'static [(&'static str, std::ops::Range<usize>)],
+    /// (d) parenthesized import/export forms — must reject with
+    /// `expected identifier` spanning the parenthesized name.
+    expected_identifier: &'static [(&'static str, std::ops::Range<usize>)],
+    /// (e) quoted symbol forms — must keep parsing.
+    quoted_ok: &'static [&'static str],
+}
+
+const SYNTACTIC_OPERATOR_ROLES: &[SyntacticOperatorRoles] = &[
+    SyntacticOperatorRoles {
+        op: "&&",
+        grammar_ok: &[
+            "a && b",
+            "a && b && c",
+            "x > 0 && return 1",
+            "if a && b\nend",
+            "a && b || c",
+        ],
+        invalid_identifier: &[
+            ("&&", 0..2),
+            ("(&&)", 1..3),
+            ("f = &&", 4..6),
+            ("[&&]", 1..3),
+            ("map(&&, xs)", 4..6),
+            ("&&{T}", 0..2),
+            ("&&(x, y) = 1", 0..2),
+            ("function &&(x)\nend", 9..11),
+            ("const && = f", 6..8),
+            ("quote && end", 6..8),
+            ("import Base: &&", 13..15),
+            ("export &&", 7..9),
+        ],
+        expected_identifier: &[
+            ("import Base: (&&)", 13..17),
+            ("using Base: (&&)", 12..16),
+            ("export (&&)", 7..11),
+        ],
+        quoted_ok: &[
+            ":&&",
+            ":(&&)",
+            "Base.:&&",
+            "Base.:(&&)",
+            "import Base.:&&",
+            "import Base.:(&&)",
+            "function Base.:(&&)(x)\n    x\nend",
+            "Expr(:&&, a, b)",
+        ],
+    },
+    SyntacticOperatorRoles {
+        op: "||",
+        grammar_ok: &[
+            "a || b",
+            "a || b || c",
+            "x < 0 || return 1",
+            "if a || b\nend",
+        ],
+        invalid_identifier: &[
+            ("||", 0..2),
+            ("(||)", 1..3),
+            ("f = ||", 4..6),
+            ("[||]", 1..3),
+            ("map(||, xs)", 4..6),
+            ("||{T}", 0..2),
+            ("||(x, y) = 1", 0..2),
+            ("function ||(x)\nend", 9..11),
+            ("const || = f", 6..8),
+            ("import Base: ||", 13..15),
+        ],
+        expected_identifier: &[("import Base: (||)", 13..17), ("export (||)", 7..11)],
+        quoted_ok: &[":||", ":(||)", "Base.:||", "Base.:(||)", "Expr(:||, a, b)"],
+    },
+    SyntacticOperatorRoles {
+        op: ".&&",
+        grammar_ok: &["a .&& b", "xs .&& ys .&& zs"],
+        invalid_identifier: &[
+            (".&&", 0..3),
+            ("(.&&)", 1..4),
+            ("f = .&&", 4..7),
+            (".&&(a, b)", 0..3),
+            ("import Base: .&&", 13..16),
+        ],
+        expected_identifier: &[("import Base: (.&&)", 13..18)],
+        quoted_ok: &[":(.&&)"],
+    },
+    SyntacticOperatorRoles {
+        op: ".||",
+        grammar_ok: &["a .|| b", "xs .|| ys"],
+        invalid_identifier: &[
+            (".||", 0..3),
+            ("(.||)", 1..4),
+            ("f = .||", 4..7),
+            (".||(a, b)", 0..3),
+            ("import Base: .||", 13..16),
+        ],
+        expected_identifier: &[("import Base: (.||)", 13..18)],
+        quoted_ok: &[":(.||)"],
+    },
+    SyntacticOperatorRoles {
+        op: "->",
+        grammar_ok: &["x -> x + 1", "(x, y) -> x + y", "() -> 1", "a |> x -> b"],
+        invalid_identifier: &[
+            ("->", 0..2),
+            ("(->)", 1..3),
+            ("f = ->", 4..6),
+            ("[->]", 1..3),
+            ("map(->, xs)", 4..6),
+            ("->{T}", 0..2),
+            ("->(x) = x", 0..2),
+            ("function ->(x)\nend", 9..11),
+            ("const -> = f", 6..8),
+            ("import Base: ->", 13..15),
+        ],
+        expected_identifier: &[("import Base: (->)", 13..17), ("export (->)", 7..11)],
+        quoted_ok: &[
+            ":->",
+            ":(->)",
+            "Base.:->",
+            "Base.:(->)",
+            "import Base.:->",
+            "import Base.:(->)",
+            "function Base.:(->)(x)\n    x\nend",
+        ],
+    },
+];
+
+#[test]
+fn test_syntactic_operator_role_inventory_issue_10940() {
+    for roles in SYNTACTIC_OPERATOR_ROLES {
+        for source in roles.grammar_ok {
+            let result = parse(source);
+            assert!(
+                result.is_ok(),
+                "[{}] grammar participation must keep parsing: {source:?}\nError: {:?}",
+                roles.op,
+                result.err()
+            );
+        }
+
+        for (source, expected_span) in roles.invalid_identifier {
+            let error = parse(source).expect_err(&format!(
+                "[{}] unquoted operator-identifier form must be rejected: {source:?}",
+                roles.op
+            ));
+            let span = error
+                .span()
+                .unwrap_or_else(|| panic!("[{}] error must carry a span: {source:?}", roles.op));
+            assert_eq!(
+                span.start..span.end,
+                *expected_span,
+                "[{}] source: {source:?}",
+                roles.op
+            );
+            assert!(
+                matches!(
+                    &error,
+                    ParseError::InvalidSyntax { message, .. } if message == "invalid identifier"
+                ),
+                "[{}] source: {source:?}, error: {error:?}",
+                roles.op
+            );
+            assert!(
+                !error.is_incomplete_input(),
+                "[{}] source: {source:?}",
+                roles.op
+            );
+        }
+
+        for (source, expected_span) in roles.expected_identifier {
+            let error = parse(source).expect_err(&format!(
+                "[{}] parenthesized import/export form must be rejected: {source:?}",
+                roles.op
+            ));
+            let span = error
+                .span()
+                .unwrap_or_else(|| panic!("[{}] error must carry a span: {source:?}", roles.op));
+            assert_eq!(
+                span.start..span.end,
+                *expected_span,
+                "[{}] source: {source:?}",
+                roles.op
+            );
+            assert!(
+                matches!(
+                    &error,
+                    ParseError::InvalidSyntax { message, .. } if message == "expected identifier"
+                ),
+                "[{}] source: {source:?}, error: {error:?}",
+                roles.op
+            );
+        }
+
+        for source in roles.quoted_ok {
+            let result = parse(source);
+            assert!(
+                result.is_ok(),
+                "[{}] quoted symbol form must keep parsing: {source:?}\nError: {:?}",
+                roles.op,
+                result.err()
+            );
+        }
+    }
+}
+
+/// Non-operator-lexed syntactic operators (`=`-family, `:=`, `$=`, `.`,
+/// `...`): quoted forms stay valid, unquoted parenthesized value forms are
+/// rejected (upstream: `invalid identifier` / `unexpected =`). Their tokens
+/// never enter `is_operator()` (see the token contract test), so only the
+/// parse-level expectations are pinned here (Issue #10940).
+#[test]
+fn test_non_operator_syntactic_tokens_roles_issue_10940() {
+    for source in [
+        ":(=)",
+        ":(+=)",
+        ":(-=)",
+        ":(*=)",
+        ":(/=)",
+        ":(//=)",
+        ":(^=)",
+        ":(÷=)",
+        ":(%=)",
+        ":(<<=)",
+        ":(>>=)",
+        ":(>>>=)",
+        ":(|=)",
+        ":(&=)",
+        ":(⊻=)",
+        ":(:=)",
+        ":($=)",
+        ":(.)",
+        ":(...)",
+        ":...",
+        ":.",
+        ":(.+=)",
+        "x = 1",
+        "x += 1",
+        "x .+= 1",
+        "a.b",
+        "f(xs...)",
+        "import Base: (:)",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "quoted/grammar form must keep parsing: {source:?}\nError: {:?}",
+            result.err()
+        );
+    }
+
+    // Unquoted value forms rejected by upstream. The error class is a
+    // ParseError; exact message parity for the assignment family is not
+    // required (upstream mixes "invalid identifier" and "unexpected `=`").
+    for source in ["(=)", "(+=)", "(:=)", "(...)", "f = +=", "x = (=)"] {
+        assert!(
+            parse(source).is_err(),
+            "unquoted syntactic-token value form must be rejected: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn test_const_operator_aliases_issue_8756() {
+    assert_root_child_kind("const (√) = sqrt", NodeKind::ConstDeclaration);
+    assert_root_child_kind("const (∛) = cbrt", NodeKind::ConstDeclaration);
+    assert_root_child_kind("const ∪ = union", NodeKind::ConstDeclaration);
 }
 
 #[test]
@@ -448,10 +853,33 @@ fn test_quote_expression_simple() {
 fn test_quote_expression_operator() {
     // :(operator) syntax - quoting operators as symbols
     assert_root_child_kind(":(+)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(++)", NodeKind::QuoteExpression);
     assert_root_child_kind(":(-)", NodeKind::QuoteExpression);
     assert_root_child_kind(":(*)", NodeKind::QuoteExpression);
     assert_root_child_kind(":(==)", NodeKind::QuoteExpression);
     assert_root_child_kind(":(<=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(.)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(:)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(..)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(…)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(÷=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(⊻=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(≔)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(⩴)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(≕)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":()", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(.÷=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(.>>>=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(.>>=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(.<<=)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(;)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":((a,;b))", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(g(a,; b))", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(1 ≔ 2)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(1 ⩴ 2)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(1 ≕ 2)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(∓ 1)", NodeKind::QuoteExpression);
+    assert_root_child_kind(":(± 1)", NodeKind::QuoteExpression);
 }
 
 #[test]
@@ -460,6 +888,12 @@ fn test_quote_expression_in_context() {
     assert_parses("f(:(+))");
     assert_parses("Dict(:add => (+), :mul => (*))");
     assert_parses("getfield(Base, :(+))");
+    assert_parses("if isexpr(f, :(.))\nend");
+    assert_parses(":maximum!_fast");
+    assert_parses("Dict(:+= => :+)");
+    assert_parses("s == :?");
+    assert_parses("s in (:+, :++, :*)");
+    assert_parses("Expr(:tuple,:())");
 }
 
 #[test]

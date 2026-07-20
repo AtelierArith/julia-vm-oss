@@ -5,10 +5,8 @@
 
 use std::sync::OnceLock;
 
-use crate::julia::{packages, stdlib::available_modules};
+use crate::julia::{base, packages, stdlib::available_modules};
 use crate::unicode::{completions_for_prefix, latex_to_unicode};
-
-const BASE_EXPORTS_SRC: &str = include_str!("../julia/base/exports.jl");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CompletionKind {
@@ -367,10 +365,7 @@ fn module_names() -> &'static [String] {
 }
 
 fn base_exports() -> &'static [String] {
-    static BASE_EXPORTS: OnceLock<Vec<String>> = OnceLock::new();
-    BASE_EXPORTS
-        .get_or_init(|| parse_base_exports(BASE_EXPORTS_SRC))
-        .as_slice()
+    base::exported_names()
 }
 
 fn exports_for_module(module: &str) -> Option<&'static [String]> {

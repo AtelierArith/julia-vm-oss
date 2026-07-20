@@ -197,7 +197,7 @@ fn test_roundtrip_common_symbols() {
 
 #[test]
 fn test_all_latex_start_with_backslash() {
-    for (latex, _) in LATEX_SYMBOLS.iter() {
+    for latex in LATEX_SYMBOLS.keys() {
         assert!(
             latex.starts_with('\\'),
             "LaTeX command '{}' should start with backslash",
@@ -208,7 +208,7 @@ fn test_all_latex_start_with_backslash() {
 
 #[test]
 fn test_all_unicode_are_non_ascii() {
-    for (_, unicode) in LATEX_SYMBOLS.iter() {
+    for unicode in LATEX_SYMBOLS.values() {
         // Most unicode symbols should be non-ASCII
         // (except for a few edge cases)
         assert!(!unicode.is_empty(), "Unicode value should not be empty");

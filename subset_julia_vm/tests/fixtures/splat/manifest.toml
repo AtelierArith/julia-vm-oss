@@ -53,3 +53,9 @@ name = "splat_tuple_literal_7741"
 file = "splat_tuple_literal_7741.jl"
 expected = true
 description = "Tuple-literal positional splat: `(A, B, xs...)` splices the splatted iterable's elements into the tuple instead of nesting it, including inside a constructor body (Issue #7741)"
+
+[[tests]]
+name = "splat_validation_protocol_11372"
+file = "splat_validation_protocol_11372.jl"
+expected = true
+description = "Positional and keyword splats exhaust iterate sources, validate malformed steps, preserve error order/catchability, and accept structural carriers (Issue #11372)"

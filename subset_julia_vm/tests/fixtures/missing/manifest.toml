@@ -29,6 +29,12 @@ expected = true
 description = "Arithmetic operations with missing return missing (Issue #486)"
 
 [[tests]]
+name = "missing_any_missing_dynamic_binary_10612"
+file = "any_missing_dynamic_binary_10612.jl"
+expected = true
+description = "Runtime Any-carried missing values propagate through dynamic ==/!=, comparisons, and arithmetic while isequal remains Bool (Issues #10612/#10693)"
+
+[[tests]]
 name = "missing_nonmissingtype"
 file = "nonmissingtype.jl"
 expected = true

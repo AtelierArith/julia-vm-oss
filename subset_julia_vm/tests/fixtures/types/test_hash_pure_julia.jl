@@ -1,5 +1,10 @@
-# Test Pure Julia hash functions (Issue #2582)
-# Verifies hash(x) and hash(x, h) work correctly
+# Test Pure Julia hash functions (Issues #2582 / #10237)
+# Verifies hash(x) and hash(x, h) uphold the portable hash contract.
+# Concrete hash VALUES are implementation-defined (upstream documents them as
+# unstable across versions), so this fixture only asserts contract properties
+# that hold under both upstream julia and sjulia. In particular it does NOT
+# assert sjulia's internal mixing formula or the hash of -0.0 relative to 0.0
+# (unspecified: isequal(0.0, -0.0) is false, so either relation is legal).
 using Test
 
 @testset "hash Pure Julia" begin
@@ -18,16 +23,15 @@ using Test
     # isequal contract: isequal(x, y) => hash(x) == hash(y)
     @test hash(1) == hash(1)
     @test hash(0.0) == hash(0.0)
+    @test hash(1) == hash(1.0)      # isequal(1, 1.0)
+    @test hash(true) == hash(1)     # isequal(true, 1)
 
-    # Two-argument hash for combining
+    # Two-argument hash for combining: deterministic, and mixing with a
+    # non-default seed changes the result
     h1 = hash(1)
     h2 = hash(2, h1)
-    @test h2 == hash(xor(hash(2), h1))
-
-    # Float special cases
-    # -0.0 and 0.0: hash(-0.0) should equal hash(0.0) since isequal(-0.0, 0.0) is false in Julia
-    # But our implementation hashes after canonicalization, so -0.0 maps to 0.0
-    @test hash(0.0) == hash(-0.0)
+    @test h2 == hash(2, h1)
+    @test h2 != hash(2)
 end
 
 true

@@ -306,3 +306,39 @@ name = "promotion_bigfloat_promote_type_6781"
 file = "bigfloat_promote_type_6781.jl"
 expected = true
 description = "promote_type/promote_rule(BigFloat|BigInt, <Float>) return BigFloat (Issue #6781). A method whose parameter is a Union of concrete Type{} entries (the BigFloat/BigInt/Rational promote_rule methods, Issue #5070) is now matched at runtime (value_matches_param) and compile-time (core_match) against a type-object argument that is one of the Union members, so promote_rule no longer falls through to the generic Union{} rule and promote_type no longer widens to the typejoin (AbstractFloat/Real). Also covers user-defined Union{Type{A},Type{B}} method dispatch. Verified vs upstream julia."
+
+[[tests]]
+name = "promotion_user_promote_rule_cached_dispatch_8555"
+file = "user_promote_rule_cached_dispatch_8555.jl"
+expected = true
+description = "User promote_rule extensions dispatch correctly on the precompiled-Base-cache path (Issue #8555 retires the #4048 full-compile bypass). Cached Base bytecode's CallTypedDispatch candidate lists are refreshed post-merge with the user's method indices, so promote_type/promote consult user rules (concrete, where-bounded, user/user pairs, both argument orders) while Base-known pairs keep Base rules. Base-type piracy still bypasses the cache. Verified vs upstream julia 1.12."
+
+[[tests]]
+name = "promotion_promote_not_sametype_guard_9334"
+file = "promote_not_sametype_guard_9334.jl"
+expected = true
+description = "promote(x, y) raises the upstream not_sametype/sametype_error (ErrorException 'promotion of types A and B failed to change any arguments') when promotion cannot change either argument's type, instead of silently returning the unchanged pair (Issue #9334). Previously the promote-fallback operators (==/+/< = op(promote(x,y)...)) re-dispatched on the identical pair forever -> StackOverflowError. The guard mirrors the diagonal same-type fast path so already-same-type pairs (including user Real subtypes whose diagonal promote method the VM does not select) still return unchanged, and ordinary numeric promotion is unaffected. Verified vs upstream julia 1.12."
+
+[[tests]]
+name = "promotion_promote_fallback_primitive_route_guards_9677"
+file = "promote_fallback_primitive_route_guards_9677.jl"
+expected = true
+description = "Primitive first-class, broadcast, Float16/Float32 mod/rem, and Irrational comparison routes stay correct when promote-fallback guards or broad numeric catch-alls change (Issue #9677)."
+
+[[tests]]
+name = "promotion_promote_varargs_9830_9831"
+file = "promote_varargs_9830_9831.jl"
+expected = true
+description = "promote_type(T) and n-ary promote_type/promote match upstream instead of NoMethodFound or unchanged-tuple fallback (Issues #9830, #9831)."
+
+[[tests]]
+name = "promotion_user_numeric_operator_dispatch_9335"
+file = "user_numeric_operator_dispatch_9335.jl"
+expected = true
+description = "User numeric wrapper operator dispatch through the promote-fallback operators no longer StackOverflows (Issue #9335): for two same-type struct operands, the CallDynamicBinaryBoth resolver consults the live, name-indexed method table (pure augmentation of the candidate list frozen at the fallback body's compile time, never dropping any previously-reachable candidate) plus a diagonal-dominance ranking restricted to same-type operand pairs (vm/exec/binary_both.rs), so a user parametric method like `+(::Wrap{T},::Wrap{T}) where T` defined after Base compiles is visible to the `px + py` re-dispatch inside `+(::Number,::Number)`. Covers the parametric promote_rule wrapper pattern (ForwardDiff.Dual / Symbolics.Num / Unitful). NOT covered (still-open #9334 residual): upstream's same-type `no_op_err`/egal anchor methods from promotion.jl are not ported — they require the dispatch rankers to place more-specific same-family methods above a bare-typevar diagonal anchor. Verified vs upstream julia 1.12. Issue #9464 (filed alongside, not fixed here): a struct name matching `^[A-Z][0-9]*$` (e.g. `S2`/`P3`) trips an unrelated pre-existing `is_type_variable_name` heuristic bug; this fixture uses `UserNumP3` to exercise the same shape."
+
+[[tests]]
+name = "promotion_struct_name_typevar_collision_9464"
+file = "struct_name_typevar_collision_9464.jl"
+expected = true
+description = "A declared struct/abstract type whose name matches the type-variable shape `^[A-Z][0-9]*$` (e.g. S2/P3/W1/Q7) is no longer misclassified as an unbound type variable by is_type_variable_name (Issue #9464). Every declared type name is registered in a VM-local registry (populated at struct collection, before method specificity scoring) consulted by is_type_variable_name, so the concrete same-type/same-family operator and convert methods keep their specificity over the abstract ::Real promote fallback regardless of spelling. Previously identical definitions worked under a non-matching name (Wrap/Foo) but broke dispatch (wrong convert selection / StackOverflow) under a matching name. Covers a parametric wrapper (W1{T} promote_rule/convert/+), a non-parametric S2 with +/==/</*, and the P3 same-type + via the Base fallback. Verified vs upstream julia 1.12."

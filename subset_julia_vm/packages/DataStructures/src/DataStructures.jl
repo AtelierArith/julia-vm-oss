@@ -10,6 +10,7 @@ module DataStructures
 using Base.Order: Ordering, Forward, Reverse, lt
 
 export AbstractHeap,
+    BinaryMaxHeap,
     heapify!,
     heapify,
     heappop!,

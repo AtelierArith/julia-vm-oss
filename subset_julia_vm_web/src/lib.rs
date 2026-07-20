@@ -11,12 +11,32 @@
 //! - Uses the pure Rust parser (subset_julia_vm_parser) that works natively in WASM
 
 use serde::{Deserialize, Serialize};
+use subset_julia_vm_bytecode::CompiledProgram;
 use wasm_bindgen::prelude::*;
 
 // Set up panic hook for better error messages in browser console
 #[wasm_bindgen(start)]
 pub fn init() {
     console_error_panic_hook::set_once();
+}
+
+/// Return the C ABI version baked into this WASM build (Issue #9001).
+///
+/// For WASM consumers the JS glue and the WASM module are bundled together at
+/// build time, so there is no runtime binary mismatch risk.  This function
+/// exposes the version as an informational export so host applications can
+/// log or assert it matches the version they were written against.
+#[wasm_bindgen]
+pub fn abi_version() -> u32 {
+    // Must equal SUBSET_VM_ABI_VERSION in subset_julia_vm_ffi/include/subset_vm.h.
+    3
+}
+
+/// Display artifact returned to JavaScript.
+#[derive(Serialize, Deserialize)]
+pub struct DisplayArtifactResult {
+    pub mime: String,
+    pub data: String,
 }
 
 /// Execution result returned to JavaScript
@@ -32,6 +52,8 @@ pub struct ExecutionResult {
     pub artifact_mime: Option<String>,
     /// Artifact data string (Plotly JSON).
     pub artifact_data: Option<String>,
+    /// All display artifacts emitted during the run, in display order.
+    pub artifacts: Vec<DisplayArtifactResult>,
 }
 
 impl ExecutionResult {
@@ -39,11 +61,16 @@ impl ExecutionResult {
         value: f64,
         typed_value: serde_json::Value,
         output: String,
-        artifact: Option<(String, String)>,
+        artifacts: Vec<(String, String)>,
     ) -> Self {
-        let (artifact_mime, artifact_data) = artifact
-            .map(|(m, d)| (Some(m), Some(d)))
+        let (artifact_mime, artifact_data) = artifacts
+            .last()
+            .map(|(m, d)| (Some(m.clone()), Some(d.clone())))
             .unwrap_or((None, None));
+        let artifacts = artifacts
+            .into_iter()
+            .map(|(mime, data)| DisplayArtifactResult { mime, data })
+            .collect();
         Self {
             success: true,
             value,
@@ -52,6 +79,7 @@ impl ExecutionResult {
             error_message: None,
             artifact_mime,
             artifact_data,
+            artifacts,
         }
     }
 
@@ -67,6 +95,7 @@ impl ExecutionResult {
             error_message: Some(message),
             artifact_mime: None,
             artifact_data: None,
+            artifacts: Vec::new(),
         }
     }
 }
@@ -89,7 +118,7 @@ pub fn run_ir_json(ir_json: &str, seed: u64) -> JsValue {
 }
 
 fn run_ir_internal(ir_json: &str, seed: u64) -> ExecutionResult {
-    use subset_julia_vm::compile::compile_with_cache;
+    use subset_julia_vm::compile::host_support::compile_with_cache;
     use subset_julia_vm::ir::core::Program;
     use subset_julia_vm::rng::StableRng;
     use subset_julia_vm::vm::Vm;
@@ -120,7 +149,7 @@ fn run_ir_internal(ir_json: &str, seed: u64) -> ExecutionResult {
             // Plot artifact extraction is not supported for raw IR execution — this entry
             // point is a numeric runner used for pre-compiled programs. The Web Playground
             // uses run_from_source_internal, which does extract plot artifacts.
-            ExecutionResult::success(f64_value, typed_value, output, None)
+            ExecutionResult::success(f64_value, typed_value, output, Vec::new())
         }
         Err(e) => ExecutionResult::error(format!("Runtime error: {}", e)),
     }
@@ -164,8 +193,12 @@ pub fn run_from_source_typed(source: &str, seed: u64) -> JsValue {
 }
 
 fn run_from_source_internal(source: &str, seed: u64) -> ExecutionResult {
-    use subset_julia_vm::compile::compile_with_cache;
-    use subset_julia_vm::pipeline::parse_and_lower;
+    use subset_julia_vm::compile::host_support::compile_with_cache;
+    // The Web Playground "Run" button runs a whole buffer, so it uses strict
+    // file-mode soft scope (Issue #9283 / #9210) to match `julia file.jl`: a
+    // top-level loop assignment to an existing global binds a new local. No
+    // backing file, so the soft-scope warning locates at `none:<line>`.
+    use subset_julia_vm::pipeline::parse_and_lower_strict as parse_and_lower;
     use subset_julia_vm::rng::StableRng;
     use subset_julia_vm::vm::Vm;
 
@@ -189,6 +222,10 @@ fn run_from_source_internal(source: &str, seed: u64) -> ExecutionResult {
     // Execute
     let rng = StableRng::new(seed);
     let mut vm = Vm::new_program(compiled, rng);
+    // The Web Playground renders display artifacts, so activate the graphical
+    // display: `display(plot(cos))` routes into the artifact channel instead of
+    // echoing the struct text (Issue #9262).
+    vm.enable_graphical_display();
 
     match vm.run() {
         Ok(value) => {
@@ -196,12 +233,190 @@ fn run_from_source_internal(source: &str, seed: u64) -> ExecutionResult {
             let f64_value = subset_julia_vm::ffi_support::legacy_numeric_result_value(&value);
             let typed_value =
                 subset_julia_vm::ffi_support::typed_value_json(&value, vm.get_struct_heap());
-            let artifact =
-                subset_julia_vm::plotting::try_value_to_artifact(&value, vm.get_struct_heap())
-                    .map(|a| (a.mime, a.data));
-            ExecutionResult::success(f64_value, typed_value, output, artifact)
+            // Prefer an artifact emitted by an explicit `display(x)` during the run
+            // (Issue #9262); otherwise render the trailing result value.
+            let mut artifacts = vm.take_display_artifacts();
+            if artifacts.is_empty() {
+                if let Some(artifact) =
+                    subset_julia_vm::plotting::try_value_to_artifact(&value, vm.get_struct_heap())
+                {
+                    artifacts.push(artifact);
+                }
+            }
+            let artifacts = artifacts
+                .into_iter()
+                .map(|artifact| (artifact.mime, artifact.data))
+                .collect();
+            ExecutionResult::success(f64_value, typed_value, output, artifacts)
         }
         Err(e) => ExecutionResult::error(format!("Runtime error: {}", e)),
+    }
+}
+
+/// Register VM vs stack VM measurement entry for wasm32 (Issue #8559).
+///
+/// Wraps one precompiled program so repeated `run` calls time VM execution
+/// only (parsing/lowering/compilation happen once, in the constructor). The
+/// JavaScript driver (`scripts/register_vm_wasm_bench_8559.mjs`) measures
+/// wall time around `run` and reads the deterministic engine counters from
+/// the returned object. wasm32-unknown-unknown has no process environment,
+/// so the engine gates are toggled through the
+/// `set_register_vm_forced`/`set_stack_vm_metrics_forced` process overrides
+/// instead of `SJULIA_REGISTER_VM`/`SJULIA_STACK_VM_METRICS`.
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct RegisterVmBench {
+    compiled: CompiledProgram,
+}
+
+/// One `RegisterVmBench::run` outcome: printed output plus the deterministic
+/// engine counters (Issue #8559). Counter fields are `f64` so
+/// `serde_wasm_bindgen` surfaces plain JavaScript numbers (the counts stay
+/// far below 2^53).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterVmBenchRun {
+    pub output: String,
+    pub register_calls: f64,
+    pub register_fallbacks: f64,
+    pub register_dispatches: f64,
+    pub stack_dispatches: f64,
+    pub executable_block_runs: f64,
+    pub operand_stack_high_water: f64,
+    pub frames_high_water: f64,
+}
+
+#[wasm_bindgen]
+impl RegisterVmBench {
+    /// Parse, lower, and compile `source` once through the shared pipeline
+    /// (same path as `run_from_source`).
+    #[wasm_bindgen(constructor)]
+    pub fn new(source: &str) -> Result<RegisterVmBench, JsValue> {
+        use subset_julia_vm::compile::host_support::compile_with_cache;
+        use subset_julia_vm::pipeline::parse_and_lower;
+
+        let program = parse_and_lower(source).map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        let compiled = compile_with_cache(&program)
+            .map_err(|e| JsValue::from_str(&format!("Compile error: {:?}", e)))?;
+        Ok(Self { compiled })
+    }
+
+    /// Execute the precompiled program once on a fresh `Vm`.
+    ///
+    /// `register_gate` routes eligible direct calls through the register VM
+    /// prototype; `collect_counters` arms the stack VM metrics (leave it
+    /// `false` for wall-time runs so counter bookkeeping does not perturb
+    /// the timing).
+    pub fn run(
+        &self,
+        register_gate: bool,
+        collect_counters: bool,
+        seed: u64,
+    ) -> Result<JsValue, JsValue> {
+        use subset_julia_vm::rng::StableRng;
+        use subset_julia_vm::vm::{set_register_vm_forced, set_stack_vm_metrics_forced, Vm};
+
+        set_register_vm_forced(register_gate);
+        set_stack_vm_metrics_forced(collect_counters);
+        let mut vm = Vm::new_program(self.compiled.clone(), StableRng::new(seed));
+        set_stack_vm_metrics_forced(false);
+        let run_result = vm.run();
+        set_register_vm_forced(false);
+
+        run_result.map_err(|e| JsValue::from_str(&format!("Runtime error: {}", e)))?;
+        let stack = vm.stack_vm_metrics().unwrap_or_default();
+        let outcome = RegisterVmBenchRun {
+            output: vm.get_output().to_string(),
+            register_calls: vm.register_vm_executed_calls() as f64,
+            register_fallbacks: vm.register_vm_fallback_calls() as f64,
+            register_dispatches: vm.register_vm_dispatch_total() as f64,
+            stack_dispatches: stack.dispatches as f64,
+            executable_block_runs: stack.executable_block_runs as f64,
+            operand_stack_high_water: stack.operand_stack_high_water as f64,
+            frames_high_water: stack.frames_high_water as f64,
+        };
+        serde_wasm_bindgen::to_value(&outcome).map_err(|e| JsValue::from_str(&format!("{}", e)))
+    }
+}
+
+/// Handler-table dispatch vs `match` dispatch measurement entry for wasm32
+/// (Issue #8562; mirrors [`RegisterVmBench`] from Issue #8559).
+///
+/// Wraps one precompiled program so repeated `run` calls time VM execution
+/// only. The JavaScript driver (`scripts/handler_table_wasm_bench_8562.mjs`)
+/// measures wall time around `run` and reads the deterministic counters from
+/// the returned object. wasm32-unknown-unknown has no process environment,
+/// so the gate is toggled through the `set_handler_table_forced` process
+/// override instead of `SJULIA_HANDLER_TABLE`. Compiled only under the
+/// `vm-handler-table` feature.
+#[cfg(feature = "vm-handler-table")]
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct HandlerTableBench {
+    compiled: CompiledProgram,
+}
+
+/// One `HandlerTableBench::run` outcome: printed output plus the
+/// deterministic dispatch counters (Issue #8562). Counter fields are `f64`
+/// so `serde_wasm_bindgen` surfaces plain JavaScript numbers.
+#[cfg(feature = "vm-handler-table")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HandlerTableBenchRun {
+    pub output: String,
+    pub stack_dispatches: f64,
+    pub executable_block_runs: f64,
+    pub table_hits: f64,
+    pub table_fallbacks: f64,
+}
+
+#[cfg(feature = "vm-handler-table")]
+#[wasm_bindgen]
+impl HandlerTableBench {
+    /// Parse, lower, and compile `source` once through the shared pipeline
+    /// (same path as `run_from_source`).
+    #[wasm_bindgen(constructor)]
+    pub fn new(source: &str) -> Result<HandlerTableBench, JsValue> {
+        use subset_julia_vm::compile::host_support::compile_with_cache;
+        use subset_julia_vm::pipeline::parse_and_lower;
+
+        let program = parse_and_lower(source).map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        let compiled = compile_with_cache(&program)
+            .map_err(|e| JsValue::from_str(&format!("Compile error: {:?}", e)))?;
+        Ok(Self { compiled })
+    }
+
+    /// Execute the precompiled program once on a fresh `Vm`.
+    ///
+    /// `handler_table` dispatches through the function-pointer table instead
+    /// of the `match`; `collect_counters` arms the stack VM metrics (leave it
+    /// `false` for wall-time runs so counter bookkeeping does not perturb
+    /// the timing).
+    pub fn run(
+        &self,
+        handler_table: bool,
+        collect_counters: bool,
+        seed: u64,
+    ) -> Result<JsValue, JsValue> {
+        use subset_julia_vm::rng::StableRng;
+        use subset_julia_vm::vm::{set_handler_table_forced, set_stack_vm_metrics_forced, Vm};
+
+        set_handler_table_forced(handler_table);
+        set_stack_vm_metrics_forced(collect_counters);
+        let mut vm = Vm::new_program(self.compiled.clone(), StableRng::new(seed));
+        set_stack_vm_metrics_forced(false);
+        set_handler_table_forced(false);
+        let run_result = vm.run();
+
+        run_result.map_err(|e| JsValue::from_str(&format!("Runtime error: {}", e)))?;
+        let stack = vm.stack_vm_metrics().unwrap_or_default();
+        let (table_hits, table_fallbacks) = vm.handler_table_metrics().unwrap_or((0, 0));
+        let outcome = HandlerTableBenchRun {
+            output: vm.get_output().to_string(),
+            stack_dispatches: stack.dispatches as f64,
+            executable_block_runs: stack.executable_block_runs as f64,
+            table_hits: table_hits as f64,
+            table_fallbacks: table_fallbacks as f64,
+        };
+        serde_wasm_bindgen::to_value(&outcome).map_err(|e| JsValue::from_str(&format!("{}", e)))
     }
 }
 
@@ -413,9 +628,9 @@ mod tests {
 
     #[test]
     fn test_run_from_source_initializes_compile_cache_6022() {
-        subset_julia_vm::compile::cache::clear_cache();
+        subset_julia_vm::compile::host_support::clear_compile_cache();
         assert!(
-            !subset_julia_vm::compile::cache::is_cache_initialized(),
+            !subset_julia_vm::compile::host_support::is_compile_cache_initialized(),
             "cache should start empty for this test"
         );
 
@@ -426,11 +641,11 @@ mod tests {
             result.error_message
         );
         assert!(
-            subset_julia_vm::compile::cache::is_cache_initialized(),
+            subset_julia_vm::compile::host_support::is_compile_cache_initialized(),
             "web run_from_source should initialize compile cache (Issue #6022)"
         );
 
-        subset_julia_vm::compile::cache::clear_cache();
+        subset_julia_vm::compile::host_support::clear_compile_cache();
     }
 
     #[test]

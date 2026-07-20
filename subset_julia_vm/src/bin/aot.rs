@@ -29,7 +29,7 @@ use subset_julia_vm::aot::{compile_program, AotBackend, AotError, AotOutput, Com
 use subset_julia_vm::base;
 use subset_julia_vm::core_ir_file;
 use subset_julia_vm::error::UnsupportedFeature;
-use subset_julia_vm::ir::core::{Block, Expr, Program, Stmt};
+use subset_julia_vm::ir::core::{Block, DefinitionOrderCursor, Expr, Program, Stmt};
 use subset_julia_vm::loader;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::{ParseOutcome, Parser, RustParsedSource};
@@ -893,6 +893,18 @@ fn format_parse_error(error: &subset_julia_vm_parser::ParseError) -> String {
         ParseError::UnterminatedString { span } => {
             format!("unterminated string literal starting at {}", location(span))
         }
+        ParseError::UnterminatedCommand { span } => {
+            format!(
+                "unterminated command literal starting at {}",
+                location(span)
+            )
+        }
+        ParseError::UnterminatedCharacter { span } => {
+            format!(
+                "unterminated character literal starting at {}",
+                location(span)
+            )
+        }
         ParseError::UnterminatedBlockComment { span } => {
             format!("unterminated block comment starting at {}", location(span))
         }
@@ -975,6 +987,8 @@ fn build_program(source: &str, minimal_prelude: bool) -> Result<Program, Box<Sou
             format!("Failed to parse prelude: {:?}", e),
         )))
     })?;
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut prelude_lowering = Lowering::new(&prelude_src);
     let prelude_program = prelude_lowering.lower(prelude_outcome).map_err(|e| {
         Box::new(SourceDiagnostic::from_error(AotError::InternalError(
@@ -983,6 +997,8 @@ fn build_program(source: &str, minimal_prelude: bool) -> Result<Program, Box<Sou
     })?;
 
     let outcome = parse_source_with_diagnostics(source)?;
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut lowering = Lowering::new(source);
     let mut program = lowering.lower(outcome).map_err(|e| {
         Box::new(SourceDiagnostic::new(
@@ -994,6 +1010,13 @@ fn build_program(source: &str, minimal_prelude: bool) -> Result<Program, Box<Sou
 
     merge_prelude(&mut program, prelude_program);
     load_external_modules(&mut program).map_err(|e| Box::new(SourceDiagnostic::from_error(e)))?;
+    // Prune functions unreachable from user code before codegen, mirroring the
+    // e2e pipeline (compile_to_rust_with_base_optimized). Without this,
+    // prelude-only paths (e.g. a BigInt constructor, Issue #6975 class) reach
+    // codegen and reject programs the pipeline can otherwise compile
+    // (Issue #8789).
+    let call_graph = CallGraph::from_program(&program);
+    let program = call_graph.filter_program(&program);
     Ok(program)
 }
 
@@ -1024,7 +1047,13 @@ fn nonzero_span(span: Span) -> Span {
 
 /// Merge the lowered prelude into a user program (structs/abstract/functions).
 fn merge_prelude(program: &mut Program, prelude_program: Program) {
-    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
+    let mut chronology = DefinitionOrderCursor::after_program(&prelude_program);
+    chronology.append_fragment(&mut *program);
+    let user_method_sigs: HashSet<_> = program
+        .functions
+        .iter()
+        .map(|f| get_method_signature(f))
+        .collect();
     let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
 
     let mut all_structs: Vec<_> = prelude_program
@@ -1053,7 +1082,9 @@ fn merge_prelude(program: &mut Program, prelude_program: Program) {
         .into_iter()
         .filter(|f| !user_method_sigs.contains(&get_method_signature(f)))
         .map(|mut f| {
-            f.is_base_extension = true;
+            // `prelude_program` was just lowered above, so each Arc here is
+            // uniquely owned (refcount 1) — `make_mut` never clones.
+            std::sync::Arc::make_mut(&mut f).is_base_extension = true;
             f
         })
         .collect();
@@ -1063,27 +1094,10 @@ fn merge_prelude(program: &mut Program, prelude_program: Program) {
 
 /// Load external (non-relative) `using` modules referenced by the program.
 fn load_external_modules(program: &mut Program) -> Result<(), AotError> {
-    let existing_modules: HashSet<String> =
-        program.modules.iter().map(|m| m.name.clone()).collect();
-    let usings_to_load: Vec<_> = program
-        .usings
-        .iter()
-        .filter(|u| !u.is_relative && !existing_modules.contains(&u.module))
-        .cloned()
-        .collect();
-
-    if !usings_to_load.is_empty() {
-        let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
-        let loaded_modules = package_loader
-            .load_for_usings(&usings_to_load)
-            .map_err(|e| AotError::InternalError(format!("Load error: {:?}", e)))?;
-        for module in loaded_modules {
-            if !existing_modules.contains(&module.name) {
-                program.modules.push(module);
-            }
-        }
-    }
-    Ok(())
+    let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
+    package_loader
+        .load_into_program(program)
+        .map_err(|e| AotError::InternalError(format!("Load error: {:?}", e)))
 }
 
 /// Print a `--stats` report (Issue #6930).
@@ -1627,7 +1641,9 @@ fn resolve_program(args: &Args) -> Result<ResolvedInput, i32> {
             eprintln!("Error: failed to load Core IR '{}': {}", ir_file, e);
             exit_code::IO
         })?;
-        let _ = CallGraph::from_program(&program);
+        // Apply the same reachability pruning as the source path (Issue #8789).
+        let call_graph = CallGraph::from_program(&program);
+        let program = call_graph.filter_program(&program);
         Ok(ResolvedInput {
             program,
             source_name: ir_file.clone(),
@@ -1906,6 +1922,18 @@ pub(crate) fn main() {
 mod tests {
     use super::*;
     use subset_julia_vm::aot::UnsupportedInstructionDiagnostic;
+
+    #[test]
+    fn format_parse_error_handles_unterminated_command_11657() {
+        let error = subset_julia_vm_parser::ParseError::UnterminatedCommand {
+            span: subset_julia_vm_parser::Span::new(4, 5, 2, 2, 3, 4),
+        };
+
+        assert_eq!(
+            format_parse_error(&error),
+            "unterminated command literal starting at line 2, column 3"
+        );
+    }
 
     #[test]
     fn parse_rejects_unknown_option() {

@@ -14,18 +14,29 @@
 //! - Distributed manifest.toml files in each category directory
 
 use serde::Deserialize;
-use std::fs;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{Result as IoResult, Write};
+use std::path::{Path, PathBuf};
 use subset_julia_vm::{
     cancel,
-    compile::{cache::clear_cache, compile_with_cache},
+    compile::host_support::{clear_non_base_compile_cache, compile_with_cache},
     pipeline::{parse_and_lower_with_base_dir, PipelineError},
     rng::StableRng,
-    vm::{Value, Vm},
+    vm::Vm,
 };
+use subset_julia_vm_bytecode::Value;
 
 /// Root manifest structure (contains global config and optionally tests)
+///
+/// `deny_unknown_fields` (Issue #9486): an unknown-key typo such as `[[test]]`
+/// instead of `[[tests]]` is valid TOML, and serde's default is to silently
+/// ignore unknown keys — the typo'd entry would be silently deregistered while
+/// every layer stayed green. Rejecting unknown fields turns the whole typo
+/// class into a loud parse failure naming the manifest. Keep the manifest
+/// structs here and in `build.rs` in sync.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RootManifest {
     config: Config,
     #[serde(default)]
@@ -34,6 +45,7 @@ struct RootManifest {
 
 /// Category manifest structure (tests only, no config)
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CategoryManifest {
     #[serde(default)]
     tests: Vec<TestCase>,
@@ -47,6 +59,7 @@ struct Manifest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Config {
     epsilon: f64,
 }
@@ -72,7 +85,9 @@ impl Expected {
             (Expected::Float(expected), Value::I64(actual)) => {
                 (expected - (*actual as f64)).abs() < epsilon
             }
-            (Expected::String(expected), Value::Str(actual)) => expected == actual,
+            (Expected::String(expected), Value::Str(actual)) => {
+                expected.as_str() == actual.as_ref()
+            }
             // Cross-type matches for backwards compatibility
             (Expected::Bool(true), Value::I64(1)) => true,
             (Expected::Bool(false), Value::I64(0)) => true,
@@ -94,6 +109,7 @@ impl Expected {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TestCase {
     name: String,
     file: String,
@@ -102,10 +118,127 @@ struct TestCase {
     description: String,
     #[serde(default)]
     skip: bool,
+    #[serde(default)]
+    env: HashMap<String, String>,
+    /// Marks a fixture that is an intentional SubsetJuliaVM extension and must
+    /// NOT be run under upstream `julia` for parity (e.g. callable GlobalRef,
+    /// Issue #302). Declarative metadata for parity tooling; declared so
+    /// `deny_unknown_fields` accepts it (Issue #9486).
+    #[serde(default)]
+    #[allow(dead_code)]
+    skip_julia_test: bool,
+    /// Marks a fixture whose semantics depend on the compile/persistent cache
+    /// mode (GC/WeakRef/finalizer, struct-table identity across cache restore —
+    /// the #10092 bug class). Categories containing a `cache_sensitive = true`
+    /// entry are run under BOTH cache modes by
+    /// `scripts/check_cache_sensitive_fixture_lane.sh` (Issue #10223).
+    /// Declarative metadata for that lane; declared so `deny_unknown_fields`
+    /// accepts it (Issue #9486).
+    #[serde(default)]
+    #[allow(dead_code)]
+    cache_sensitive: bool,
+}
+
+struct EnvGuard {
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl EnvGuard {
+    fn apply(vars: &HashMap<String, String>) -> Self {
+        let saved = vars
+            .iter()
+            .map(|(key, value)| {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                (key.clone(), previous)
+            })
+            .collect();
+        Self { saved }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, previous) in &self.saved {
+            match previous {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
 }
 
 fn get_fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+fn workspace_target_dir() -> PathBuf {
+    if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        return PathBuf::from(target_dir);
+    }
+
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("target"))
+        .unwrap_or_else(|| PathBuf::from("target"))
+}
+
+fn env_flag_exact_one(name: &str) -> bool {
+    std::env::var(name).ok().as_deref() == Some("1")
+}
+
+fn env_flag_present(name: &str) -> bool {
+    std::env::var(name).is_ok()
+}
+
+fn cache_files_with_prefix(target_dir: &Path, prefix: &str) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(target_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<_> = entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with(prefix))
+        .collect();
+    files.sort();
+    files
+}
+
+fn append_fixture_journal(
+    journal_path: &Path,
+    test: &TestCase,
+    fixture_path: &Path,
+    rng_seed: u64,
+) -> IoResult<()> {
+    if let Some(parent) = journal_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let target_dir = workspace_target_dir();
+    let base_cache_files = cache_files_with_prefix(&target_dir, "sjulia_base_cache_");
+    let prelude_cache_files = cache_files_with_prefix(&target_dir, "sjulia_prelude_program_");
+    let entry = serde_json::json!({
+        "test": test.name,
+        "fixture": test.file,
+        "fixture_path": fixture_path.display().to_string(),
+        "pid": std::process::id(),
+        "rng_seed": rng_seed,
+        "crate_version": env!("CARGO_PKG_VERSION"),
+        "compiler_build_fingerprint": env!("SJULIA_BASE_CACHE_BUILD_HASH"),
+        "cache_target_dir": target_dir.display().to_string(),
+        "compile_cache_disabled": env_flag_present("SUBSET_JULIA_VM_DISABLE_CACHE"),
+        "persistent_base_cache_disabled": env_flag_exact_one("SUBSET_JULIA_VM_DISABLE_PERSISTENT_BASE_CACHE"),
+        "persistent_prelude_cache_disabled": env_flag_present("SUBSET_JULIA_VM_DISABLE_PERSISTENT_PRELUDE_CACHE"),
+        "base_cache_files": base_cache_files,
+        "prelude_cache_files": prelude_cache_files,
+    });
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(journal_path)?;
+    writeln!(file, "{entry}")?;
+    file.flush()
 }
 
 fn load_manifest() -> Manifest {
@@ -134,24 +267,37 @@ fn load_manifest() -> Manifest {
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
 
-                    if let Ok(content) = fs::read_to_string(&category_manifest_path) {
-                        match toml::from_str::<CategoryManifest>(&content) {
-                            Ok(category_manifest) => {
-                                // Prefix file paths with category name
-                                for mut test in category_manifest.tests {
-                                    if !test.file.contains('/') {
-                                        test.file = format!("{}/{}", category_name, test.file);
-                                    }
-                                    all_tests.push(test);
+                    let content = fs::read_to_string(&category_manifest_path).unwrap_or_else(|e| {
+                        panic!(
+                            "Failed to read category manifest {}: {}",
+                            category_manifest_path.display(),
+                            e
+                        )
+                    });
+                    // Loud manifest failure (Issue #9378): a malformed category
+                    // manifest (e.g. a dropped `[[tests]]` header from a botched
+                    // merge resolution) previously only printed a warning here and
+                    // silently registered 0 tests for the whole category, so the
+                    // full-suite gate stayed green with the category's coverage
+                    // deleted. Panic instead: this thread backs every category
+                    // fixture test, so a broken manifest turns the suite red.
+                    match toml::from_str::<CategoryManifest>(&content) {
+                        Ok(category_manifest) => {
+                            // Prefix file paths with category name
+                            for mut test in category_manifest.tests {
+                                if !test.file.contains('/') {
+                                    test.file = format!("{}/{}", category_name, test.file);
                                 }
+                                all_tests.push(test);
                             }
-                            Err(e) => {
-                                eprintln!(
-                                    "Warning: Failed to parse {}: {}",
-                                    category_manifest_path.display(),
-                                    e
-                                );
-                            }
+                        }
+                        Err(e) => {
+                            panic!(
+                                "Failed to parse category manifest {} (Issue #9378 — a malformed \
+                                 manifest must fail loudly, not silently drop the category): {}",
+                                category_manifest_path.display(),
+                                e
+                            );
                         }
                     }
                 }
@@ -182,41 +328,209 @@ fn load_manifest() -> Manifest {
     }
 }
 
-fn run_test_case(test: &TestCase, epsilon: f64) {
-    clear_cache();
-    cancel::reset();
+/// `@testset`-failure allowlist (Issue #9360), read from
+/// `docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv` at test time.
+///
+/// Keyed on the manifest `file` value (category-prefixed, e.g. `io/show_array.jl`).
+/// Each row is `file<TAB>classification<TAB>issue<TAB>reason`; only the first
+/// column is load-bearing here — the rest document *why* each pre-existing
+/// broken-but-green fixture is grandfathered (see the file header for the
+/// umbrella tracking Issue). Read at runtime (not `include_str!`) so the list can
+/// be edited without recompiling the ~370k-line VM test binary.
+fn testset_failure_allowlist() -> &'static std::collections::HashSet<String> {
+    static ALLOWLIST: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    ALLOWLIST.get_or_init(|| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .join("docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv");
+        let content = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "Issue #9360: failed to read @testset-failure allowlist {}: {}",
+                path.display(),
+                e
+            )
+        });
+        content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('\t').next().unwrap_or("").trim().to_string())
+            .filter(|file| !file.is_empty())
+            .collect()
+    })
+}
 
+fn run_test_case(test: &TestCase, epsilon: f64) {
     let fixtures_dir = get_fixtures_dir();
     let file_path = fixtures_dir.join(&test.file);
+    let rng_seed = 0;
+
+    if let Ok(journal_path) = std::env::var("SJULIA_FIXTURE_JOURNAL") {
+        if let Err(err) =
+            append_fixture_journal(Path::new(&journal_path), test, &file_path, rng_seed)
+        {
+            eprintln!(
+                "Warning: failed to append fixture journal '{}': {}",
+                journal_path, err
+            );
+        }
+    }
 
     let source = fs::read_to_string(&file_path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", test.file, e));
+    let _env_guard = EnvGuard::apply(&test.env);
 
     let base_dir = file_path.parent().map(PathBuf::from);
-    let program = parse_and_lower_with_base_dir(&source, base_dir).unwrap_or_else(|e| {
+    run_test_case_source(
+        &test.name,
+        &test.file,
+        &test.description,
+        &source,
+        base_dir,
+        &test.expected,
+        epsilon,
+    );
+}
+
+/// Core harness pipeline (Issue #10045): parse, compile, run, and gate a Julia
+/// source string against an `Expected` value. Factored out of [`run_test_case`]
+/// so the `@testset`-failure gate below can be exercised directly by a meta-test
+/// with an inline literal source — without registering a fixture file or
+/// touching `docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv` (see `testset_gate_*_10045`
+/// tests at the bottom of this file). `test_file` only needs to be a stable
+/// identifier for allowlist lookup / diagnostics; it need not exist on disk.
+fn run_test_case_source(
+    test_name: &str,
+    test_file: &str,
+    description: &str,
+    source: &str,
+    base_dir: Option<PathBuf>,
+    expected: &Expected,
+    epsilon: f64,
+) {
+    clear_non_base_compile_cache();
+    cancel::reset();
+
+    let program = parse_and_lower_with_base_dir(source, base_dir).unwrap_or_else(|e| {
         let message = match e {
             PipelineError::Parse(e) => format!("parse error: {}", e),
             PipelineError::Lower(e) => format!("lower error: {:?}", e),
             PipelineError::Load(e) => format!("load error: {}", e),
         };
-        panic!("Test '{}' failed with error: {}", test.name, message);
+        panic!("Test '{}' failed with error: {}", test_name, message);
     });
     let compiled = compile_with_cache(&program)
-        .unwrap_or_else(|e| panic!("Test '{}' failed with compile error: {:?}", test.name, e));
+        .unwrap_or_else(|e| panic!("Test '{}' failed with compile error: {:?}", test_name, e));
     let mut vm = Vm::new_program(compiled, StableRng::new(0));
     let result = vm
         .run()
-        .unwrap_or_else(|e| panic!("Test '{}' failed with runtime error: {}", test.name, e));
+        .unwrap_or_else(|e| panic!("Test '{}' failed with runtime error: {}", test_name, e));
+
+    // @testset gate (Issue #9360): the harness historically compared only the
+    // VM's final returned value against `expected`. A fixture that runs a
+    // `@testset`/`@test` which FAILS but still ends with a matching value (e.g.
+    // a trailing `true`) therefore stayed green here while a direct CLI run went
+    // red (`Test Failed`, exit 1) — the "harness passes / CLI red" divergence
+    // (see memory/project/project_9312_testset_scope_cli_harness_divergence.md).
+    // `Vm::any_test_failed()` is the sticky flag the CLI already uses to exit
+    // non-zero (Issue #8191); a `true` value means some `@test`/`@testset`
+    // recorded a failure (or a `@test_broken` unexpectedly passed).
+    //
+    // This is enforced as a TWO-SIDED RATCHET keyed on the manifest `file` path
+    // against `docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv`:
+    //   * a fixture that records a `@test` failure and is NOT allowlisted FAILS
+    //     (so no NEW broken-but-green fixture can land);
+    //   * an allowlisted fixture that records NO failure FAILS as a stale entry
+    //     (so the list monotonically shrinks as the underlying bugs are fixed).
+    // The initial allowlist grandfathers the pre-existing broken-but-green
+    // fixtures discovered when this gate was introduced (umbrella tracking Issue
+    // in the TSV header). `@test_broken` failures do NOT set the flag (they are
+    // the expected outcome). Fixtures whose VM bug makes them *error* (rather
+    // than record a `@test` failure) must instead be `skip = true` with a
+    // tracking Issue, since they never reach this point.
+    //
+    // Decision logic itself lives in the pure `testset_gate_verdict` (Issue
+    // #10045) so it can be unit-tested for all four (failed, allowlisted)
+    // quadrants without running the VM — this function is only responsible for
+    // wiring the VM signal + allowlist lookup into that verdict.
+    let testset_failed = vm.any_test_failed();
+    if let Ok(log_path) = std::env::var("SJULIA_TESTSET_GATE_LOG") {
+        // Diagnostic collection mode (used to (re)generate the allowlist): record
+        // every fixture whose run recorded a `@test` failure and do not assert.
+        if testset_failed {
+            if let Some(parent) = Path::new(&log_path).parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                let _ = writeln!(file, "{}", test_file);
+            }
+        }
+    } else {
+        let allowlisted = testset_failure_allowlist().contains(test_file);
+        if let Err(message) = testset_gate_verdict(
+            test_name,
+            test_file,
+            description,
+            testset_failed,
+            allowlisted,
+        ) {
+            panic!("{}", message);
+        }
+    }
 
     assert!(
-        test.expected.matches(&result, epsilon),
+        expected.matches(&result, epsilon),
         "Test '{}' failed:\n  File: {}\n  Expected: {}\n  Got: {:?}\n  Description: {}",
-        test.name,
-        test.file,
-        test.expected.display(),
+        test_name,
+        test_file,
+        expected.display(),
         result,
-        test.description
+        description
     );
+}
+
+/// Pure decision function for the `@testset`-failure gate (Issue #9360;
+/// two-sided ratchet Issue #9472; extracted for direct unit coverage as part of
+/// the epic #10045 harness-hardening pass).
+///
+/// Takes only the two booleans the gate cares about — did this run record a
+/// `@test`/`@testset` failure, and is the fixture grandfathered in
+/// `docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv` — so all four quadrants can be
+/// pinned by `testset_gate_verdict_*_10045` below without invoking the VM.
+/// `Ok(())` means the harness should treat the run as green on this axis;
+/// `Err(message)` is the exact panic message `run_test_case_source` raises.
+fn testset_gate_verdict(
+    test_name: &str,
+    test_file: &str,
+    description: &str,
+    testset_failed: bool,
+    allowlisted: bool,
+) -> Result<(), String> {
+    match (testset_failed, allowlisted) {
+        (true, false) => Err(format!(
+            "Test '{}' recorded a failing @test/@testset (Issue #9360 gate):\n  \
+             File: {}\n  \
+             The fixture's final value matched `expected`, but a `@test` inside it FAILED \
+             (this run exits non-zero under a direct `sjulia` CLI run of the file).\n  \
+             If this is a NEW fixture: fix the fixture or the underlying VM bug — do not \
+             land a fixture that is green here but red on the CLI.\n  \
+             If the VM bug is real and deferred: file a `bug` Issue and add `{}` to \
+             docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv with the Issue reference.\n  \
+             Description: {}",
+            test_name, test_file, test_file, description
+        )),
+        (false, true) => Err(format!(
+            "Test '{}' is in docs/vm/TESTSET_FAILURE_ALLOWLIST.tsv but now records NO \
+             @test failure (Issue #9360 ratchet):\n  \
+             File: {}\n  \
+             The underlying bug appears fixed — remove `{}` from the allowlist so the gate \
+             protects it going forward.",
+            test_name, test_file, test_file
+        )),
+        (true, true) | (false, false) => Ok(()),
+    }
 }
 
 /// Minimum thread stack size for fixture tests (16 MB).
@@ -246,6 +560,28 @@ fn run_test_cases_by_name(manifest: &Manifest, names: &[&str]) {
     }
 }
 
+fn run_test_cases_by_selector(manifest: &Manifest, selectors: &[String]) {
+    for selector in selectors {
+        let test = manifest
+            .tests
+            .iter()
+            .find(|t| t.name == *selector || t.file == *selector)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Fixture selector '{}' not found in manifest by name or file",
+                    selector
+                )
+            });
+
+        if test.skip {
+            eprintln!("Skipping test '{}': marked as skip in manifest", test.name);
+            continue;
+        }
+
+        run_test_case(test, manifest.config.epsilon);
+    }
+}
+
 /// Run all fixture tests in a category (used by generated tests).
 ///
 /// nextest executes each Rust test in its own process. Grouping fixture cases by
@@ -267,6 +603,448 @@ fn run_fixture_category(names: &[&str]) {
     if let Err(e) = result {
         std::panic::resume_unwind(e);
     }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+
+    #[test]
+    fn fixture_journal_appends_path_seed_and_cache_metadata_issue_8708() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let journal_path = tempdir.path().join("fixtures.jsonl");
+        let fixture_path = get_fixtures_dir().join("arithmetic/basic.jl");
+        let test = TestCase {
+            name: "arithmetic_basic".to_string(),
+            file: "arithmetic/basic.jl".to_string(),
+            expected: Expected::Bool(true),
+            description: "journal test".to_string(),
+            skip: false,
+            env: HashMap::new(),
+            skip_julia_test: false,
+            cache_sensitive: false,
+        };
+
+        append_fixture_journal(&journal_path, &test, &fixture_path, 0).expect("append journal");
+        append_fixture_journal(&journal_path, &test, &fixture_path, 0).expect("append journal");
+
+        let content = fs::read_to_string(&journal_path).expect("read journal");
+        let lines: Vec<_> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "journal should append one line per fixture");
+        assert!(lines[0].contains("\"test\":\"arithmetic_basic\""));
+        assert!(lines[0].contains("\"fixture\":\"arithmetic/basic.jl\""));
+        assert!(lines[0].contains("\"rng_seed\":0"));
+        assert!(lines[0].contains("\"compiler_build_fingerprint\""));
+        assert!(lines[0].contains("\"persistent_base_cache_disabled\""));
+        assert!(lines[0].contains("\"persistent_prelude_cache_disabled\""));
+    }
+}
+
+/// Harness-integrity regression coverage for the epic #10045 "broken-but-green
+/// @testset masking" hardening pass.
+///
+/// The #9360/#9472 gate (see `run_test_case_source` / `testset_gate_verdict`
+/// above) already makes the harness fail a fixture whose `@testset` records a
+/// failure but whose final value still matches `expected`. Before this module
+/// existed, that guarantee was only exercised indirectly (by the ~4,000 real
+/// fixtures currently in the tree) — nothing pinned the *decision logic itself*,
+/// so a future refactor could silently drop or invert the `assert!`/`panic!`
+/// without any test noticing. These tests close that hole two ways:
+///   * `testset_gate_verdict_*` unit-tests all four (failed, allowlisted)
+///     quadrants of the pure decision function directly (no VM run needed).
+///   * `run_test_case_source_*` proves the decision function is actually wired
+///     into the full parse/compile/run pipeline, using inline literal Julia
+///     source so no fixture file or allowlist entry is ever touched.
+#[cfg(test)]
+mod testset_gate_regression_tests_10045 {
+    use super::*;
+    use std::panic::{self, AssertUnwindSafe};
+
+    // --- Pure decision function: all four (testset_failed, allowlisted) quadrants ---
+
+    #[test]
+    fn testset_gate_verdict_failed_and_unallowlisted_is_rejected_10045() {
+        // The "broken-but-green" case #9360 exists to prevent: a @testset
+        // failure that is NOT grandfathered must be a hard error.
+        let verdict = testset_gate_verdict("t", "some/fixture.jl", "desc", true, false);
+        let message = verdict.expect_err("an unallowlisted @testset failure must be rejected");
+        assert!(
+            message.contains("Issue #9360 gate"),
+            "rejection message should name the gate it enforces: {message}"
+        );
+    }
+
+    #[test]
+    fn testset_gate_verdict_failed_and_allowlisted_is_accepted_10045() {
+        // Grandfathered fixtures stay green until their underlying bug is fixed.
+        let verdict = testset_gate_verdict("t", "some/fixture.jl", "desc", true, true);
+        assert!(verdict.is_ok(), "an allowlisted failure must be accepted");
+    }
+
+    #[test]
+    fn testset_gate_verdict_stale_allowlist_entry_is_rejected_10045() {
+        // The ratchet's other side (#9472): an allowlisted fixture that no
+        // longer fails must be rejected so the allowlist is forced to shrink.
+        let verdict = testset_gate_verdict("t", "some/fixture.jl", "desc", false, true);
+        let message = verdict.expect_err("a stale allowlist entry must be rejected");
+        assert!(
+            message.contains("Issue #9360 ratchet"),
+            "rejection message should name the ratchet it enforces: {message}"
+        );
+    }
+
+    #[test]
+    fn testset_gate_verdict_clean_and_unallowlisted_is_accepted_10045() {
+        // The overwhelmingly common case: no failure, no allowlist entry.
+        let verdict = testset_gate_verdict("t", "some/fixture.jl", "desc", false, false);
+        assert!(
+            verdict.is_ok(),
+            "a clean, unallowlisted run must be accepted"
+        );
+    }
+
+    // --- End-to-end wiring: run_test_case_source must actually invoke the gate ---
+
+    /// A fixture-shaped source whose `@testset` runs a deliberately failing
+    /// `@test` but still ends with a `true` matching `expected` — the exact
+    /// "harness passes / CLI red" shape #9360 was filed to close (see
+    /// `error_overflow_arithmetic.jl` in that Issue). Never registered in any
+    /// `manifest.toml` or written under `tests/fixtures/`.
+    const BROKEN_BUT_GREEN_SOURCE: &str = r#"
+using Test
+@testset "deliberately failing (Issue #10045 regression)" begin
+    @test 1 == 2
+end
+true
+"#;
+
+    const GENUINELY_GREEN_SOURCE: &str = r#"
+using Test
+@testset "genuinely passing (Issue #10045 regression)" begin
+    @test 1 == 1
+end
+true
+"#;
+
+    #[test]
+    fn run_test_case_source_rejects_broken_but_green_fixture_10045() {
+        // SJULIA_TESTSET_GATE_LOG switches run_test_case_source into diagnostic
+        // logging mode (used to regenerate the allowlist), which does not
+        // assert at all — make sure it is unset so this test actually exercises
+        // the gate, not the logging branch.
+        std::env::remove_var("SJULIA_TESTSET_GATE_LOG");
+
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            run_test_case_source(
+                "broken_but_green_10045",
+                "meta/never_registered_broken_but_green_10045.jl",
+                "Issue #10045 harness regression: masked @testset failure",
+                BROKEN_BUT_GREEN_SOURCE,
+                None,
+                &Expected::Bool(true),
+                1e-9,
+            );
+        }));
+
+        assert!(
+            outcome.is_err(),
+            "a failing @testset that ends with a matching final value must make \
+             run_test_case_source panic (Issue #9360 gate) — if this assertion \
+             fails, the fixture harness can silently report a broken fixture as \
+             green again"
+        );
+    }
+
+    #[test]
+    fn run_test_case_source_accepts_genuinely_green_fixture_10045() {
+        // No-false-positive guard: a fixture whose @testset genuinely passes
+        // must NOT be rejected by the gate that catches case above.
+        std::env::remove_var("SJULIA_TESTSET_GATE_LOG");
+
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            run_test_case_source(
+                "genuinely_green_10045",
+                "meta/never_registered_genuinely_green_10045.jl",
+                "Issue #10045 harness regression: no false positive",
+                GENUINELY_GREEN_SOURCE,
+                None,
+                &Expected::Bool(true),
+                1e-9,
+            );
+        }));
+
+        assert!(
+            outcome.is_ok(),
+            "a genuinely passing @testset must not be rejected by the harness: {:?}",
+            outcome.err()
+        );
+    }
+}
+
+#[test]
+fn fixture_sequence_replay_8709_from_env() {
+    let Ok(sequence_path) = std::env::var("SJULIA_FIXTURE_SEQUENCE_FILE") else {
+        eprintln!("SJULIA_FIXTURE_SEQUENCE_FILE not set; skipping fixture sequence replay");
+        return;
+    };
+
+    let sequence_path = PathBuf::from(sequence_path);
+    let resolved_sequence_path = if sequence_path.exists() {
+        sequence_path
+    } else if sequence_path.is_relative() {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .join(&sequence_path)
+    } else {
+        sequence_path
+    };
+    let content = fs::read_to_string(&resolved_sequence_path).unwrap_or_else(|e| {
+        panic!(
+            "failed to read fixture sequence '{}': {}",
+            resolved_sequence_path.display(),
+            e
+        )
+    });
+    let selectors: Vec<String> = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(ToOwned::to_owned)
+        .collect();
+    assert!(
+        !selectors.is_empty(),
+        "fixture sequence '{}' must contain at least one selector",
+        resolved_sequence_path.display()
+    );
+
+    let result = std::thread::Builder::new()
+        .stack_size(FIXTURE_TEST_STACK_SIZE)
+        .spawn(move || {
+            let manifest = load_manifest();
+            run_test_cases_by_selector(&manifest, &selectors);
+        })
+        .expect("Failed to spawn fixture sequence replay thread")
+        .join();
+
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// Loud manifest-integrity gate (Issue #9378).
+///
+/// A malformed category `manifest.toml` (e.g. a dropped `[[tests]]` header from
+/// a botched merge resolution) used to make the fixture harness silently
+/// register 0 tests for the whole category, and the full-suite gate stayed green
+/// with the category's coverage deleted (the 2026-07-06 bigfloat incident,
+/// repaired in PR #9359). This always-run test reads every
+/// `tests/fixtures/*/manifest.toml` directly (independent of `build.rs` test
+/// generation) and asserts each one (1) parses and (2) registers at least one
+/// `[[tests]]` entry — so a category can never silently drop to 0. It also
+/// asserts the root `manifest.toml` parses (it carries the global `[config]`).
+#[test]
+fn every_category_manifest_parses_and_registers_tests_9378() {
+    let fixtures_dir = get_fixtures_dir();
+
+    // Root manifest must parse (it carries `[config] epsilon`).
+    let root_manifest_path = fixtures_dir.join("manifest.toml");
+    let root_content = fs::read_to_string(&root_manifest_path).unwrap_or_else(|e| {
+        panic!(
+            "Issue #9378: failed to read root manifest {}: {}",
+            root_manifest_path.display(),
+            e
+        )
+    });
+    if let Err(e) = toml::from_str::<RootManifest>(&root_content) {
+        panic!(
+            "Issue #9378: root manifest {} failed to parse: {}",
+            root_manifest_path.display(),
+            e
+        );
+    }
+
+    let mut category_dirs: Vec<PathBuf> = fs::read_dir(&fixtures_dir)
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to read fixtures dir {}: {}",
+                fixtures_dir.display(),
+                e
+            )
+        })
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("manifest.toml").exists())
+        .collect();
+    category_dirs.sort();
+
+    assert!(
+        !category_dirs.is_empty(),
+        "Issue #9378: no category manifests found under {} — the fixture harness \
+         would register 0 tests. This almost certainly means the fixtures tree is \
+         missing or the layout changed.",
+        fixtures_dir.display()
+    );
+
+    let mut problems: Vec<String> = Vec::new();
+    for dir in &category_dirs {
+        let manifest_path = dir.join("manifest.toml");
+        let content = match fs::read_to_string(&manifest_path) {
+            Ok(c) => c,
+            Err(e) => {
+                problems.push(format!("  {}: unreadable ({})", manifest_path.display(), e));
+                continue;
+            }
+        };
+        match toml::from_str::<CategoryManifest>(&content) {
+            Ok(manifest) => {
+                if manifest.tests.is_empty() {
+                    problems.push(format!(
+                        "  {}: parsed but registers 0 tests (a category must have >= 1 \
+                         [[tests]] entry, or the whole category is silently uncovered)",
+                        manifest_path.display()
+                    ));
+                }
+            }
+            Err(e) => {
+                problems.push(format!(
+                    "  {}: FAILED TO PARSE ({})",
+                    manifest_path.display(),
+                    e
+                ));
+            }
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "Issue #9378: {} category manifest(s) are malformed or register 0 tests. A malformed \
+         manifest silently deletes an entire category's coverage while the full suite stays \
+         green — this gate makes that loud:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
+}
+
+/// Builtin IO global identity coverage gate (Issue #10056).
+///
+/// `PushStdin` (and earlier `PushDevnull`) used to construct a fresh `IORef`
+/// on every execution of the compiler's bare-global shortcut, so
+/// `stdin === stdin` was `false` even though print/read behavior looked fine.
+/// The fix routes every builtin IO `Push*` instruction through a VM-owned
+/// singleton ref (`subset_julia_vm_vm/src/vm/exec/stack.rs`).
+///
+/// This gate enumerates the builtin IO `Push*` instruction handlers directly
+/// from the `stack.rs` source (any `Instr::Push<Name>` arm whose body pushes
+/// `Value::IO(...)`) and asserts, for each one:
+///   1. the handler clones VM/session state (`self.…`) and does NOT call an
+///      `IOValue::…` constructor per instruction, and
+///   2. the fixture `tests/fixtures/io/redirect_stdio_pipe_9577.jl` contains a
+///      `<global> === <global>` identity assertion for the matching Julia
+///      global (`PushStdout` -> `stdout`, `PushDevnull` -> `devnull`, …).
+///
+/// A new builtin IO global instruction therefore cannot land without both a
+/// VM-owned singleton and an identity regression check.
+#[test]
+fn push_io_global_instructions_have_identity_fixture_coverage_10056() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let stack_rs_path = manifest_dir.join("../subset_julia_vm_vm/src/vm/exec/stack.rs");
+    let stack_rs = fs::read_to_string(&stack_rs_path).unwrap_or_else(|e| {
+        panic!(
+            "Issue #10056: failed to read {}: {}",
+            stack_rs_path.display(),
+            e
+        )
+    });
+
+    // Collect `Instr::Push<Name> => { ... }` arm bodies: from the arm header
+    // line to the next `Instr::` arm header.
+    let lines: Vec<&str> = stack_rs.lines().collect();
+    let mut io_push_arms: Vec<(String, String)> = Vec::new(); // (variant, body)
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        if trimmed.starts_with("Instr::Push") && trimmed.contains("=>") {
+            let variant: String = trimmed
+                .trim_start_matches("Instr::")
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            let mut body = String::new();
+            let mut j = i + 1;
+            while j < lines.len() && !lines[j].trim_start().starts_with("Instr::") {
+                body.push_str(lines[j]);
+                body.push('\n');
+                j += 1;
+            }
+            // The header line itself can carry a one-line body.
+            body.push_str(trimmed);
+            if body.contains("Value::IO(") {
+                io_push_arms.push((variant, body));
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+
+    let found: Vec<&str> = io_push_arms.iter().map(|(v, _)| v.as_str()).collect();
+    for expected in ["PushStdin", "PushStdout", "PushStderr", "PushDevnull"] {
+        assert!(
+            found.contains(&expected),
+            "Issue #10056: expected builtin IO instruction handler `Instr::{expected}` \
+             not found in {} (found: {found:?}). If the handler moved or was renamed, \
+             update this gate — do not let IO-global identity coverage silently lapse.",
+            stack_rs_path.display()
+        );
+    }
+
+    let fixture_path = manifest_dir.join("tests/fixtures/io/redirect_stdio_pipe_9577.jl");
+    let fixture = fs::read_to_string(&fixture_path).unwrap_or_else(|e| {
+        panic!(
+            "Issue #10056: failed to read {}: {}",
+            fixture_path.display(),
+            e
+        )
+    });
+
+    let mut problems: Vec<String> = Vec::new();
+    for (variant, body) in &io_push_arms {
+        // 1. Singleton invariant: the handler must clone VM/session-owned
+        //    state, never construct a fresh IO value per instruction.
+        if body.contains("IOValue::") {
+            problems.push(format!(
+                "  Instr::{variant}: handler calls an `IOValue::…` constructor. Builtin IO \
+                 globals are identity-observable with `===`; load a VM/session-owned \
+                 singleton ref instead (see vm/state.rs initialization)."
+            ));
+        }
+        if !body.contains("self.") {
+            problems.push(format!(
+                "  Instr::{variant}: handler does not read VM/session state (`self.…`); \
+                 the pushed IO value cannot be a VM-owned singleton."
+            ));
+        }
+        // 2. Fixture identity coverage: `stdout === stdout` etc.
+        let global = variant.trim_start_matches("Push").to_lowercase();
+        let identity_check = format!("{global} === {global}");
+        if !fixture.contains(&identity_check) {
+            problems.push(format!(
+                "  Instr::{variant}: fixture {} lacks the identity assertion \
+                 `@test {identity_check}` for the `{global}` global.",
+                fixture_path.display()
+            ));
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "Issue #10056: builtin IO global identity invariant violated for {} handler(s). \
+         Every `Push*` builtin IO instruction must push a VM-owned singleton ref and be \
+         covered by a `===` identity check in the IO fixture:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
 }
 
 // Include auto-generated test modules from build.rs

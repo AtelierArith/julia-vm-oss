@@ -6,7 +6,7 @@ function memory_setindex_test!(m, v, i)
 end
 
 @testset "Memory{T} bounds checking" begin
-    m = Memory{Int64}(3)
+    m = Memory{Int64}(undef, 3)
     m[1] = 10
     m[2] = 20
     m[3] = 30
@@ -24,7 +24,7 @@ end
     @test_throws BoundsError memory_setindex_test!(m, 99, 4)
 
     # Empty memory — all access is out of bounds
-    m2 = Memory{Int64}(0)
+    m2 = Memory{Int64}(undef, 0)
     @test_throws BoundsError m2[1]
 end
 

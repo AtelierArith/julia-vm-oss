@@ -12,6 +12,10 @@ fn assert_parses(source: &str) {
     );
 }
 
+fn assert_parse_fails(source: &str) {
+    assert!(parse(source).is_err(), "Expected parse failure: {source}");
+}
+
 fn assert_root_child_kind(source: &str, expected_kind: NodeKind) {
     let cst = parse(source).unwrap_or_else(|_| panic!("Failed to parse: {}", source));
     assert_eq!(cst.kind, NodeKind::SourceFile);
@@ -111,6 +115,26 @@ fn test_character_escape() {
 fn test_character_unicode() {
     assert_root_child_kind("'α'", NodeKind::CharacterLiteral);
     assert_root_child_kind("'日'", NodeKind::CharacterLiteral);
+}
+
+#[test]
+fn test_character_invalid_byte_escapes_issue_8759() {
+    assert_root_child_kind("'\\x1'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\u80'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\U10000'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\U10ffff'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\U001f428'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\xc0\\xa0'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\xf0\\x80\\x80'", NodeKind::CharacterLiteral);
+    assert_parse_fails("'\\x41\\x42'");
+    assert_parse_fails("'\\x80\\x80'");
+}
+
+#[test]
+fn test_character_octal_and_quote_literal_issue_8961() {
+    assert_root_child_kind("'\\033'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'\\100'", NodeKind::CharacterLiteral);
+    assert_root_child_kind("'''", NodeKind::CharacterLiteral);
 }
 
 // =============================================================================

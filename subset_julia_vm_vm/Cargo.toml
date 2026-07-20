@@ -1,0 +1,49 @@
+[package]
+name = "subset_julia_vm_vm"
+version = "0.10.3"
+edition = "2021"
+rust-version.workspace = true
+license = "MIT OR Apache-2.0"
+
+[features]
+default = []
+profiling = []
+vm-handler-table = []
+wasm = ["dep:js-sys"]
+
+[dependencies]
+subset_julia_vm_ir = { path = "../subset_julia_vm_ir" }
+subset_julia_vm_lowering = { path = "../subset_julia_vm_lowering" }
+subset_julia_vm_bytecode = { path = "../subset_julia_vm_bytecode" }
+subset_julia_vm_parser = { path = "../subset_julia_vm_parser" }
+subset_julia_vm_types = { path = "../subset_julia_vm_types" }
+serde_json = "1"
+num-bigint = "0.4"
+num-traits = "0.2"
+smallvec = "1"
+half = { version = "2.4", default-features = false, features = ["serde"] }
+astro-float = "0.9"
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
+js-sys = { version = "0.3", optional = true }
+
+[dev-dependencies]
+subset_julia_vm = { path = "../subset_julia_vm" }
+subset_julia_vm_compile = { path = "../subset_julia_vm_compile" }
+
+[lints.rust]
+# VM internals become visible to the integration crate after extraction; they
+# are not a stable external API surface.
+missing_debug_implementations = "allow"
+
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+only_used_in_recursion = "allow"
+large_enum_variant = "allow"
+wrong_self_convention = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+items_after_test_module = "allow"
+cast_sign_loss = "warn"

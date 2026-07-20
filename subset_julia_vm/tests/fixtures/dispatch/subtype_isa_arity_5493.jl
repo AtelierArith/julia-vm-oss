@@ -72,6 +72,14 @@ function isa_too_many_is_catchable()
     end
 end
 
+function lt_two_arg_alias_call_in_function()
+    return lt(Int, Number)
+end
+
+function isa_two_arg_alias_call_in_function()
+    return is_a(3, Int)
+end
+
 @testset "wrong-arity type-operator calls are catchable (Issue #5493)" begin
     @test lt_too_few_is_catchable()
     @test lt_too_many_is_catchable()
@@ -84,6 +92,11 @@ end
     @test is_a(3, Int) == true
     @test is_a(3, String) == false
     @test gt(Number, Int) == true
+
+    # Issue #8911/#8907/#8902: const aliases to builtin operator/function values
+    # must remain visible as callable globals when compiling function bodies.
+    @test lt_two_arg_alias_call_in_function() == true
+    @test isa_two_arg_alias_call_in_function() == true
 end
 
 println("all 5493 checks passed")

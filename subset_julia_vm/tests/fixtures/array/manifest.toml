@@ -1,124 +1,16 @@
 # Test manifest for array category
 
 [[tests]]
-name = "array_fancy_vector_index_5756"
-file = "fancy_vector_index_5756.jl"
-expected = true
-description = "Fancy/vector-literal indexing arr[[1,3,5]] (1D, 2D, logical) is a single index, not multi-dim (Issue #5756)"
-
-[[tests]]
-name = "array_reshape_range_5758"
-file = "reshape_range_5758.jl"
-expected = true
-description = "reshape(range, dims) materializes and reshapes the range, e.g. reshape(1:6, 2, 3) == [1 3 5; 2 4 6] (Issue #5758)"
-
-[[tests]]
 name = "array_literal_type_inference"
 file = "literal_type_inference.jl"
 expected = true
 description = "Array literals create arrays with correct element types (Issue #609)"
 
 [[tests]]
-name = "array_literal_memory_first"
-file = "literal_memory_first.jl"
-expected = true
-description = "Array literals preserve type, shape, and mutation behavior through Memory-first builders (Issue #3953)"
-
-[[tests]]
-name = "array_literal_struct_routing_6649"
-file = "array_literal_struct_routing_6649.jl"
-expected = true
-description = "Untyped array literals and typed empty literals route to the pure-Julia Array{T,N} wrapper over MemoryRef{T} instead of the native array builder (Issue #6649)"
-
-[[tests]]
-name = "array_construction_remaining_routing_6649"
-file = "array_construction_remaining_routing_6649.jl"
-expected = true
-description = "Typed non-empty literals, empty Array/Vector constructors, comprehensions, undef, zeros/fill/similar, and Bool constructors route through Memory-backed Array wrappers where applicable (Issue #6649)"
-
-[[tests]]
-name = "array_collect_wrapper_routing_6649"
-file = "array_collect_wrapper_routing_6649.jl"
-expected = true
-description = "collect/range materialization routes public results through Memory-backed Array wrappers while preserving element type and copy semantics (Issue #6649)"
-
-[[tests]]
-name = "array_generator_collect_wrapper_routing_6649"
-file = "array_generator_collect_wrapper_routing_6649.jl"
-expected = true
-description = "Generator/HOF-backed collect routes public results through Memory-backed Array wrappers while preserving element type and shape (Issue #6649)"
-
-[[tests]]
-name = "array_axes_zero_dim_wrapper_6650"
-file = "array_axes_zero_dim_wrapper_6650.jl"
-expected = true
-description = "Array wrapper axes returns upstream OneTo axes and zero-dimensional getindex/setindex! works over MemoryRef storage (Issue #6650)"
-
-[[tests]]
-name = "array_memory_mutation_iteration_6651"
-file = "array_memory_mutation_iteration_6651.jl"
-expected = true
-description = "Array wrapper push!/pop!/pushfirst!/popfirst!/insert!/deleteat!/resize!/empty!/iterate operate over MemoryRef storage with upstream state and sharing semantics (Issue #6651)"
-
-[[tests]]
-name = "array_hof_broadcast_wrapper_6652"
-file = "array_hof_broadcast_wrapper_6652.jl"
-expected = true
-description = "Array wrapper map/map!/broadcast/broadcast!/reduce/mapreduce/collect/filter/sort/comprehension materialization operate over MemoryRef storage and keep MemoryRef-backed public result surfaces (Issue #6652)"
-
-[[tests]]
-name = "array_native_carrier_demoted_6653"
-file = "array_native_carrier_demoted_6653.jl"
-expected = true
-description = "Public Array construction/materialization/HOF/broadcast routes return MemoryRef-backed Array wrappers, leaving the native array carrier as a VM/cache compatibility boundary (Issue #6653)"
-
-[[tests]]
-name = "array_string_literal_type_preservation_4277"
-file = "string_literal_type_preservation_4277.jl"
-expected = true
-description = "String and Char array literals preserve concrete Vector element types (Issue #4277)"
-
-[[tests]]
-name = "array_arraymath_vector_add_sub_dispatch_4019"
-file = "arraymath_vector_add_sub_dispatch_4019.jl"
-expected = true
-description = "Vector + and - route through Pure Julia arraymath dispatch before Rust array arithmetic fallback (Issue #4019)"
-
-[[tests]]
-name = "array_arraymath_matrix_add_sub_dispatch_7579"
-file = "arraymath_matrix_add_sub_dispatch_7579.jl"
-expected = true
-description = "Matrix + and - route through Pure Julia arraymath dispatch with shape-preserving dense elementwise results (Issue #7579)"
-
-[[tests]]
-name = "array_map_bang_five_sources_4019"
-file = "map_bang_five_sources_4019.jl"
-expected = true
-description = "map! with five Array sources routes through Pure Julia dispatch and preserves destination mutation semantics (Issue #4019)"
-
-[[tests]]
-name = "array_map_bang_vararg_sources_4019"
-file = "map_bang_vararg_sources_4019.jl"
-expected = true
-description = "map! with six or more Array sources and splatted source tuples routes through Pure Julia vararg dispatch (Issue #4019)"
-
-[[tests]]
 name = "array_zeros_ones_typed"
 file = "zeros_ones_typed.jl"
 expected = true
 description = "zeros(Type, dims...) and ones(Type, dims...) create typed arrays through Pure Julia dispatch, including runtime DataType values (Issues #589/#4036/#4039/#4044)"
-
-[[tests]]
-name = "array_zeros_ones_fill_tuple_dims_4018"
-file = "zeros_ones_fill_tuple_dims_4018.jl"
-expected = true
-description = "typed tuple-dims zeros/ones/fill and Array{T}(undef, dims) allocate through Pure Julia similar(Array{T}, dims) wrapper dispatch (Issue #4018)"
-
-[[tests]]
-name = "array_range_adjoint_similar_allocation_4018"
-file = "range_adjoint_similar_allocation_4018.jl"
-expected = true
-description = "Range adjoint row allocation returns a Matrix whose assigned local type still dispatches size(::Array) (Issues #4018, #4572)"
 
 [[tests]]
 name = "array_sum"
@@ -169,70 +61,10 @@ expected = true
 description = "hcat: element value check"
 
 [[tests]]
-name = "array_hcat_varargs_type_preservation_4280"
-file = "hcat_varargs_type_preservation_4280.jl"
-expected = true
-description = "hcat of 4+ homogeneous typed vectors preserves Matrix element type (Issue #4280)"
-
-[[tests]]
-name = "array_hcat_small_integer_type_preservation_4607"
-file = "hcat_small_integer_type_preservation_4607.jl"
-expected = true
-description = "hcat preserves small signed/unsigned integer element types instead of falling back to Matrix{Any} (Issues #4018, #4607)"
-
-[[tests]]
-name = "array_concat_mixed_type_preservation_4655"
-file = "concat_mixed_type_preservation_4655.jl"
-expected = true
-description = "hcat and vcat preserve promoted mixed vector element types instead of falling back to Any or the first input eltype (Issues #4018, #4655)"
-
-[[tests]]
-name = "array_runtime_datatype_typed_array_constructor_4606"
-file = "runtime_datatype_typed_array_constructor_4606.jl"
-expected = true
-description = "Runtime DataType typed array constructor T[...] creates a typed vector, including abstract Real/Number element types with concrete value preservation, instead of indexing DataType (Issues #4018, #4586, #4606, #4641)"
-
-[[tests]]
-name = "array_any_preserves_narrow_integer_4646"
-file = "array_any_preserves_narrow_integer_4646.jl"
-expected = true
-description = "Array{Any}/Array{Real} setindex! preserves boxed narrow integer and Float32 values instead of widening them through the scalar F64 IndexStore path (Issue #4646)"
-
-[[tests]]
-name = "array_complex_typed_array_literal_4605"
-file = "complex_typed_array_literal_4605.jl"
-expected = true
-description = "ComplexF64[...] and Complex{T}[...] typed literals construct typed Complex vectors instead of coercing element values as dimensions (Issues #4018, #4605)"
-
-[[tests]]
-name = "array_typed_vector_equality_4639"
-file = "typed_vector_equality_4639.jl"
-expected = true
-description = "Typed Vector{Int16} equality dispatch handles inline literals and runtime values (Issue #4639)"
-
-[[tests]]
-name = "array_matrix_equality_4653"
-file = "matrix_equality_4653.jl"
-expected = true
-description = "Typed and boxed Matrix equality compares logical wrapper shape and values (Issue #4653)"
-
-[[tests]]
-name = "array_string_array_type_preservation_4278"
-file = "string_array_type_preservation_4278.jl"
-expected = true
-description = "String literal arrays preserve element type through similar/repeat/permutedims representative cases (Issue #4278)"
-
-[[tests]]
 name = "array_matrix_literal_storage"
 file = "matrix_literal_storage.jl"
 expected = true
 description = "Matrix literal [1 2; 3 4] uses column-major storage order"
-
-[[tests]]
-name = "array_typed_matrix_literal_4575_4629"
-file = "typed_matrix_literal_4575_4629.jl"
-expected = true
-description = "Typed matrix literals lower through typed vector construction plus reshape (Issues #4575, #4629)"
 
 [[tests]]
 name = "array_vec_1d"
@@ -259,30 +91,6 @@ expected = true
 description = "findlast: find last occurrence (returns Int64 index)"
 
 [[tests]]
-name = "array_findfirst_predicate"
-file = "findfirst_predicate.jl"
-expected = true
-description = "findfirst(f, A): find first index where predicate is true (Issue #1996)"
-
-[[tests]]
-name = "array_query_dispatch_first_6743"
-file = "array_query_dispatch_first_6743.jl"
-expected = true
-description = "length/size/ndims/eltype dispatch-first to pure-Julia methods (base/array.jl); user-defined query methods are not shadowed by the Rust fallback, matching upstream (Issue #6743)"
-
-[[tests]]
-name = "array_reducers_finders_pure_julia_6745"
-file = "reducers_finders_pure_julia_6745.jl"
-expected = true
-description = "collect/findfirst/findall/argmin/argmax/prod/minimum/maximum + array iteration are pure Julia (base/array.jl) and match upstream across element types; dead Rust BuiltinId variants (Prod/Minimum/Maximum/Argmin/Argmax/FindFirst/FindAll) removed (Issue #6745)"
-
-[[tests]]
-name = "array_findlast_predicate"
-file = "findlast_predicate.jl"
-expected = true
-description = "findlast(f, A): find last index where predicate is true (Issue #1996)"
-
-[[tests]]
 name = "array_findall_count"
 file = "findall_count.jl"
 expected = true
@@ -301,12 +109,6 @@ expected = 1.0
 description = "findall: single-argument form for boolean arrays"
 
 [[tests]]
-name = "array_findall_hof_chain"
-file = "findall_hof_chain.jl"
-expected = true
-description = "findall(A::Array) dispatch over findall(x::Bool) after HOF chains (Issue #2296)"
-
-[[tests]]
 name = "array_fill_mutate"
 file = "fill_mutate.jl"
 expected = true
@@ -319,46 +121,10 @@ expected = true
 description = "copyto!: copy elements between arrays"
 
 [[tests]]
-name = "array_wrap_memoryref"
-file = "wrap_memoryref.jl"
-expected = true
-description = "wrap(Array, MemoryRef, dims) preserves offset backing storage (Issue #3926)"
-
-[[tests]]
-name = "array_similar_receiver_typevar_binding_4018"
-file = "similar_receiver_typevar_binding_4018.jl"
-expected = true
-description = "similar(a::Array{T}, dims) can use receiver-bound T for native and Memory-backed arrays (Issue #4018)"
-
-[[tests]]
 name = "array_similar_known_array_dispatch_4018"
 file = "similar_known_array_dispatch_4018.jl"
 expected = true
 description = "Known Array receiver similar calls go through method dispatch before builtin fallback (Issue #4018)"
-
-[[tests]]
-name = "array_similar_any_receiver_dispatch_4018"
-file = "similar_any_receiver_dispatch_4018.jl"
-expected = true
-description = "Any-typed Array receiver similar calls try method dispatch before builtin fallback (Issue #4018)"
-
-[[tests]]
-name = "array_wrapper_push_dispatch_4018"
-file = "wrapper_push_dispatch_4018.jl"
-expected = true
-description = "push! on Pure Julia Array wrapper dispatches instead of failing in ArrayPush fallback (Issue #4018)"
-
-[[tests]]
-name = "array_similar_bare_array_dispatch_4018"
-file = "similar_bare_array_dispatch_4018.jl"
-expected = true
-description = "Bare Array receiver similar calls allocate through Pure Julia eltype(a) fallback and support push! (Issue #4018)"
-
-[[tests]]
-name = "array_wrap_range_indexing"
-file = "wrap_range_indexing.jl"
-expected = true
-description = "wrap(Array, Memory, dims) supports Pure Julia range and colon indexing (Issue #4017)"
 
 [[tests]]
 name = "array_first_last"
@@ -421,12 +187,6 @@ expected = true
 description = "permutedims for 3D array with permutation argument"
 
 [[tests]]
-name = "array_permutedims_explicit_float32_type_preservation_4598"
-file = "permutedims_explicit_float32_type_preservation_4598.jl"
-expected = true
-description = "permutedims(A, perm) preserves Float32 result eltype for 2D identity, 3D, and 4D explicit permutations (Issues #4018, #4598)"
-
-[[tests]]
 name = "reshape_basic"
 file = "reshape_basic.jl"
 expected = true
@@ -481,12 +241,6 @@ expected = true
 description = "copyto! with offset arguments (dstart, sstart, n)"
 
 [[tests]]
-name = "array_copyto_overlap"
-file = "copyto_overlap.jl"
-expected = true
-description = "copyto! handles overlapping self-copy ranges (Issue #3595)"
-
-[[tests]]
 name = "array_dequeue_operations"
 file = "dequeue_operations.jl"
 expected = true
@@ -497,12 +251,6 @@ name = "array_permutation_functions"
 file = "permutation_functions.jl"
 expected = true
 description = "Permutation functions: indexin, isperm, invperm"
-
-[[tests]]
-name = "array_indexin_union_result_4657"
-file = "indexin_union_result_4657.jl"
-expected = true
-description = "indexin returns Vector{Union{Nothing, Int64}} instead of Vector{Any} (Issues #4018/#4657)"
 
 [[tests]]
 name = "array_empty_filter_inplace"
@@ -523,143 +271,10 @@ expected = true
 description = "map! - apply function to array elements in-place"
 
 [[tests]]
-name = "array_map_inplace_binary_4019"
-file = "map_inplace_binary_4019.jl"
-expected = true
-description = "Binary map!(f, dest, A, B) mutates destination through Pure Julia dispatch (Issue #4019)"
-
-[[tests]]
-name = "array_map_inplace_nary_4019"
-file = "map_inplace_nary_4019.jl"
-expected = true
-description = "N-ary map!(f, dest, A, B, C) mutates destination through Pure Julia dispatch (Issue #4019)"
-
-[[tests]]
-name = "array_clamp_inplace"
-file = "clamp_inplace.jl"
-expected = true
-description = "clamp! - clamp array values in place (Issue #433)"
-
-[[tests]]
 name = "array_issue_825_mutation"
 file = "issue_825_mutation.jl"
 expected = true
 description = "Array mutation operations: pop!, push!, resize!, unique! (Issue #825)"
-
-[[tests]]
-name = "array_adjoint_transpose"
-file = "adjoint_transpose.jl"
-expected = true
-description = "adjoint and transpose for arrays (Pure Julia implementation)"
-
-[[tests]]
-name = "array_adjoint_float32_type_preservation_4597"
-file = "adjoint_float32_type_preservation_4597.jl"
-expected = true
-description = "adjoint preserves Float32 element type instead of allocating Matrix{Float64} through zeros fallback (Issues #4018, #4597)"
-
-[[tests]]
-name = "array_adjoint_bool_type_preservation_4601"
-file = "adjoint_bool_type_preservation_4601.jl"
-expected = true
-description = "adjoint preserves Bool element type instead of allocating Matrix{Float64} through zeros fallback (Issues #4018, #4601)"
-
-[[tests]]
-name = "array_adjoint_small_integer_type_preservation_4602"
-file = "adjoint_small_integer_type_preservation_4602.jl"
-expected = true
-description = "adjoint preserves small signed/unsigned integer element types instead of allocating Matrix{Float64} through zeros fallback (Issues #4018, #4602)"
-
-[[tests]]
-name = "array_adjoint_complex_type_preservation_4604"
-file = "adjoint_complex_type_preservation_4604.jl"
-expected = true
-description = "adjoint preserves Complex{Float64} element type and conjugated values instead of routing through zeros fallback (Issues #4018, #4604)"
-
-[[tests]]
-name = "array_empty_array_type_preservation_4599"
-file = "empty_array_type_preservation_4599.jl"
-expected = true
-description = "empty(::Array) and empty(arr, T) preserve source or requested element type instead of zeros(0) Float64 fallback (Issues #4018, #4599)"
-
-[[tests]]
-name = "array_slice_2d_dimension"
-file = "slice_2d_dimension.jl"
-expected = true
-description = "2D slice dimension handling: A[:, i] returns 1D vector (Issue #1562)"
-
-[[tests]]
-name = "array_slice_2d_shape_debug"
-file = "slice_2d_shape_debug.jl"
-expected = true
-description = "Debug test for 2D slice shape"
-
-[[tests]]
-name = "array_slice_2d_size_check"
-file = "slice_2d_size_check.jl"
-expected = true
-description = "Explicit size check for 2D slicing"
-
-[[tests]]
-name = "array_slice_2d_explicit_shape"
-file = "slice_2d_explicit_shape.jl"
-expected = true
-description = "Explicit shape verification for 2D slicing"
-
-[[tests]]
-name = "array_slice_bool"
-file = "slice_bool_array.jl"
-expected = true
-description = "Bool array slicing preserves element type (Issue #1565)"
-
-[[tests]]
-name = "array_slice_index_logical_3908"
-file = "slice_index_logical_3908.jl"
-expected = true
-description = "Array slice index vectors and masks read logical reshaped elements (Issue #3908)"
-
-[[tests]]
-name = "array_slice_string"
-file = "slice_string_array.jl"
-expected = true
-description = "String array slicing preserves element type (Issue #1565)"
-
-[[tests]]
-name = "array_slice_bool_2d"
-file = "slice_bool_2d.jl"
-expected = true
-description = "2D Bool array slicing preserves element type (Issue #1565)"
-
-[[tests]]
-name = "array_slice_3d_basic"
-file = "slice_3d_basic.jl"
-expected = true
-description = "3D array slicing (Issue #1564)"
-
-
-[[tests]]
-name = "array_typed_undef_constructor"
-file = "typed_array_undef_constructor.jl"
-expected = true
-description = "Vector{T}(undef, n), Array{T}(undef, dims...), and Array{T,N}(undef, tuple dims) constructors (Issues #1586/#4047)"
-
-[[tests]]
-name = "array_matrix_vector_undef_constructor_7890"
-file = "matrix_vector_undef_constructor_7890.jl"
-expected = true
-description = "Matrix{T}(undef, m, n) and Vector{T}(undef, n) constructors (Issue #7890)"
-
-[[tests]]
-name = "array_typed_edge_cases"
-file = "typed_array_edge_cases.jl"
-expected = true
-description = "Typed array constructor edge cases: zero-length, single-element, multi-dim, zeros/ones (Issue #1607)"
-
-[[tests]]
-name = "array_isassigned_basic"
-file = "isassigned_basic.jl"
-expected = true
-description = "isassigned(array, i) checks if index is valid (Issue #1836)"
 
 [[tests]]
 name = "array_accumulate_basic"
@@ -668,346 +283,10 @@ expected = true
 description = "accumulate(op, A) cumulative operation for vectors (Issue #1839)"
 
 [[tests]]
-name = "array_accumulate_operator_type_preservation_4608"
-file = "accumulate_operator_type_preservation_4608.jl"
-expected = true
-description = "accumulate operator and generic callable paths preserve representative typed vector allocations, including promoted/changing accumulator single and empty vectors (Issues #4018, #4608, #4645)"
-
-[[tests]]
-name = "array_cumulative_type_preservation_4018"
-file = "cumulative_type_preservation_4018.jl"
-expected = true
-description = "cumsum/cumprod preserve upstream result element types through non-Float64 allocation (Issues #4018, #4590)"
-
-[[tests]]
-name = "array_matrix_rotation"
-file = "matrix_rotation.jl"
-expected = true
-description = "rotl90, rotr90, rot180 - matrix rotation functions (Issue #1879)"
-
-[[tests]]
-name = "array_first_last_n"
-file = "first_last_n.jl"
-expected = true
-description = "first(arr, n) and last(arr, n) - multi-element variants (Issue #1887)"
-
-[[tests]]
-name = "array_stack_selectdim"
-file = "stack_selectdim.jl"
-expected = true
-description = "stack and selectdim array utility functions (Issue #1942)"
-
-[[tests]]
-name = "array_stack_ragged"
-file = "stack_ragged.jl"
-expected = true
-description = "stack on ragged input raises DimensionMismatch (Issue #3592)"
-
-[[tests]]
-name = "array_eachrow_eachcol_dropdims"
-file = "eachrow_eachcol_dropdims.jl"
-expected = true
-description = "eachrow, eachcol, dropdims array utility functions (Issue #1946)"
-
-[[tests]]
-name = "array_cat_eachslice_mapslices"
-file = "cat_eachslice_mapslices.jl"
-expected = true
-description = "cat, eachslice, mapslices array utility functions (Issue #1952)"
-
-[[tests]]
-name = "array_cat_string_type_preservation_4592"
-file = "cat_string_type_preservation_4592.jl"
-expected = true
-description = "cat preserves String and mixed promoted result eltypes through typed allocation instead of zeros fallback (Issues #4018, #4592, #4651)"
-
-[[tests]]
-name = "array_mapslices_string_type_preservation_4593"
-file = "mapslices_string_type_preservation_4593.jl"
-expected = true
-description = "mapslices allocates String input slices with similar(A, len) and result arrays from the function result type (Issues #4018, #4593)"
-
-[[tests]]
-name = "array_sortslices_string_type_preservation_4594"
-file = "sortslices_string_type_preservation_4594.jl"
-expected = true
-description = "sortslices preserves String matrix result eltype through similar(A, m, n) allocation instead of zeros fallback (Issues #4018, #4594)"
-
-[[tests]]
-name = "array_reduce_dims"
-file = "reduce_dims.jl"
-expected = true
-description = "sum, prod, maximum, minimum, extrema with dims keyword argument (Issue #1958)"
-
-[[tests]]
-name = "array_reduce_dims_string_type_preservation_4595"
-file = "reduce_dims_string_type_preservation_4595.jl"
-expected = true
-description = "minimum/maximum/extrema with dims preserve upstream String matrix result eltypes and tuple matrix shape (Issues #4018, #4595)"
-
-[[tests]]
-name = "array_sum_dims_bool_type_preservation_4596"
-file = "sum_dims_bool_type_preservation_4596.jl"
-expected = true
-description = "sum with dims on Bool matrices returns Int64 result arrays instead of preserving Bool eltype (Issues #4018, #4596)"
-
-[[tests]]
-name = "array_prod_dims_type_preservation_4614"
-file = "prod_dims_type_preservation_4614.jl"
-expected = true
-description = "prod with dims preserves upstream typed matrix result allocation for small integers and strings (Issues #4019, #4614)"
-
-[[tests]]
-name = "array_prod_scalar_type_preservation_4615"
-file = "prod_scalar_type_preservation_4615.jl"
-expected = true
-description = "scalar prod preserves upstream result types for typed vectors and empty products (Issues #4019, #4615)"
-
-[[tests]]
-name = "array_prod_bang_type_preservation_4616"
-file = "prod_bang_type_preservation_4616.jl"
-expected = true
-description = "prod! preserves typed in-place reduction semantics without Float64 accumulator fallback (Issues #4019, #4616)"
-
-[[tests]]
-name = "array_sum_bang_type_preservation_4617"
-file = "sum_bang_type_preservation_4617.jl"
-expected = true
-description = "sum! preserves typed in-place reduction semantics and Bool destination errors without Float64 accumulator fallback (Issues #4019, #4617)"
-
-[[tests]]
-name = "array_sum_scalar_type_preservation_4618"
-file = "sum_scalar_type_preservation_4618.jl"
-expected = true
-description = "scalar sum preserves upstream result types for Bool, small integer, unsigned, and Float32 vectors (Issues #4019, #4618)"
-
-[[tests]]
-name = "array_partialsortperm_sortslices"
-file = "partialsortperm_sortslices.jl"
-expected = true
-description = "partialsortperm, partialsortperm!, sortslices (Issue #1962)"
-
-[[tests]]
-name = "array_inplace_reductions"
-file = "inplace_reductions.jl"
-expected = true
-description = "In-place reduction functions: sum!, prod!, maximum!, minimum! (Issue #1964)"
-
-[[tests]]
-name = "array_permutedims_inplace"
-file = "permutedims_inplace.jl"
-expected = true
-description = "permutedims! in-place dimension permutation (Issue #1964)"
-
-[[tests]]
-name = "array_cumulative_inplace"
-file = "cumulative_inplace.jl"
-expected = true
-description = "In-place cumulative functions: cumsum!, cumprod!, accumulate! (Issue #1966)"
-
-[[tests]]
-name = "array_sort_keywords"
-file = "sort_keywords.jl"
-expected = true
-description = "sort/sort! keyword arguments: by, rev, lt (Issue #2011)"
-
-[[tests]]
-name = "array_similar_basic"
-file = "similar_basic.jl"
-expected = true
-description = "similar() function for creating uninitialized arrays (Issue #2129)"
-
-[[tests]]
-name = "array_similar_array_type_dispatch"
-file = "similar_array_type_dispatch.jl"
-expected = true
-description = "similar(Array{T}, dims...) allocates through Pure Julia Array wrapper dispatch (Issue #4018)"
-
-[[tests]]
-name = "array_similar_array_type_preservation"
-file = "similar_array_type_preservation.jl"
-expected = true
-description = "similar(Array{T}, dims...) preserves typeof/eltype through wrapper allocation (Issue #4029)"
-
-[[tests]]
-name = "array_fill_type_preservation"
-file = "fill_type_preservation.jl"
-expected = true
-description = "fill(value, dims...) allocates through Array{typeof(value)} and preserves value type (Issue #4018, bug #4027)"
-
-[[tests]]
-name = "array_similar_multidim"
-file = "similar_multidim.jl"
-expected = true
-description = "similar(arr, dims...) and similar(arr, T, dims...) for 2+ dimensions (Issue #3751)"
-
-[[tests]]
-name = "array_multi_comprehension"
-file = "multi_comprehension.jl"
-expected = true
-description = "Multi-variable array comprehension [expr for i in R1, j in R2] (Issue #2143)"
-
-[[tests]]
-name = "array_insertdims"
-file = "insertdims.jl"
-expected = true
-description = "insertdims: insert singleton dimensions, inverse of dropdims (Issue #2153)"
-
-[[tests]]
-name = "array_stride_strides"
-file = "stride_strides.jl"
-expected = true
-description = "stride and strides: memory stride for column-major arrays (Issue #2157)"
-
-[[tests]]
-name = "array_vcat_hcat_varargs"
-file = "vcat_hcat_varargs.jl"
-expected = true
-description = "vcat/hcat with 3+ arguments (varargs) (Issue #2169)"
-
-[[tests]]
-name = "array_scalar_ndims_length"
-file = "scalar_ndims_length.jl"
-expected = true
-description = "ndims(::Number) = 0 and length(::Number) = 1 for scalar types (Issue #2171)"
-
-[[tests]]
-name = "array_fill_non_numeric"
-file = "fill_non_numeric.jl"
-expected = true
-description = "fill() with non-numeric types: String, Bool (Issue #2177)"
-
-[[tests]]
-name = "array_scalar_size"
-file = "scalar_size.jl"
-expected = true
-description = "size(::Number) returns empty tuple for scalars (Issue #2179)"
-
-[[tests]]
-name = "array_typed_undef_roundtrip"
-file = "typed_undef_roundtrip.jl"
-expected = true
-description = "Write-read round-trip for all typed undef array constructors: Float64, Int64, Bool, Complex (Issue #1804)"
-
-[[tests]]
-name = "array_vector_bool_indexstore"
-file = "vector_bool_indexstore.jl"
-expected = true
-description = "Indexed assignment to Vector{Bool}(undef, n) handles Bool values (Issue #2207)"
-
-[[tests]]
-name = "array_typed_indexstore_all_types"
-file = "typed_array_indexstore_all_types.jl"
-expected = true
-description = "IndexStore roundtrip for all numeric element types: Int8-Int64, UInt8-UInt64, Float16-Float64, Bool (Issue #2218)"
-
-[[tests]]
-name = "array_begin_indexing"
-file = "begin_indexing.jl"
-expected = true
-description = "begin keyword in indexing context: a[begin], a[begin+1], a[begin:end], and nested inner end over arrays (Issues #2310, #5604)"
-
-[[tests]]
-name = "array_vectorof_specificity"
-file = "vectorof_specificity.jl"
-expected = true
-description = "VectorOf specificity dispatch: Vector{Int64} preferred over Vector{Any} (Issue #2352)"
-
-[[tests]]
-name = "array_vectorof_type_locals"
-file = "vectorof_type_locals.jl"
-expected = true
-description = "VectorOf type tracking through reassignment and conditional expressions (Issue #2319)"
-
-[[tests]]
-name = "array_begin_end_multidim"
-file = "begin_end_multidim.jl"
-expected = true
-description = "Multi-dimensional begin/end indexing: m[begin, end] uses dimension-aware firstindex/lastindex (Issue #2349)"
-
-[[tests]]
-name = "array_memory_creation"
-file = "test_array_memory_creation.jl"
-expected = true
-description = "Array creation via Memory pipeline: zeros/ones/similar/undef use MemoryValue internally (Issue #2762)"
-
-[[tests]]
-name = "array_pure_julia_struct"
-file = "test_array_pure_julia.jl"
-expected = true
-description = "Array{T,N} as Pure Julia mutable struct wrapping Memory{T} (Issue #2760)"
-
-[[tests]]
 name = "array_multidim_3d_construction"
 file = "multidim_3d_construction.jl"
 expected = true
 description = "3D array construction via zeros+setindex! and multi-dimensional indexing (Issue #3259)"
-
-[[tests]]
-name = "array_deleteat_return_type"
-file = "deleteat_return_type.jl"
-expected = true
-description = "deleteat! returns the mutated array, not the removed element (Issue #3468)"
-
-[[tests]]
-name = "array_setindex_return_type"
-file = "setindex_return_type.jl"
-expected = true
-description = "setindex! returns the mutated collection, not the assigned value (Issue #3477)"
-
-[[tests]]
-name = "array_splice_range"
-file = "splice_range.jl"
-expected = true
-description = "splice! with range indices removes and returns a subarray (Issue #3481)"
-
-[[tests]]
-name = "array_repeat_type_preservation"
-file = "repeat_type_preservation.jl"
-expected = true
-description = "repeat preserves element type and values for one- and two-dim forms (Issue #3587, #3761)"
-
-[[tests]]
-name = "array_stack_type_preservation"
-file = "stack_type_preservation.jl"
-expected = true
-description = "stack preserves homogeneous and mixed promoted matrix element types without Float64 or Any widening (Issues #3591, #4018, #4603, #4652)"
-
-[[tests]]
-name = "array_hcat_type_preservation"
-file = "hcat_type_preservation.jl"
-expected = true
-description = "hcat preserves Matrix{Int64}/Bool/Float64/String for 2- and 3-arg forms (Issue #3588)"
-
-[[tests]]
-name = "array_rotation_type_preservation"
-file = "rotation_type_preservation.jl"
-expected = true
-description = "rotl90/rotr90/rot180 preserve Matrix{Int64}/Bool/Float64 (Issue #3589)"
-
-[[tests]]
-name = "array_permutedims_type_preservation"
-file = "permutedims_type_preservation.jl"
-expected = true
-description = "permutedims preserves Matrix element types through similar allocation, including Int8 and Float32 (Issues #3590, #4018, #4656)"
-
-[[tests]]
-name = "array_type_preserving_alloc"
-file = "type_preserving_alloc.jl"
-expected = true
-description = "similar/collect/Vector{T}(undef, n) preserve element type from inside functions (Issue #3648)"
-
-[[tests]]
-name = "array_similar_dispatch_any_dims"
-file = "similar_dispatch_any_dims.jl"
-expected = true
-description = "similar(arr, ...) routes to builtin even with Any-inferred dim args (Issue #3777)"
-
-[[tests]]
-name = "array_wrapper_typed_index_dispatch_4018"
-file = "wrapper_typed_index_dispatch_4018.jl"
-expected = true
-description = "Typed indexing on Pure Julia Array wrappers dispatches to getindex/setindex! (Issue #4018)"
 
 [[tests]]
 name = "array_any_array_local_boundary_4021"
@@ -1020,48 +299,6 @@ name = "array_local_any_carrier_5081"
 file = "array_local_any_carrier_5081.jl"
 expected = true
 description = "Array fallback locals use locals_any with VarTypeTag::Array after legacy locals_array removal (Issue #5081)"
-
-[[tests]]
-name = "array_indexstore_logical_element_3908"
-file = "indexstore_logical_element_3908.jl"
-expected = true
-description = "IndexStore scalar conversion uses logical ArrayValue element type for Complex and Bool arrays (Issue #3908)"
-
-[[tests]]
-name = "array_zero_preserves_element_type_4419"
-file = "zero_preserves_element_type_4419.jl"
-expected = true
-description = "zero(::Array) native fallback preserves logical element type for Int64, Bool, and Float64 arrays (Issue #4419)"
-
-[[tests]]
-name = "array_memory_array_equality_boundary_3908"
-file = "memory_array_equality_boundary_3908.jl"
-expected = true
-description = "Memory<->Array equality in the binary_both fallback routes through the public Memory 1-indexed boundary helper (Issue #3908)"
-
-[[tests]]
-name = "array_abstractarray_subtype_equality_8229"
-file = "abstractarray_subtype_equality_8229.jl"
-expected = true
-description = "== / isequal element-compare against an AbstractArray-subtype operand the equality builtin cannot read (user struct <: AbstractVector, SubArray view), and such structs dispatch to ::AbstractArray methods (Issue #8229)"
-
-[[tests]]
-name = "array_mutate_push_pop_helpers_3908"
-file = "array_mutate_push_pop_helpers_3908.jl"
-expected = true
-description = "Array zero/push!/pop!/pushfirst!/popfirst!/insert!/deleteat! routed through shared push_array_ref/push_array_value helpers preserve Julia behavior (Issue #3908)"
-
-[[tests]]
-name = "array_logical_index_load_helper_3908"
-file = "logical_index_load_helper_3908.jl"
-expected = true
-description = "Logical and integer IndexLoad selection reads target elements via ArrayValue::get_linear so reshape-aware shared-backing and element-type-preserving semantics stay intact for Int64 and Float64 vectors (Issue #3908)"
-
-[[tests]]
-name = "array_builtins_arrays_query_helpers_3908"
-file = "builtins_arrays_query_helpers_3908.jl"
-expected = true
-description = "Similar/Reshape/Size/Ndims/Keytype/Valtype Array projection routed through shared value_as_array_ref helper preserves Julia behavior for Int64/Float64/Bool/Complex{Float64} arrays and reshaped views (Issue #3908)"
 
 [[tests]]
 name = "array_basic_push_helpers_3908"
@@ -1082,34 +319,10 @@ expected = true
 description = "isequal/hash for native Array values route through ArrayValue logical helpers in vm/builtins_equality.rs so reshape shared backing and NaN-aware Float comparisons stay correct (Issue #3908)"
 
 [[tests]]
-name = "array_index_store_dispatch_helper_3908"
-file = "array_index_store_dispatch_helper_3908.jl"
-expected = true
-description = "IndexStore branches for Tuple value, Array element (Issue #3648), and boxed scalars (String/Char/Symbol) route their native Array targets through the shared array_ref_from_value destructure helper in vm/exec/array_index.rs (Issue #3908)"
-
-[[tests]]
-name = "array_pair_typed_undef_allocation_4635"
-file = "pair_typed_undef_allocation_4635.jl"
-expected = true
-description = "Array{Pair{K,V}}(undef, n) and similar(Array{Pair{K,V}}, dims) preserve Pair parameters (Issues #4018/#4635)"
-
-[[tests]]
-name = "array_tuple_collect_abstract_numeric_eltype_4662"
-file = "tuple_collect_abstract_numeric_eltype_4662.jl"
-expected = true
-description = "collect on mixed numeric tuples and Vector{abstract numeric}(undef, n) preserve upstream abstract numeric eltypes (Issues #4018/#4662)"
-
-[[tests]]
 name = "array_vector_range_constructor_4810"
 file = "vector_range_constructor_4810.jl"
 expected = true
-description = "Vector(::AbstractRange) materializes to a Vector via RangeCollect instead of returning the range unchanged. No-type-args form only — Vector{T}(::AbstractRange) typed conversion stays on follow-up #4811 (Issue #4810)"
-
-[[tests]]
-name = "array_literal_splat_4793"
-file = "array_literal_splat_4793.jl"
-expected = true
-description = "Splat (v...) inside array literals [a, v..., b] flattens via vcat — supports vectors, tuples, ranges, empty collections, and float-promotion (Issue #4793)"
+description = "Vector(::AbstractRange) materializes to a Vector via RangeCollect instead of returning the range unchanged, and Vector(::Array) copies rather than preserving identity (Issues #4810, #10085)"
 
 [[tests]]
 name = "array_typed_vector_range_constructor_4811"
@@ -1118,34 +331,22 @@ expected = true
 description = "Vector{T}(::AbstractRange) typed constructor materializes via a synthesized T[T(x) for x in r] comprehension instead of returning the range unchanged — covers UnitRange, StepRange, StepRangeLen, Array{T} alias, and regression guards for non-typed Vector(range) and Vector{T}(::Array) (Issue #4811)"
 
 [[tests]]
+name = "array_vector_constructor_copy_10085"
+file = "vector_constructor_copy_10085.jl"
+expected = true
+description = "Vector(::Vector) and Vector{T}(::Vector) allocate fresh vectors, and map(Vector, ::Vector{Vector}) dispatches through the same copy constructor (Issue #10085)"
+
+[[tests]]
+name = "array_map_vector_ctor_outer_eltype_10187"
+file = "map_vector_ctor_outer_eltype_10187.jl"
+expected = true
+description = "map(Vector, ::Vector{Vector{Int64}}) preserves the precise OUTER element type Vector{Vector{Int64}} (not Vector{Array{Any, Any}}); covers map(Matrix)/map(x->[x])/collect-generator container results plus direct-vs-callable-vs-typed array-constructor type + copy parity (Issues #10187, #10272, #10250)"
+
+[[tests]]
 name = "array_typed_vector_array_conversion_4816"
 file = "typed_vector_array_conversion_4816.jl"
 expected = true
-description = "Vector{T}(::Vector{S}) where T != S converts each element via T(x) instead of returning the source vector unchanged — covers Int->Float, Float->Int, Float64->Float32, Array{T} alias, plus same-eltype no-op fast path and Vector{T}() / Vector(arr) regression guards (Issue #4816)"
-
-[[tests]]
-name = "array_typed_vector_any_conversion_4818"
-file = "typed_vector_any_conversion_4818.jl"
-expected = true
-description = "Vector{Any}(::Vector{S}) materializes a Vector{Any} via a routed Pure-Julia helper (Any[x for x in arr] cannot be used because typed-Any comprehension is itself broken — #4819). Covers Int->Any, Float->Any, same-eltype Vector{Any}(::Vector{Any}), Vector{Any}() empty, Vector{Any}(undef, n), and non-Any fast-path regression guards (Issue #4818)"
-
-[[tests]]
-name = "array_typed_vector_comprehension_cluster_parity_4824"
-file = "typed_vector_comprehension_cluster_parity_4824.jl"
-expected = true
-description = "Prevention parity probe for the typed-vector / typed-comprehension intercept cluster (#4811/#4816/#4818/#4819/#4822). Sweeps (target T in Int64/Int8/Float64/Float32/Any/String/Char/Symbol) x (arg shape: UnitRange, StepRange, StepRangeLen, Vector{S}, empty array, T[expr for x in iter] comprehension, Any-body comprehension) and locks in both value and typeof against upstream Julia so a future change to compile_array_constructor / compile_comprehension cannot silently break any cell (Issue #4824)"
-
-[[tests]]
-name = "array_typed_vector_tuple_method_error_5041"
-file = "typed_vector_tuple_method_error_5041.jl"
-expected = true
-description = "Vector{T}(::Tuple) / Array{T}(::Tuple) and bare Vector/Array (::Tuple) now raise a catchable MethodError matching upstream (no such constructor method) instead of silently materializing a vector — the single-arg compile_array_constructor intercept guards the Tuple shape and synthesizes throw(MethodError(ctor, (tuple,))). Regression-guards collect(tuple), tuple comprehension, Vector{T}(range/array), Vector{Any}(array), Vector{T}(undef,n), and Array{T}(undef, tuple-dims) (Issue #5041)"
-
-[[tests]]
-name = "array_typed_comprehension_nonnumeric_eltypes_5040"
-file = "typed_comprehension_nonnumeric_eltypes_5040.jl"
-expected = true
-description = "Typed comprehension T[expr for x in iter] for non-numeric element types Bool/Char/Symbol/String now lowers the body to convert(T, expr) and forces the result element type to T (single-iterator Vector{T} and multi-iterator Matrix{T}), matching upstream value + typeof. Previously Bool/Symbol errored 'Unknown function', Char was rejected into an I64 slot, and String produced Vector{Any} (Issue #5040)"
+description = "Vector{T}(::Vector{S}) converts each element via T(x) and always returns a fresh vector — covers Int->Float, Float->Int, Float64->Float32, Array{T} alias, plus Vector{T}() / Vector(arr) regression guards (Issues #4816, #10085)"
 
 [[tests]]
 name = "array_show_eltype_prefix_5236_5237"
@@ -1154,88 +355,22 @@ expected = true
 description = "Array show emits the upstream typeinfo_prefix type prefix for non-implicit eltypes — Int8[...]/Float32[...]/Bool[1, 0]/Foo[...] and Any[...] for heterogeneous Any arrays — and nothing for implicit eltypes (Int64/Float64/Char/String/Symbol/implicit Tuple/Pair), across print/string/repr/sprint(show, ...). Mirrors base/arrayshow.jl typeinfo_prefix/typeinfo_implicit in base/io.jl _show_vector_compact/_show_matrix_compact and vm/formatting.rs array_show_prefix. Asserts only the cases where sjulia's inferred eltype already matches upstream Julia 1.12 (Issues #5236 / #5237)"
 
 [[tests]]
-name = "array_typed_container_no_widening_5073"
-file = "typed_container_no_widening_5073.jl"
-expected = true
-description = "Consolidated regression fixture for the typed-container no-widening umbrella (Issue #5073): typed allocation (zeros/ones/fill) keeps the declared element type, n-dimensional/parametric allocation, boxed numeric values in Any[]/Real[] keep their real type on retrieval (#4646 cluster), typed comprehension T[expr...] converts and keeps T (#5040), and Vector{T}(::Tuple) is a MethodError (#5041). Pins the matrix verified at exact parity with upstream Julia via scripts/fixture_julia_parity.sh."
-
-[[tests]]
 name = "array_top_level_idx_array_assignment_5590"
 file = "top_level_idx_array_assignment_5590.jl"
 expected = true
 description = "Top-level assignment to the binding name `idx` with an array literal or findall result must not inherit a Base-local Int64 idx slot from merged Base main pre-scan/compilation. Regression for `Cannot convert Array to I64` on `idx = [1, 2, 3]` (Issue #5590)."
 
 [[tests]]
-name = "array_reverse_subrange_5693"
-file = "array_reverse_subrange_5693.jl"
-expected = true
-description = "reverse(v, start[, stop]) reverses only the subrange [start, stop] of a vector (stop defaults to the last index), returning a type-preserving copy: reverse([1,2,3,4], 2, 3)==[1,3,2,4], reverse([1,2,3,4], 2)==[1,4,3,2]. Adds reverse(::AbstractVector, ::Integer, ::Integer) and the 2-arg form in base/array.jl; whole-vector reverse unchanged. Issue #5693"
-
-[[tests]]
-name = "array_repeat_inner_outer_5699"
-file = "array_repeat_inner_outer_5699.jl"
-expected = true
-description = "repeat(v; inner=k, outer=m) repeats each element inner times then the whole result outer times (repeat([1,2,3],inner=2)==[1,1,2,2,3,3], repeat([1,2,3],outer=2)==[1,2,3,1,2,3]). Adds repeat(::AbstractVector; inner=1, outer=1) in base/array.jl and gates the repeat->String return-type inference (julia_type.rs + infer/mod.rs) on the array first arg so repeat(v;inner)==arr_literal does not compile a String-vs-Array ==. Positional repeat(v,n) and string repeat unchanged. Issue #5699"
-
-[[tests]]
-name = "array_accumulate_init_5701"
-file = "array_accumulate_init_5701.jl"
-expected = true
-description = "accumulate(op, A; init=x) seeds the accumulation via the init keyword (accumulate(+, [1,2,3]; init=10)==[11,13,16]). Adds init=nothing to the generic and Array accumulate methods AND to the ~22 type-specific +/* fast-path methods (which previously shadowed the kwarg and errored on it), each delegating to the positional accumulate(op,A,init). No-init paths unchanged. Issue #5701"
-
-[[tests]]
-name = "array_empty_typed_eltype_5711"
-file = "array_empty_typed_eltype_5711.jl"
-expected = true
-description = "Empty typed array literal T[] keeps its declared element type for Symbol/Regex/RegexMatch (Issue #5711). eltype(Symbol[])==Symbol etc. — the Expr::TypedEmptyArray element-type match (codegen in compile/expr/mod.rs + the two ValueType inference paths) omitted these and fell through to Any. Covers eltype/typeof, non-empty regression, and push! preserving the element type."
-
-[[tests]]
-name = "array_any_push_no_coerce_5717"
-file = "array_any_push_no_coerce_5717.jl"
-expected = true
-description = "push! into an Any[] / untyped [] (both Vector{Any}) preserves the pushed element's type — integers are no longer widened to Float64 (Issue #5717). The push! compile path grouped Any with F64 storage and coerced I64/I32/F32 to F64; now only F64-backed arrays coerce. Regression: Float64[] still widens, Int[]/Int32[] preserve width."
-
-[[tests]]
-name = "array_mutate_literal_arg_5674"
-file = "array_mutate_literal_arg_5674.jl"
-expected = true
-description = "Mutating builtins insert!/deleteat!/pushfirst!/push! accept a literal (non-variable) array first argument (Issue #5674): the array value is mutated on the stack and returned, no store-back needed. Covers element-type handling (Int/Float64) and the unchanged variable path. (copy()/collect() results remain blocked by the StructRef representation, #5721.)"
-
-[[tests]]
-name = "array_deleteat_multiindex_copy_collect_5744"
-file = "deleteat_multiindex_copy_collect_5744.jl"
-expected = true
-description = "deleteat!(arr, inds::Vector/Range) works for a copy/collect result (Memory-backed Array-wrapper StructRef) via the untyped pure-Julia deleteat!(a::Array, inds) fallback (Issue #5744)"
-
-[[tests]]
-name = "array_untyped_param_index_5747"
-file = "array_untyped_param_index_5747.jl"
-expected = true
-description = "a[k] with an untyped parameter k holding a runtime Range/Vector indexes a sub-array, not a scalar. Two inference channels now recognize a non-literal Range/AbstractVector index as a slice: the runtime specializer's compile_index (emits IndexSlice, returns Any) and the abstract_interp single-index getindex transfer (returns Array{element}). Scalar/typed-param forms unregressed (Issue #5747)."
-
-[[tests]]
-name = "array_gen_dispatch_first_6744"
-file = "array_gen_dispatch_first_6744.jl"
-expected = true
-description = "Array generation functions zeros/ones/similar/reshape dispatch-first to pure-Julia methods (Issue #6744, #6729 slice 2/3). zeros/ones became pure-Julia allocation dispatch in #4036 (BuiltinOp::Zeros/Ones dead-but-kept); similar/reshape are pure-Julia where{T,N} methods. The legacy Rust array-creation builtins only make Float64/Int64, so producing Float32/Int32/Complex{Float64} arrays proves the generic pure-Julia zeros(::Type{T},...) path runs. Covers default eltype, tuple-dims, similar (eltype/dims forms), reshape (column-major + range). Values vs julia 1.12. (ComplexF64[0,0] literal avoided due to #6771.)"
-
-[[tests]]
-name = "array_array_field_access_6804"
-file = "array_field_access_6804.jl"
-expected = true
-description = "Array field access a.size / a.ref resolves to the faithful Array{T,N} struct fields (size::NTuple{N,Int}, ref::MemoryRef{T}) (Issue #6804). Top-level access worked once arrays became the faithful wrapper; the remaining bug was `a.size` reached via a function parameter, where the lazy specializer mis-typed the wrapper's parametric size/ref fields and coerced the tuple result to a numeric (\"expected numeric value, got Tuple\"). Fix: the specializer leaves field access on array-wrapper structs to the interpreter. Covers .size/.ref top-level, through function params, 2D, after push!, and float arrays. Verified vs julia 1.12.6."
-
-[[tests]]
-name = "array_show_any_vector_prefix_7303"
-file = "show_any_vector_prefix_7303.jl"
-expected = true
-description = "A genuine Vector{Any} keeps the Any[...] element-type prefix in show/print/string/repr even when its elements all print as a narrower implicit type (Any[1, 2, 3], Any[1.0, 2.0], Any[\"a\", \"b\"]), matching upstream's type-driven typeinfo_prefix (typeinfo_implicit(Any)==false). Issue #7303: sjulia's value-driven Any-eltype prefix derivation dropped the prefix for a homogeneous scalar run, printing [1, 2, 3]. Fix (_array_show_prefix in base/io.jl + array_show_prefix in vm/formatting/mod.rs): for an Any tag the prefix is dropped only when ALL elements are inference-widened composites (Pair/Tuple/nested array) — the cases sjulia widens to Any but upstream infers precisely ([1 => 1] stays bare); a scalar implicit run under Any means an explicit Any[...] literal and keeps the prefix. Narrow eltypes unregressed: Int[1,2]->[1, 2], Real[1,2]->Real[1, 2], Any[1,\"x\"]->Any[1, \"x\"]. Verified at parity vs julia 1.12.6 (scripts/fixture_julia_parity.sh)."
-
-[[tests]]
 name = "array_typed_struct_array_eltype_7304"
 file = "typed_struct_array_eltype_7304.jl"
 expected = true
 description = "Vector{T}(undef, n) and the typed-array literal T[...] preserve a user-struct element type T (Vector{PP}/Vector{MM}) instead of widening to Vector{Any} (Issue #7304). sjulia kept builtin primitive eltypes but boxed user structs into ArrayElementType::Any because the type-name->element-type mapping only knew primitive names AND the StructOf(type_id) tag rendered as Any (no struct registry in julia_type_name/array_element_type_to_julia_type). Fix: produce StructOf(type_id) for registered user structs at construction (array_element_type_from_julia_type_resolved on NewMemoryDynamicTyped; heap_julia_type_array_element_type_resolved on the typed-literal compile path) and resolve StructOf back to the struct name at the typeof/eltype display boundary via struct_defs (memory_element_type_name / array_element_type_to_julia_type_resolved / array_wrapper_julia_type_resolved). Builtin primitives (Vector{Int8}, Int[...]) and Vector{Any} unregressed. Verified at parity vs julia 1.12.6 (scripts/fixture_julia_parity.sh)."
+
+[[tests]]
+name = "array_typed_literal_container_convert_10750"
+file = "typed_literal_container_convert_10750.jl"
+expected = true
+description = "Every typed array literal element is routed through convert(T, x), and the target expression is evaluated once before element expressions, so Vector{Int}[Vector{Float64}] stores Vector{Int64}, Char[97] stores 'a', exact-type boxed Regex values remain equal (identity is #11780), nested-parametric Union targets retain structural identity (#11783), and later elements keep using the snapshotted target after a binding mutation (logical eltype metadata is #11787). Prevents a manually synchronized type allowlist from drifting behind supported convert methods (Issues #10750 / #10835 / #11779)."
 
 [[tests]]
 name = "array_typed_multiline_8188"
@@ -1250,7 +385,397 @@ expected = true
 description = "Typed comprehension Int[expr for ...] / UInt[...] keeps the native word eltype (Vector{Int64}/Vector{UInt64}) instead of collapsing to Vector{Any}; the platform aliases Int/UInt were missing from the ValueType numeric-constructor tfunc table (Issue #8198)"
 
 [[tests]]
-name = "array_similar_nothing_eltype_8387"
-file = "similar_nothing_eltype_8387.jl"
+name = "array_isbits_struct_contiguous_9198"
+file = "isbits_struct_contiguous_9198.jl"
 expected = true
-description = "similar(arr, Nothing, dims...) preserves Vector{Nothing} instead of allocating Vector{Any} (Issue #8387)"
+description = "Arrays of an all-Float64 isbits immutable struct (Vec2/Vec3) use byte-contiguous unboxed StructInlineF64/StructF64 storage: sizeof matches upstream n*field_count*8, and construction/getindex/setindex!/iteration/collect/push!/map are value-parity; Complex{Float64} arrays stay contiguous (Issue #9198 S4)"
+
+[[tests]]
+name = "array_abstract_vector_end_index_9778"
+file = "abstract_vector_end_index_9778.jl"
+expected = true
+description = "end-indexing through an AbstractVector{T} receiver dispatches lastindex to the generic array path for native Vector values, not to SubArray field-access overloads (Issue #9778)"
+
+[[tests]]
+name = "arrays_vector_complex"
+file = "vector_complex.jl"
+expected = true
+description = "Vector{Complex{Float64}} creation and indexing"
+
+[[tests]]
+name = "arrays_parametric_eltype_empty_vector_6768"
+file = "parametric_eltype_empty_vector_6768.jl"
+expected = true
+description = "Empty typed Vector with a concrete PARAMETRIC element type (UnitRange{Int64}, Vector{Int}) keeps its eltype after push! instead of widening to Vector{Any}; Vector{T}() and T[] forms; Int64/Complex regressions (Issue #6768)"
+
+[[tests]]
+name = "arrays_repeat"
+file = "repeat.jl"
+expected = true
+description = "Array repeat: repeat(v, n) and repeat(arr, m, n)"
+
+[[tests]]
+name = "arrays_logical_indexing"
+file = "logical_indexing.jl"
+expected = true
+description = "Logical indexing: arr[arr .> 0], arr[[true, false, true]]"
+
+[[tests]]
+name = "tuple_array_basic"
+file = "tuple_array_basic.jl"
+expected = true
+description = "Tuple array creation and indexing"
+
+[[tests]]
+name = "tuple_array_pushpop"
+file = "tuple_array_pushpop.jl"
+expected = true
+description = "Tuple array push! operation"
+
+[[tests]]
+name = "tuple_array_setindex"
+file = "tuple_array_setindex.jl"
+expected = true
+description = "Tuple array setindex! operation"
+
+[[tests]]
+name = "arrays_permutedims"
+file = "permutedims.jl"
+expected = true
+description = "permutedims - dimension permutation for vectors and matrices"
+
+[[tests]]
+name = "arrays_checkbounds"
+file = "checkbounds.jl"
+expected = true
+description = "checkbounds and checkindex for bounds checking"
+
+[[tests]]
+name = "array_popat_basic"
+file = "popat_basic.jl"
+expected = true
+description = "popat!(arr, i): remove and return element at index (Issue #436)"
+
+[[tests]]
+name = "array_popat_with_default"
+file = "popat_with_default.jl"
+expected = true
+description = "popat!(arr, i, default): return default if index out of bounds (Issue #436)"
+
+[[tests]]
+name = "array_trues_basic"
+file = "trues_basic.jl"
+expected = true
+description = "trues(n): create array of true values (Issue #668)"
+
+[[tests]]
+name = "array_falses_basic"
+file = "falses_basic.jl"
+expected = true
+description = "falses(n): create array of false values (Issue #669)"
+
+[[tests]]
+name = "array_fill_basic"
+file = "fill_basic.jl"
+expected = true
+description = "fill(value, n): create array filled with value (Issue #690)"
+
+[[tests]]
+name = "arrays_insert_basic"
+file = "insert_basic.jl"
+expected = true
+description = "insert!(a, i, x): insert element at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_deleteat_basic"
+file = "deleteat_basic.jl"
+expected = true
+description = "deleteat!(a, i): delete element at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_deleteat_multi_index"
+file = "deleteat_multi_index.jl"
+expected = true
+description = "deleteat!(a, inds): delete elements at a Vector/Range of indices (Issue #5738)"
+
+[[tests]]
+name = "arrays_mutate_copy_collect_result_5721"
+file = "mutate_copy_collect_result_5721.jl"
+expected = true
+description = "insert!/deleteat!/pushfirst! work on copy()/collect() results (Memory-backed Array wrappers), matching push! (Issue #5721)"
+
+[[tests]]
+name = "arrays_append_prepend"
+file = "append_prepend.jl"
+expected = true
+description = "append!(a, items) and prepend!(a, items) (Issue #2860)"
+
+[[tests]]
+name = "arrays_pushfirst_popfirst"
+file = "pushfirst_popfirst.jl"
+expected = true
+description = "pushfirst!(a, x) and popfirst!(a) (Issue #2860)"
+
+[[tests]]
+name = "arrays_splice_basic"
+file = "splice_basic.jl"
+expected = true
+description = "splice!(a, i) and splice!(a, i, v): remove/replace at index (Issue #2860)"
+
+[[tests]]
+name = "arrays_resize_basic"
+file = "resize_basic.jl"
+expected = true
+description = "resize!(a, n): shrink and grow array (Issue #2860)"
+
+[[tests]]
+name = "arrays_keepat_basic"
+file = "keepat_basic.jl"
+expected = true
+description = "keepat!(a, inds): keep elements at specified indices (Issue #2860)"
+
+[[tests]]
+name = "arrays_findnext_findprev"
+file = "findnext_findprev.jl"
+expected = true
+description = "findnext(f, A, start) and findprev(f, A, start) with predicate (Issue #2860)"
+
+[[tests]]
+name = "arrays_index_assign_specialized_6346"
+file = "index_assign_specialized_6346.jl"
+expected = true
+description = "1D Vector{Int64}/Vector{Float64} setindex! loops remain compatible while lazy specialization emits a typed IndexAssign fast path (Issue #6346)"
+
+[[tests]]
+name = "arrays_index_assign_multidim_fallback_6346"
+file = "index_assign_multidim_fallback_6346.jl"
+expected = true
+description = "Multi-dimensional IndexAssign keeps using the generic fallback path outside the 1D typed lazy-specialization shape (Issue #6346)"
+
+[[tests]]
+name = "arrays_rank1_wrapper_index_untyped_param_6806"
+file = "rank1_wrapper_index_untyped_param_6806.jl"
+expected = true
+description = "Indexing a rank-1 Array{T} wrapper through an untyped parameter (raw IndexLoad) reads the element directly from the MemoryRef-backed storage instead of dispatching getindex per index. Characterization of value and bounds semantics across the #6806 PR B fast path; verified against upstream Julia (Issue #6806)."
+
+[[tests]]
+name = "arrays_matrix_literal_negative_element_7196"
+file = "matrix_literal_negative_element_7196.jl"
+expected = true
+description = "Issue #7196: in a whitespace-separated matrix/hcat row a space-before-but-not-after `-`/`+` (e.g. [0.20 -0.26; 0.23 0.22], [1 -2]) starts a new unary-signed element, while [1 - 2] stays binary subtraction; comma vectors, `*`, and ordinary subtraction are unaffected"
+
+[[tests]]
+name = "array_struct_backed_range_index_10970"
+file = "array_struct_backed_range_index_10970.jl"
+expected = true
+description = "Array getindex through untyped parameters accepts struct-backed UnitRange and StepRange indices while preserving scalar and CartesianIndex routing (Issue #10970)"
+
+[[tests]]
+name = "global_array_const_modify"
+file = "const_array_modify.jl"
+expected = 6.0
+description = "Functions can modify global const arrays (Issue #341)"
+
+[[tests]]
+name = "array_agg_indexing_9671"
+file = "array_agg_indexing_9671.jl"
+expected = true
+description = "Aggregated array indexing / access / slice fixtures (Issue #9671 Phase 3 pilot)"
+
+[[tests]]
+name = "array_agg_construct_resize_9671"
+file = "array_agg_construct_resize_9671.jl"
+expected = true
+description = "Aggregated array construction / fill / resize fixtures (Issue #9671 Phase 3 pilot)"
+
+[[tests]]
+name = "array_agg_reduce_map_9671"
+file = "array_agg_reduce_map_9671.jl"
+expected = true
+description = "Aggregated array in-place reduce / map / sort fixtures (Issue #9671 Phase 3 pilot)"
+
+[[tests]]
+name = "array_agg_shape_transform_9671"
+file = "array_agg_shape_transform_9671.jl"
+expected = true
+description = "Aggregated array shape / transpose / transform fixtures (Issue #9671 Phase 3 pilot)"
+
+[[tests]]
+name = "array_agg_misc_9671"
+file = "array_agg_misc_9671.jl"
+expected = true
+description = "Aggregated array utility / type-preservation fixtures (Issue #9671 Phase 3 pilot)"
+
+[[tests]]
+name = "array_ncat_literal_ndim_shape_10190"
+file = "ncat_literal_ndim_shape_10190.jl"
+expected = true
+description = "N-dimensional `;`/`;;`/`;;;`/... array-literal shape folding, including trailing dangling separators, all-semicolon empty literals, and single-`;` scalar vertical chains that collapse to vectors (Issues #10190, #10378, #10379, #10380)"
+
+[[tests]]
+name = "array_agg_misc_10238"
+file = "array_agg_misc_10238.jl"
+expected = true
+description = "Aggregated array miscellaneous definition-heavy fixtures with top-level definitions, each former fixture isolated in its own module (20 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_agg_type_preservation_10238"
+file = "array_agg_type_preservation_10238.jl"
+expected = true
+description = "Aggregated array element-type preservation fixtures with top-level definitions, each former fixture isolated in its own module (28 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_agg_mutation_global_10238"
+file = "array_agg_mutation_global_10238.jl"
+expected = true
+description = "Aggregated array mutation helpers and global-array state fixtures with top-level definitions, each former fixture isolated in its own module (8 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_agg_wrapper_routing_10238"
+file = "array_agg_wrapper_routing_10238.jl"
+expected = true
+description = "Aggregated array pure-Julia Array wrapper routing / native-carrier dispatch fixtures with top-level definitions, each former fixture isolated in its own module (25 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_agg_typed_literal_10238"
+file = "array_agg_typed_literal_10238.jl"
+expected = true
+description = "Aggregated array typed literals, comprehensions and constructors fixtures with top-level definitions, each former fixture isolated in its own module (16 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_agg_similar_dispatch_10238"
+file = "array_agg_similar_dispatch_10238.jl"
+expected = true
+description = "Aggregated array similar / map! / arraymath receiver dispatch fixtures with top-level definitions, each former fixture isolated in its own module (10 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_similar_any_receiver_dispatch_4018"
+file = "similar_any_receiver_dispatch_4018.jl"
+expected = true
+description = "Any-typed Array receiver similar calls try method dispatch before builtin fallback (Issue #4018); kept standalone (Base.similar piracy leaks across an aggregate, #5966 class, Issue #10238)"
+
+[[tests]]
+name = "array_arraymath_vector_add_sub_dispatch_4019"
+file = "arraymath_vector_add_sub_dispatch_4019.jl"
+expected = true
+description = "Vector + and - route through Pure Julia arraymath dispatch before Rust array arithmetic fallback (Issue #4019); kept standalone (Base.:+ piracy on Vector{Int64} leaks across an aggregate, #5966 class, Issue #10238)"
+
+[[tests]]
+name = "array_agg_indexing_10238"
+file = "array_agg_indexing_10238.jl"
+expected = true
+description = "Aggregated array indexing (begin/end, logical, fancy, multidim) fixtures with top-level definitions, each former fixture isolated in its own module (8 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "array_ctor_direct_vs_callable_parity_10213"
+file = "ctor_direct_vs_callable_parity_10213.jl"
+expected = true
+description = "Direct-syntax vs first-class-callable array constructor parity audit: same-eltype/converting/range/tuple/comprehension Vector sources, Array/Matrix direct syntax plus callable type values, including first-class parametric Vector/Array/Matrix constructor copy semantics. Former gaps are closed and covered at their owning observation level: outer HOF result eltype in map_vector_ctor_outer_eltype_10187, catchable/parametric callable dispatch in parametric_ctor_callable_parity_10502, and dotted parametric targets in dotted_parametric_constructor_10475. The metamorphic direct_callable lane supplies the cross-entry value/type/exception ratchet (Issues #10085, #10187, #10213, #10250, #10405, #10406, #10475)."
+
+[[tests]]
+name = "array_ncat_double_semicolon_line_wrap_10519"
+file = "ncat_double_semicolon_line_wrap_10519.jl"
+expected = true
+description = "A `;;` followed by a newline continues the current row in untyped and typed multi-row literals (Issue #10519)"
+
+[[tests]]
+name = "array_typed_empty_ncat_10506"
+file = "typed_empty_ncat_10506.jl"
+expected = true
+description = "Typed all-semicolon empty literals preserve element type and semicolon-count rank for vectors, matrices, and rank-3 arrays (Issue #10506)"
+
+[[tests]]
+name = "array_dotted_parametric_constructor_10475"
+file = "dotted_parametric_constructor_10475.jl"
+expected = true
+description = "Broadcast calls accept parametric constructor and indexed type-value callees as ordinary value expressions (Issue #10475)"
+
+[[tests]]
+name = "array_nested_array_eltype_10495"
+file = "nested_array_eltype_10495.jl"
+expected = true
+description = "Nested array element types stay concrete through copy constructors, undef/similar/Memory allocation, map(collect), and runtime-valued array literals (Issue #10495)"
+
+[[tests]]
+name = "array_specialized_store_fill_10566"
+file = "specialized_store_fill_10566.jl"
+expected = true
+description = "Fill loop storing into a MemoryRef-backed Vector{Int64}/{Float64} argument through an untyped function now runtime-specializes (Issue #10566 blocker (a))"
+
+[[tests]]
+name = "array_specialized_store_compound_10566"
+file = "specialized_store_compound_10566.jl"
+expected = true
+description = "Compound update x[i] *= c into a MemoryRef-backed Vector argument through an untyped function (Issue #10566 blocker (a))"
+
+[[tests]]
+name = "array_specialized_store_mapcopy_10566"
+file = "specialized_store_mapcopy_10566.jl"
+expected = true
+description = "Map-copy y[i] = x[i] + 1 across two MemoryRef-backed Vector arguments in a specialized body (Issue #10566 blocker (a))"
+
+[[tests]]
+name = "array_specialized_store_alias_10566"
+file = "specialized_store_alias_10566.jl"
+expected = true
+description = "Aliased array locals sharing one origin observe each other's writes through a specialized store body -- no snapshot or reallocation (Issue #10566 blocker (a))"
+
+[[tests]]
+name = "array_specialized_store_errpath_10566"
+file = "specialized_store_errpath_10566.jl"
+expected = true
+description = "Stores preceding a mid-loop BoundsError stay observable under try/catch in a specialized store body (Issue #10566 blocker (a))"
+
+[[tests]]
+name = "array_specialized_store_bounds_10566"
+file = "specialized_store_bounds_10566.jl"
+expected = true
+description = "Out-of-bounds load/store on a MemoryRef-backed Vector raises a catchable BoundsError identically in specialized and unspecialized bodies (Issue #10566 blocker (a))"
+
+[[tests]]
+name = "array_typed_loop_store_alias_storage_10566"
+file = "typed_loop_store_alias_storage_10566.jl"
+expected = true
+description = "Typed-loop array-store alias rejection keys on BACKING STORAGE (Memory Rc + element window), so reshape/view wrappers sharing one Memory never lose or stale-read a store (Issue #10566 blocker (c))"
+
+[[tests]]
+name = "array_typed_loop_store_bail_10566"
+file = "typed_loop_store_bail_10566.jl"
+expected = true
+description = "A typed-loop block mixing an array store with a data-dependent Bail-capable op discards its transactional buffer on Bail -- the generic re-run from the header never double-applies the store (Issue #10566 blockers (b)+(c))"
+
+[[tests]]
+name = "array_hvncat_block_literals_10381"
+file = "hvncat_block_literals_10381.jl"
+expected = true
+description = "N-dimensional array literals with array-valued blocks route through the pure-Julia hvncat (upstream abstractarray.jl port: along-dim Int form, balanced dims form, ragged shape form + hvncat_fill!): [A B; C D;;; A B; C D] is (2,4,2) instead of the old mis-shaped (4,4) hvcat result; trailing separators pad rank; ragged rows and DimensionMismatch validation match upstream (Issue #10381)"
+
+[[tests]]
+name = "array_bigint_index_out_of_range_boundserror_11010"
+file = "bigint_index_out_of_range_boundserror_11010.jl"
+expected = true
+description = "An out-of-i64-range BigInt array index (scalar range h:h, a wider h:(h+2) range, and a negative-out-of-range range) raises a catchable BoundsError, matching upstream checkbounds -- not a TypeError; in-range BigInt ranges keep working (Issue #11010)"
+
+[[tests]]
+name = "array_ndim_display_10385"
+file = "ndim_array_display_10385.jl"
+expected = true
+description = "print/string/show of rank>=3 arrays render upstream's nested ;;-literal compact form (dim-k slices joined by k semicolons + space) and higher-rank empty arrays print the undef-constructor form, instead of leaking the internal MemoryRef representation (Issue #10385)"
+
+[[tests]]
+name = "array_typed_empty_undef_head_10583"
+file = "typed_empty_array_undef_head_10583.jl"
+expected = true
+description = "a typed-empty-array-literal head naming an undefined identifier raises UndefVarError via getindex routing instead of silently producing Any[]; value-binding and known-type heads keep their semantics (Issue #10583)"
+
+[[tests]]
+name = "array_specializer_typed_literal_10746"
+file = "specializer_typed_literal_10746.jl"
+expected = true
+description = "Runtime specializer emits the shared typed-array-literal build (NewMemory/MemorySet/FinalizeArray with convert routing) for T[a, b] inside specializable functions instead of bailing the whole specialization (Issue #10746)"
+
+[[tests]]
+name = "array_broadcast_any_eltype_widening_10787"
+file = "broadcast_any_eltype_widening_10787.jl"
+expected = true
+description = "Broadcast over Any/abstract-eltype arrays preserves per-element result types via Any-storage materialization + promote_typejoin narrowing (Vector{Real}), instead of coercing to the first element's type (Issue #10787)"

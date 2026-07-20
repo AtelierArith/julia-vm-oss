@@ -45,7 +45,9 @@ end
 end
 
 @testset "accumulate with init" begin
-    result = accumulate((a, b) -> a + b, [1, 2, 3], 10)
+    # Upstream accumulate takes `init` as a KEYWORD; the positional 3-arg form
+    # is an sjulia-internal shape (Issues #10324 / #10237).
+    result = accumulate((a, b) -> a + b, [1, 2, 3]; init=10)
     @test length(result) == 3
     @test result[1] == 11
     @test result[2] == 13

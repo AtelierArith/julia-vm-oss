@@ -1,58 +1,16 @@
 # Test manifest for macros category
 
 [[tests]]
-name = "macros_timev"
-file = "test_timev.jl"
-expected = true
-description = "@timev macro for verbose timing output"
-
-[[tests]]
-name = "macros_something_coalesce"
-file = "test_something_coalesce.jl"
-expected = true
-description = "@something and @coalesce macros for handling nothing/missing values"
-
-[[tests]]
-name = "macros_isdefined"
-file = "isdefined.jl"
-expected = true
-description = "@isdefined macro for checking if variable is defined"
-
-[[tests]]
-name = "macros_showtime"
-file = "test_showtime.jl"
-expected = true
-description = "@showtime macro for timing with expression display"
-
-[[tests]]
 name = "macros_allocation"
 file = "test_allocation_macros.jl"
 expected = true
 description = "@allocated and @allocations macros (stub implementations)"
 
 [[tests]]
-name = "macros_simd"
-file = "simd.jl"
-expected = true
-description = "@simd macro (no-op in SubsetJuliaVM)"
-
-[[tests]]
-name = "macros_inbounds"
-file = "inbounds.jl"
-expected = true
-description = "@inbounds macro marks local indexing expressions and block forms for compatible execution (Issues #890/#4286)"
-
-[[tests]]
 name = "macros_inbounds_tuple_index_assignment_8366"
 file = "inbounds_tuple_index_assignment_8366.jl"
 expected = true
 description = "@inbounds lowers tuple assignment to indexed arrays as explicit inbounds stores (Issue #8366)"
-
-[[tests]]
-name = "macros_testset_function"
-file = "testset_function.jl"
-expected = true
-description = "Function definitions inside @testset blocks (Issue #902)"
 
 [[tests]]
 name = "macros_show_expression_string"
@@ -67,12 +25,6 @@ expected = true
 description = "Test @showtime macro displays source expression with timing"
 
 [[tests]]
-name = "macros_macroexpand_show"
-file = "macroexpand_show.jl"
-expected = true
-description = "Test @macroexpand @show produces correct expansion structure"
-
-[[tests]]
 name = "macros_eval_dotted_callee_7616"
 file = "eval_dotted_callee_7616.jl"
 expected = true
@@ -83,12 +35,6 @@ name = "macros_eval_function_world_age_8452"
 file = "eval_function_world_age_8452.jl"
 expected = true
 description = "@eval function definitions obey Julia world-age visibility for direct calls and invokelatest (Issue #8452)"
-
-[[tests]]
-name = "macros_macro_expr_function_7634"
-file = "macro_expr_function_7634.jl"
-expected = true
-description = "Macro expansions that return Expr(:function, ...) lower back to function definitions (Issue #7634)"
 
 [[tests]]
 name = "macros_whitespace_macro_tuple_7526"
@@ -103,94 +49,10 @@ expected = true
 description = "var\"name\" identifiers passed to a macro are preserved as Symbols (not String literals) and round-trip back to var\"name\" in Julia-source form (Issue #7676)"
 
 [[tests]]
-name = "macros_quoted_interpolated_field_7523"
-file = "quoted_interpolated_field_7523.jl"
-expected = true
-description = "Quoted field assignments with interpolated receiver and field name parse to Expr(:., ...) targets for = and += (Issue #7523)"
-
-[[tests]]
-name = "macros_quoted_docstring_core_doc_7712"
-file = "quoted_docstring_core_doc_7712.jl"
-expected = true
-description = "Quoted newline docstrings lower to Core.@doc macrocalls while semicolon-separated strings stay ordinary string statements (Issue #7712)"
-
-[[tests]]
-name = "macros_globalref_any_field_7743"
-file = "globalref_any_field_7743.jl"
-expected = true
-description = "Any-typed GlobalRef values expose .mod and .name through dynamic field access (Issue #7743)"
-
-[[tests]]
-name = "macros_quoted_function_param_splat_7522"
-file = "quoted_function_param_splat_7522.jl"
-expected = true
-description = "Quoted function definitions splice interpolated positional and keyword parameter lists (Issue #7522)"
-
-[[tests]]
-name = "macros_quoted_function_name_interpolation_7520"
-file = "quoted_function_name_interpolation_7520.jl"
-expected = true
-description = "Quoted function definitions interpolate function names, including MacroTools combinedef-style parameter splats (Issue #7520)"
-
-[[tests]]
-name = "macros_quoted_operator_function_head_7519"
-file = "quoted_operator_function_head_7519.jl"
-expected = true
-description = "Quoted parenthesized operator function heads lower to operator call signatures (Issue #7519)"
-
-[[tests]]
-name = "macros_quoted_function_pair_7517"
-file = "quoted_function_pair_7517.jl"
-expected = true
-description = "Quoted Pair expressions accept block-form function definitions on the left-hand side (Issue #7517)"
-
-[[tests]]
-name = "macros_quoted_single_tuple_interpolation_7514"
-file = "quoted_single_tuple_interpolation_7514.jl"
-expected = true
-description = "Quoted single-element tuple interpolation lowers to Expr(:tuple, value) (Issue #7514)"
-
-[[tests]]
-name = "macros_quoted_let_expression_7512"
-file = "quoted_let_expression_7512.jl"
-expected = true
-description = "Quoted let expressions lower to Expr(:let, binding, body) (Issue #7512)"
-
-[[tests]]
-name = "macros_quoted_semicolon_block_7511"
-file = "quoted_semicolon_block_7511.jl"
-expected = true
-description = "Quoted parenthesized semicolon expressions lower to Expr(:block, ...) with interpolated values (Issue #7511)"
-
-[[tests]]
-name = "macros_nested_quote_call_interpolation_7507"
-file = "nested_quote_call_interpolation_7507.jl"
-expected = true
-description = "Nested quote interpolation inside call arguments parses, including splatted interpolation in nested vector literals (Issue #7507)"
-
-[[tests]]
 name = "macros_nospecialize"
 file = "nospecialize.jl"
 expected = true
 description = "@nospecialize macro (no-op in SubsetJuliaVM, Issue #2528)"
-
-[[tests]]
-name = "macros_inference_meta_noop_4286"
-file = "inference_meta_noop_4286.jl"
-expected = true
-description = "Inference metadata annotations on definitions, expressions, and parameters parse and execute as no-op wrappers (Issue #4286)"
-
-[[tests]]
-name = "macros_nospecialize_param_short_form_5122"
-file = "nospecialize_param_short_form_5122.jl"
-expected = true
-description = "@nospecialize/@specialize argument annotations in short-form function definitions f(@nospecialize(x)) = ... pass through as no-ops (Issue #5122)"
-
-[[tests]]
-name = "macros_base_in_function"
-file = "test_base_macro_in_function.jl"
-expected = true
-description = "Base macros (@inbounds, @simd, @assert) work inside function bodies via no-context path (Issue #2604)"
 
 [[tests]]
 name = "macros_base_runtime_path_7721"
@@ -205,22 +67,10 @@ expected = true
 description = "Macro-returned Expr(:try) values with catch but no finally lower from the three-argument upstream shape (Issue #7832)"
 
 [[tests]]
-name = "macros_macro_spliced_typearg_binding_7835"
-file = "macro_spliced_typearg_binding_7835.jl"
-expected = true
-description = "Macro-spliced parametric type arguments evaluate ordinary caller bindings dynamically instead of stringifying symbols (Issue #7835)"
-
-[[tests]]
 name = "macros_macro_return_where_typevar_binding_7844"
 file = "macro_return_where_typevar_binding_7844.jl"
 expected = true
 description = "Macro-returned where types bind introduced TypeVars inside dynamically lowered bodies (Issue #7844)"
-
-[[tests]]
-name = "macros_macro_return_quote_expr_args_7898"
-file = "macro_return_quote_expr_args_7898.jl"
-expected = true
-description = "Macro-returned Expr(:quote, ex.args) rematerializes Expr.args arrays as Vector{Any} values (Issue #7898)"
 
 [[tests]]
 name = "macros_quoted_export_macro_return_7908"
@@ -229,136 +79,16 @@ expected = true
 description = "Quoted export statements inside macro-returned blocks lower to Expr(:export, ...) and rebuild Stmt::Export, including interpolated exported names (Issue #7908)"
 
 [[tests]]
-name = "macros_show_macro_form_4865"
-file = "show_macro_form_4865.jl"
-expected = true
-description = "`@show x` emits the value in show-form (matching upstream Julia's `julia/base/show.jl` lowering `println(EXPR_STR * \" = \", repr(value))`), so `@show \"positive\"` prints `x = \"positive\"` (with quotes) and `@show :foo` prints `x = :foo` (with the leading colon) instead of the previous print-form `x = positive` / `x = foo` (Issue #4865)"
-
-[[tests]]
-name = "macros_quoted_operator_4872"
-file = "quoted_operator_4872.jl"
-expected = true
-description = "Bare operators inside a quoted expression (`:(%)`, `:(+)`, `:(*)`, `:(==)`, etc.) lower to `Symbol(text)` just like quoted identifiers, instead of crashing with `UnsupportedExpression(\"quote for operator not yet supported\")`. Mirrors the existing `NodeKind::Identifier` arm in `subset_julia_vm/src/lowering/expr/quote/cst_to_constructor.rs` (Issue #4872)"
-
-[[tests]]
-name = "macros_quote_vector_parametric_4890"
-file = "quote_vector_parametric_4890.jl"
-expected = true
-description = "Vector literals (`:([1, 2, 3])`) lower to `Expr(:vect, ...)` and parametric type expressions (`:(Tuple{Int, Int})`) lower to `Expr(:curly, base, params...)` — mirrors upstream Julia's `base/expr.jl` lowering convention. Two top-level arms added in `subset_julia_vm/src/lowering/expr/quote/cst_to_constructor.rs` filling the catch-all gaps that surfaced after #4872 fixed the operator-quote slice (Issue #4890)"
-
-[[tests]]
-name = "macros_quote_lowering_matrix_4893"
-file = "quote_lowering_matrix_4893.jl"
-expected = true
-description = "Regression-guard matrix for the quote-lowering pass in `cst_to_constructor.rs`: pins the literal / identifier / operator / aggregate / matrix / call / control-flow / assignment / ternary / range forms that currently lower correctly, and documents remaining `NodeKind` variants so the next contributor sees the audit results at-a-glance (Issue #4893)"
-
-[[tests]]
 name = "macros_macro_arg_matrix_literal_7733"
 file = "macro_arg_matrix_literal_7733.jl"
 expected = true
 description = "Matrix literals passed as macro arguments arrive as upstream-shaped Expr(:vcat, Expr(:row, ...), ...) values instead of failing quote lowering with `quote for matrix_expression not yet supported` (Issue #7733)"
 
 [[tests]]
-name = "macros_quote_nothing_missing_symbol_4895"
-file = "quote_nothing_missing_symbol_4895.jl"
-expected = true
-description = "`:(nothing)` / `:(missing)` quote to the Symbols `:nothing` / `:missing` (matching upstream Julia), not the literal `nothing` / `missing` values, while `:(true)` / `:(false)` stay literal Bool nodes. The value-keyword handling in `lowering/expr/quote/code_generation.rs` lets the Pure-Julia `@test` macro's trailing-`nothing` `quote ... end` block still resolve to the `nothing` value during macro expansion (Issue #4895)"
-
-[[tests]]
-name = "macros_quote_field_access_4899"
-file = "quote_field_access_4899.jl"
-expected = true
-description = "`:(a.b)` lowers to `Expr(:., :a, QuoteNode(:b))` (upstream Julia's canonical shape) via a new `NodeKind::FieldExpression` arm in `lowering/expr/quote/cst_to_constructor.rs`, instead of crashing with `UnsupportedExpression(\"quote for field_expression not yet supported\")`. Covers bare field access and nested chains; the call-with-dotted-callee form is tracked separately as #4901 (Issue #4899)"
-
-[[tests]]
-name = "macros_quote_splat_4904"
-file = "quote_splat_4904.jl"
-expected = true
-description = "`:(f(args...))` lowers to `Expr(:call, :f, Expr(:..., :args))` via a new `NodeKind::SplatExpression` arm in `lowering/expr/quote/cst_to_constructor.rs`. Covers leading splat, splat in the middle of an arg list, and splat of an arbitrary nested expression (Issue #4904)"
-
-[[tests]]
-name = "macros_symbol_dot_literal_4908"
-file = "symbol_dot_literal_4908.jl"
-expected = true
-description = "`:.` and `:...` parse as the Symbols `Symbol(\".\")` and `Symbol(\"...\")`. Previously rejected with `ParseFailed` because `Token::Dot` / `Token::Ellipsis` are not in `Token::is_operator()` and fell through to the standalone-colon arm in `parse_colon_prefix`. Added an explicit arm; lets PRs #4903 / #4906 use the colon-literal sugar for field-access and splat Expr-head assertions instead of `Symbol(name)` workarounds (Issue #4908)"
-
-[[tests]]
-name = "macros_quote_metaquote_4911"
-file = "quote_metaquote_4911.jl"
-expected = true
-description = "`:(:foo)` (meta-quote of a Symbol) lowers to `QuoteNode(:foo)` via a new `NodeKind::QuoteExpression` arm in `lowering/expr/quote/cst_to_constructor.rs`. Handles both the leaf form (parses Symbol name from leaf text) and the with-children form (recurses and wraps result in QuoteNode) (Issue #4911)"
-
-[[tests]]
-name = "macros_quotenode_egal_4915"
-file = "quotenode_egal_4915.jl"
-expected = true
-description = "`===` on two QuoteNode values compares the wrapped inner values structurally (mirrors the `Expr` arm in the `Egal` builtin's main match). Previously fell through to `_ => false`. The `==` operator still errors with `Cannot convert QuoteNode to I64` at compile time; the compile-time fix is the remaining piece of #4915 (Issue #4915 — partial)"
-
-[[tests]]
-name = "macros_quote_metaquote_expr_4920"
-file = "quote_metaquote_expr_4920.jl"
-expected = true
-description = "Meta-quote with a complex Expr inner (`:(:(x + y))`, `:(:(f(a, b)))`) now lowers to `Expr(:quote, complex_expr)` instead of `QuoteNode(complex_expr)`, matching upstream Julia's `QuoteNode(atom)` vs `Expr(:quote, complex)` discrimination. Atom-inner meta-quote (e.g. `:(:foo)`) continues to produce QuoteNode per PR #4914 (Issue #4920)"
-
-[[tests]]
-name = "macros_colon_literal_4923"
-file = "colon_literal_4923.jl"
-expected = true
-description = "`:42`, `:3.14`, `:\"hello\"`, `:'A'` (colon-prefix on a literal) parses and evaluates to the literal value (`typeof(:42) === Int64`). Adds a literal-token arm to `parse_colon_prefix`, restructures `lower_quote_expr` to branch on `children.is_empty()` instead of the text-shape heuristic, and adds a missing `NodeKind::CharacterLiteral` arm to `cst_to_expr_constructor`. The nested case `:(:42) isa QuoteNode` still holds (Issue #4923)"
-
-[[tests]]
-name = "macros_colon_hex_type_4927"
-file = "colon_hex_type_4927.jl"
-expected = true
-description = "`:0xFF`, `:0x100`, `:0b1010`, etc. preserve their hex/binary/octal UInt8/UInt16/… natural types instead of evaluating to Int64. The `cst_to_expr_constructor::IntegerLiteral` arm now delegates to the shared `lower_integer_literal` helper (which uses `parse_int_typed` and wraps in a UInt constructor for typed literals); decimal literals continue to evaluate to Int64 as the regression guard pins (Issue #4927)"
-
-[[tests]]
-name = "macros_quote_call_dotted_callee_4901"
-file = "quote_call_dotted_callee_4901.jl"
-expected = true
-description = "`:(Base.foo(x))` — a call with a dotted callee — lowers to `Expr(:call, Expr(:., :Base, QuoteNode(:foo)), :x)` instead of collapsing the callee to a single `Symbol(\"Base.foo\")`. The `NodeKind::CallExpression` arm in `cst_to_constructor.rs` now recurses into the callee via `cst_to_expr_constructor` (which routes a `FieldExpression` callee through the arm added in PR #4903 for #4899) rather than extracting the callee's raw text. Plain-identifier and operator callees continue to emit `Symbol(text)` because their arms already do (Issue #4901)"
-
-[[tests]]
-name = "macros_quote_assign_dotted_lhs_4993"
-file = "quote_assign_dotted_lhs_4993.jl"
-expected = true
-description = "`:(x.y = z)` — assignment with a dotted LHS — lowers to `Expr(:(=), Expr(:., :x, QuoteNode(:y)), :z)` instead of collapsing the LHS to a single `Symbol(\"x.y\")`. The `NodeKind::Assignment` arm in `cst_to_constructor.rs` now recurses into the target via `cst_to_expr_constructor` (routing a `FieldExpression` LHS through the arm added in PR #4903 for #4899). Structurally identical to PR #4992's fix for the `CallExpression` callee path. Plain identifier LHS continues to emit `Symbol(text)` via its own arm (Issue #4993)"
-
-[[tests]]
-name = "macros_quote_assign_typed_lhs_7622"
-file = "quote_assign_typed_lhs_7622.jl"
-expected = true
-description = "`:(x::Int = nothing)` keeps the typed assignment LHS as `Expr(:(::), :x, :Int)` instead of collapsing it to `Symbol(\"x::Int\")` (Issue #7622)"
-
-[[tests]]
-name = "macros_show_multiarg_4868"
-file = "show_multiarg_4868.jl"
-expected = true
-description = "@show x y z with multiple arguments lowers and runs, returning the value of the last argument. base/macros.jl's `macro show(ex)` becomes `macro show(exs...)`, looping over arguments and emitting one _do_show(expr_str, value) per arg (mirroring upstream julia/base/show.jl) (Issue #4868)"
-
-[[tests]]
-name = "macros_macro_arg_space_paren_5494"
-file = "macro_arg_space_paren_5494.jl"
-expected = true
-description = "Space-separated macro arguments are whitespace-sensitive at the `(`/`[` boundary, matching upstream Julia: `@m Ident (expr)` is two arguments (`Ident`, `(expr)`), `@m foo(bar)` is one call argument. The parser now sets `macro_arg_space_sensitive` while parsing each space-separated macro argument and `try_parse_postfix` refuses to fuse a `(`/`[` that is preceded by whitespace; the flag is cleared inside any grouping so sjulia's lenient `f (x)` call parsing at ordinary expression position is preserved. Fixes `@test_throws TypeError (1 + 1)::Float64` being mis-parsed as one argument `(TypeError(1 + 1))::Float64` (Issue #5494)"
-
-[[tests]]
 name = "macros_enum_runtime_5139"
 file = "enum_runtime_5139.jl"
 expected = true
 description = "@enum members bind at runtime (no UndefVarError), the enum type name resolves to a DataType, members convert to integers via Int(), the type is callable for value->member construction (Color(2) === blue), instances(Color) returns the declaration-ordered tuple, and display shows the member name rather than `Type(value)`. Also fixes the explicit-value lowering bug where `@enum Fruit apple=1` mis-read the `=` operator node as the member value (Issue #5139)"
-
-[[tests]]
-name = "macros_quote_const_declaration_5578"
-file = "quote_const_declaration_5578.jl"
-expected = true
-description = "quote blocks returned by macros can contain const declarations with interpolated escaped targets, resolving the caller binding during expansion (Issue #5578)"
-
-[[tests]]
-name = "macros_sprintf_value_position_5683"
-file = "sprintf_value_position_5683.jl"
-expected = true
-description = "@sprintf in value/expression position passes all arguments (not just the format string) by selecting the base-macro overload matching the call arity, like the statement-position expander (Issue #5683)"
 
 [[tests]]
 name = "macros_escaped_step_range_7020"
@@ -377,12 +107,6 @@ name = "macros_quotenode_symbol_typed_field_7163"
 file = "quotenode_symbol_typed_field_7163.jl"
 expected = true
 description = "Macro-injected QuoteNode(:sym) flows into a ::Symbol-typed struct field / parameter as a genuine Symbol (compiler types PushSymbol as Symbol, not Any) instead of failing with 'Cannot convert Any to Symbol' (Issue #7163)"
-
-[[tests]]
-name = "macros_test_macro_in_let_7189"
-file = "test_macro_in_let_7189.jl"
-expected = true
-description = "@test (and other Test macros) inside a `let` block expand correctly when Test is imported, instead of failing with a misleading 'requires `using Test`' error (Issue #7189)"
 
 [[tests]]
 name = "macros_macro_if_expr_value_7350"
@@ -487,46 +211,10 @@ expected = true
 description = "Macro expansion can lower returned Expr(:let, ...) values in expression position (Issue #7550)"
 
 [[tests]]
-name = "macros_macro_return_typed_expr_7628"
-file = "macro_return_typed_expr_7628.jl"
-expected = true
-description = "Macro expansion can lower returned Expr(:(::), value, type) values in expression position as typeassert (Issue #7628)"
-
-[[tests]]
-name = "macros_macro_return_catch_only_try_7832"
-file = "macro_return_catch_only_try_7832.jl"
-expected = true
-description = "Macro expansion can lower a returned catch-only Expr(:try, ...) (no finally; 3-arg shape) in value position (Issue #7832)"
-
-[[tests]]
-name = "macros_quoted_field_assignment_7630"
-file = "quoted_field_assignment_7630.jl"
-expected = true
-description = "Macro expansion can return quoted field assignment expressions without rejecting Expr assignment targets (Issue #7630)"
-
-[[tests]]
 name = "macros_macro_public_expr_7625"
 file = "macro_public_expr_7625.jl"
 expected = true
 description = "Macro expansion can lower Expr(:public, ...) declarations as compile-time no-ops (Issue #7625)"
-
-[[tests]]
-name = "macros_macro_pair_call_7639"
-file = "macro_pair_call_7639.jl"
-expected = true
-description = "Macro expansion restores Expr(:call, :=>, key, value) to Pair expressions for Dict literals (Issue #7639)"
-
-[[tests]]
-name = "macros_quote_adjoint_expr_7554"
-file = "quote_adjoint_expr_7554.jl"
-expected = true
-description = "Quote construction preserves adjoint expressions as Expr(:', operand) values (Issue #7554)"
-
-[[tests]]
-name = "macros_quote_where_expr_7553"
-file = "quote_where_expr_7553.jl"
-expected = true
-description = "Quote construction preserves where expressions as Expr(:where, value, params...) values, including bare where parameters (Issues #7553, #7714)"
 
 [[tests]]
 name = "macros_macro_hof_dependency_7552"
@@ -595,24 +283,6 @@ expected = true
 description = "Macro expansion can return an arrow-function Expr and lower it to a callable closure (Issue #7563)"
 
 [[tests]]
-name = "macros_macro_return_typevar_curly_7830"
-file = "macro_return_typevar_curly_7830.jl"
-expected = true
-description = "Macro-returned parametric types (Expr(:curly, :Vector, :T) / :(Vector{T})) resolve a caller where type parameter from the caller's method instantiation via DynamicTypeConstruct instead of stringifying it into a static TypeOf literal (Issue #7830)"
-
-[[tests]]
-name = "macros_macro_return_where_typevar_7844"
-file = "macro_return_where_typevar_7844.jl"
-expected = true
-description = "Macro-returned where types (Expr(:where, body, var...)) bind each introduced inner type variable as a runtime TypeVar(:var) fed to UnionAll while resolving caller-bound type params in the body dynamically (Issue #7844)"
-
-[[tests]]
-name = "macros_macro_return_where_bound_typevar_7924"
-file = "macro_return_where_bound_typevar_7924.jl"
-expected = true
-description = "Macro-returned where types preserve earlier TypeVars referenced by later TypeVar bounds (Issue #7924)"
-
-[[tests]]
 name = "macros_macro_expanded_struct_7915"
 file = "macro_expanded_struct_7915.jl"
 expected = true
@@ -649,6 +319,12 @@ expected = true
 description = "Non-esc function names defined inside a macro's bare `quote` are hygienic (gensym'd / module-private): they are not visible after the macrocall (upstream UndefVarError), and two macros sharing an internal helper name keep independent method tables instead of merging (Issue #8064)"
 
 [[tests]]
+name = "macros_quote_comprehension_hygiene_10626"
+file = "quote_comprehension_hygiene_10626.jl"
+expected = true
+description = "A user-defined macro's quote body may return a comprehension or a bare generator expression: both now convert to the same Expr::Comprehension/Expr::Generator IR a non-quoted comprehension/generator produces (previously hard-errored with 'unsupported Expr head :comprehension'/':generator'), and the comprehension's non-escaped iteration variable does not leak into a caller-scope variable of the same name, even when an esc'd reference inside the same comprehension body shares that exact literal name (Issue #10626)"
+
+[[tests]]
 name = "macros_quote_local_funcdef_8065"
 file = "quote_local_funcdef_8065.jl"
 expected = true
@@ -677,3 +353,386 @@ name = "macros_inbounds_tuple_destructuring_8405"
 file = "inbounds_tuple_destructuring_8405.jl"
 expected = true
 description = "@inbounds supports tuple destructuring assignments in statement and expression/do-block positions (Issue #8405)"
+
+[[tests]]
+name = "macros_docstring_retrieval_8997"
+file = "docstring_retrieval_8997.jl"
+expected = true
+description = "Docstrings attached by preceding string literals are retrievable through @doc plain-text lookup (Issue #8997)"
+
+[[tests]]
+name = "macro_identity"
+file = "identity_macro.jl"
+expected = 42.0
+description = "Simple identity macro that returns its argument unchanged"
+
+[[tests]]
+name = "macro_addone"
+file = "add_one_macro.jl"
+expected = 42.0
+description = "Macro with binary operation: x + 1"
+
+[[tests]]
+name = "macro_double"
+file = "double_macro.jl"
+expected = 42.0
+description = "Macro with quote and interpolation: quote 2 * $x end"
+
+[[tests]]
+name = "macro_gensym"
+file = "gensym_test.jl"
+expected = 42.0
+description = "gensym() for generating unique symbols (hygiene)"
+
+[[tests]]
+name = "macro_gensym_in_macro"
+file = "gensym_in_macro.jl"
+expected = 13.0
+description = "gensym used as variable name in macro for hygiene"
+
+[[tests]]
+name = "macro_hygiene"
+file = "hygiene_test.jl"
+expected = 50.0
+description = "Macro hygiene: local variables don't shadow user variables"
+
+[[tests]]
+name = "macro_macroexpand"
+file = "macroexpand_test.jl"
+expected = true
+description = "@macroexpand returns the expanded expression as an Expr"
+
+[[tests]]
+name = "macro_nested"
+file = "nested_macro_test.jl"
+expected = 12.0
+description = "Nested macro calls - macro calling another macro"
+
+[[tests]]
+name = "macro_esc"
+file = "esc_test.jl"
+expected = 42.0
+description = "esc() for escaping expressions in macro hygiene"
+
+[[tests]]
+name = "macro_inline"
+file = "inline_macro.jl"
+expected = 42.0
+description = "@inline macro defined locally with esc(ex)"
+
+[[tests]]
+name = "macro_base_inline"
+file = "base_inline.jl"
+expected = 42.0
+description = "@inline macro from base/macros.jl (Base macro pre-registration)"
+
+[[tests]]
+name = "macro_multi_statement_quote"
+file = "multi_statement_quote.jl"
+expected = 13.0
+description = "Macro with multi-statement quote block"
+
+[[tests]]
+name = "macro_local_in_quote"
+file = "local_in_quote.jl"
+expected = 15.0
+description = "Macro with local keyword in quote block"
+
+[[tests]]
+name = "macro_eval"
+file = "eval_test.jl"
+expected = 42.0
+description = "eval() evaluates Expr AST at runtime"
+
+[[tests]]
+name = "macro_juxtaposition_quote"
+file = "juxtaposition_quote.jl"
+expected = true
+description = "Quoting and evaluating juxtaposition expressions like eval(:(2x + 1))"
+
+[[tests]]
+name = "macro_expr_fields"
+file = "expr_fields.jl"
+expected = 42.0
+description = "Expr.head and Expr.args field access (Core.Expr structure)"
+
+[[tests]]
+name = "macro_splat_interpolation_basic"
+file = "splat_interpolation_basic.jl"
+expected = 42.0
+description = "Splat interpolation $(args...) in tuple creation"
+
+[[tests]]
+name = "macro_splat_interpolation_call"
+file = "splat_interpolation_call.jl"
+expected = 42.0
+description = "Splat interpolation $(args...) in function call"
+
+[[tests]]
+name = "macro_something"
+file = "something_macro.jl"
+expected = 7.0
+description = "@something macro - return first non-nothing value (Pure Julia implementation)"
+
+[[tests]]
+name = "macro_test_basic"
+file = "test_macro_basic.jl"
+expected = 42.0
+description = "Test module macros: @test, @testset, @test_throws"
+
+[[tests]]
+name = "macro_testset_reuse_local_slot_type_6256"
+file = "testset_reuse_local_slot_type_6256.jl"
+expected = true
+description = "@testset local variable reuse does not keep stale slot type (Issue #6256)"
+
+[[tests]]
+name = "macro_assert_pure_julia"
+file = "assert_pure_julia.jl"
+expected = 42.0
+description = "@assert macro - Pure Julia implementation"
+
+[[tests]]
+name = "macro_assert_cli_lowering_9766"
+file = "assert_cli_lowering_9766.jl"
+expected = true
+description = "Top-level Base @assert lowers in CLI/source-file statement position instead of reporting unknown macro (Issue #9766)"
+
+[[tests]]
+name = "macro_show_pure_julia"
+file = "show_pure_julia.jl"
+expected = 100.0
+description = "@show macro - Pure Julia implementation returns value"
+
+[[tests]]
+name = "macro_dispatch_arity"
+file = "dispatch_arity.jl"
+expected = 12.0
+description = "Macro multiple dispatch based on arity (number of arguments)"
+
+[[tests]]
+name = "macro_dispatch_type"
+file = "dispatch_type.jl"
+expected = 3.0
+description = "Macro multiple dispatch based on argument types (Symbol vs Expr)"
+
+[[tests]]
+name = "macro_dispatch_specificity"
+file = "dispatch_specificity.jl"
+expected = 60.0
+description = "Macro dispatch specificity: Symbol > Expr > Any"
+
+[[tests]]
+name = "macro_dispatch_int"
+file = "dispatch_int.jl"
+expected = 6.0
+description = "Macro dispatch with Int literal (AST-based, not runtime)"
+
+[[tests]]
+name = "macro_dispatch_literals"
+file = "dispatch_literals.jl"
+expected = 600.0
+description = "Macro dispatch with Float64, String, Int literals"
+
+[[tests]]
+name = "macro_varargs"
+file = "varargs_macro.jl"
+expected = 42.0
+description = "Macro varargs (rest...) parameter support"
+
+[[tests]]
+name = "macro_not_in_macro"
+file = "not_in_macro.jl"
+expected = true
+description = "! operator in macro-generated code (Issue #290)"
+
+[[tests]]
+name = "macro_assert_with_message"
+file = "assert_with_message.jl"
+expected = 42
+description = "@assert with message and comparison operators (Issue #307)"
+
+[[tests]]
+name = "macro_inbounds_basic"
+file = "inbounds_basic.jl"
+expected = true
+description = "@inbounds, @boundscheck - no-op macros for compatibility (Issue #763)"
+
+[[tests]]
+name = "macro_file_dir"
+file = "file_dir_macros.jl"
+expected = true
+description = "@__FILE__ and @__DIR__ macros for source file information (Issue #460)"
+
+[[tests]]
+name = "macro_show_user_defined_function"
+file = "show_user_defined_function.jl"
+expected = true
+description = "@show macro with user-defined functions (Issue #1330)"
+
+[[tests]]
+name = "macro_eval_real_dispatch_4976"
+file = "eval_real_dispatch_4976.jl"
+expected = 42.0
+description = "eval() dispatches real functions/constructors (identity, Val(x), Val{N}(), user fn) through the VM call path instead of the mini-interpreter (Issue #4976)"
+
+[[tests]]
+name = "macro_eval_dispatch_depth_bound_5014"
+file = "eval_dispatch_depth_bound_5014.jl"
+expected = 47
+description = "Bounded eval-initiated VM dispatch (g(5) = eval(g(0)) + 5 = 47) still works after the eval re-entrancy/depth-bound fix that makes runaway eval recursion fail safely (Issue #5014)"
+
+[[tests]]
+name = "macro_eval_nested_quote_5978"
+file = "macro_eval_nested_quote_5978.jl"
+expected = true
+description = "eval mini-interpreter handles a nested quote literal (Expr head :quote): eval(Expr(:quote, e)) returns e unevaluated, so eval(:(eval(:(f())))) works (Issue #5978)"
+
+[[tests]]
+name = "macro_expansion_helper_call_6616"
+file = "expansion_helper_call_6616.jl"
+expected = true
+description = "User-defined macro bodies execute at expansion time, so Symbolics-style helper calls such as parse_vars(:variables, Real, xs) produce the returned AST (Issue #6616)"
+
+[[tests]]
+name = "macro_macro_expanded_pair_7639"
+file = "macro_expanded_pair_7639.jl"
+expected = true
+description = "Macro-expanded Expr(:call, :=>, ...) is restored to Pair IR before Dict construction (Issue #7639)"
+
+[[tests]]
+name = "macro_quote_vector_assignment_lhs_7641"
+file = "quote_vector_assignment_lhs_7641.jl"
+expected = true
+description = "Quoted assignment preserves vector-pattern LHS as Expr(:vect, ...) instead of Symbol(\"[a, b]\") (Issue #7641)"
+
+[[tests]]
+name = "macro_named_tuple_return_7765"
+file = "macro_named_tuple_return_7765.jl"
+expected = true
+description = "Runtime macro-return converter lowers Expr(:tuple, Expr(:(=), :name, value), ...) as a NamedTuple (not a plain Tuple) so field access works; mixed/plain tuples still lower to Tuple (Issue #7765)"
+
+[[tests]]
+name = "macro_value_in_statement_position_7764"
+file = "macro_value_in_statement_position_7764.jl"
+expected = 7
+description = "A value-producing macro expanded as the final top-level statement preserves its result as the program value instead of dropping it via Stmt::Block (Issue #7764)"
+
+[[tests]]
+name = "macro_statement_tail_stmt_7805"
+file = "macro_statement_tail_stmt_7805.jl"
+expected = true
+description = "A macro expanded in statement position whose returned block ends in a statement-only Expr head (:function or :+=) lowers through the statement path instead of the value-preserving tail path (Issue #7805)"
+
+[[tests]]
+name = "macros_agg_quote_9671"
+file = "macros_agg_quote_9671.jl"
+expected = true
+description = "Aggregated concat-safe macros quote / Expr construction fixtures (27 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "macros_testset_nested_struct_def_10194"
+file = "testset_nested_struct_def_10194.jl"
+expected = true
+description = "struct/mutable struct nested inside @testset \"...\" begin ... end lowers and runs, matching upstream Julia (Issue #10194)"
+
+[[tests]]
+name = "macros_user_macro_quote_nested_struct_10194"
+file = "user_macro_quote_nested_struct_10194.jl"
+expected = true
+description = "struct nested in a caller-supplied body that a user-defined macro re-emits inside its own let...end (Issue #10194)"
+
+[[tests]]
+name = "macros_user_macro_literal_quote_struct_10370"
+file = "user_macro_literal_quote_struct_10370.jl"
+expected = true
+description = "struct written literally inside a user-defined macro's own quote (not via $()-interpolation) lowers and its constructor is callable at runtime (Issue #10370, resolved as a side effect of Issue #10194's LoweringWithInclude drain fix)"
+
+[[tests]]
+name = "macros_agg_misc_9671"
+file = "macros_agg_misc_9671.jl"
+expected = true
+description = "Aggregated concat-safe macros miscellaneous fixtures (11 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "macros_agg_misc_10238"
+file = "macros_agg_misc_10238.jl"
+expected = true
+description = "Aggregated macros miscellaneous definition-heavy fixtures with top-level definitions, each former fixture isolated in its own module (13 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "macros_agg_macro_return_quote_10238"
+file = "macros_agg_macro_return_quote_10238.jl"
+expected = true
+description = "Aggregated macros macro return-position exprs, quote forms and hygiene fixtures with top-level definitions, each former fixture isolated in its own module (13 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "macros_base_docstring_registration_10164"
+file = "base_docstring_registration_10164.jl"
+expected = true
+description = "Docstrings preceding a struct, abstract type, and top-level const are all registered and retrievable via @doc, covering the ConstStatement doc-registration fix shared by the Base/prelude and user-program lowering paths (Issue #10164)"
+
+[[tests]]
+name = "macros_stdlib_macro_expr_position_10293_10307"
+file = "stdlib_macro_expr_position_10293_10307.jl"
+expected = true
+description = "stdlib Test macros (@test/@testset/@test_throws/@test_broken) in expression/value position route through the shared stdlib expansion path and return upstream-shaped Test.Pass/Test.Broken/Test.DefaultTestSet values rather than Nothing (Issues #10293, #10307, #10496)"
+
+[[tests]]
+name = "macros_base_macro_internal_local_hygiene_10977"
+file = "macros_base_macro_internal_local_hygiene_10977.jl"
+expected = true
+description = "Base macros' own quote-introduced locals (t0/result/elapsed_ns/elapsed_s/temp across @time/@elapsed/@timev/@timed/@showtime/@allocated/@allocations/@lock) are gensym-renamed and never clobber same-named caller locals or globals, while caller-spliced assignments (@time grid = ...) stay caller-visible per Issue #9619 (Issue #10977)"
+
+[[tests]]
+name = "macros_quote_engine_convergence_test_10627"
+file = "quote_engine_convergence_test_10627.jl"
+expected = true
+description = "differential test: Test.@test's static-path quote body (Block/Local/Try-Catch/If/ElseIf/Call/String heads) vs. a hand-mirrored user-defined macro through the dynamic macro_runtime engine, asserting identical pass/fail/error classification and hygiene non-leak; both engines dispatch every head through the shared quote_binding_role classifier (Issue #10627)"
+
+[[tests]]
+name = "macros_quote_scope_aware_param_where_hygiene_10925"
+file = "quote_scope_aware_param_where_hygiene_10925.jl"
+expected = true
+description = "Scope-aware dynamic-path macro hygiene rename (a stack of rename frames pushed/popped at function definitions and where clauses, replacing the flat whole-tree substitution) safely registers nested-function parameter names and where type-parameter names for gensym renaming: a parameter/where-binder is renamed only within its own introducing scope, an unrelated sibling reference of the same bare name outside it (including the exact #10626 sort-collision regression MWE) is untouched, a where-binder may shadow a builtin type name, nested functions sharing a parameter name reuse/distinguish gensyms matching upstream @macroexpand, a closure captures an outer macro-local correctly, a gensym-renamed standalone UnionAll remains equal/subtype-equivalent to its canonical Vector alias (#11013), and esc() still preserves caller visibility for the function-name and where-shadowed-body-reference forms (Issue #10925)"
+[[tests]]
+name = "macros_eval_module_namespace_boundary_11072"
+file = "eval_module_namespace_boundary_11072.jl"
+expected = true
+description = "Issue #11072: an explicit module-target eval resolves that module's bindings and writes, but a missing target binding never falls back to an unrelated same-named Main global."
+
+[[tests]]
+name = "macros_test_macro_stmt_expr_value_matrix_10630"
+file = "test_macro_stmt_expr_value_matrix_10630.jl"
+expected = true
+description = "green half of the Issue #10630 statement/value adapter matrix: statement-position Test macro expansions retain recorder effects and discard only the result tail (no caller-slot clobbering), expression-position expansions preserve Test.Pass/Broken/DefaultTestSet values; failing halves live in testset_exit_code_8191_tests.rs"
+
+[[tests]]
+name = "macros_quote_lambda_expansion_10617"
+file = "quote_lambda_expansion_10617.jl"
+expected = true
+description = "Arrow lambdas (Expr(:->, ...)) inside a macro quote on the dynamic expansion engine: the Issue #10617 MWE, multi-parameter and typed-parameter lambdas (shared function_param_from_value reader), and scope-aware parameter hygiene (#10925 RenameEnv) — a lambda param sharing a bare name with a sibling global sort call leaves the sibling untouched, a param shadowing a macro quote-local collapses onto its gensym but stays call-frame-scoped, and a caller variable colliding with a lambda param is unaffected (Issue #10617)"
+
+[[tests]]
+name = "macros_quote_anonymous_function_10926"
+file = "quote_anonymous_function_10926.jl"
+expected = true
+description = "Anonymous function expressions (Expr(:function, Expr(:tuple, ...), body)) returned from a macro quote lift as lambdas on the dynamic engine: the Issue #10926 MWE, the PR #10913 hygiene-parity case (macro-local x + anonymous-fn param x -> (2, 10)), multi-parameter and typed-parameter forms (the quote constructor now wraps a single typed parameter in upstream's one-element tuple), and the sibling-global-sort collision guard (Issue #10926)"
+
+[[tests]]
+name = "macros_macro_definition_module_helper_10610"
+file = "macro_definition_module_helper_10610.jl"
+expected = true
+description = "A macro-introduced non-escaped helper call resolves in the macro's DEFINITION module independent of caller imports (using .M: @m only): the Issue #10610 MWE, caller-side same-named function shadowing (plain stays module-resolved, esc'd resolves in caller scope), an explicitly qualified control, and nested helper-to-helper calls with an esc'd argument used both at top level and inside a function (Issue #10610)"
+
+[[tests]]
+name = "macros_macro_esc_signature_binding_11014"
+file = "macro_esc_signature_binding_11014.jl"
+expected = true
+description = "An escaped/interpolated identifier at a function-signature binding position inside a macro quote reconstructs to its bare name: escaped parameter name, escaped parameter type annotation, escaped where-bound type-variable name, the interaction with scope-aware quote hygiene (escaped param not renamed, plain quote-local still renamed), and a plain-parameter control (Issue #11014)"
+
+[[tests]]
+name = "macros_macro_generator_forms_10923"
+file = "macro_generator_forms_10923.jl"
+expected = true
+description = "Macro quote bodies support filtered (if) and multi-binding generators/comprehensions on the dynamic path: quote constructor builds upstream Expr(:filter)/Expr(:flatten) shapes, macro expansion maps them to the IR filter slot and MultiComprehension (comma cartesian and whitespace flatten), incl. lazy filtered single-binding generators (Issue #10923)"

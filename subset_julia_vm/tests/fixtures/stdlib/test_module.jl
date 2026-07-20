@@ -24,6 +24,7 @@ end
 @testset "@test_throws exceptions" begin
     @test_throws ErrorException error("oops")
     @test_throws BoundsError getindex([1, 2, 3], 10)
+    @test_throws DivideError div(typemin(Int64), Int64(-1))
 end
 
 @testset "@test_broken expected failures" begin

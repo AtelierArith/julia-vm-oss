@@ -26,15 +26,30 @@ fn finish_vm_profile_if_enabled(enabled: bool) {
 fn parse_cli_program(
     source: &str,
     base_dir: Option<std::path::PathBuf>,
+    script_path: Option<&str>,
 ) -> subset_julia_vm::ir::core::Program {
     // Deserialize the Base cache on this thread NOW, while the background
     // prefetch thread (spawned at the top of main) is still loading the
     // prelude Program that parse_and_lower blocks on — the two largest
     // warm-start deserializes overlap instead of running serially
     // (Issue #6348).
-    subset_julia_vm::compile::cache::warm_base_cache();
+    subset_julia_vm::compile::host_support::warm_base_cache();
 
-    subset_julia_vm::pipeline::parse_and_lower_with_base_dir(source, base_dir).unwrap_or_else(|e| {
+    // The CLI script path (`sjulia file.jl` / `-e` / piped stdin) is
+    // non-interactive execution, so it uses strict file-mode soft scope
+    // (Issue #9210): a top-level loop-body assignment to an existing global
+    // binds a new local, matching `julia file.jl` / `julia -e`. The interactive
+    // REPL keeps lenient soft scope (it lowers through `Lowering`, not here).
+    // `script_path` (absolute, for `sjulia file.jl`) renders the soft-scope
+    // warning location `└ @ /abs/path:<line>`; `-e` / stdin pass `None` so it
+    // reads `└ @ none:<line>`, matching `julia -e` (Issue #9283).
+    subset_julia_vm::pipeline::parse_and_lower_with_base_dir_mode(
+        source,
+        base_dir,
+        subset_julia_vm::pipeline::SoftScopeMode::Strict,
+        script_path,
+    )
+    .unwrap_or_else(|e| {
         eprintln!("Pipeline error: {e}");
         std::process::exit(1);
     })
@@ -52,11 +67,34 @@ fn flush_vm_output<R: subset_julia_vm::rng::RngLike>(vm: &Vm<R>) {
 }
 
 fn compile_and_run_program(program: subset_julia_vm::ir::core::Program) {
-    let compiled = subset_julia_vm::compile::compile_with_cache(&program).unwrap_or_else(|e| {
-        eprintln!("Compilation error: {e:?}");
-        std::process::exit(1);
-    });
+    let compiled = subset_julia_vm::compile::host_support::compile_with_cache(&program)
+        .unwrap_or_else(|e| {
+            eprintln!("Compilation error: {e:?}");
+            std::process::exit(1);
+        });
+    // Opt-in inference budget metrics report (Issue #8546): inference is done
+    // once compilation succeeds, and the success path below leaves via
+    // `fast_exit` without returning to `main`, so report here.
+    subset_julia_vm::compile::budget_metrics::report_to_stderr_if_enabled();
     run_compiled_program(compiled);
+}
+
+fn print_runtime_error_with_trace<R: subset_julia_vm::rng::RngLike>(
+    vm: &Vm<R>,
+    error: subset_julia_vm::vm::VmError,
+) {
+    eprintln!("Runtime error: {}", vm.spanned_error(error));
+    let frames = vm.runtime_stack_trace();
+    if frames.is_empty() {
+        return;
+    }
+    eprintln!("Stacktrace:");
+    for (idx, frame) in frames.iter().enumerate() {
+        eprintln!(" [{}] {}()", idx + 1, frame.function);
+        if let Some(span) = frame.span {
+            eprintln!("   @ Main ./none:{}", span.start_line);
+        }
+    }
 }
 
 fn run_compiled_program(compiled: CompiledProgram) {
@@ -99,7 +137,7 @@ fn run_compiled_program(compiled: CompiledProgram) {
         }
         Err(e) => {
             flush_vm_output(&vm);
-            eprintln!("Runtime error: {e}");
+            print_runtime_error_with_trace(&vm, e);
             finish_vm_profile_if_enabled(vm_profile);
             std::process::exit(1);
         }
@@ -132,7 +170,14 @@ pub(super) fn run_file(file_path: &str) {
     });
 
     let base_dir = Path::new(file_path).parent().map(Path::to_path_buf);
-    let program = parse_cli_program(&source, base_dir);
+    // Absolute path for the soft-scope warning location, matching upstream
+    // `julia file.jl` which reports `abspath(file)` (Issue #9283). `std::path::
+    // absolute` normalizes against the physical cwd (like Julia's `abspath`)
+    // without resolving symlinks; fall back to the raw argument if it fails.
+    let abs_path = std::path::absolute(file_path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| file_path.to_string());
+    let program = parse_cli_program(&source, base_dir, Some(&abs_path));
     compile_and_run_program(program);
 }
 
@@ -163,7 +208,9 @@ pub(super) fn run_vm_bytecode_file(file_path: &str) {
 }
 
 pub(super) fn run_code(source: &str) {
-    let program = parse_cli_program(source, None);
+    // `-e '<code>'` has no backing file, so the soft-scope warning locates at
+    // `none:<line>` (upstream `julia -e` does the same); pass no script path.
+    let program = parse_cli_program(source, None, None);
     compile_and_run_program(program);
 }
 

@@ -297,6 +297,13 @@ end
 # representation).
 Tuple(a::AbstractArray) = _tuple_from_vector(a)
 
+# Tuple(g::Generator) — materialize a lazy generator, then build the tuple
+# (Issue #9103). Upstream reaches this through the generic
+# `(::Type{T})(itr) where {T<:Tuple}` constructor; the subset's `Tuple` only
+# covered `AbstractArray`, so `Tuple(x^2 for x in 1:3)` had no method once
+# generator expressions became lazy.
+Tuple(g::Generator) = _tuple_from_vector(collect(g))
+
 function filter(f::Function, t::Tuple)
     kept = Any[]
     for x in t

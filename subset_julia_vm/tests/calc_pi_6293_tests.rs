@@ -1,12 +1,13 @@
 #[cfg(feature = "profiling")]
 use std::collections::HashMap;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
 #[cfg(feature = "profiling")]
 use subset_julia_vm::vm::profiler;
-use subset_julia_vm::vm::{CompiledProgram, FunctionInfo, Instr, Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::{CompiledProgram, FunctionInfo, Instr, Value};
 
 const CALC_PI_SOURCE: &str = r#"
 function mygcd(a, b)
@@ -103,7 +104,7 @@ fn base_gcd_calc_pi_uses_slot_resolved_call_6315() {
             Instr::CallResolvedI64Slots(operands) if operands.slots.len() == 2 => compiled
                 .functions
                 .get(operands.func_index)
-                .map(is_gcd_function)
+                .map(|f| is_gcd_function(f))
                 .unwrap_or(false),
             _ => false,
         })
@@ -124,7 +125,7 @@ fn base_gcd_calc_pi_uses_slot_resolved_call_6315() {
                 ] if compiled
                     .functions
                     .get(*func_index)
-                    .map(is_gcd_function)
+                    .map(|f| is_gcd_function(f))
                     .unwrap_or(false)
             )
         }),
@@ -163,9 +164,13 @@ fn untyped_calc_pi_uses_specialize_i64_dispatch_cache_8167() {
     );
 }
 
+// Issue #10310: the Euclidean-modulo special case (`EuclideanModuloI64Function`)
+// was retired in favor of the general frame-less `I64Function` call path
+// (`TypedLoopOp`/`I64FunctionBlock` already cover `ModI64`/`LoadModI64Slot`).
+// `calc_pi` should now direct-execute `mygcd` through that general path.
 #[cfg(feature = "profiling")]
 #[test]
-fn calc_pi_uses_direct_euclidean_modulo_i64_function_path_6293() {
+fn calc_pi_uses_general_i64_function_path_10310() {
     profiler::clear();
     profiler::enable();
     let result = run_calc_pi_10();
@@ -181,12 +186,8 @@ fn calc_pi_uses_direct_euclidean_modulo_i64_function_path_6293() {
 
     let counts: HashMap<String, u64> = profiler::get_results().into_iter().collect();
     assert!(
-        counts
-            .get("ExecutableBlock::EuclideanModuloI64Function")
-            .copied()
-            .unwrap_or(0)
-            > 0,
-        "calc_pi should direct-execute Euclidean modulo I64 loop calls: {counts:?}"
+        counts.get("ExecutableBlock::I64Function").copied().unwrap_or(0) > 0,
+        "calc_pi should direct-execute mygcd via the general frame-less I64Function path: {counts:?}"
     );
     assert!(
         counts

@@ -46,6 +46,66 @@ fn test_module_with_export() {
 }
 
 #[test]
+fn test_keyword_operator_function_name_issue_8756() {
+    assert_root_child_kind(
+        "function in(p::Pair, a::AbstractDict, valcmp=(==))\n  true\nend",
+        NodeKind::FunctionDefinition,
+    );
+}
+
+#[test]
+fn test_additional_definition_gaps_issue_8759() {
+    assert_root_child_kind(
+        "abstract type AbstractPlatform; end",
+        NodeKind::AbstractDefinition,
+    );
+    assert_root_child_kind(
+        "function @main(args::Vector{String})::Cint\n  return 0\nend",
+        NodeKind::FunctionDefinition,
+    );
+    assert_root_child_kind(
+        "function warntype_type_printer(io::IO; @nospecialize(type), used::Bool)\nend",
+        NodeKind::FunctionDefinition,
+    );
+    assert_root_child_kind(
+        "function _setup_module!(mod::Module, Core.@nospecialize syntax_ver)\nend",
+        NodeKind::FunctionDefinition,
+    );
+    assert_root_child_kind(
+        "function test_typed_ir_printing(Base.@nospecialize(f), Base.@nospecialize(types), must_used_vars)\nend",
+        NodeKind::FunctionDefinition,
+    );
+}
+
+#[test]
+fn test_function_head_type_expression_parameters_issue_8759() {
+    assert_root_child_kind(
+        "function Stateful{<:Any, Any}(itr::T) where {T}\nend",
+        NodeKind::FunctionDefinition,
+    );
+    assert_root_child_kind(
+        "function IdOffsetRange{T,IdOffsetRange{T,I}}(r::IdOffsetRange{T,I}, offset::T) where {T<:Integer,I<:AbstractUnitRange{T}}\nend",
+        NodeKind::FunctionDefinition,
+    );
+}
+
+#[test]
+fn test_multiline_function_parameters_issue_8753() {
+    assert_root_child_kind(
+        "function f(x,\n    y::Int,\n    z = 1)\n  x + y + z\nend",
+        NodeKind::FunctionDefinition,
+    );
+    assert_root_child_kind(
+        "function f(\n    x::Int,\n    y::Int\n)\n  x + y\nend",
+        NodeKind::FunctionDefinition,
+    );
+    assert_root_child_kind(
+        "function f(x =\n    1)\n  x\nend",
+        NodeKind::FunctionDefinition,
+    );
+}
+
+#[test]
 fn test_baremodule() {
     assert_root_child_kind("baremodule Foo\nend", NodeKind::BaremoduleDefinition);
 }
@@ -96,6 +156,34 @@ fn test_primitive_simple() {
 fn test_primitive_with_supertype() {
     assert_root_child_kind(
         "primitive type MyInt <: Integer 32 end",
+        NodeKind::PrimitiveDefinition,
+    );
+}
+
+#[test]
+fn test_primitive_parametric_and_interpolated_issue_8759() {
+    assert_root_child_kind(
+        "primitive type Date4581{T} 64 end",
+        NodeKind::PrimitiveDefinition,
+    );
+    assert_root_child_kind(
+        "primitive type C28593{S<:Real, V<:AbstractVector{S}} 32 end",
+        NodeKind::PrimitiveDefinition,
+    );
+    assert_root_child_kind(
+        "primitive type $(esc(:T)) <: Enum{$(esc(:B))} $(8) end",
+        NodeKind::PrimitiveDefinition,
+    );
+    assert_root_child_kind(
+        "@eval primitive type $(:T) <: Signed $8 end",
+        NodeKind::MacrocallExpression,
+    );
+}
+
+#[test]
+fn test_primitive_parenthesized_bits_expression_issue_9050() {
+    assert_root_child_kind(
+        "primitive type ByteString58434 (18 * 8) end",
         NodeKind::PrimitiveDefinition,
     );
 }
@@ -226,12 +314,26 @@ fn test_function_default_args() {
     );
 }
 
+#[test]
+fn test_function_anonymous_typed_default_arg_where_issue_8514() {
+    assert_root_child_kind(
+        "function foo(v::Val{N}, ::Type{T}=Float64) where {N,T<:Real}\n  T\nend",
+        NodeKind::FunctionDefinition,
+    );
+}
+
 // Keyword args
 #[test]
 fn test_function_keyword_args() {
     assert_parses("function foo(x; y=1)\n  x + y\nend");
     assert_parses("function foo(; x=1, y=2)\n  x + y\nend"); // keyword-only
     assert_parses("function foo(a, b; x=1, y=2)\n  a + b + x + y\nend");
+}
+
+#[test]
+fn test_var_string_identifier_function_parameter_issue_8754() {
+    assert_parses("function f(var\"my weird name\")\n  var\"my weird name\"\nend");
+    assert_parses("f(var\"my weird name\") = var\"my weird name\" + 1");
 }
 
 // Varargs
@@ -252,6 +354,16 @@ fn test_function_return_type() {
 #[test]
 fn test_function_where() {
     assert_parses("function foo(x::T) where T\n  x\nend");
+}
+
+#[test]
+fn test_where_soft_keyword_identifier_issue_8755() {
+    assert_parses(
+        "function identify_package(where::Module, name::String)\n  where.name === name\nend",
+    );
+    assert_parses("f(where) = where.name");
+    assert_parses("where = 1");
+    assert_parses("function where(x)\n  x\nend");
 }
 
 #[test]
@@ -293,11 +405,7 @@ fn test_function_where_double_bound() {
         3,
         "double bound should have three children [name, upper, lower]"
     );
-    let text_of = |n: &subset_julia_vm_parser::cst::CstNode| {
-        n.text
-            .clone()
-            .unwrap_or_else(|| source[n.span.start..n.span.end].to_string())
-    };
+    let text_of = |n: &subset_julia_vm_parser::cst::CstNode| n.text_from_source(source).to_string();
     assert_eq!(text_of(&constraint.children[0]), "T", "name child");
     assert_eq!(
         text_of(&constraint.children[1]),
@@ -309,6 +417,15 @@ fn test_function_where_double_bound() {
         "Integer",
         "lower bound child"
     );
+}
+
+#[test]
+fn test_type_position_where_parameter_issue_8759() {
+    assert_parses("eltype(::Type{TakeWhile{I,P}} where P) where {I} = eltype(I)");
+    assert_parses(
+        "function check_readable(a::ReinterpretArray{T, N, S} where N) where {T,S}\n  a\nend",
+    );
+    assert_parses("function runviews(SB::AbstractArray{T, 3} where T, indexN)\n  SB\nend");
 }
 
 // Parametric function (old syntax)
@@ -350,6 +467,11 @@ fn test_short_function_where() {
     assert_parses("foo(x::T) where T = x");
 }
 
+#[test]
+fn test_short_function_anonymous_typed_default_arg_where_issue_8514() {
+    assert_parses("foo(v::Val{N}, ::Type{T}=Float64) where {N,T<:Real} = T");
+}
+
 // =============================================================================
 // Operator Definition
 // =============================================================================
@@ -369,6 +491,7 @@ fn test_operator_definition_typed() {
 #[test]
 fn test_operator_short_form() {
     assert_parses("Base.:(==)(a::MyType, b::MyType) = a.value == b.value");
+    assert_parses("Base.:(:)(a, b) = a:b");
 }
 
 // =============================================================================
@@ -378,6 +501,7 @@ fn test_operator_short_form() {
 #[test]
 fn test_macro_empty() {
     assert_root_child_kind("macro foo()\nend", NodeKind::MacroDefinition);
+    assert_root_child_kind("macro var\"#\" end", NodeKind::MacroDefinition);
 }
 
 #[test]
@@ -399,6 +523,17 @@ fn test_macro_with_args() {
 #[test]
 fn test_function_tuple_param() {
     assert_parses("function foo((x, y))\n  x + y\nend");
+}
+
+#[test]
+fn test_function_tuple_param_default_issue_8759() {
+    assert_parses(
+        "function iterate(itr::RegexMatchIterator, (offset,prevempty)=(1,false))\n  offset\nend",
+    );
+    assert_parses(
+        "function iterate(I::ANSIIterator, (i, m_st)=(1, iterate(I.captures)))\n  i\nend",
+    );
+    assert_parses("foo((x, y)=(1, 2)) = x + y");
 }
 
 #[test]
@@ -488,4 +623,20 @@ fn test_callable_struct_parametric_where_structure() {
 fn test_anonymous_function_not_callable() {
     let kinds = function_def_children("function (x)\n  x + 1\nend");
     assert_eq!(kinds[0], NodeKind::ParameterList);
+}
+
+#[test]
+fn test_macro_definition_interpolated_var_string_name_issue_8961() {
+    assert_parses("@eval macro $(:var\"try\")(expr)\n  esc(expr)\nend");
+}
+
+#[test]
+fn test_macro_definition_qualified_name_issue_9046() {
+    assert_parses("macro MyMacroModule.mymacro()\nend");
+}
+
+#[test]
+fn test_slurp_parameter_default_issue_9046() {
+    assert_parses("function g1(a=(1,2)..., b...=3)\nend");
+    assert_parses("function g3(a=(1,2)..., b=3, c...=4)\nend");
 }

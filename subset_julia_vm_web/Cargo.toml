@@ -1,12 +1,19 @@
 [package]
 name = "subset_julia_vm_web"
-version = "0.9.5"
+version = "0.10.3"
 edition = "2021"
+rust-version.workspace = true
 description = "WebAssembly binding for SubsetJuliaVM - Julia subset interpreter"
 license = "MIT OR Apache-2.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+# Forwards the Issue #8562 handler-table dispatch experiment into the VM and
+# compiles the `HandlerTableBench` wasm binding. Measurement-only; never a
+# default (build with `wasm-pack build ... -- --features vm-handler-table`).
+vm-handler-table = ["subset_julia_vm/vm-handler-table"]
 
 [dependencies]
 wasm-bindgen = "0.2"
@@ -29,6 +36,9 @@ features = ["wasm"]
 
 [dependencies.subset_julia_vm_parser]
 path = "../subset_julia_vm_parser"
+
+[dependencies.subset_julia_vm_bytecode]
+path = "../subset_julia_vm_bytecode"
 
 # NOTE: profiles must live at the workspace root — a `[profile.*]` block here is
 # silently ignored by Cargo. The WASM size-optimized profile (`opt-level = "s"`,

@@ -3,9 +3,7 @@
 #
 # Note: Uses `print(io, x)` instead of `write(io, x)` because:
 # - print(io, x) goes through emit_output which is captured by sprint
-# - write(io, x) in SubsetJuliaVM returns a new IOBuffer (functional style)
-#   rather than mutating the original, so it doesn't work with sprint's
-#   output capture mechanism
+# - write(io, x) returns a byte count, matching upstream Julia
 
 using Test
 

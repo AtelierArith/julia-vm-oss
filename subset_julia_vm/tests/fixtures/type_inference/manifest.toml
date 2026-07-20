@@ -1,6 +1,12 @@
 # Type Inference Tests
 
 [[tests]]
+name = "type_inference_promote_type_typevalue_9914"
+file = "promote_type_typevalue_9914.jl"
+expected = true
+description = "promote_type over known Type{T} arguments preserves a Type{promoted} return in Base.infer_return_type instead of widening to generic DataType (Issue #9914)"
+
+[[tests]]
 name = "type_inference_collect_index_return_type_5669"
 file = "collect_index_return_type_5669.jl"
 expected = true
@@ -55,232 +61,16 @@ expected = true
 description = "All-returning if branches whose return payloads are simple LetBlock expressions infer Int64, matching upstream Julia and locking the CFG authoritative return path for LetBlock payloads (Issue #5602)"
 
 [[tests]]
-name = "type_inference_loop_element"
-file = "loop_element_inference.jl"
-expected = true
-description = "Tests loop variable type inference from iterables (Array, String, Tuple, Range)"
-
-[[tests]]
-name = "type_inference_conditional_narrowing"
-file = "conditional_narrowing.jl"
-expected = true
-description = "Tests conditional type narrowing in branches"
-
-[[tests]]
-name = "type_inference_union_types"
-file = "union_types.jl"
-expected = true
-description = "Tests Union type inference in conditional expressions"
-
-[[tests]]
-name = "type_inference_array_element"
-file = "array_element_inference.jl"
-expected = true
-description = "Tests array element type inference from array indexing"
-
-[[tests]]
-name = "type_inference_bounds_check_elision_5089"
-file = "bounds_check_elision_5089.jl"
-expected = true
-description = "eachindex(a), 1:length(a), firstindex(a):lastindex(a), and direct getindex prove in-bounds typed load/store emission (Issue #5089)"
-
-[[tests]]
-name = "type_inference_loop"
-file = "loop_inference.jl"
-expected = true
-description = "Tests basic loop variable type inference"
-
-[[tests]]
 name = "type_inference_loop_var"
 file = "loop_var_inference.jl"
 expected = true
 description = "Tests loop variable type inference from various iterator types"
 
 [[tests]]
-name = "type_inference_nothing_narrowing"
-file = "nothing_narrowing.jl"
-expected = true
-description = "Tests type narrowing with === nothing checks"
-
-[[tests]]
 name = "type_inference_numeric"
 file = "numeric_inference.jl"
 expected = true
 description = "Tests numeric type inference through arithmetic operations"
-
-[[tests]]
-name = "type_inference_range_dict_set"
-file = "range_dict_set.jl"
-expected = true
-description = "Tests type inference for Range, Dict, and Set iteration"
-
-[[tests]]
-name = "type_inference_struct_iterable"
-file = "struct_iterable_inference.jl"
-expected = true
-description = "Tests type inference for struct iterables (LinRange, StepRangeLen, etc.)"
-
-[[tests]]
-name = "type_inference_struct_field"
-file = "struct_field_inference.jl"
-expected = true
-description = "Tests type inference for user-defined struct field access"
-
-[[tests]]
-name = "type_inference_function_chain"
-file = "function_chain_inference.jl"
-expected = true
-description = "Tests inter-procedural type propagation through function call chains"
-
-[[tests]]
-name = "type_inference_hof"
-file = "hof_type_inference.jl"
-expected = true
-description = "Tests HOF type inference"
-
-[[tests]]
-name = "type_inference_builtin_type_dispatch"
-file = "builtin_type_dispatch.jl"
-expected = true
-description = "Tests builtin type names dispatch to Type{T} even when they have methods defined (Issue #1692, #1701)"
-
-[[tests]]
-name = "type_inference_tuple_const_index"
-file = "tuple_const_index.jl"
-expected = true
-description = "Tests Tuple constant index type inference (Issue #1638)"
-
-[[tests]]
-name = "type_inference_namedtuple_getfield"
-file = "namedtuple_getfield.jl"
-expected = true
-description = "Tests NamedTuple getfield type inference with constant Symbol (Issue #1638)"
-
-[[tests]]
-name = "type_inference_union_preservation"
-file = "union_preservation.jl"
-expected = true
-description = "Tests Union type preservation in codegen to prevent regression (Issue #1682)"
-
-[[tests]]
-name = "type_inference_ternary_float_promotion"
-file = "ternary_float_promotion.jl"
-expected = true
-description = "Tests ternary/ifelse type inference with Float32/Float16 promotion (Issue #1892)"
-
-[[tests]]
-name = "type_inference_numeric_bit_width"
-file = "numeric_bit_width.jl"
-expected = true
-description = "Numeric type constructors preserve bit width (prevention for Issue #1663)"
-
-[[tests]]
-name = "type_inference_arithmetic_bit_width"
-file = "arithmetic_bit_width.jl"
-expected = true
-description = "Arithmetic on same-type small integers preserves bit width (Issue #2278)"
-
-[[tests]]
-name = "type_inference_math_intrinsics_type_preservation"
-file = "math_intrinsics_type_preservation.jl"
-expected = true
-description = "Math intrinsics (sqrt, floor, ceil, trunc, abs) preserve Float16/Float32 types (Issue #2221)"
-
-[[tests]]
-name = "type_inference_typeof_returns_type"
-file = "typeof_returns_type.jl"
-expected = true
-description = "typeof(x) returns a DataType/Type object, not a String (Issue #3469)"
-
-[[tests]]
-name = "type_inference_typeof_datatype_result"
-file = "typeof_datatype_result.jl"
-expected = true
-description = "typeof returns DataType not Top in transfer function (Issue #3482)"
-
-[[tests]]
-name = "type_inference_min_max_promotion"
-file = "min_max_promotion.jl"
-expected = true
-description = "min/max use Julia promotion rules, not lattice join (Issue #3479)"
-
-[[tests]]
-name = "type_inference_sum_prod_widening"
-file = "sum_prod_widening.jl"
-expected = true
-description = "sum/prod apply Julia's reduction widening rules for Bool/small ints (Issue #3478)"
-
-[[tests]]
-name = "type_inference_float32_preservation"
-file = "float32_type_preservation.jl"
-expected = true
-description = "Float32 preserved in division and power; Bool arithmetic widens to Int64 (Issue #3462)"
-
-[[tests]]
-name = "type_inference_bool_arithmetic_widening"
-file = "bool_arithmetic_widening.jl"
-expected = true
-description = "Bool arithmetic (true+false) returns Int64, not Bool (Issue #3462)"
-
-[[tests]]
-name = "type_inference_size_tuple_arity"
-file = "size_tuple_arity.jl"
-expected = true
-description = "size(array) returns tuple with correct arity for multidimensional arrays (Issue #3463)"
-
-[[tests]]
-name = "type_inference_broadcast_inference"
-file = "broadcast_inference.jl"
-expected = true
-description = "Broadcast result type inferred for vector-vector, scalar-vector, and unary cases (Issue #3464)"
-
-[[tests]]
-name = "type_inference_string_mul_non_string"
-file = "string_mul_non_string.jl"
-expected = true
-description = "String * non-String raises MethodError; only String/Char * String/Char is valid (Issue #3465)"
-
-[[tests]]
-name = "type_inference_complex_abs2_type"
-file = "complex_abs2_type.jl"
-expected = true
-description = "abs2(ComplexF32) returns Float32, abs2(ComplexF64) returns Float64 (Issue #3466)"
-
-[[tests]]
-name = "type_inference_map_element_type"
-file = "map_element_type.jl"
-expected = true
-description = "map(f, arr) infers element type from f's return type (Issue #3480)"
-
-[[tests]]
-name = "type_inference_varargs_interproc"
-file = "varargs_interproc_inference.jl"
-expected = true
-description = "Interprocedural call binding packs varargs into a Tuple (Issue #3526)"
-
-[[tests]]
-name = "type_inference_recursive_call"
-file = "recursive_call_inference.jl"
-expected = true
-description = "Recursive call cycles infer concrete return types instead of Top (Issue #3527)"
-
-[[tests]]
-name = "type_inference_heterogeneous_array"
-file = "heterogeneous_array_inference.jl"
-expected = true
-description = "Heterogeneous array literals preserve Array container shape (Issue #3528)"
-
-[[tests]]
-name = "type_inference_multidim_getindex"
-file = "multidim_getindex_inference.jl"
-expected = true
-description = "Multi-dimensional getindex distinguishes scalar vs slice/range indexing (Issue #3529)"
-
-[[tests]]
-name = "type_inference_typed_empty_array_widths"
-file = "typed_empty_array_widths.jl"
-expected = true
-description = "Int32[]/Float32[]/UInt8[] preserve declared widths (Issue #3532)"
 
 [[tests]]
 name = "type_inference_isa_union_narrowing"
@@ -355,30 +145,6 @@ expected = true
 description = "Nested field writes through lowering temporaries invalidate original nested field refinements instead of keeping stale Int64 precision (Issue #5864/#5601)"
 
 [[tests]]
-name = "type_inference_parametric_struct_distinct_instantiations"
-file = "parametric_struct_distinct_instantiations.jl"
-expected = true
-description = "Parametric struct constructor inference must use the exact instantiation (Issue #3534)"
-
-[[tests]]
-name = "type_inference_ternary_struct_vs_primitive"
-file = "ternary_struct_vs_primitive.jl"
-expected = true
-description = "Ternary inference must not silently drop a non-struct branch (Issue #3533)"
-
-[[tests]]
-name = "type_inference_letblock_under_expression"
-file = "letblock_under_expression.jl"
-expected = true
-description = "Locals from begin/let inside expression positions are collected (Issue #3537)"
-
-[[tests]]
-name = "type_inference_branch_local_widening"
-file = "branch_local_widening.jl"
-expected = true
-description = "Branch-local widening preserves runtime types from both arms (Issues #3535 #3536)"
-
-[[tests]]
 name = "type_inference_loop_var_returns_after_loop"
 file = "loop_var_returns_after_loop.jl"
 expected = true
@@ -401,60 +167,6 @@ name = "type_inference_range_expr_promotion"
 file = "range_expr_promotion.jl"
 expected = true
 description = "Range expression element type uses Julia-style numeric promotion for mixed endpoints (Issue #3519)"
-
-[[tests]]
-name = "type_inference_typed_empty_array_runtime_types_3548"
-file = "typed_empty_array_runtime_types_3548.jl"
-expected = true
-description = "typed empty array literals (Int32[], Float32[], …) report the declared Vector{T} at runtime (Issue #3548)"
-
-[[tests]]
-name = "type_inference_typed_range_runtime_element_3550"
-file = "typed_range_runtime_element_3550.jl"
-expected = true
-description = "ranges constructed from typed integers preserve element type at runtime (Issue #3550)"
-
-[[tests]]
-name = "type_inference_hex_literal_range_runtime_element_3559"
-file = "hex_literal_range_runtime_element_3559.jl"
-expected = true
-description = "hex/binary/octal literal ranges preserve typed-width element type at runtime (Issue #3559)"
-
-[[tests]]
-name = "type_inference_heterogeneous_array_runtime_union_3549"
-file = "heterogeneous_array_runtime_union_3549.jl"
-expected = true
-description = "heterogeneous array literals with Nothing/Missing produce Vector{Union{...}} at runtime (Issue #3549)"
-
-[[tests]]
-name = "type_inference_heterogeneous_array_runtime_union_3way_3558"
-file = "heterogeneous_array_runtime_union_3way_3558.jl"
-expected = true
-description = "heterogeneous array literals with 3+ concretes apply numeric promotion before forming Union (Issue #3558)"
-
-[[tests]]
-name = "type_inference_typed_empty_array_int128_3557"
-file = "typed_empty_array_int128_3557.jl"
-expected = true
-description = "Int128[] / UInt128[] typed empty arrays preserve declared element type (Issue #3557)"
-
-[[tests]]
-name = "type_inference_post_loop_fallthrough_runtime"
-file = "post_loop_fallthrough_runtime.jl"
-expected = true
-description = "Function-return slot accepts post-loop fallthrough type when loop body has return (Issue #3547)"
-
-[[tests]]
-name = "type_inference_limit_type_size_3507"
-file = "limit_type_size_3507.jl"
-expected = true
-description = "Comparison-aware union widening preserves nullable patterns and tuples while bounding loop accumulators (Issue #3507)"
-
-[[tests]]
-name = "type_inference_recursive_type_growth_4273"
-file = "recursive_type_growth_4273.jl"
-expected = true
-description = "Comparison-aware limit_type_size bounds recursively-nesting loop accumulators (tuple/array self-wrapping) while leaving plain accumulators unchanged (Issue #4273)"
 
 [[tests]]
 name = "type_inference_global_binding_invalidation_4285"
@@ -491,6 +203,12 @@ name = "type_inference_alias_field_refinement_4844"
 file = "alias_field_refinement_4844.jl"
 expected = true
 description = "Fresh alias y=x does not inherit getfield/dot path refinements so reads stay Union{Nothing,Int64} (Issue #4844)"
+
+[[tests]]
+name = "type_inference_mustalias_narrowing_limits_9035"
+file = "mustalias_narrowing_limits_9035.jl"
+expected = true
+description = "MustAlias compatibility boundary: mutable getindex guards and fresh aliases stay conservative with Union{Nothing,Int64}, matching upstream Julia 1.12.6 rather than adding non-upstream branch refinements (Issue #9035)"
 
 [[tests]]
 name = "type_inference_setfield_invalidates_guard_4854"
@@ -565,12 +283,6 @@ expected = true
 description = "For-loop over a provably non-empty constant range routes the post-loop env through break-exit envs only, skipping the pre-loop fallthrough (Issue #4680)"
 
 [[tests]]
-name = "type_inference_slot_widening_4688"
-file = "slot_widening_4688.jl"
-expected = true
-description = "Specializer widens a local's recorded slot type to Any when an assignment rebinds the variable to a different concrete type, so later loads emit LoadAny instead of typed LoadSlotI64 and survive the previous binding when the rebinding path was skipped (Issue #4688)"
-
-[[tests]]
 name = "type_inference_nested_field_union_4856"
 file = "nested_field_union_4856.jl"
 expected = true
@@ -583,37 +295,10 @@ expected = true
 description = "A generic single-method function whose body returns a literal reports the literal's concrete type from `Base.infer_return_type` / `Base.return_types`, both with an explicit `Tuple` signature and with no signature (generic-only state). Locks in the body-based reflection precision portion of #4985; the world-age 'reflection sees a later top-level method' portion remains tracked under #4985 / #4271 (Issue #4985)"
 
 [[tests]]
-name = "type_inference_const_specialization_parity_4272"
-file = "const_specialization_parity_4272.jl"
-expected = true
-description = "Const-influenced inference (Bool branch select, Symbol field select, Nothing singleton, small-Int dispatch) produces correct runtime results across the pipeline, matching upstream Julia. Exercises the value classes handled by the shared const-specialization policy now used by both the compile cache key and the AoT specialization key (Issue #4272)"
-
-[[tests]]
-name = "type_inference_ternary_letblock_value_join_5180"
-file = "ternary_letblock_value_join_5180.jl"
-expected = true
-description = "Value-position if/ternary/begin expressions type-join their branch expressions in infer_expr_type instead of widening to Any. Same-typed branches (I64 + I64) keep the concrete type so a ternary/begin/if used directly as a typed-array index or arithmetic operand preserves slot typing; mixed I64/F64 and incompatible Int/String branches still produce branch-correct runtime values matching upstream Julia. LetBlock infers the type of its body's tail-value statement (Issue #5180)"
-
-[[tests]]
 name = "type_inference_branch_loop_return_join_limited_4273"
 file = "branch_loop_return_join_limited_4273.jl"
 expected = true
 description = "Inference return-aggregation joins use comparison-aware join_limited so small / already-known structured unions built from branch (if/elseif) and loop-body (for-in / while) returns are preserved instead of collapsing to Any. A deep-first branch return seeds the accumulator and a later shallow Int return joins against it, keeping Union{Int64, Tuple{...depth6...}}; for-in and while small tuple / nullable unions are likewise preserved. Migrates the ForEach/While loop accumulator joins (previously plain join, unlike the already-migrated range-based For), the if/try branch return aggregation, the block-level Return/MaybeReturn aggregation, and the return-vs-fallthrough join, all routed through join_limited(.., compare_to = previous_return). Verified against upstream Julia 1.12 (Issue #4273)"
-[[tests]]
-name = "type_inference_tuple_length_const_5142"
-file = "tuple_length_const_5142.jl"
-expected = true
-description = "length of a fixed-arity tuple is propagated as Const(N) by the type lattice (mirroring upstream nfields_tfunc, which returns Const(length(x.types))). Enables constant folding and branch elimination on tuple-length while keeping observable runtime values identical to upstream Julia; a tuple with a Vararg tail keeps an unknown length (widens to Int64) (Issue #5142)"
-[[tests]]
-name = "type_inference_isa_flow_narrowing_codegen_5181"
-file = "isa_flow_narrowing_codegen_5181.jl"
-expected = true
-description = "Flow-sensitive isa narrowing is wired into branch codegen: inside an `x isa T` (or `c1 && c2` chain) guarded then-branch, the compiler refines `self.locals[x]` to the concrete ValueType so typed loads / arithmetic specialize. Refinement is saved/restored around the branch so the else path and fall-through keep dynamic dispatch, and a reassignment inside the branch persists (Julia function scoping). Verified parity with upstream Julia for Int64/Float64/String/&&/struct guards plus the negation path (Issue #5181)"
-[[tests]]
-name = "type_inference_array_eltype_propagation_5083"
-file = "array_eltype_propagation_5083.jl"
-expected = true
-description = "Array element types beyond Int64/Float64 (Int8/16/32, UInt8/16/32/64, Float32, Symbol, Complex) propagate through inference so `a[i]` yields the concrete element type instead of widening to Any. Root cause was value_type_to_lattice_with_table collapsing every unsupported ArrayElementType to LatticeType::Top, erasing the element type and forcing boxed access. Fixed by completing the ArrayElementType to ConcreteType mapping in abstract_interp/struct_info.rs (Issue #5083)"
 [[tests]]
 name = "type_inference_typeof_eq_narrowing_5140"
 file = "typeof_eq_narrowing_5140.jl"
@@ -621,28 +306,10 @@ expected = true
 description = "typeof(x) === T / == T / !== T / != T (and the reversed operand order) narrow x in conditional branches, equivalent to x isa T for concrete T. A Union{Int,String} argument inferred via Base.infer_return_type matches upstream Julia (Int64 / Union{Int64,Float64}) instead of widening to Any, while x === nothing narrowing is preserved (Issue #5140)"
 
 [[tests]]
-name = "type_inference_typeof_codegen_narrowing_5077"
-file = "typeof_codegen_narrowing_5077.jl"
-expected = true
-description = "typeof(x) === T / == T / !== T guards feed branch codegen narrowing for Union{Int64,String}, so narrowed Int64 arithmetic can compile through typed loads/arithmetic while runtime results stay upstream-compatible (Issue #5077)"
-
-[[tests]]
-name = "type_inference_union_typed_array_literal_dispatch_5143"
-file = "union_typed_array_literal_dispatch_5143.jl"
-expected = true
-description = "A small-Union-typed array literal (`Union{Int64,Float64}[1, 2.5, 3, 4.0]`) stores each element verbatim instead of coercing the `Float64` members to the first/`Int64` member, so per-element multiple dispatch picks the correct concrete method. Root cause: `heap_julia_type_array_element_type` only recognized `Pair`/`Dict`/`Set`/struct type-literal targets, so a `Union{...}` literal fell through `typed_array_literal_element_type` to the generic `getindex(::DataType, idx)` path that coerced each index to `Int64`. Fixed by recognizing `JuliaType::Union`/`Bottom`/abstract element types as verbatim-store typed literals (Issue #5143)"
-
-[[tests]]
 name = "type_inference_union_struct_field_access_5601"
 file = "union_struct_field_access_5601.jl"
 expected = true
 description = "Field access over a Union of struct types infers the join of the per-member field types (upstream getfield_tfunc over a Union) instead of widening to Any; a member lacking the field contributes Bottom. Previously (x::Union{A,B}).n inferred Any for all-struct unions — only struct+primitive unions narrowed (Issue #5601)"
-
-[[tests]]
-name = "type_inference_number_isa_narrowing_5941"
-file = "number_isa_narrowing_5941.jl"
-expected = true
-description = "An Int64 argument bound to an abstract-numeric parameter (`x::Number`/`x::Real`, statically `ValueType::F64` in the compiler locals) narrows correctly under `if x isa Int64`. compile_time_isa_result previously treated the representational static F64 as an exact runtime type and folded `x isa Int64` to a constant false, skipping the guarded branch; the fix defers isa folding to runtime for abstract-numeric params (Issue #5941)"
 
 [[tests]]
 name = "type_inference_ambiguous_method_return_bottom_5603"
@@ -661,12 +328,6 @@ name = "type_inference_untyped_redef_inference_5938"
 file = "untyped_redef_inference_5938.jl"
 expected = true
 description = "An untyped, same-signature method redefinition is a replacement (last-definition-wins), not an ambiguous overload, so caller inference stays precise instead of collapsing to Any. `add_function` previously marked any same-name second definition as ambiguous and removed it from the function table; the fix compares fixed-param signatures and overwrites in place when they are equal (Issue #5938)"
-
-[[tests]]
-name = "type_inference_parametric_ctor_resolution_5922"
-file = "parametric_ctor_resolution_5922.jl"
-expected = true
-description = "Parametric constructor return-type resolution stays precise after migrating the ctor gates to the tfuncs adapter's StructInstantiation seam: parametric struct ctors infer type args and instantiate on demand (eltype of [CtorPoint5922(1.0,2.0), ...] is the concrete instantiation), `{`-instantiated ctor names (Val{2}(), CtorPoint5922{Int64}()) resolve, and the parametric Rational ctor keeps Rational{Int64} (Issue #5922)"
 
 [[tests]]
 name = "type_inference_bottom_throw_return_6532"
@@ -729,7 +390,91 @@ expected = true
 description = "Function-body slot-typing pre-scan: an `Assign` RHS that is an `Expr::Call` is typed through the shared inference engine as the final corpus class (engine-better) — the shared `tfunc_sqrt` family (sqrt/exp/sin/cos/log) now preserves `Complex` so `exp(z)` is ComplexF64 (legacy widened to Any/Struct), `abs(Complex)` is Float64 (legacy returned ComplexF64), and `zeros(n)` is Vector{Float64} (legacy returned bare Array). `calls(1.0 + 2.0im, 3)` reads `e = exp(z)` / `a = abs(z)` / `zs = zeros(n)` as Call RHS slots returning (ComplexF64, 2.23606797749979, 3); typeof of `exp(1.0 + 2.0im)` is ComplexF64, of `abs(1.0 + 2.0im)` is Float64, and of `zeros(3)` is Vector{Float64}, matching upstream Julia (the #6601 divergence map is now empty) (Issue #6601)"
 
 [[tests]]
-name = "type_inference_reflection_predicates_pure_julia_6738"
-file = "reflection_predicates_pure_julia_6738.jl"
+name = "type_inference_early_return_narrowing_8545"
+file = "early_return_narrowing_8545.jl"
 expected = true
-description = "isbits/ismutable/hasfield are pure-Julia public wrappers (base/reflection.jl) over isbitstype/ismutabletype/_fieldnames primitives; match upstream across types and as first-class function values; ismutable(String) divergence fixed (Issue #6738)"
+description = "Flow-sensitive early-return narrowing: when one arm of a branch terminates (return), the negated condition applies to the fall-through state instead of joining both arms — `isnothing(x) && return 0`, `x isa Int64 || return 0`, one-armed `if ... return ... end`, chained guards across >=2 blocks, and guards nested inside an outer branch all narrow `x` so `x + 1` and Base.infer_return_type see Int64, matching upstream Julia's Conditional lattice (Issue #8545)"
+
+[[tests]]
+name = "type_inference_interconditional_predicate_8545"
+file = "interconditional_predicate_8545.jl"
+expected = true
+description = "InterConditional: single-argument user predicates whose body reduces to a conditional on their argument slot narrow at the call site — direct `isa` bodies, predicates delegating to other predicates (isnothing), and compound `&&`/`||` bodies with neutral non-narrowing leaves all translate into the caller's frame so `if pred(x)` / `pred(x) && return` narrow `x`, matching upstream Julia's InterConditional/from_interconditional (Issue #8545)"
+
+[[tests]]
+name = "type_inference_partial_struct_lattice_8544"
+file = "partial_struct_lattice_8544.jl"
+expected = true
+description = "First-class PartialStruct lattice element: constructor-site per-field type facts survive as lattice values through argument passing into helpers, identity round trips (CachedReturn), getfield-by-index across a call boundary, nested obj.inner.v dot chains, branch joins of same-shape constructors, and parametric struct instantiation — Base.infer_return_type sees the concrete field type instead of widening untyped fields to Any, matching upstream Core.PartialStruct (Issue #8544)"
+
+[[tests]]
+name = "type_inference_partial_struct_inner_ctor_lattice_8739"
+file = "partial_struct_inner_ctor_lattice_8739.jl"
+expected = true
+description = "Inner-constructor new(...) argument facts surface as first-class PartialStruct lattice values through the regular return-type cache (ConstructorPartial side cache retired): long- and short-form inner ctors keep untyped-field precision across helper argument binding, local bindings, getfield by name and constant index, interprocedural returns, and nested ctor chains, matching upstream abstract_eval_new (Issue #8739)"
+
+[[tests]]
+name = "type_inference_partial_return_if_implicit_tail_8600"
+file = "partial_return_if_implicit_tail_8600.jl"
+expected = true
+description = "A non-final if with only a partial explicit return reports MaybeReturn so the enclosing function joins the implicit tail value into Base.infer_return_type and runtime return routing; both-arms-return ifs remain unconditional (Issue #8600)"
+
+[[tests]]
+name = "type_inference_return_channel_fallthrough_8761"
+file = "return_channel_fallthrough_8761.jl"
+expected = true
+description = "StmtResult return-channel prevention coverage: non-final if, begin block, try/catch, and loop bodies with partial explicit returns report MaybeReturn so Base.infer_return_type joins the implicit tail, while runtime paths still return the explicit or tail value (Issue #8761)"
+
+[[tests]]
+name = "type_inference_memory_lattice_inference_9009"
+file = "memory_lattice_inference_9009.jl"
+expected = true
+description = "Memory{T} is now tracked as a ConcreteType lattice variant (mirroring Array) and the method-table ValueType for Memory{T} parameter annotations resolves to MemoryOf(elem) rather than Any; element-type precision is preserved across function call boundaries (Issue #9009 / tracking option of #9034)"
+
+[[tests]]
+name = "type_inference_agg_numeric_9671"
+file = "type_inference_agg_numeric_9671.jl"
+expected = true
+description = "Aggregated concat-safe type_inference numeric width / promotion / preservation fixtures (12 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_agg_containers_9671"
+file = "type_inference_agg_containers_9671.jl"
+expected = true
+description = "Aggregated concat-safe type_inference container element inference fixtures (13 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_agg_misc_9671"
+file = "type_inference_agg_misc_9671.jl"
+expected = true
+description = "Aggregated concat-safe type_inference miscellaneous fixtures (3 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_agg_loops_arrays_10238"
+file = "type_inference_agg_loops_arrays_10238.jl"
+expected = true
+description = "Aggregated type_inference loop-carried and array element inference fixtures with top-level definitions, each former fixture isolated in its own module (12 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_agg_misc_10238"
+file = "type_inference_agg_misc_10238.jl"
+expected = true
+description = "Aggregated type_inference miscellaneous definition-heavy fixtures with top-level definitions, each former fixture isolated in its own module (11 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_agg_narrowing_join_10238"
+file = "type_inference_agg_narrowing_join_10238.jl"
+expected = true
+description = "Aggregated type_inference flow narrowing, guards and branch joins fixtures with top-level definitions, each former fixture isolated in its own module (13 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_agg_struct_field_10238"
+file = "type_inference_agg_struct_field_10238.jl"
+expected = true
+description = "Aggregated type_inference partial-struct and field-type inference fixtures with top-level definitions, each former fixture isolated in its own module (3 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "type_inference_index_receiver_shape_matrix_10887"
+file = "index_receiver_shape_matrix_10887.jl"
+expected = true
+description = "Receiver-sensitive getindex inference matrix keeps Array/range/tuple slicing precise while array-valued keys on Dict-like and custom receivers remain dynamic through value, typeof, equality, and dispatch consumers (Issue #10887)"

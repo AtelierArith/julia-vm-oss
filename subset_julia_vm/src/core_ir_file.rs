@@ -39,6 +39,14 @@
 //!
 //! See the `sjulia` CLI for complete examples of Core IR compilation/loading.
 
+// Issue #10906 (Phase 1c of #10869): the `.sjir` cache-load boundary — zero
+// real unwrap_used/expect_used sites in production code (the two expect_used
+// token matches the static scan finds are inside the `//!` doc-comment usage
+// example above, not executable code; every real unwrap/expect match is
+// inside the cfg(test) module, which carries an explicit allow).
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::ir::core::Program;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -48,7 +56,13 @@ use std::path::Path;
 pub const MAGIC: &[u8; 4] = b"SJIR";
 
 /// Current persisted Core IR file format version.
-pub const VERSION: u32 = 2;
+/// Version 8 adds explicit Base/package provenance to serialized modules;
+/// version 7 gives lowering-generated callables explicit private-helper
+/// provenance; version 6 adds recovered enum-member publication state to
+/// `Stmt::EnumDef`;
+/// version 5 requires package fragments to carry centrally composed definition
+/// chronology.
+pub const VERSION: u32 = 8;
 
 /// Persisted Core IR file format error.
 #[derive(Debug)]
@@ -217,7 +231,7 @@ pub fn load_with_header<P: AsRef<Path>>(
     let mut version_bytes = [0u8; 4];
     file.read_exact(&mut version_bytes)?;
     let version = u32::from_le_bytes(version_bytes);
-    if version > VERSION {
+    if version != VERSION {
         return Err(CoreIrFileError::UnsupportedVersion(version));
     }
 
@@ -261,7 +275,7 @@ pub fn load_from_bytes(data: &[u8]) -> Result<Program, CoreIrFileError> {
 
     // Read version
     let version = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-    if version > VERSION {
+    if version != VERSION {
         return Err(CoreIrFileError::UnsupportedVersion(version));
     }
 
@@ -305,6 +319,7 @@ pub fn save_to_bytes(program: &Program) -> Result<Vec<u8>, CoreIrFileError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::ir::core::{Block, Program};
@@ -373,5 +388,74 @@ mod tests {
             result,
             Err(CoreIrFileError::UnsupportedVersion(999))
         ));
+    }
+
+    #[test]
+    fn test_stale_definition_chronology_version_is_rejected_11036() -> Result<(), CoreIrFileError> {
+        let program = empty_program();
+        let mut bytes = save_to_bytes(&program)?;
+        bytes[4..8].copy_from_slice(&(VERSION - 1).to_le_bytes());
+
+        assert!(matches!(
+            load_from_bytes(&bytes),
+            Err(CoreIrFileError::UnsupportedVersion(version)) if version == VERSION - 1
+        ));
+        Ok(())
+    }
+
+    /// Issue #10906 (Phase 1c of #10869): a `.sjir` blob whose declared
+    /// `ir_length` exceeds the bytes actually available (truncated file /
+    /// partial write) must be rejected with a typed `DeserializeError`, not a
+    /// panic from an out-of-bounds slice.
+    #[test]
+    fn test_load_from_bytes_truncated_data_is_rejected() {
+        let mut data = vec![];
+        data.extend_from_slice(MAGIC);
+        data.extend_from_slice(&VERSION.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes()); // flags
+        data.extend_from_slice(&1_000_000u32.to_le_bytes()); // absurd ir_length
+                                                             // No IR data follows: the file was cut short.
+
+        let result = load_from_bytes(&data);
+        assert!(
+            matches!(result, Err(CoreIrFileError::DeserializeError(_))),
+            "expected DeserializeError for truncated .sjir data, got: {result:?}"
+        );
+    }
+
+    /// Issue #10906 (Phase 1c of #10869): a `.sjir` whose HEADER is valid
+    /// (right magic/version/declared length) but whose bincode IR payload is
+    /// bit-flipped/corrupted must never panic the host — the "cache
+    /// deserialize/load" boundary #10869 names as its own entrypoint.
+    /// Asserts the load never panics; if it does return an error, it must be
+    /// the typed `DeserializeError` variant, not some other failure mode.
+    #[test]
+    fn test_load_from_bytes_corrupted_payload_never_panics_10906() {
+        let program = empty_program();
+        let mut bytes = save_to_bytes(&program).expect("serialization should succeed");
+        assert!(
+            bytes.len() > 16 + 8,
+            "empty program's IR payload is too small to exercise payload corruption: {} bytes",
+            bytes.len()
+        );
+
+        // Corrupt a run of bytes inside the IR payload, past the 16-byte
+        // fixed header this function already validates before touching it.
+        for b in bytes.iter_mut().skip(16).take(8) {
+            *b ^= 0xFF;
+        }
+
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_from_bytes(&bytes)));
+        assert!(
+            result.is_ok(),
+            "loading a corrupted .sjir payload must never panic (Issue #10906)"
+        );
+        if let Ok(Err(e)) = &result {
+            assert!(
+                matches!(e, CoreIrFileError::DeserializeError(_)),
+                "expected a DeserializeError for a corrupted payload, got: {e:?}"
+            );
+        }
     }
 }

@@ -14,6 +14,8 @@ using Test
         result = result + 10.0
     end
     @test (result) == 1.0
+    @test isone(big(1) // big(1))
+    @test !isone(big(2) // big(1))
 end
 
 true  # Test passed

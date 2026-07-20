@@ -1,0 +1,5173 @@
+[
+  {
+    "name": "Tuples",
+    "source": "()\n# There's no (,)\n\n(a) # NOT a tuple\n(a,)\n(a,b,c)\n(a,b,c,)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 60
+        },
+        "children": [
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 0,
+              "end": 2
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 3,
+              "end": 19
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParenExpression",
+            "span": {
+              "start": 21,
+              "end": 24
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 22,
+                  "end": 23
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 25,
+              "end": 38
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 39,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 40,
+                  "end": 41
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 44,
+              "end": 51
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 45,
+                  "end": 46
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 47,
+                  "end": 48
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "b"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 49,
+                  "end": 50
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "c"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 52,
+              "end": 60
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 53,
+                  "end": 54
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "a"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 55,
+                  "end": 56
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "b"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 57,
+                  "end": 58
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "c"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Named tuples",
+    "source": "(a = 1,)\n(a = 1) # NOT a tuple\n(a = 1, b = 2)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 45
+        },
+        "children": [
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 0,
+              "end": 8
+            },
+            "children": [
+              {
+                "kind": "KwArg",
+                "span": {
+                  "start": 1,
+                  "end": 6
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 2
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 3,
+                      "end": 4
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "="
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 5,
+                      "end": 6
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParenExpression",
+            "span": {
+              "start": 9,
+              "end": 16
+            },
+            "children": [
+              {
+                "kind": "Assignment",
+                "span": {
+                  "start": 10,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 10,
+                      "end": 11
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 12,
+                      "end": 13
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "="
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 17,
+              "end": 30
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 31,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "KwArg",
+                "span": {
+                  "start": 32,
+                  "end": 37
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 32,
+                      "end": 33
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 34,
+                      "end": 35
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "="
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 36,
+                      "end": 37
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "KwArg",
+                "span": {
+                  "start": 39,
+                  "end": 44
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 39,
+                      "end": 40
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 41,
+                      "end": 42
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "="
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 43,
+                      "end": 44
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Named tuples with leading semicolon",
+    "source": "(;)\n(; a)\n(; a, b)\n(; a = 1)\n(; a = 1, b = 2)\n(; a, foo.b)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 58
+        },
+        "children": [
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 0,
+              "end": 3
+            },
+            "children": [
+              {
+                "kind": "KeywordArguments",
+                "span": {
+                  "start": 1,
+                  "end": 2
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 4,
+              "end": 9
+            },
+            "children": [
+              {
+                "kind": "KeywordArguments",
+                "span": {
+                  "start": 5,
+                  "end": 8
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 7,
+                      "end": 8
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 10,
+              "end": 18
+            },
+            "children": [
+              {
+                "kind": "KeywordArguments",
+                "span": {
+                  "start": 11,
+                  "end": 17
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 13,
+                      "end": 14
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 16,
+                      "end": 17
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 19,
+              "end": 28
+            },
+            "children": [
+              {
+                "kind": "KeywordArguments",
+                "span": {
+                  "start": 20,
+                  "end": 27
+                },
+                "children": [
+                  {
+                    "kind": "KwArg",
+                    "span": {
+                      "start": 22,
+                      "end": 27
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 22,
+                          "end": 23
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 24,
+                          "end": 25
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 26,
+                          "end": 27
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 29,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "KeywordArguments",
+                "span": {
+                  "start": 30,
+                  "end": 44
+                },
+                "children": [
+                  {
+                    "kind": "KwArg",
+                    "span": {
+                      "start": 32,
+                      "end": 37
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 32,
+                          "end": 33
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 34,
+                          "end": 35
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 36,
+                          "end": 37
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "KwArg",
+                    "span": {
+                      "start": 39,
+                      "end": 44
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 39,
+                          "end": 40
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 41,
+                          "end": 42
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 43,
+                          "end": 44
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "TupleExpression",
+            "span": {
+              "start": 46,
+              "end": 58
+            },
+            "children": [
+              {
+                "kind": "KeywordArguments",
+                "span": {
+                  "start": 47,
+                  "end": 57
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 49,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "FieldExpression",
+                    "span": {
+                      "start": 52,
+                      "end": 57
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 52,
+                          "end": 55
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "foo"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Field",
+                        "span": {
+                          "start": 56,
+                          "end": 57
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 56,
+                              "end": 57
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "b"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Vector arrays",
+    "source": "[]\n# There's no [,]\n[x]\n[x,]\n[1, 2]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 35
+        },
+        "children": [
+          {
+            "kind": "VectorExpression",
+            "span": {
+              "start": 0,
+              "end": 2
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 3,
+              "end": 19
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "VectorExpression",
+            "span": {
+              "start": 20,
+              "end": 23
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 21,
+                  "end": 22
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "VectorExpression",
+            "span": {
+              "start": 24,
+              "end": 28
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 25,
+                  "end": 26
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "VectorExpression",
+            "span": {
+              "start": 29,
+              "end": 35
+            },
+            "children": [
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 30,
+                  "end": 31
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "1"
+                },
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 33,
+                  "end": 34
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "2"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Matrix arrays",
+    "source": "[x;]\n[1 2]\n\n[1 2; 3 4]\n[1 2\n 3 4]\n\n[1\n 2\n 3\n]\n[\n a;\n b;\n c;\n]\n\n## this is tecnically parsed incorrectly. `;;` concatenates along the 2nd dimension.\n[1;; 2;; 3;;; 4;; 5;; 6;;]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 174
+        },
+        "children": [
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 0,
+              "end": 4
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 1,
+                  "end": 2
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 2
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 5,
+              "end": 10
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 6,
+                  "end": 9
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 6,
+                      "end": 7
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 8,
+                      "end": 9
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 12,
+              "end": 22
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 13,
+                  "end": 16
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 13,
+                      "end": 14
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 15,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 18,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 18,
+                      "end": 19
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "3"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 20,
+                      "end": 21
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "4"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 23,
+              "end": 33
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 24,
+                  "end": 27
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 24,
+                      "end": 25
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 26,
+                      "end": 27
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 29,
+                  "end": 32
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 29,
+                      "end": 30
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "3"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 31,
+                      "end": 32
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "4"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 35,
+              "end": 45
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 36,
+                  "end": 37
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 36,
+                      "end": 37
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 39,
+                  "end": 40
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 39,
+                      "end": 40
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 42,
+                  "end": 43
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 42,
+                      "end": 43
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "3"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 46,
+              "end": 61
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 49,
+                  "end": 50
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 49,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 53,
+                  "end": 54
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 53,
+                      "end": 54
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 57,
+                  "end": 58
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 57,
+                      "end": 58
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "c"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 63,
+              "end": 147
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MatrixExpression",
+            "span": {
+              "start": 148,
+              "end": 174
+            },
+            "children": [
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 149,
+                  "end": 150
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 149,
+                      "end": 150
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 153,
+                  "end": 154
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 153,
+                      "end": 154
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 157,
+                  "end": 158
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 157,
+                      "end": 158
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "3"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 162,
+                  "end": 163
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 162,
+                      "end": 163
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "4"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 166,
+                  "end": 167
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 166,
+                      "end": 167
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "5"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MatrixRow",
+                "span": {
+                  "start": 170,
+                  "end": 171
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 170,
+                      "end": 171
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "6"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Field expressions - typed_ncat",
+    "source": "Int[1 2 3 4]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 12
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 12
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Int"
+                },
+                "flags": []
+              },
+              {
+                "kind": "MatrixExpression",
+                "span": {
+                  "start": 3,
+                  "end": 12
+                },
+                "children": [
+                  {
+                    "kind": "MatrixRow",
+                    "span": {
+                      "start": 4,
+                      "end": 11
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 4,
+                          "end": 5
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 6,
+                          "end": 7
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 8,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "3"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 10,
+                          "end": 11
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "4"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Comprehension arrays",
+    "source": "[x for x in xs]\nUInt[b(c, e) for c in d for e in f]\n[\n  a(1)\n  for a in f\n]\n[\n  a(1)\n  for a in f\n        ,b in e\n]\n[\n  a(1)\n  for a in f\n        for b in e\n]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 158
+        },
+        "children": [
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 0,
+              "end": 15
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 1,
+                  "end": 14
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 2
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 3,
+                      "end": 14
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 7,
+                          "end": 14
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 7,
+                              "end": 8
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 9,
+                              "end": 11
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 12,
+                              "end": 14
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "xs"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 16,
+              "end": 51
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 16,
+                  "end": 20
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "UInt"
+                },
+                "flags": []
+              },
+              {
+                "kind": "ComprehensionExpression",
+                "span": {
+                  "start": 20,
+                  "end": 51
+                },
+                "children": [
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 21,
+                      "end": 50
+                    },
+                    "children": [
+                      {
+                        "kind": "CallExpression",
+                        "span": {
+                          "start": 21,
+                          "end": 28
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 21,
+                              "end": 22
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "b"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Arguments",
+                            "span": {
+                              "start": 22,
+                              "end": 28
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 23,
+                                  "end": 24
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "c"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 26,
+                                  "end": 27
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "e"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 29,
+                          "end": 50
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 33,
+                              "end": 39
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 33,
+                                  "end": 34
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "c"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 35,
+                                  "end": 37
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 38,
+                                  "end": 39
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "d"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 44,
+                              "end": 50
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 44,
+                                  "end": 45
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "e"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 46,
+                                  "end": 48
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 49,
+                                  "end": 50
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "f"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 52,
+              "end": 75
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 56,
+                  "end": 73
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 56,
+                      "end": 60
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 56,
+                          "end": 57
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 57,
+                          "end": 60
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 58,
+                              "end": 59
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 63,
+                      "end": 73
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 67,
+                          "end": 73
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 67,
+                              "end": 68
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "a"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 69,
+                              "end": 71
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 72,
+                              "end": 73
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "f"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 76,
+              "end": 115
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 80,
+                  "end": 113
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 80,
+                      "end": 84
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 80,
+                          "end": 81
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 81,
+                          "end": 84
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 82,
+                              "end": 83
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 87,
+                      "end": 113
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 91,
+                          "end": 97
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 91,
+                              "end": 92
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "a"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 93,
+                              "end": 95
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 96,
+                              "end": 97
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "f"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 107,
+                          "end": 113
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 107,
+                              "end": 108
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "b"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 109,
+                              "end": 111
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 112,
+                              "end": 113
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 116,
+              "end": 158
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 120,
+                  "end": 156
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 120,
+                      "end": 124
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 120,
+                          "end": 121
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 121,
+                          "end": 124
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 122,
+                              "end": 123
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 127,
+                      "end": 156
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 131,
+                          "end": 137
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 131,
+                              "end": 132
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "a"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 133,
+                              "end": 135
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 136,
+                              "end": 137
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "f"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 150,
+                          "end": 156
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 150,
+                              "end": 151
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "b"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 152,
+                              "end": 154
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 155,
+                              "end": 156
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Comprehension arrays with compound-statement bodies",
+    "source": "[\n  try catch end\n  for i in 1:10\n]\n[\n  let\n    1 + 1\n  end\n  for i in 1:10\n]\n[if true; x end for x in xs]\n[while false; nothing end for x in xs]\n[begin\n  a = 1\n  a\nend for i in xs]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 181
+        },
+        "children": [
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 0,
+              "end": 35
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 4,
+                  "end": 33
+                },
+                "children": [
+                  {
+                    "kind": "TryStatement",
+                    "span": {
+                      "start": 4,
+                      "end": 17
+                    },
+                    "children": [
+                      {
+                        "kind": "CatchClause",
+                        "span": {
+                          "start": 8,
+                          "end": 13
+                        },
+                        "children": [],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 20,
+                      "end": 33
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 24,
+                          "end": 33
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 24,
+                              "end": 25
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "i"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 26,
+                              "end": 28
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 29,
+                              "end": 33
+                            },
+                            "children": [
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 29,
+                                  "end": 30
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "1"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 30,
+                                  "end": 31
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": ":"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 31,
+                                  "end": 33
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "10"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 36,
+              "end": 77
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 40,
+                  "end": 75
+                },
+                "children": [
+                  {
+                    "kind": "LetExpression",
+                    "span": {
+                      "start": 40,
+                      "end": 59
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 48,
+                          "end": 53
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 48,
+                              "end": 49
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 50,
+                              "end": 51
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "+"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 52,
+                              "end": 53
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 62,
+                      "end": 75
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 66,
+                          "end": 75
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 66,
+                              "end": 67
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "i"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 68,
+                              "end": 70
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 71,
+                              "end": 75
+                            },
+                            "children": [
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 71,
+                                  "end": 72
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "1"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 72,
+                                  "end": 73
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": ":"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 73,
+                                  "end": 75
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "10"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 78,
+              "end": 106
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 79,
+                  "end": 105
+                },
+                "children": [
+                  {
+                    "kind": "IfStatement",
+                    "span": {
+                      "start": 79,
+                      "end": 93
+                    },
+                    "children": [
+                      {
+                        "kind": "Condition",
+                        "span": {
+                          "start": 82,
+                          "end": 87
+                        },
+                        "children": [
+                          {
+                            "kind": "BooleanLiteral",
+                            "span": {
+                              "start": 82,
+                              "end": 86
+                            },
+                            "children": [],
+                            "value": {
+                              "Keyword": "true"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 88,
+                          "end": 89
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 94,
+                      "end": 105
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 98,
+                          "end": 105
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 98,
+                              "end": 99
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 100,
+                              "end": 102
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 103,
+                              "end": 105
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "xs"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 107,
+              "end": 145
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 108,
+                  "end": 144
+                },
+                "children": [
+                  {
+                    "kind": "WhileStatement",
+                    "span": {
+                      "start": 108,
+                      "end": 132
+                    },
+                    "children": [
+                      {
+                        "kind": "Condition",
+                        "span": {
+                          "start": 114,
+                          "end": 120
+                        },
+                        "children": [
+                          {
+                            "kind": "BooleanLiteral",
+                            "span": {
+                              "start": 114,
+                              "end": 119
+                            },
+                            "children": [],
+                            "value": {
+                              "Keyword": "false"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 121,
+                          "end": 128
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "nothing"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 133,
+                      "end": 144
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 137,
+                          "end": 144
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 137,
+                              "end": 138
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 139,
+                              "end": 141
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 142,
+                              "end": 144
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "xs"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 146,
+              "end": 181
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 147,
+                  "end": 180
+                },
+                "children": [
+                  {
+                    "kind": "BeginBlock",
+                    "span": {
+                      "start": 147,
+                      "end": 168
+                    },
+                    "children": [
+                      {
+                        "kind": "Assignment",
+                        "span": {
+                          "start": 155,
+                          "end": 160
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 155,
+                              "end": 156
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "a"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 157,
+                              "end": 158
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 159,
+                              "end": 160
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 163,
+                          "end": 164
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 169,
+                      "end": 180
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 173,
+                          "end": 180
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 173,
+                              "end": 174
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "i"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 175,
+                              "end": 177
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 178,
+                              "end": 180
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "xs"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Comprehension arrays with begin block bodies - issue #44",
+    "source": "[\n\tbegin\n\t\t1 + i\n\tend for i in 1:10\n]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 37
+        },
+        "children": [
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 0,
+              "end": 37
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 3,
+                  "end": 35
+                },
+                "children": [
+                  {
+                    "kind": "BeginBlock",
+                    "span": {
+                      "start": 3,
+                      "end": 21
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 11,
+                          "end": 16
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 11,
+                              "end": 12
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 13,
+                              "end": 14
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "+"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 15,
+                              "end": 16
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "i"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 22,
+                      "end": 35
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 26,
+                          "end": 35
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 26,
+                              "end": 27
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "i"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 28,
+                              "end": 30
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 31,
+                              "end": 35
+                            },
+                            "children": [
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 31,
+                                  "end": 32
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "1"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 32,
+                                  "end": 33
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": ":"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "IntegerLiteral",
+                                "span": {
+                                  "start": 33,
+                                  "end": 35
+                                },
+                                "children": [],
+                                "value": {
+                                  "IntegerLiteral": "10"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Typed comprehensions - issue #45",
+    "source": "Float64[i for i in 1:3]\nT[i + j for i in 1:3, j in 1:3]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 55
+        },
+        "children": [
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 0,
+              "end": 23
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 7
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "Float64"
+                },
+                "flags": []
+              },
+              {
+                "kind": "ComprehensionExpression",
+                "span": {
+                  "start": 7,
+                  "end": 23
+                },
+                "children": [
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 8,
+                      "end": 22
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 8,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "i"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 10,
+                          "end": 22
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 14,
+                              "end": 22
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 14,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "i"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 16,
+                                  "end": 18
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "BinaryExpression",
+                                "span": {
+                                  "start": 19,
+                                  "end": 22
+                                },
+                                "children": [
+                                  {
+                                    "kind": "IntegerLiteral",
+                                    "span": {
+                                      "start": 19,
+                                      "end": 20
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "IntegerLiteral": "1"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Operator",
+                                    "span": {
+                                      "start": 20,
+                                      "end": 21
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Operator": ":"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "IntegerLiteral",
+                                    "span": {
+                                      "start": 21,
+                                      "end": 22
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "IntegerLiteral": "3"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "IndexExpression",
+            "span": {
+              "start": 24,
+              "end": 55
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 24,
+                  "end": 25
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "T"
+                },
+                "flags": []
+              },
+              {
+                "kind": "ComprehensionExpression",
+                "span": {
+                  "start": 25,
+                  "end": 55
+                },
+                "children": [
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 26,
+                      "end": 54
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 26,
+                          "end": 31
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 26,
+                              "end": 27
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "i"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 28,
+                              "end": 29
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "+"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 30,
+                              "end": 31
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "j"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 32,
+                          "end": 54
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 36,
+                              "end": 44
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 36,
+                                  "end": 37
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "i"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 38,
+                                  "end": 40
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "BinaryExpression",
+                                "span": {
+                                  "start": 41,
+                                  "end": 44
+                                },
+                                "children": [
+                                  {
+                                    "kind": "IntegerLiteral",
+                                    "span": {
+                                      "start": 41,
+                                      "end": 42
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "IntegerLiteral": "1"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Operator",
+                                    "span": {
+                                      "start": 42,
+                                      "end": 43
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Operator": ":"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "IntegerLiteral",
+                                    "span": {
+                                      "start": 43,
+                                      "end": 44
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "IntegerLiteral": "3"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 46,
+                              "end": 54
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 46,
+                                  "end": 47
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "j"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 48,
+                                  "end": 50
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "BinaryExpression",
+                                "span": {
+                                  "start": 51,
+                                  "end": 54
+                                },
+                                "children": [
+                                  {
+                                    "kind": "IntegerLiteral",
+                                    "span": {
+                                      "start": 51,
+                                      "end": 52
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "IntegerLiteral": "1"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Operator",
+                                    "span": {
+                                      "start": 52,
+                                      "end": 53
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Operator": ":"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "IntegerLiteral",
+                                    "span": {
+                                      "start": 53,
+                                      "end": 54
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "IntegerLiteral": "3"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Matrix rows of tilde bindings",
+    "source": "eqs = [D(x) ~ a * x\n       D(y) ~ b * y]",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 40
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 40
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 3
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "eqs"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 4,
+                  "end": 5
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "MatrixExpression",
+                "span": {
+                  "start": 6,
+                  "end": 40
+                },
+                "children": [
+                  {
+                    "kind": "MatrixRow",
+                    "span": {
+                      "start": 7,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "Assignment",
+                        "span": {
+                          "start": 7,
+                          "end": 19
+                        },
+                        "children": [
+                          {
+                            "kind": "CallExpression",
+                            "span": {
+                              "start": 7,
+                              "end": 11
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 7,
+                                  "end": 8
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "D"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Arguments",
+                                "span": {
+                                  "start": 8,
+                                  "end": 11
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 9,
+                                      "end": 10
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "x"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 12,
+                              "end": 13
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "~"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 14,
+                              "end": 19
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 14,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "a"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 16,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "*"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 18,
+                                  "end": 19
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "MatrixRow",
+                    "span": {
+                      "start": 27,
+                      "end": 39
+                    },
+                    "children": [
+                      {
+                        "kind": "Assignment",
+                        "span": {
+                          "start": 27,
+                          "end": 39
+                        },
+                        "children": [
+                          {
+                            "kind": "CallExpression",
+                            "span": {
+                              "start": 27,
+                              "end": 31
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 27,
+                                  "end": 28
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "D"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Arguments",
+                                "span": {
+                                  "start": 28,
+                                  "end": 31
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 29,
+                                      "end": 30
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "y"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 32,
+                              "end": 33
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "~"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "BinaryExpression",
+                            "span": {
+                              "start": 34,
+                              "end": 39
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 34,
+                                  "end": 35
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "b"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 36,
+                                  "end": 37
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "*"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 38,
+                                  "end": 39
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Generator expressions",
+    "source": "(b(c, e) for c in d if e)\n(b(c, e) for c in d, e = 5)\n(b(c, e) for c in d, e = 5 if e)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 86
+        },
+        "children": [
+          {
+            "kind": "ParenExpression",
+            "span": {
+              "start": 0,
+              "end": 25
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 1,
+                  "end": 24
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 1,
+                      "end": 8
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 1,
+                          "end": 2
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 2,
+                          "end": 8
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 3,
+                              "end": 4
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 6,
+                              "end": 7
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 9,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 13,
+                          "end": 19
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 13,
+                              "end": 14
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 15,
+                              "end": 17
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 18,
+                              "end": 19
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "d"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "IfClause",
+                    "span": {
+                      "start": 20,
+                      "end": 24
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 23,
+                          "end": 24
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "e"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParenExpression",
+            "span": {
+              "start": 26,
+              "end": 53
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 27,
+                  "end": 52
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 27,
+                      "end": 34
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 27,
+                          "end": 28
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 28,
+                          "end": 34
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 29,
+                              "end": 30
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 32,
+                              "end": 33
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 35,
+                      "end": 52
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 39,
+                          "end": 45
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 39,
+                              "end": 40
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 41,
+                              "end": 43
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 44,
+                              "end": 45
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "d"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 47,
+                          "end": 52
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 47,
+                              "end": 48
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 49,
+                              "end": 50
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 51,
+                              "end": 52
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "5"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ParenExpression",
+            "span": {
+              "start": 54,
+              "end": 86
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 55,
+                  "end": 85
+                },
+                "children": [
+                  {
+                    "kind": "CallExpression",
+                    "span": {
+                      "start": 55,
+                      "end": 62
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 55,
+                          "end": 56
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Arguments",
+                        "span": {
+                          "start": 56,
+                          "end": 62
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 57,
+                              "end": 58
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 60,
+                              "end": 61
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 63,
+                      "end": 80
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 67,
+                          "end": 73
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 67,
+                              "end": 68
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 69,
+                              "end": 71
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 72,
+                              "end": 73
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "d"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 75,
+                          "end": 80
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 75,
+                              "end": 76
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "e"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 77,
+                              "end": 78
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 79,
+                              "end": 80
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "5"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "IfClause",
+                    "span": {
+                      "start": 81,
+                      "end": 85
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 84,
+                          "end": 85
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "e"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Generator expressions in function calls",
+    "source": "f(i for i in iter)\nf(1, 2, x for x = xs)\nf(1, 2, x + y for x = xs, y = ys)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 74
+        },
+        "children": [
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 0,
+              "end": 18
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 0,
+                  "end": 1
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 1,
+                  "end": 18
+                },
+                "children": [
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 2,
+                      "end": 17
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 2,
+                          "end": 3
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "i"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 4,
+                          "end": 17
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 8,
+                              "end": 17
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 8,
+                                  "end": 9
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "i"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 10,
+                                  "end": 12
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 13,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "iter"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 19,
+              "end": 40
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 19,
+                  "end": 20
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 20,
+                  "end": 40
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 21,
+                      "end": 22
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 24,
+                      "end": 25
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 27,
+                      "end": 39
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 27,
+                          "end": 28
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 29,
+                          "end": 39
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 33,
+                              "end": 39
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 33,
+                                  "end": 34
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 35,
+                                  "end": 36
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "="
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 37,
+                                  "end": 39
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "xs"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 41,
+              "end": 74
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 41,
+                  "end": 42
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 42,
+                  "end": 74
+                },
+                "children": [
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 43,
+                      "end": 44
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 46,
+                      "end": 47
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "2"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 49,
+                      "end": 73
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 49,
+                          "end": 54
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 49,
+                              "end": 50
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 51,
+                              "end": 52
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "+"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 53,
+                              "end": 54
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 55,
+                          "end": 73
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 59,
+                              "end": 65
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 59,
+                                  "end": 60
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 61,
+                                  "end": 62
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "="
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 63,
+                                  "end": 65
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "xs"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 67,
+                              "end": 73
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 67,
+                                  "end": 68
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 69,
+                                  "end": 70
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "="
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 71,
+                                  "end": 73
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "ys"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  }
+]

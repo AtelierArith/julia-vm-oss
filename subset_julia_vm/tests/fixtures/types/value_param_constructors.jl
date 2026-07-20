@@ -17,6 +17,9 @@ import Base: HasShape
     base_shape_two = Base.HasShape{2}()
     @test typeof(base_shape_two) === Base.HasShape{2}
     @test base_shape_two isa Base.HasShape{2}
+
+    @test sprint(show, Base.HasShape{1}()) == "HasShape{1}()"
+    @test (Base.IteratorSize((x for x in 1:5)) == Base.HasShape{1}())
 end
 
 true

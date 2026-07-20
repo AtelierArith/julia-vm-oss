@@ -119,6 +119,12 @@ expected = true
 description = "SubArray view == view compares elements rather than falling back to identity when view(...) return-type inference previously widened to Any (Issue #8240)"
 
 [[tests]]
+name = "subarray_vector_subarray_vector_equality_10296"
+file = "vector_subarray_vector_equality_10296.jl"
+expected = true
+description = "SubArray views and collect(Iterators.partition(...)) compare structurally equal to plain Vector literals in both operand orders, including nested Vector{SubArray} vs Vector{Vector} equality (Issue #10296)"
+
+[[tests]]
 name = "subarray_array_like_wrapper_contract_8246"
 file = "array_like_wrapper_contract_8246.jl"
 expected = true

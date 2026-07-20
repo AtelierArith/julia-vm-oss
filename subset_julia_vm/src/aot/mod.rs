@@ -368,6 +368,14 @@ fn prepare_aot_program(
     stats.functions_eliminated = stats.functions_total - program.functions.len();
     timings.push(("dead-code-elimination", t.elapsed()));
 
+    // Reverse the #9103 generator-body lift before inference so both inference
+    // and IR conversion see the inline generator (Issue #9179). The lift wraps a
+    // non-trivial generator body in an expression-position `let` block that AoT
+    // inference cannot see through; without this the surrounding binding widens
+    // to `Any` and the block trips the #7014 diagnostic during conversion.
+    let mut program = program;
+    crate::aot::analyze::reverse_generator_lifts_in_program(&mut program);
+
     // Type inference
     let t = std::time::Instant::now();
     let mut type_engine = TypeInferenceEngine::new();
@@ -551,7 +559,7 @@ fn append_cranelift_c_abi_export_wrappers(
                 export.export_name
             )));
         }
-        module.add_function(cranelift_c_abi_wrapper_function(export));
+        module.add_function(cranelift_c_abi_wrapper_function(export)?);
     }
 
     Ok(())
@@ -684,7 +692,9 @@ fn is_c_symbol_name(name: &str) -> bool {
 }
 
 #[cfg(feature = "cranelift")]
-fn cranelift_c_abi_wrapper_function(export: ResolvedCraneliftCAbiExport) -> ir::IrFunction {
+fn cranelift_c_abi_wrapper_function(
+    export: ResolvedCraneliftCAbiExport,
+) -> AotResult<ir::IrFunction> {
     let mut wrapper = ir::IrFunction::new(
         export.export_name,
         export.params.clone(),
@@ -696,36 +706,34 @@ fn cranelift_c_abi_wrapper_function(export: ResolvedCraneliftCAbiExport) -> ir::
         .map(|(name, ty)| ir::VarRef::new(name.clone(), ty.clone()))
         .collect::<Vec<_>>();
 
+    // INTERNAL: `IrFunction::new` always creates its entry block (Issue
+    // #10907 — previously four repeated panicking `entry_block_mut` lookups
+    // relying on this same invariant).
+    let entry = wrapper.entry_block_mut().ok_or_else(|| {
+        AotError::InternalError(
+            "cranelift_c_abi_wrapper_function: IrFunction::new always creates its entry block"
+                .to_string(),
+        )
+    })?;
+
     if export.return_type == types::StaticType::Nothing {
-        wrapper
-            .entry_block_mut()
-            .unwrap()
-            .push(ir::Instruction::Call {
-                dest: None,
-                func: export.target_name,
-                args,
-            });
-        wrapper
-            .entry_block_mut()
-            .unwrap()
-            .set_terminator(ir::Terminator::Return(None));
+        entry.push(ir::Instruction::Call {
+            dest: None,
+            func: export.target_name,
+            args,
+        });
+        entry.set_terminator(ir::Terminator::Return(None));
     } else {
         let result = ir::VarRef::new("__sjulia_cabi_ret".to_string(), export.return_type);
-        wrapper
-            .entry_block_mut()
-            .unwrap()
-            .push(ir::Instruction::Call {
-                dest: Some(result.clone()),
-                func: export.target_name,
-                args,
-            });
-        wrapper
-            .entry_block_mut()
-            .unwrap()
-            .set_terminator(ir::Terminator::Return(Some(result)));
+        entry.push(ir::Instruction::Call {
+            dest: Some(result.clone()),
+            func: export.target_name,
+            args,
+        });
+        entry.set_terminator(ir::Terminator::Return(Some(result)));
     }
 
-    wrapper
+    Ok(wrapper)
 }
 
 #[cfg(not(feature = "cranelift"))]
@@ -1106,9 +1114,14 @@ fn build_cranelift_struct_layouts(
 fn insert_builtin_cranelift_complex_layouts(
     layouts: &mut std::collections::HashMap<String, CraneliftStructLayout>,
 ) {
-    fn layout(element_ty: types::StaticType) -> CraneliftStructLayout {
-        let (size, align) =
-            cranelift_scalar_layout(&element_ty).expect("Complex element type is scalar");
+    // Issue #10907: `size`/`align` used to come from `cranelift_scalar_layout`
+    // (a general, `Option`-returning helper covering every `StaticType`),
+    // guarded only by a panicking "Complex element type is scalar" assertion
+    // that relied on the caller only ever passing F64/F32 below. Since both
+    // call sites already know their element's scalar layout literally, take
+    // it as a parameter instead — the possibility of "not actually scalar"
+    // is removed by construction rather than asserted at runtime.
+    fn layout(element_ty: types::StaticType, size: usize, align: usize) -> CraneliftStructLayout {
         CraneliftStructLayout {
             fields: vec![
                 CraneliftStructField {
@@ -1131,12 +1144,12 @@ fn insert_builtin_cranelift_complex_layouts(
     for name in ["Complex", "ComplexF64", "Complex{Float64}"] {
         layouts
             .entry(name.to_string())
-            .or_insert_with(|| layout(types::StaticType::F64));
+            .or_insert_with(|| layout(types::StaticType::F64, 8, 8));
     }
     for name in ["ComplexF32", "Complex{Float32}"] {
         layouts
             .entry(name.to_string())
-            .or_insert_with(|| layout(types::StaticType::F32));
+            .or_insert_with(|| layout(types::StaticType::F32, 4, 4));
     }
 }
 
@@ -1221,15 +1234,21 @@ fn lower_aot_program_for_cranelift(
         )
         .lower_main(&aot_program.main)?,
     );
-    module.add_function(cranelift_standalone_main_wrapper());
+    module.add_function(cranelift_standalone_main_wrapper()?);
     Ok(module)
 }
 
 #[cfg(feature = "cranelift")]
-fn cranelift_standalone_main_wrapper() -> ir::IrFunction {
+fn cranelift_standalone_main_wrapper() -> AotResult<ir::IrFunction> {
     let mut wrapper = ir::IrFunction::new("main".to_string(), Vec::new(), types::StaticType::I32);
     let exit_code = ir::VarRef::new("__sjulia_exit_code".to_string(), types::StaticType::I32);
-    let entry = wrapper.entry_block_mut().unwrap();
+    // INTERNAL: `IrFunction::new` always creates its entry block (Issue #10907).
+    let entry = wrapper.entry_block_mut().ok_or_else(|| {
+        AotError::InternalError(
+            "cranelift_standalone_main_wrapper: IrFunction::new always creates its entry block"
+                .to_string(),
+        )
+    })?;
     entry.push(ir::Instruction::Call {
         dest: None,
         func: "__juliars_main".to_string(),
@@ -1240,7 +1259,7 @@ fn cranelift_standalone_main_wrapper() -> ir::IrFunction {
         value: ir::ConstValue::Int32(0),
     });
     entry.set_terminator(ir::Terminator::Return(Some(exit_code)));
-    wrapper
+    Ok(wrapper)
 }
 
 #[cfg(feature = "cranelift")]
@@ -1407,6 +1426,7 @@ impl CraneliftAotLowerer {
                 Ok(())
             }
             ir::AotStmt::Expr(expr) => self.lower_expr_for_effect(expr, func),
+            ir::AotStmt::ValueCarrier(expr) => self.lower_expr_for_effect(expr, func),
             ir::AotStmt::Return(Some(expr)) => {
                 if let types::StaticType::Tuple(elements) = func.return_type.clone() {
                     let values = self.lower_tuple_expr_fields(expr, &elements, func, None)?;
@@ -1616,11 +1636,18 @@ impl CraneliftAotLowerer {
                 }
                 let args = self.lower_call_args(args, func)?;
                 let dest = self.temp(return_ty.clone());
+                // Issue #10907: bind the match guard's `Option` once instead
+                // of re-deriving it with a second `Self::cranelift_math_builtin_name`
+                // call guarded only by a panicking "math builtin was matched"
+                // assertion.
+                let Some(math_name) = Self::cranelift_math_builtin_name(*builtin) else {
+                    return Err(AotError::InternalError(format!(
+                        "cranelift math builtin `{builtin}` matched the arm guard but not the body"
+                    )));
+                };
                 self.current_block_mut(func)?.push(ir::Instruction::Call {
                     dest: Some(dest.clone()),
-                    func: Self::cranelift_math_builtin_name(*builtin)
-                        .expect("math builtin was matched")
-                        .to_string(),
+                    func: math_name.to_string(),
                     args,
                 });
                 Ok(dest)
@@ -2036,6 +2063,18 @@ impl CraneliftAotLowerer {
         };
 
         let layout = self.struct_layout(self.struct_type_name(result_ty)?)?;
+        // INTERNAL: every Complex layout is built by
+        // `insert_builtin_cranelift_complex_layouts`, which always inserts
+        // exactly a "re" and "im" field (Issue #10907 — replaces two
+        // panicking field-lookup assertions with typed internal errors).
+        let re_offset = layout.field("re").ok_or_else(|| {
+            AotError::InternalError("Complex layout is missing its `re` field".to_string())
+        })?;
+        let re_offset = re_offset.offset as i32;
+        let im_offset = layout.field("im").ok_or_else(|| {
+            AotError::InternalError("Complex layout is missing its `im` field".to_string())
+        })?;
+        let im_offset = im_offset.offset as i32;
         let dest = self.temp(result_ty.clone());
         self.current_block_mut(func)?
             .push(ir::Instruction::StructNew {
@@ -2044,11 +2083,11 @@ impl CraneliftAotLowerer {
                 align: layout.align,
                 fields: vec![
                     ir::StructFieldInit {
-                        offset: layout.field("re").expect("Complex layout has re").offset as i32,
+                        offset: re_offset,
                         value: re,
                     },
                     ir::StructFieldInit {
-                        offset: layout.field("im").expect("Complex layout has im").offset as i32,
+                        offset: im_offset,
                         value: im,
                     },
                 ],
@@ -2299,7 +2338,11 @@ impl CraneliftAotLowerer {
                 "Cranelift backend tuple index must be one-based and positive (Issue #7097)",
             ));
         }
-        let zero_based = (*index as usize) - 1;
+        let zero_based = usize::try_from(*index - 1).map_err(|_| {
+            cranelift_unsupported(format!(
+                "Cranelift backend tuple index {index} exceeds the host index range (Issue #7097)"
+            ))
+        })?;
         let field = match array {
             ir::AotExpr::TupleLit { elements } => {
                 let Some(element) = elements.get(zero_based) else {
@@ -2616,6 +2659,7 @@ mod tests {
     use crate::ir::core::{EnumDef, EnumMember};
     use crate::span::Span;
     use crate::types::JuliaType;
+    use std::sync::Arc;
 
     fn empty_program() -> Program {
         Program {
@@ -3708,7 +3752,7 @@ mod tests {
             },
             span,
         });
-        program.functions.push(Function {
+        program.functions.push(Arc::new(Function {
             name: "pick_green".to_string(),
             params: vec![],
             kwparams: vec![],
@@ -3716,18 +3760,19 @@ mod tests {
             return_type: Some(JuliaType::Int32),
             body: Block {
                 stmts: vec![Stmt::Return {
-                    value: Some(Expr::Var("green".to_string(), span)),
+                    value: Some(Expr::var("green", span)),
                     span,
                 }],
                 span,
             },
             is_base_extension: false,
             is_runtime_eval: false,
+            new_struct_name: None,
             span,
-        });
+        }));
         program.main.stmts.push(Stmt::Expr {
             expr: Expr::Call {
-                function: "pick_green".to_string(),
+                function: "pick_green".to_string().into(),
                 args: vec![],
                 kwargs: vec![],
                 splat_mask: vec![],
@@ -4239,7 +4284,8 @@ mod tests {
     fn c_abi_export_keeps_uncalled_function_through_pipeline_issue_6990() {
         let span = Span::new(0, 0, 1, 1, 1, 1);
         let mut program = empty_program();
-        program.functions.push(Function {
+        program.functions.push(Arc::new(Function {
+            new_struct_name: None,
             name: "add".to_string(),
             params: vec![
                 TypedParam::new("x".to_string(), Some(JuliaType::Int64), span),
@@ -4252,8 +4298,8 @@ mod tests {
                 stmts: vec![Stmt::Return {
                     value: Some(Expr::BinaryOp {
                         op: BinaryOp::Add,
-                        left: Box::new(Expr::Var("x".to_string(), span)),
-                        right: Box::new(Expr::Var("y".to_string(), span)),
+                        left: Box::new(Expr::Var("x".to_string().into(), span)),
+                        right: Box::new(Expr::Var("y".to_string().into(), span)),
                         span,
                     }),
                     span,
@@ -4263,7 +4309,7 @@ mod tests {
             is_base_extension: false,
             is_runtime_eval: false,
             span,
-        });
+        }));
 
         let config = CompileConfig {
             c_abi_exports: vec![CAbiExport::new("sjulia_add", "add")],
@@ -4291,16 +4337,16 @@ mod tests {
             let body_expr = if index + 1 == function_count {
                 Expr::BinaryOp {
                     op: BinaryOp::Add,
-                    left: Box::new(Expr::Var("x".to_string(), span)),
+                    left: Box::new(Expr::Var("x".to_string().into(), span)),
                     right: Box::new(Expr::Literal(crate::ir::core::Literal::Int(1), span)),
                     span,
                 }
             } else {
                 Expr::Call {
-                    function: format!("f{}", index + 1),
+                    function: format!("f{}", index + 1).into(),
                     args: vec![Expr::BinaryOp {
                         op: BinaryOp::Add,
-                        left: Box::new(Expr::Var("x".to_string(), span)),
+                        left: Box::new(Expr::Var("x".to_string().into(), span)),
                         right: Box::new(Expr::Literal(crate::ir::core::Literal::Int(1), span)),
                         span,
                     }],
@@ -4310,7 +4356,8 @@ mod tests {
                     span,
                 }
             };
-            program.functions.push(Function {
+            program.functions.push(Arc::new(Function {
+                new_struct_name: None,
                 name: format!("f{}", index),
                 params: vec![TypedParam::new(
                     "x".to_string(),
@@ -4339,12 +4386,12 @@ mod tests {
                 is_base_extension: false,
                 is_runtime_eval: false,
                 span,
-            });
+            }));
         }
 
         program.main.stmts.push(Stmt::Expr {
             expr: Expr::Call {
-                function: "f0".to_string(),
+                function: "f0".to_string().into(),
                 args: vec![Expr::Literal(crate::ir::core::Literal::Int(0), span)],
                 kwargs: vec![],
                 splat_mask: vec![],
@@ -4376,7 +4423,8 @@ mod tests {
     fn abstract_return_value_boundary_codegen_is_valid_issue_7074() {
         let span = Span::new(0, 0, 1, 1, 1, 1);
         let mut program = empty_program();
-        program.functions.push(Function {
+        program.functions.push(Arc::new(Function {
+            new_struct_name: None,
             name: "f".to_string(),
             params: vec![TypedParam::new(
                 "x".to_string(),
@@ -4389,10 +4437,10 @@ mod tests {
             body: Block {
                 stmts: vec![Stmt::Return {
                     value: Some(Expr::Call {
-                        function: "convert".to_string(),
+                        function: "convert".to_string().into(),
                         args: vec![
-                            Expr::Var("Real".to_string(), span),
-                            Expr::Var("x".to_string(), span),
+                            Expr::Var("Real".to_string().into(), span),
+                            Expr::Var("x".to_string().into(), span),
                         ],
                         kwargs: vec![],
                         splat_mask: vec![false, false],
@@ -4406,8 +4454,9 @@ mod tests {
             is_base_extension: false,
             is_runtime_eval: false,
             span,
-        });
-        program.functions.push(Function {
+        }));
+        program.functions.push(Arc::new(Function {
+            new_struct_name: None,
             name: "g".to_string(),
             params: vec![TypedParam::new(
                 "flag".to_string(),
@@ -4420,11 +4469,11 @@ mod tests {
             body: Block {
                 stmts: vec![Stmt::Return {
                     value: Some(Expr::Call {
-                        function: "convert".to_string(),
+                        function: "convert".to_string().into(),
                         args: vec![
-                            Expr::Var("Real".to_string(), span),
+                            Expr::Var("Real".to_string().into(), span),
                             Expr::Ternary {
-                                condition: Box::new(Expr::Var("flag".to_string(), span)),
+                                condition: Box::new(Expr::Var("flag".to_string().into(), span)),
                                 then_expr: Box::new(Expr::Literal(Literal::Int(1), span)),
                                 else_expr: Box::new(Expr::Literal(Literal::Float(2.5), span)),
                                 span,
@@ -4442,14 +4491,14 @@ mod tests {
             is_base_extension: false,
             is_runtime_eval: false,
             span,
-        });
+        }));
 
         program.main.stmts.push(Stmt::Expr {
             expr: Expr::LetBlock {
                 bindings: vec![(
-                    "y".to_string(),
+                    "y".to_string().into(),
                     Expr::Call {
-                        function: "f".to_string(),
+                        function: "f".to_string().into(),
                         args: vec![Expr::Literal(Literal::Int(1), span)],
                         kwargs: vec![],
                         splat_mask: vec![false],
@@ -4461,7 +4510,7 @@ mod tests {
                     stmts: vec![Stmt::Expr {
                         expr: Expr::BinaryOp {
                             op: BinaryOp::Add,
-                            left: Box::new(Expr::Var("y".to_string(), span)),
+                            left: Box::new(Expr::Var("y".to_string().into(), span)),
                             right: Box::new(Expr::Literal(Literal::Int(2), span)),
                             span,
                         },
@@ -4476,9 +4525,9 @@ mod tests {
         program.main.stmts.push(Stmt::Expr {
             expr: Expr::LetBlock {
                 bindings: vec![(
-                    "z".to_string(),
+                    "z".to_string().into(),
                     Expr::Call {
-                        function: "g".to_string(),
+                        function: "g".to_string().into(),
                         args: vec![Expr::Literal(Literal::Bool(false), span)],
                         kwargs: vec![],
                         splat_mask: vec![false],
@@ -4490,7 +4539,7 @@ mod tests {
                     stmts: vec![Stmt::Expr {
                         expr: Expr::BinaryOp {
                             op: BinaryOp::Add,
-                            left: Box::new(Expr::Var("z".to_string(), span)),
+                            left: Box::new(Expr::Var("z".to_string().into(), span)),
                             right: Box::new(Expr::Literal(Literal::Int(2), span)),
                             span,
                         },
@@ -4531,7 +4580,7 @@ mod tests {
         let mut program = empty_program();
         program.main.stmts.push(Stmt::Expr {
             expr: Expr::LetBlock {
-                bindings: vec![("x".to_string(), Expr::Literal(Literal::Int(1), span))],
+                bindings: vec![("x".to_string().into(), Expr::Literal(Literal::Int(1), span))],
                 body: Block {
                     stmts: vec![
                         Stmt::Assign {
@@ -4540,7 +4589,7 @@ mod tests {
                             span,
                         },
                         Stmt::Expr {
-                            expr: Expr::Var("x".to_string(), span),
+                            expr: Expr::Var("x".to_string().into(), span),
                             span,
                         },
                     ],
@@ -4566,6 +4615,86 @@ mod tests {
             .rust_code
             .contains("x = Value::from(\"s\".to_string());"));
         assert!(!result.output.rust_code.contains("let mut x: i64 = 1i64;"));
+    }
+
+    /// Issue #10537 (codex review of #10528): when the scope-local join of a
+    /// `let` binding is `StaticType::Any` — not `Union` — because a later
+    /// assignment is a call whose return type is `Any`, `enter_lexical_scope`
+    /// must keep the boxed `Value` slot. Dropping the `Any` env entry lets the
+    /// first concrete assignment declare `i64` and the later Any store fails
+    /// codegen (#6978). Distinct from #7075, which covers the Int+Str → Union path.
+    #[test]
+    fn type_unstable_any_return_reassignment_uses_value_slot_issue_10537() {
+        let span = Span::new(0, 0, 1, 1, 1, 1);
+        let mut program = empty_program();
+        program.functions.push(Arc::new(Function {
+            new_struct_name: None,
+            name: "g".to_string(),
+            params: vec![TypedParam::new("x".to_string(), Some(JuliaType::Any), span)],
+            kwparams: vec![],
+            type_params: vec![],
+            return_type: Some(JuliaType::Any),
+            body: Block {
+                stmts: vec![Stmt::Return {
+                    value: Some(Expr::Var("x".to_string().into(), span)),
+                    span,
+                }],
+                span,
+            },
+            is_base_extension: false,
+            is_runtime_eval: false,
+            span,
+        }));
+        program.main.stmts.push(Stmt::Expr {
+            expr: Expr::LetBlock {
+                bindings: vec![("x".to_string().into(), Expr::Literal(Literal::Int(1), span))],
+                body: Block {
+                    stmts: vec![
+                        Stmt::Assign {
+                            var: "x".to_string(),
+                            value: Expr::Call {
+                                function: "g".to_string().into(),
+                                args: vec![Expr::Literal(Literal::Str("s".to_string()), span)],
+                                kwargs: vec![],
+                                splat_mask: vec![false],
+                                kwargs_splat_mask: vec![],
+                                span,
+                            },
+                            span,
+                        },
+                        Stmt::Expr {
+                            expr: Expr::Var("x".to_string().into(), span),
+                            span,
+                        },
+                    ],
+                    span,
+                },
+                span,
+            },
+            span,
+        });
+
+        let config = CompileConfig {
+            opt_level: optimizer::OptLevel::O0,
+            ..CompileConfig::default()
+        };
+        let result = compile_program(program, &config).expect(
+            "let local reassigned through an Any-returning call must compile with a Value slot (#10537)",
+        );
+
+        assert!(
+            result
+                .output
+                .rust_code
+                .contains("let mut x: Value = Value::from(1i64);"),
+            "scope-local Any join must keep a boxed Value slot, got:\n{}",
+            result.output.rust_code
+        );
+        assert!(
+            !result.output.rust_code.contains("let mut x: i64 = 1i64;"),
+            "must not declare a concrete i64 slot when a later Any store is in scope, got:\n{}",
+            result.output.rust_code
+        );
     }
 
     #[test]

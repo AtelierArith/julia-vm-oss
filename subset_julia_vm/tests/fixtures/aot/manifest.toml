@@ -11,3 +11,58 @@ name = "aot_mandelbrot_scalar_aot"
 file = "mandelbrot_scalar_aot.jl"
 expected = true
 description = "AoT scalar Mandelbrot: typed Float64/Int64 arithmetic, nested while loops, early return — no Complex or broadcasting"
+
+[[tests]]
+name = "aot_coprime_pi_acceptance"
+file = "coprime_pi_acceptance_aot.jl"
+expected = true
+description = "ADR #8639 acceptance program 1/3: coprime-probability pi estimate (typed scalar loops, gcd, sqrt) — must run under both VM and AoT with upstream-identical output"
+
+[[tests]]
+name = "aot_aizawa_acceptance"
+file = "aizawa_acceptance_aot.jl"
+expected = true
+description = "ADR #8639 acceptance program 2/3: Aizawa attractor explicit-Euler kernel (pure Float64 scalar hot loop) — must run under both VM and AoT with upstream-identical output"
+
+[[tests]]
+name = "aot_mandelbrot_acceptance"
+file = "mandelbrot_acceptance_aot.jl"
+expected = true
+description = "ADR #8639 acceptance program 3/3: scalar for-loop Mandelbrot on ComplexF64 (z = z*z + c, early return in for) — the Complex-arithmetic gate; must run under both VM and AoT with upstream-identical output"
+
+[[tests]]
+name = "aot_scope_sibling_rebind_10251"
+file = "scope_sibling_rebind_10251.jl"
+expected = true
+description = "Same-named locals in sibling let/for scopes are independent bindings and keep their own concrete type (Issue #10251/#10111); VM parity lock, AoT let-block case fixed"
+
+[[tests]]
+name = "aot_bool_cmp_unary_minimal_prelude_10815"
+file = "aot_bool_cmp_unary_minimal_prelude_10815.jl"
+expected = true
+description = "vm_aot equivalence corpus widening (Issue #10815): Bool/comparison/unary operators through the AoT minimal-prelude codegen path"
+
+[[tests]]
+name = "aot_gcd_lcm_factorial_minimal_prelude_10815"
+file = "aot_gcd_lcm_factorial_minimal_prelude_10815.jl"
+expected = true
+description = "vm_aot equivalence corpus widening (Issue #10815): prelude_aot.jl's gcd/lcm/factorial integer-utility family through the AoT minimal-prelude codegen path"
+
+[[tests]]
+name = "aot_string_concat_minimal_prelude_10815"
+file = "aot_string_concat_minimal_prelude_10815.jl"
+expected = true
+description = "vm_aot equivalence corpus widening (Issue #10815): String parameters/concatenation/return values through the AoT minimal-prelude codegen path"
+
+[[tests]]
+name = "aot_recursive_fib_minimal_prelude_10815"
+file = "aot_recursive_fib_minimal_prelude_10815.jl"
+expected = true
+description = "vm_aot equivalence corpus widening (Issue #10815): user-defined recursive function + for loop through the AoT minimal-prelude codegen path"
+
+[[tests]]
+name = "aot_break_continue_minimal_prelude_10815"
+file = "aot_break_continue_minimal_prelude_10815.jl"
+expected = true
+description = "vm_aot equivalence corpus widening (Issue #10815): break/continue inside a while-true loop through the AoT minimal-prelude codegen path"
+

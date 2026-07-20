@@ -4,14 +4,39 @@
 // in each individual test target.
 #![allow(dead_code)]
 
-use subset_julia_vm::compile::compile_core_program;
+use subset_julia_vm::compile::host_support::compile_core_program;
 use subset_julia_vm::ir::core::Program;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
 use subset_julia_vm::types::JuliaType;
-use subset_julia_vm::vm::{CompiledProgram, Instr, Value, Vm};
+use subset_julia_vm::vm::Vm;
 use subset_julia_vm::*;
+use subset_julia_vm_bytecode::{CompiledProgram, Instr, Value};
+
+/// Run a test body on a dedicated thread with a large stack (Issue #10006).
+///
+/// Tests that parse/lower/compile the full Base prelude in-process recurse
+/// deeply over the Base AST (`compile_expr` → `compile_expr_as` →
+/// `compile_binary_op` over long chained binary expressions). Debug-profile
+/// frames are large enough that this overflows the default 2 MiB libtest
+/// worker-thread stack under `cargo test`, aborting the whole process with
+/// SIGABRT; release builds fit comfortably. Mirrors the established pattern
+/// (`FIXTURE_TEST_STACK_SIZE` in `fixture_tests.rs`,
+/// `run_with_large_stack` in `repl_session_fixture_tests.rs`).
+pub fn run_with_large_stack<F: FnOnce() + Send + 'static>(f: F) {
+    const LARGE_TEST_STACK_SIZE: usize = 64 * 1024 * 1024;
+    let handle = std::thread::Builder::new()
+        .name("large-stack-test".into())
+        .stack_size(LARGE_TEST_STACK_SIZE)
+        .spawn(f)
+        .expect("failed to spawn large-stack test thread");
+    // Re-panic on the test thread if the spawned thread panicked, so
+    // assertion failures keep their normal libtest reporting.
+    if let Err(e) = handle.join() {
+        std::panic::resume_unwind(e);
+    }
+}
 
 /// Helper to run code through the Core IR pipeline (tree-sitter → lowering → compile_core)
 /// This supports advanced features like struct definitions.
@@ -25,7 +50,7 @@ pub fn run_core_pipeline(src: &str, seed: u64) -> Result<Value, String> {
 /// Helper to run code and return the VM output (println output)
 /// Includes prelude functions. Uses the proper pipeline with caching.
 pub fn compile_and_run_str_with_output(src: &str, seed: u64) -> String {
-    use subset_julia_vm::compile::compile_with_cache;
+    use subset_julia_vm::compile::host_support::compile_with_cache;
     use subset_julia_vm::pipeline::parse_and_lower;
 
     // Use the proper pipeline that merges with prelude and uses compile cache
@@ -43,14 +68,23 @@ pub fn compile_and_run_str_with_output(src: &str, seed: u64) -> String {
 pub fn run_pipeline_with_output(src: &str, seed: u64) -> (Value, String) {
     use subset_julia_vm::base;
 
+    // This harness drives Lowering directly (not through pipeline.rs), so it
+    // must install the VM-backed macro expander seam itself or built-in
+    // macros like @show fail to lower (Issues #8656 / #9115).
+    subset_julia_vm::macro_runtime::install();
+
     // Parse Base source
     let prelude_src = base::get_base();
     let mut parser = Parser::new().expect("parser creation failed");
     let prelude_parsed = parser.parse(&prelude_src).expect("prelude parse failed");
     let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering
+    let mut prelude_program = prelude_lowering
         .lower(prelude_parsed)
         .expect("prelude lowering failed");
+    // This helper manually merges Base into the user Program instead of using
+    // the production pipeline, so preserve the same serialized provenance
+    // boundary used by `base_loader`/`pipeline` (Issue #10959).
+    prelude_program.mark_structs_as_base_origin();
 
     // Parse user source
     let mut parser = Parser::new().expect("parser creation failed");

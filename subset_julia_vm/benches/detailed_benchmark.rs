@@ -13,7 +13,7 @@ use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
 use subset_julia_vm::vm::Vm;
-use subset_julia_vm::{compile::compile_with_cache, compile_and_run_str};
+use subset_julia_vm::{compile::host_support::compile_with_cache, compile_and_run_str};
 
 /// Benchmark: Parse + Lower only (source -> Core IR)
 fn bench_parse_lower(c: &mut Criterion) {

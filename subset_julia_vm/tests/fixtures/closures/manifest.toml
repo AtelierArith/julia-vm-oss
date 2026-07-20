@@ -61,6 +61,12 @@ expected = true
 description = "Closures inside @testset capture outer variables (Issue #2358)"
 
 [[tests]]
+name = "closures_testset_named_function_capture_11260"
+file = "testset_named_function_capture_11260.jl"
+expected = true
+description = "Short- and full-form named functions defined inside @testset capture locals from the same hard scope instead of reading nonexistent globals (Issue #11260)"
+
+[[tests]]
 name = "closures_any_tuple_array_lambda_4650"
 file = "any_tuple_array_lambda_4650.jl"
 expected = true
@@ -209,3 +215,39 @@ name = "closures_recursive_nested_closure_8118"
 file = "recursive_nested_closure_8118.jl"
 expected = true
 description = "A nested function that captures an enclosing local (a closure) can call itself recursively and call a mutually-recursive sibling: the self/sibling reference resolves through the captured environment instead of failing as 'Unknown function'. Covers self-recursion capturing a value (MWE1), pure mutual recursion (MWE2), self-recursion doing real work, mutually-recursive even/odd predicates, mutual recursion where only the callee captures an enclosing local, where both siblings capture it, three-way mutual recursion capturing a local, and regression guards for a non-recursive escaping closure and a captured function argument. prescan_mutual_closure_captures propagates a sibling closure's enclosing-local captures into every member that (transitively) calls it (sibling names excluded — reconstructed, not data-captured), so each member can reconstruct the others from the shared captures (Issue #8118)"
+
+[[tests]]
+name = "closures_closure_typeof_identity_9106"
+file = "closure_typeof_identity_9106.jl"
+expected = true
+description = "typeof(closure returned from a function) is a per-definition-site singleton type (typeof(parent#lambda)) instead of the shared Function DataType: two instances of the same closure template share one type, closures from different definition sites have different types, closures still satisfy isa Function / map, and a `fn::typeof(f)` method annotation dispatches on a closure-valued global binding (accepts f and g from the same site, MethodError for a different site). Runtime `typeof(v)` singleton annotations are resolved through the current global binding in check_subtype/check_subtype_core (Issue #9106)"
+
+[[tests]]
+name = "closures_testset_closure_capture_loop_9324"
+file = "testset_closure_capture_loop_9324.jl"
+expected = true
+description = "Issue #9324: closures capturing a for-loop variable inside a @testset body get a fresh per-iteration binding (like source-level let/function/top level), not one shared cell holding the post-loop value. The quote-expanded synthetic-marker let that a @testset body becomes now registers the loop variable (and comma-tuple loop variables) as a capturable local. Verified at parity with julia 1.12"
+
+[[tests]]
+name = "closures_for_loop_shadow_captured_outer_var_10984"
+file = "for_loop_shadow_captured_outer_var_10984.jl"
+expected = true
+description = "Issue #10984: a closure created BEFORE a for-loop that shadows the same name keeps seeing the outer (pre-loop) captured value both during and after the loop — the loop's induction variable is a fresh binding, not an alias of the closure's captured slot. Regression guard for the CoreCompiler::shadow_local_enter/shadow_local_exit fix (distinct from Issue #9324's per-iteration-capture concern). Verified at parity with julia 1.12.6"
+
+[[tests]]
+name = "closures_lambda_context_capability_cross_product_10965"
+file = "lambda_context_capability_cross_product_10965.jl"
+expected = true
+description = "Issue #10965: a static parametric type expression (Tuple{Int64}, Complex{Float64}) in a function body must not change closure representation or capture analysis. Cross product of unrelated static type expressions with captured assigned/inline/nested/mutating closures, plus the Issue #10948 builtin-spelled value-base shadow as positive control; the assigned-closure cases also guard the Issue #11030 fix (value-position arrows inside ctx-lowered bodies are nested closures, not capture-less lifted lambdas). Verified at parity with julia 1.12."
+
+[[tests]]
+name = "closures_assigned_arrow_context_capture_11030"
+file = "assigned_arrow_context_capture_11030.jl"
+expected = true
+description = "Assigned and returned arrow-function values retain captures when macros, where binders, or value-parametric type bases keep LambdaContext active (Issue #11030)"
+
+[[tests]]
+name = "closures_let_scope_global_function_capture_11015"
+file = "let_scope_global_function_capture_11015.jl"
+expected = true
+description = "Issue #11015: functions defined inside a `let` capture the let-locals — `global function`/short-form `global f() = ...` (the Base bootstrap pattern that `Base.include` uses for SOURCE_PATH), several global methods over one let binding, multi-method dispatch over a shared let-local, and plain named functions in a `let`. The let scope is boxed (closure_box), its captures are pre-analyzed before function compilation, and the global method's closure value binds to the module-level name. Verified at parity with julia 1.12"

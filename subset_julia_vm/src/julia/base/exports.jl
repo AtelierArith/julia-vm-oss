@@ -2,6 +2,21 @@
 # Modeled after Julia's base/exports.jl
 
 export
+# Module names exported by Base and therefore introduced by every ordinary
+# module's implicit `using Base`. `Base` itself is an implicit binding, not an
+# export; keep it out of this metadata so `using Base` mirrors upstream.
+    Core,
+    Main,
+    Broadcast,
+    Docs,
+    Libc,
+    MathConstants,
+    Meta,
+    StackTraces,
+    StepRangeLen,
+    Sys,
+    Threads,
+
 # Types
     AbstractArray,
     AbstractChar,
@@ -30,6 +45,7 @@ export
     CartesianIndices,
     Char,
     Complex,
+    ComplexF32,
     ComplexF64,
     CompositeException,
     DenseArray,
@@ -45,6 +61,7 @@ export
     IndexCartesian,
     IndexLinear,
     IndexStyle,
+    FieldError,
     InexactError,
     InvalidStateException,
     IOBuffer,
@@ -71,14 +88,18 @@ export
     Memory,
     Nothing,
     Number,
+    OrdinalRange,
     OutOfMemoryError,
     OverflowError,
     Pair,
+    Pipe,
     ProcessFailedException,
     Rational,
     Real,
     Ref,
     Regex,
+    RegexMatch,
+    SubstitutionString,
     RoundingMode,
     RoundDown,
     RoundFromZero,
@@ -92,6 +113,8 @@ export
     StackOverflowError,
     String,
     StringIndexError,
+    SubString,
+    SubArray,
     Symbol,
     SystemError,
     Channel,
@@ -101,6 +124,7 @@ export
     Text,
     TextDisplay,
     Tuple,
+    TypeVar,
     TypeError,
     UInt8,
     UInt16,
@@ -110,10 +134,15 @@ export
     UndefKeywordError,
     UndefRefError,
     UndefVarError,
+    UnionAll,
     UnitRange,
+    StepRange,
     Unsigned,
+    Val,
     Vector,
     VersionNumber,
+    WeakRef,
+    WeakKeyDict,
 
 # Mathematical constants
     VERSION,
@@ -145,6 +174,7 @@ export
     /,
     //,
     <,
+    <:,
     <=,
     ==,
     >,
@@ -155,6 +185,7 @@ export
     ~,
     :,
     =>,
+    >:,
     ÷,
     ≠,
     ≡,
@@ -253,10 +284,11 @@ export
     isinf,
     isinteger,
     isnan,
-    isnegative,
+    # isnegative — defined in number.jl but intentionally NOT exported: not in
+    # upstream Base's export list (upstream adds it as `public`, not `export`).
     isodd,
     isone,
-    ispositive,
+    # ispositive — defined in number.jl; not exported for the same reason as isnegative.
     ispow2,
     isqrt,
     isreal,
@@ -645,6 +677,12 @@ export
     tempname,
     touch,
     write,
+    flush,
+    position,
+    redirect_stderr,
+    redirect_stdout,
+    seek,
+    skip,
 
 # iteration
     eachrsplit,
@@ -685,12 +723,14 @@ export
     isbitstype,
     supertype,
     fieldcount,
-    fieldindex,
+    # fieldindex — defined in reflection.jl but internal in upstream Base (not exported).
     fieldname,
     fieldnames,
     fieldoffset,
     fieldtype,
     fieldtypes,
+    finalizer,
+    finalize,
     getfield,
     getproperty,
     hasfield,
@@ -705,7 +745,10 @@ export
     ismutable,
     ismutabletype,
     methods,
+    memoryref,
     nameof,
+    names,
+    GC,
     nfields,
     objectid,
     which,
@@ -769,7 +812,7 @@ export
     include_string,
     LineNumberNode,
     macroexpand,
-    macroexpand!,
+    # macroexpand! — sjulia builtin (Issue #300/#296); not an upstream Base export.
     QuoteNode,
 
 # Macros

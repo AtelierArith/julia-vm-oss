@@ -1,0 +1,3287 @@
+[
+  {
+    "name": "Closed macro call expressions",
+    "source": "@enum(Light, red, yellow, green)\n@NamedTuple{a::Float64, b::String}",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 67
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 32
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 0,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "enum"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 5,
+                  "end": 32
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 6,
+                      "end": 11
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "Light"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 13,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "red"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 18,
+                      "end": 24
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "yellow"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 26,
+                      "end": 31
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "green"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 33,
+              "end": 67
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 33,
+                  "end": 44
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 34,
+                      "end": 44
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "NamedTuple"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "BraceExpression",
+                "span": {
+                  "start": 44,
+                  "end": 67
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 45,
+                      "end": 55
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 45,
+                          "end": 46
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 46,
+                          "end": 48
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "::"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Type",
+                        "span": {
+                          "start": 48,
+                          "end": 55
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 48,
+                              "end": 55
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "Float64"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 57,
+                      "end": 66
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 57,
+                          "end": 58
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 58,
+                          "end": 60
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "::"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Type",
+                        "span": {
+                          "start": 60,
+                          "end": 66
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 60,
+                              "end": 66
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "String"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Open macro call expressions",
+    "source": "@mac a b c\n\n@assert x == y \"a message\"\n\n@. a * x + b\n\njoinpath(@__DIR__, \"grammar.js\")\n\n@macroexpand @async accept(socket)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 122
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 10
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 0,
+                  "end": 4
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 4
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "mac"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 5,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 5,
+                      "end": 6
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "a"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 7,
+                      "end": 8
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "b"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 9,
+                      "end": 10
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "c"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 12,
+              "end": 38
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 12,
+                  "end": 19
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 13,
+                      "end": 19
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "assert"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 20,
+                  "end": 38
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 20,
+                      "end": 26
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 20,
+                          "end": 21
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 22,
+                          "end": 24
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "=="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 25,
+                          "end": 26
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "StringExpression",
+                    "span": {
+                      "start": 27,
+                      "end": 38
+                    },
+                    "children": [
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 28,
+                          "end": 37
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "a message"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 40,
+              "end": 52
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 40,
+                  "end": 42
+                },
+                "children": [
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 41,
+                      "end": 42
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "."
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 43,
+                  "end": 52
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 43,
+                      "end": 52
+                    },
+                    "children": [
+                      {
+                        "kind": "BinaryExpression",
+                        "span": {
+                          "start": 43,
+                          "end": 48
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 43,
+                              "end": 44
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "a"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 45,
+                              "end": 46
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "*"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 47,
+                              "end": 48
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 49,
+                          "end": 50
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 51,
+                          "end": 52
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "b"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 54,
+              "end": 86
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 54,
+                  "end": 62
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "joinpath"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 62,
+                  "end": 86
+                },
+                "children": [
+                  {
+                    "kind": "MacroCallExpression",
+                    "span": {
+                      "start": 63,
+                      "end": 71
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroIdentifier",
+                        "span": {
+                          "start": 63,
+                          "end": 71
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 64,
+                              "end": 71
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "__DIR__"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "StringExpression",
+                    "span": {
+                      "start": 73,
+                      "end": 85
+                    },
+                    "children": [
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 74,
+                          "end": 84
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "grammar.js"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 88,
+              "end": 122
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 88,
+                  "end": 100
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 89,
+                      "end": 100
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "macroexpand"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 101,
+                  "end": 122
+                },
+                "children": [
+                  {
+                    "kind": "MacroCallExpression",
+                    "span": {
+                      "start": 101,
+                      "end": 122
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroIdentifier",
+                        "span": {
+                          "start": 101,
+                          "end": 107
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 102,
+                              "end": 107
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "async"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "MacroArguments",
+                        "span": {
+                          "start": 108,
+                          "end": 122
+                        },
+                        "children": [
+                          {
+                            "kind": "CallExpression",
+                            "span": {
+                              "start": 108,
+                              "end": 122
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 108,
+                                  "end": 114
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "accept"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Arguments",
+                                "span": {
+                                  "start": 114,
+                                  "end": 122
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 115,
+                                      "end": 121
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "socket"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Qualified macro identifiers",
+    "source": "Meta.@dump x = 1\n# @Meta.dump 1, 2 # TODO",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 41
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 16
+            },
+            "children": [
+              {
+                "kind": "FieldExpression",
+                "span": {
+                  "start": 0,
+                  "end": 10
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 0,
+                      "end": 4
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "Meta"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "MacroIdentifier",
+                    "span": {
+                      "start": 5,
+                      "end": 10
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 6,
+                          "end": 10
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "dump"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 11,
+                  "end": 16
+                },
+                "children": [
+                  {
+                    "kind": "Assignment",
+                    "span": {
+                      "start": 11,
+                      "end": 16
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 11,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 13,
+                          "end": 14
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 15,
+                          "end": 16
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "LineComment",
+            "span": {
+              "start": 17,
+              "end": 41
+            },
+            "children": [],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Open macro call expressions - Assignments and open tuple arguments",
+    "source": "@m x = y = z\n\n@m x, y = 1, 2\n\n@m x, y, z x, y, z",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 48
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 12
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 0,
+                  "end": 2
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 2
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "m"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 3,
+                  "end": 12
+                },
+                "children": [
+                  {
+                    "kind": "Assignment",
+                    "span": {
+                      "start": 3,
+                      "end": 12
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 3,
+                          "end": 4
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 5,
+                          "end": 6
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Assignment",
+                        "span": {
+                          "start": 7,
+                          "end": 12
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 7,
+                              "end": 8
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 9,
+                              "end": 10
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 11,
+                              "end": 12
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "z"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 14,
+              "end": 28
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 14,
+                  "end": 16
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 15,
+                      "end": 16
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "m"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 17,
+                  "end": 28
+                },
+                "children": [
+                  {
+                    "kind": "Assignment",
+                    "span": {
+                      "start": 17,
+                      "end": 28
+                    },
+                    "children": [
+                      {
+                        "kind": "OpenTuple",
+                        "span": {
+                          "start": 17,
+                          "end": 21
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 17,
+                              "end": 18
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 20,
+                              "end": 21
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 22,
+                          "end": 23
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "="
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "OpenTuple",
+                        "span": {
+                          "start": 24,
+                          "end": 28
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 24,
+                              "end": 25
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 27,
+                              "end": 28
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "2"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 30,
+              "end": 48
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 30,
+                  "end": 32
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 31,
+                      "end": 32
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "m"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 33,
+                  "end": 48
+                },
+                "children": [
+                  {
+                    "kind": "OpenTuple",
+                    "span": {
+                      "start": 33,
+                      "end": 40
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 33,
+                          "end": 34
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 36,
+                          "end": 37
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 39,
+                          "end": 40
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "z"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "OpenTuple",
+                    "span": {
+                      "start": 41,
+                      "end": 48
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 41,
+                          "end": 42
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 44,
+                          "end": 45
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "y"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 47,
+                          "end": 48
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "z"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Open macro call expressions - Arguments spanning multiple lines",
+    "source": "@name a +\n  2",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 13
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 13
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 0,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "name"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 6,
+                  "end": 13
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 6,
+                      "end": 13
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 6,
+                          "end": 7
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "a"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 8,
+                          "end": 9
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 12,
+                          "end": 13
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Open macro call expressions - Block arguments",
+    "source": "@testset \"a\" begin\n  b = c\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 30
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 30
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 0,
+                  "end": 8
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 8
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "testset"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 9,
+                  "end": 30
+                },
+                "children": [
+                  {
+                    "kind": "StringExpression",
+                    "span": {
+                      "start": 9,
+                      "end": 12
+                    },
+                    "children": [
+                      {
+                        "kind": "StringFragment",
+                        "span": {
+                          "start": 10,
+                          "end": 11
+                        },
+                        "children": [],
+                        "value": {
+                          "StringFragment": "a"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "BeginBlock",
+                    "span": {
+                      "start": 13,
+                      "end": 30
+                    },
+                    "children": [
+                      {
+                        "kind": "Assignment",
+                        "span": {
+                          "start": 21,
+                          "end": 26
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 21,
+                              "end": 22
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "b"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 23,
+                              "end": 24
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "="
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 25,
+                              "end": 26
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "c"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Closed macro call expressions - Do blocks",
+    "source": "@test() do x\n  xs\nend\n\n@test() do x, (y,z)\n  body\nend",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 53
+        },
+        "children": [
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 0,
+              "end": 21
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 0,
+                  "end": 5
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 1,
+                      "end": 5
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "test"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 5,
+                  "end": 7
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 8,
+                  "end": 21
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 11,
+                      "end": 12
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 11,
+                          "end": 12
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 15,
+                      "end": 17
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "xs"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 23,
+              "end": 53
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 23,
+                  "end": 28
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 24,
+                      "end": 28
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "test"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 28,
+                  "end": 30
+                },
+                "children": [],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "DoClause",
+                "span": {
+                  "start": 31,
+                  "end": 53
+                },
+                "children": [
+                  {
+                    "kind": "Parameters",
+                    "span": {
+                      "start": 34,
+                      "end": 42
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 34,
+                          "end": 35
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "x"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "TupleExpression",
+                        "span": {
+                          "start": 37,
+                          "end": 42
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 38,
+                              "end": 39
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "y"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 40,
+                              "end": 41
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "z"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 45,
+                      "end": 49
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "body"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Open vs closed macro calls",
+    "source": "@m[1, 2] + 1\n@m [1, 2] + 1",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 26
+        },
+        "children": [
+          {
+            "kind": "BinaryExpression",
+            "span": {
+              "start": 0,
+              "end": 12
+            },
+            "children": [
+              {
+                "kind": "MacroCallExpression",
+                "span": {
+                  "start": 0,
+                  "end": 8
+                },
+                "children": [
+                  {
+                    "kind": "MacroIdentifier",
+                    "span": {
+                      "start": 0,
+                      "end": 2
+                    },
+                    "children": [
+                      {
+                        "kind": "Identifier",
+                        "span": {
+                          "start": 1,
+                          "end": 2
+                        },
+                        "children": [],
+                        "value": {
+                          "Identifier": "m"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "VectorExpression",
+                    "span": {
+                      "start": 2,
+                      "end": 8
+                    },
+                    "children": [
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 3,
+                          "end": 4
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 6,
+                          "end": 7
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "2"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 9,
+                  "end": 10
+                },
+                "children": [],
+                "value": {
+                  "Operator": "+"
+                },
+                "flags": []
+              },
+              {
+                "kind": "IntegerLiteral",
+                "span": {
+                  "start": 11,
+                  "end": 12
+                },
+                "children": [],
+                "value": {
+                  "IntegerLiteral": "1"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "MacroCallExpression",
+            "span": {
+              "start": 13,
+              "end": 26
+            },
+            "children": [
+              {
+                "kind": "MacroIdentifier",
+                "span": {
+                  "start": 13,
+                  "end": 15
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 14,
+                      "end": 15
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "m"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "MacroArguments",
+                "span": {
+                  "start": 16,
+                  "end": 26
+                },
+                "children": [
+                  {
+                    "kind": "BinaryExpression",
+                    "span": {
+                      "start": 16,
+                      "end": 26
+                    },
+                    "children": [
+                      {
+                        "kind": "VectorExpression",
+                        "span": {
+                          "start": 16,
+                          "end": 22
+                        },
+                        "children": [
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 17,
+                              "end": 18
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "1"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "IntegerLiteral",
+                            "span": {
+                              "start": 20,
+                              "end": 21
+                            },
+                            "children": [],
+                            "value": {
+                              "IntegerLiteral": "2"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "Operator",
+                        "span": {
+                          "start": 23,
+                          "end": 24
+                        },
+                        "children": [],
+                        "value": {
+                          "Operator": "+"
+                        },
+                        "flags": []
+                      },
+                      {
+                        "kind": "IntegerLiteral",
+                        "span": {
+                          "start": 25,
+                          "end": 26
+                        },
+                        "children": [],
+                        "value": {
+                          "IntegerLiteral": "1"
+                        },
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Macro calls as parameters",
+    "source": "f(@nospecialize(x)) = x\ng(@nospecialize x) = x + 1\nh(@nospecialize x, y) = x + y",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 80
+        },
+        "children": [
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 0,
+              "end": 23
+            },
+            "children": [
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 0,
+                  "end": 19
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 0,
+                      "end": 1
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "f"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 1,
+                      "end": 19
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroCallExpression",
+                        "span": {
+                          "start": 2,
+                          "end": 18
+                        },
+                        "children": [
+                          {
+                            "kind": "MacroIdentifier",
+                            "span": {
+                              "start": 2,
+                              "end": 15
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 3,
+                                  "end": 15
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "nospecialize"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "Arguments",
+                            "span": {
+                              "start": 15,
+                              "end": 18
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 16,
+                                  "end": 17
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 20,
+                  "end": 21
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 22,
+                  "end": 23
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "x"
+                },
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 24,
+              "end": 50
+            },
+            "children": [
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 24,
+                  "end": 42
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 24,
+                      "end": 25
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "g"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 25,
+                      "end": 42
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroCallExpression",
+                        "span": {
+                          "start": 26,
+                          "end": 41
+                        },
+                        "children": [
+                          {
+                            "kind": "MacroIdentifier",
+                            "span": {
+                              "start": 26,
+                              "end": 39
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 27,
+                                  "end": 39
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "nospecialize"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "MacroArguments",
+                            "span": {
+                              "start": 40,
+                              "end": 41
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 40,
+                                  "end": 41
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 43,
+                  "end": 44
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 45,
+                  "end": 50
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 45,
+                      "end": 46
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 47,
+                      "end": 48
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "+"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "IntegerLiteral",
+                    "span": {
+                      "start": 49,
+                      "end": 50
+                    },
+                    "children": [],
+                    "value": {
+                      "IntegerLiteral": "1"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "Assignment",
+            "span": {
+              "start": 51,
+              "end": 80
+            },
+            "children": [
+              {
+                "kind": "CallExpression",
+                "span": {
+                  "start": 51,
+                  "end": 72
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 51,
+                      "end": 52
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "h"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Arguments",
+                    "span": {
+                      "start": 52,
+                      "end": 72
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroCallExpression",
+                        "span": {
+                          "start": 53,
+                          "end": 71
+                        },
+                        "children": [
+                          {
+                            "kind": "MacroIdentifier",
+                            "span": {
+                              "start": 53,
+                              "end": 66
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 54,
+                                  "end": 66
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "nospecialize"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "MacroArguments",
+                            "span": {
+                              "start": 67,
+                              "end": 71
+                            },
+                            "children": [
+                              {
+                                "kind": "OpenTuple",
+                                "span": {
+                                  "start": 67,
+                                  "end": 71
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 67,
+                                      "end": 68
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "x"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 70,
+                                      "end": 71
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "y"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              },
+              {
+                "kind": "Operator",
+                "span": {
+                  "start": 73,
+                  "end": 74
+                },
+                "children": [],
+                "value": {
+                  "Operator": "="
+                },
+                "flags": []
+              },
+              {
+                "kind": "BinaryExpression",
+                "span": {
+                  "start": 75,
+                  "end": 80
+                },
+                "children": [
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 75,
+                      "end": 76
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "x"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Operator",
+                    "span": {
+                      "start": 77,
+                      "end": 78
+                    },
+                    "children": [],
+                    "value": {
+                      "Operator": "+"
+                    },
+                    "flags": []
+                  },
+                  {
+                    "kind": "Identifier",
+                    "span": {
+                      "start": 79,
+                      "end": 80
+                    },
+                    "children": [],
+                    "value": {
+                      "Identifier": "y"
+                    },
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "Open macro calls terminated by a generator `for` - issue #24",
+    "source": "[@show (index) for index in eachindex(r_v)]\n[@__FILE__ for index in eachindex(r_v)]\nsum(@show x for x in y)\nf(@m x for i in y end)",
+    "document": {
+      "version": 1,
+      "root": {
+        "kind": "SourceFile",
+        "span": {
+          "start": 0,
+          "end": 130
+        },
+        "children": [
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 0,
+              "end": 43
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 1,
+                  "end": 42
+                },
+                "children": [
+                  {
+                    "kind": "MacroCallExpression",
+                    "span": {
+                      "start": 1,
+                      "end": 14
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroIdentifier",
+                        "span": {
+                          "start": 1,
+                          "end": 6
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 2,
+                              "end": 6
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "show"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "MacroArguments",
+                        "span": {
+                          "start": 7,
+                          "end": 14
+                        },
+                        "children": [
+                          {
+                            "kind": "ParenExpression",
+                            "span": {
+                              "start": 7,
+                              "end": 14
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 8,
+                                  "end": 13
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "index"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 15,
+                      "end": 42
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 19,
+                          "end": 42
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 19,
+                              "end": 24
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "index"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 25,
+                              "end": 27
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "CallExpression",
+                            "span": {
+                              "start": 28,
+                              "end": 42
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 28,
+                                  "end": 37
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "eachindex"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Arguments",
+                                "span": {
+                                  "start": 37,
+                                  "end": 42
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 38,
+                                      "end": 41
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "r_v"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "ComprehensionExpression",
+            "span": {
+              "start": 44,
+              "end": 83
+            },
+            "children": [
+              {
+                "kind": "GeneratorExpression",
+                "span": {
+                  "start": 45,
+                  "end": 82
+                },
+                "children": [
+                  {
+                    "kind": "MacroCallExpression",
+                    "span": {
+                      "start": 45,
+                      "end": 54
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroIdentifier",
+                        "span": {
+                          "start": 45,
+                          "end": 54
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 46,
+                              "end": 54
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "__FILE__"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  },
+                  {
+                    "kind": "ForClause",
+                    "span": {
+                      "start": 55,
+                      "end": 82
+                    },
+                    "children": [
+                      {
+                        "kind": "ForBinding",
+                        "span": {
+                          "start": 59,
+                          "end": 82
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 59,
+                              "end": 64
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "index"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "Operator",
+                            "span": {
+                              "start": 65,
+                              "end": 67
+                            },
+                            "children": [],
+                            "value": {
+                              "Operator": "in"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "CallExpression",
+                            "span": {
+                              "start": 68,
+                              "end": 82
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 68,
+                                  "end": 77
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "eachindex"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Arguments",
+                                "span": {
+                                  "start": 77,
+                                  "end": 82
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 78,
+                                      "end": 81
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "r_v"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 84,
+              "end": 107
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 84,
+                  "end": 87
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "sum"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 87,
+                  "end": 107
+                },
+                "children": [
+                  {
+                    "kind": "GeneratorExpression",
+                    "span": {
+                      "start": 88,
+                      "end": 106
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroCallExpression",
+                        "span": {
+                          "start": 88,
+                          "end": 95
+                        },
+                        "children": [
+                          {
+                            "kind": "MacroIdentifier",
+                            "span": {
+                              "start": 88,
+                              "end": 93
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 89,
+                                  "end": 93
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "show"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          },
+                          {
+                            "kind": "MacroArguments",
+                            "span": {
+                              "start": 94,
+                              "end": 95
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 94,
+                                  "end": 95
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "ForClause",
+                        "span": {
+                          "start": 96,
+                          "end": 106
+                        },
+                        "children": [
+                          {
+                            "kind": "ForBinding",
+                            "span": {
+                              "start": 100,
+                              "end": 106
+                            },
+                            "children": [
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 100,
+                                  "end": 101
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "x"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Operator",
+                                "span": {
+                                  "start": 102,
+                                  "end": 104
+                                },
+                                "children": [],
+                                "value": {
+                                  "Operator": "in"
+                                },
+                                "flags": []
+                              },
+                              {
+                                "kind": "Identifier",
+                                "span": {
+                                  "start": 105,
+                                  "end": 106
+                                },
+                                "children": [],
+                                "value": {
+                                  "Identifier": "y"
+                                },
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          },
+          {
+            "kind": "CallExpression",
+            "span": {
+              "start": 108,
+              "end": 130
+            },
+            "children": [
+              {
+                "kind": "Identifier",
+                "span": {
+                  "start": 108,
+                  "end": 109
+                },
+                "children": [],
+                "value": {
+                  "Identifier": "f"
+                },
+                "flags": []
+              },
+              {
+                "kind": "Arguments",
+                "span": {
+                  "start": 109,
+                  "end": 130
+                },
+                "children": [
+                  {
+                    "kind": "MacroCallExpression",
+                    "span": {
+                      "start": 110,
+                      "end": 129
+                    },
+                    "children": [
+                      {
+                        "kind": "MacroIdentifier",
+                        "span": {
+                          "start": 110,
+                          "end": 112
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 111,
+                              "end": 112
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "m"
+                            },
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      },
+                      {
+                        "kind": "MacroArguments",
+                        "span": {
+                          "start": 113,
+                          "end": 129
+                        },
+                        "children": [
+                          {
+                            "kind": "Identifier",
+                            "span": {
+                              "start": 113,
+                              "end": 114
+                            },
+                            "children": [],
+                            "value": {
+                              "Identifier": "x"
+                            },
+                            "flags": []
+                          },
+                          {
+                            "kind": "ForStatement",
+                            "span": {
+                              "start": 115,
+                              "end": 129
+                            },
+                            "children": [
+                              {
+                                "kind": "ForBinding",
+                                "span": {
+                                  "start": 119,
+                                  "end": 125
+                                },
+                                "children": [
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 119,
+                                      "end": 120
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "i"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Operator",
+                                    "span": {
+                                      "start": 121,
+                                      "end": 123
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Operator": "in"
+                                    },
+                                    "flags": []
+                                  },
+                                  {
+                                    "kind": "Identifier",
+                                    "span": {
+                                      "start": 124,
+                                      "end": 125
+                                    },
+                                    "children": [],
+                                    "value": {
+                                      "Identifier": "y"
+                                    },
+                                    "flags": []
+                                  }
+                                ],
+                                "value": null,
+                                "flags": []
+                              }
+                            ],
+                            "value": null,
+                            "flags": []
+                          }
+                        ],
+                        "value": null,
+                        "flags": []
+                      }
+                    ],
+                    "value": null,
+                    "flags": []
+                  }
+                ],
+                "value": null,
+                "flags": []
+              }
+            ],
+            "value": null,
+            "flags": []
+          }
+        ],
+        "value": null,
+        "flags": []
+      },
+      "diagnostics": []
+    }
+  }
+]

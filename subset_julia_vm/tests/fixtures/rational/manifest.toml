@@ -329,3 +329,69 @@ name = "rational_rounding_type_6775"
 file = "rounding_type_6775.jl"
 expected = true
 description = "floor/ceil/round/trunc(::Rational) return Rational (not Float64) via integer fld/cld/div; typed forms floor(Int, ::Rational) return the integer type (Issue #6775)"
+
+[[tests]]
+name = "rational_bool_uint_construction_9315"
+file = "bool_uint_construction_9315.jl"
+expected = true
+description = "// and Rational construction for Bool / Unsigned / Int128 element types construct and reduce (Rational{Bool}, Rational{UInt8}, ...) instead of self-recursing through the promote fallback until MAX_CALL_DEPTH; adds same-type gcd for those element types (Issue #9315)"
+
+[[tests]]
+name = "rational_float_compare_exact_9340"
+file = "float_compare_exact_9340.jl"
+expected = true
+description = "Rational vs AbstractFloat ==/!=/</<=/>/>= compare exactly (infinite precision) instead of rounding both operands to Float64 first, so 1//3 == 0.3333333333333333 is false and 1//2 == 0.5 is true (Issue #9340)"
+
+[[tests]]
+name = "rational_signunsigned_divremmod_9440"
+file = "signunsigned_divremmod_9440.jl"
+expected = true
+description = "div/rem/mod between Rational and Unsigned follow upstream signedness: div promotes to the unsigned type (UInt64/UInt128), rem/mod element type follows the integer rem/mod rule (Rational{Int64} vs Rational{UInt64}) instead of forcing the unsigned promotion (Issue #9440)"
+
+[[tests]]
+name = "rational_bigfloat_compare_exact_9424"
+file = "bigfloat_compare_exact_9424.jl"
+expected = true
+description = "Rational vs BigFloat ==/!=/</<=/>/>= compare exactly (infinite precision) instead of rounding the Rational to BigFloat precision via the promote fallback, so 1//3 == BigFloat(1)/BigFloat(3) is false and x > 1//3 is true at any precision (Issue #9424)"
+
+[[tests]]
+name = "rational_rem_mod_real_promote_9416"
+file = "rem_mod_real_promote_9416.jl"
+expected = true
+description = "rem/mod between Rational and Float/BigFloat promote like upstream's rem/mod(x::Real, y::Real) fallback instead of MethodError, and rem/mod at the typemax(UInt128) boundary raise upstream's catchable OverflowError via checked_mul instead of wrapping or aborting uncatchably (Issues #9416, #9422)"
+
+[[tests]]
+name = "rational_integer_checked_addsub_9527"
+file = "integer_checked_addsub_9527.jl"
+expected = true
+description = "+/- between a Rational and an Integer use checked_add/checked_sub/checked_mul on the cross-multiplied numerator so overflow raises upstream's catchable OverflowError instead of silently wrapping (Issue #9527)"
+
+[[tests]]
+name = "rational_identity_ctor_float_dispatch_9363"
+file = "identity_ctor_float_dispatch_9363.jl"
+expected = true
+description = "Rational(x::Rational) identity constructor returns x unchanged instead of loose-matching Rational(num::Int64) and raising an InternalError (Issue #9363); float and user dispatch on unsigned/Bool Rational element types select the Rational method instead of flaky Bottom-argument static dispatch (Issue #9362)"
+
+[[tests]]
+name = "rational_unsigned_component_show_9374"
+file = "unsigned_component_show_9374.jl"
+expected = true
+description = "Rational display renders numerator and denominator in show form, so Rational{UInt8} displays 0x01//0x03 instead of decimal 1//3 while Bool stays true//true (Issue #9374)"
+
+[[tests]]
+name = "rational_maxmin_wide_integer_promote_9526"
+file = "maxmin_wide_integer_promote_9526.jl"
+expected = true
+description = "max/min/minmax between a Rational and a wide/unsigned integer (Int128/UInt64/UInt128) promote to the common Rational type via the promote fallback instead of throwing MethodError on the missing Rational{S}(::Rational) conversion (Issue #9526)"
+
+[[tests]]
+name = "rational_rem_mod_inf_divisor_zerozero_9514"
+file = "rem_mod_inf_divisor_zerozero_9514.jl"
+expected = true
+description = "rem/mod with an infinite Rational divisor (1//0) raises ArgumentError instead of returning the invalid 0//0: the Rational constructor now rejects num == 0 && den == 0 like upstream while preserving the 1//0 / -1//0 Inf sentinels (Issue #9514)"
+
+[[tests]]
+name = "rational_float32_loosematch_abort_9524"
+file = "float32_loosematch_abort_9524.jl"
+expected = true
+description = "+(Rational{Int64}, Float32) selects the promote fallback (3.25f0) regardless of prior dispatch-cache state instead of loose-matching Float32 to a +(Rational, Integer) method, and the VM-side 'Inconsistent type inference for T' error from the Rational constructor is a catchable exception rather than an uncatchable process abort, so the mixed-type rem/mod/+ sweep reaches ALL DONE (Issue #9524)"

@@ -24,12 +24,17 @@ Factorial of `n`. If `n` is an [`Integer`](@ref), the factorial is computed as a
 integer (promoted to at least 64 bits). Note that this may overflow if `n` is not small,
 but you can use `factorial(big(n))` to compute the result exactly in arbitrary precision.
 """
+# Generic catch-all for integer types without a more specific method. Matches
+# upstream `factorial_lookup` semantics: n < 0 throws DomainError and n > 20
+# throws OverflowError (kept in sync with factorial(n::Int64) in intfuncs.jl so
+# ANY dispatch path raises OverflowError rather than a plain ErrorException or a
+# silently wrapped value). (Issue #9326)
 function factorial(n)
     if n < 0
-        error("factorial not defined for negative values")
+        throw(DomainError(n, "`n` must not be negative."))
     end
     if n > 20
-        error("factorial($n) overflows; consider using factorial(big($n))")
+        throw(OverflowError("$n is too large to look up in the table; consider using `factorial(big($n))` instead"))
     end
     result = 1
     for i in 2:n
@@ -146,11 +151,14 @@ function invperm(p)
     if !isperm(p)
         error("argument is not a permutation")
     end
-    # Create inverse
-    result = zeros(n)
+    # Create inverse (Issue #10089: was `zeros(n)` + `Float64(i)`, producing a
+    # Vector{Float64} where upstream Julia returns Vector{Int64} — matches
+    # array.jl's invperm now so the two same-signature Base definitions no
+    # longer diverge in behavior regardless of which one dispatch resolves).
+    result = zeros(Int64, n)
     for i in 1:n
         j = Int64(p[i])
-        result[j] = Float64(i)
+        result[j] = i
     end
     return result
 end

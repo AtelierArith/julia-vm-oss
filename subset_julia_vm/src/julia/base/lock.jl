@@ -126,33 +126,38 @@ Create a condition variable.
 """
 mutable struct Condition
     waiting::Int64
+    waitq::Vector{Any}
+    value::Any
 
     function Condition()
-        new(0)
+        new(0, Any[], nothing)
     end
 end
 
 """
     wait(c::Condition)
 
-Wait for a notification (not supported in cooperative model).
+Park the current task until a notification wakes its continuation.
 """
-function wait(c::Condition)
-    error("wait(Condition): Cannot block in cooperative model")
+function _wait_condition(c::Condition)
+    waiter = current_task()
+    c.waitq = vcat(c.waitq, [waiter])
+    c.waiting = c.waiting + 1
+    _task_park()
+    c.waiting = c.waiting - 1
+    return c.value
 end
+
+wait(c::Condition) = _wait_condition(c)
 
 """
     notify(c::Condition)
 
-Notify waiting tasks (no-op in cooperative model).
+Notify waiting tasks through the VM scheduler.
 """
-function notify(c::Condition)
-    return 0
-end
+notify(c::Condition) = notify(c, nothing)
 
-function notify(c::Condition; all::Bool=true)
-    return 0
-end
+notify(c::Condition; all::Bool=true) = notify(c, nothing; all=all)
 
 # =============================================================================
 # SpinLock

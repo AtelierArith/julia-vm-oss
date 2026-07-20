@@ -1,5 +1,8 @@
 # Test that functions can access global const values from prelude
 # Issue #1443: Global const values not accessible from function bodies
+# NOTE: `RoundNearest.mode` is a SubsetJuliaVM-specific field accessor —
+# upstream Julia's RoundingMode has no `.mode` field — so this fixture is
+# marked skip_julia_test in manifest.toml (Issue #10237).
 
 using Test
 

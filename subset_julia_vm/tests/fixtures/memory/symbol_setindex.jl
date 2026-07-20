@@ -1,7 +1,7 @@
 using Test
 
 @testset "Memory{Symbol} setindex preserves boxed Symbol values" begin
-    m = Memory{Symbol}(2)
+    m = Memory{Symbol}(undef, 2)
     m[1] = :x
     m[2] = :y
 

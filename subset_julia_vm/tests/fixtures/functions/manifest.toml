@@ -7,6 +7,12 @@ expected = true
 description = "Short-form varargs function definitions (Issue #1721 regression prevention)"
 
 [[tests]]
+name = "functions_trivial_ssa_fast_path_10115"
+file = "functions_trivial_ssa_fast_path_10115.jl"
+expected = true
+description = "A single literal-arg-call/literal-return function body skips the SSA build/optimize/plan pipeline and compiles through the legacy path directly, with near-miss shapes (param-referencing args, multi-statement bodies) still compiling correctly through their normal path (Issue #10115)"
+
+[[tests]]
 name = "functions_default_args"
 file = "default_args.jl"
 expected = true
@@ -23,6 +29,12 @@ name = "functions_callable_value_resolver_3910"
 file = "callable_value_resolver_3910.jl"
 expected = true
 description = "Callable function variables use shared resolver scoring for overloaded methods (Issue #3910)"
+
+[[tests]]
+name = "functions_parameter_shadows_numeric_constructor_10146"
+file = "parameter_shadows_numeric_constructor_10146.jl"
+expected = true
+description = "A function parameter or local named like a specializer name-keyed fast path (Float64, Int64, sqrt, round) shadows the builtin in callee position during runtime specialization (Issues #10146/#10418)"
 
 [[tests]]
 name = "functions_callable_value_single_candidate_vararg_3910"
@@ -101,3 +113,118 @@ name = "functions_anonymous_default_arg_8047"
 file = "anonymous_default_arg_8047.jl"
 expected = true
 description = "Anonymous/arrow functions with optional positional default args ((x, d=2) -> ...) generate reduced-arity stubs so the default binds in shorter calls and is overridden at full arity; covers int/float/string/bool/symbol/nothing/missing/const/type/call/typed defaults, multiple defaults, typed params, and the IIFE form (Issue #8047)"
+
+[[tests]]
+name = "functions_anonymous_typed_default_type_where_8514"
+file = "anonymous_typed_default_type_where_8514.jl"
+expected = true
+description = "Anonymous typed positional parameters with Type{T} defaults in where-method signatures parse and generate reduced-arity default stubs for short and block forms (Issue #8514)"
+
+# --- merged from `function` category (Issue #9671 Phase 2) ---
+[[tests]]
+name = "function_basic"
+file = "basic.jl"
+expected = true
+description = "Basic function definition and call"
+
+[[tests]]
+name = "function_recursive"
+file = "recursive.jl"
+expected = true
+description = "Recursive factorial function"
+
+[[tests]]
+name = "function_higher_order"
+file = "higher_order.jl"
+expected = true
+description = "Higher-order function (map + sum)"
+
+[[tests]]
+name = "function_type_specialization"
+file = "type_specialization.jl"
+expected = true
+description = "Function preserves input type: f(Int) returns Int, f(Float) returns Float"
+
+[[tests]]
+name = "function_operator_method"
+file = "operator_method.jl"
+expected = 10.0
+description = "Operator method definitions using short form: +(a, b) = expr"
+
+[[tests]]
+name = "function_return_type_annotation"
+file = "return_type_annotation.jl"
+expected = true
+description = "Function with return type annotation (f(x)::Int syntax)"
+
+[[tests]]
+name = "function_return_type_convert"
+file = "return_type_convert.jl"
+expected = true
+description = "Return type annotation applies convert() to return values (Issue #415)"
+
+[[tests]]
+name = "function_return_type_convert_insertion_5147"
+file = "return_type_convert_insertion_5147.jl"
+expected = true
+description = "Return type declaration f()::T inserts convert(T, ret) on all return paths; non-convertible/inexact values throw like upstream (Issue #5147)"
+
+[[tests]]
+name = "function_symbol_kwarg_default"
+file = "test_symbol_kwarg_default.jl"
+expected = true
+description = "Symbol default values in keyword arguments preserve type (Issue #830)"
+
+[[tests]]
+name = "function_implicit_return_if"
+file = "implicit_return_if.jl"
+expected = true
+description = "Implicit return from if/else blocks without explicit return (Issue #1119)"
+
+[[tests]]
+name = "function_bare_comma_return"
+file = "bare_comma_return.jl"
+expected = true
+description = "Bare comma return syntax: return a, b => return (a, b) (Issue #2076)"
+
+[[tests]]
+name = "function_default_args"
+file = "function_default_args.jl"
+expected = true
+description = "Default function arguments desugar into stub methods (Issue #2090)"
+
+[[tests]]
+name = "function_implicit_return_specialize"
+file = "implicit_return_specialize.jl"
+expected = true
+description = "Implicit return handling in runtime specialization with untyped Bool parameters (Issue #1726)"
+
+[[tests]]
+name = "function_sync_exec_varargs_splat"
+file = "sync_exec_varargs_splat.jl"
+expected = true
+description = "sync_exec CallWithSplat collects excess args into varargs Tuple (Issue #2213)"
+
+[[tests]]
+name = "function_nothing_local_any_carrier_5081"
+file = "nothing_local_any_carrier_5081.jl"
+expected = true
+description = "Nothing locals continue to round-trip and reassign correctly after consolidating the legacy locals_nothing set into the Any carrier (Issue #5081)"
+
+[[tests]]
+name = "function_e_name_shadowed_global_8852"
+file = "e_name_shadowed_global_8852.jl"
+expected = true
+description = "A user-defined function named `e` shadows the stale global type saved for `Base.MathConstants.e`, so direct and method-body calls resolve through the user method table instead of loading an undefined top-level `e` binding (Issue #8852)"
+
+[[tests]]
+name = "functions_destructive_load_10107"
+file = "functions_destructive_load_10107.jl"
+expected = true
+description = "Destructive slot load (TakeSlot): peephole rewrites LoadSlot*; Return* to a moving TakeSlot inside function bodies with no active handler; end-to-end correctness for fire cases (heap accessors, mutually-exclusive branch returns) and adversarial declines (try/finally reading the returned var, closure capture, aliasing escape) (Issue #10107)"
+
+[[tests]]
+name = "functions_specialize_user_callee_10749"
+file = "functions_specialize_user_callee_10749.jl"
+expected = true
+description = "The runtime specializer compiles calls to OTHER user-defined functions (name -> specializable-function lookup + CallSpecialize emission + nested return-type inference), with clean Unsupported fallbacks for direct/mutual recursion cycles, unresolvable callee return types, and throwing callees (Issue #10749)"

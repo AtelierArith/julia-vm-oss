@@ -136,6 +136,16 @@ function endswith(s, suffix::Regex)
     return _endswith_regex(s, suffix)
 end
 
+# keys(m::RegexMatch) (Issue #10173). Upstream base/regex.jl returns a vector of
+# keys for all capture groups: the group's name (String) for named groups, its
+# 1-based index (Int) otherwise. `keys(m)` on an Any-typed RegexMatch routes
+# through method dispatch (which never reaches the DictKeys builtin fallback),
+# so this method delegates to the `_regexmatch_keys` helper, which is backed by
+# the RegexMatch arm of the DictKeys builtin.
+function keys(m::RegexMatch)
+    return _regexmatch_keys(m)
+end
+
 # startswith: curried form (Issue #2100)
 # Julia Base: startswith(prefix) returns s -> startswith(s, prefix)
 function startswith(prefix::String)
@@ -269,8 +279,14 @@ function findprev(pattern::String, s::String, i::Int64)
     end
     # Byte offset within the pattern of the start of its last character.
     last_char_offset = thisind(pattern, m) - 1
-    # Start position is where pattern could end at position i
-    start = i - m + 1
+    # `i` bounds the start index considered by findprev. Clamp to the last
+    # possible byte start for the pattern, but do not shift backward by the
+    # pattern length; otherwise findprev("é", "éaéa", 4) skips the match at 4.
+    start = i
+    last_start = n - m + 1
+    if start > last_start
+        start = last_start
+    end
     if start < 1
         return nothing
     end
@@ -444,4 +460,40 @@ function findall(pat::Regex, s::AbstractString)
         push!(result, start:stop)
     end
     return result
+end
+
+# --- findnext / findfirst: Regex pattern → UnitRange{Int64} or nothing ---
+# Mirror upstream `findnext(re::Regex, str, idx)` / `findfirst(re::Regex, s)`
+# (base/regex.jl): return the 1-based byte UnitRange of the first match at or
+# after byte index `i`, or `nothing` when there is none. The positional search
+# runs against the FULL string via the `_regex_findnext` builtin (sjulia's
+# analog of upstream's `PCRE.exec(re, str, idx-1)`), so lookbehind, `\b` word
+# boundaries and `^` anchors still see the preceding context — unlike a
+# substring/`eachmatch` scan, which would miss overlapping matches. The range is
+# built with the same `offset : offset + ncodeunits(match) - 1` machinery as
+# `findall(::Regex, s)` above. `findlast(::Regex, s)` is intentionally NOT
+# defined — upstream Julia itself throws MethodError for it (Issue #10177).
+function findnext(re::Regex, s::AbstractString, i::Integer)
+    ii = Int(i)
+    # Upstream `_findnext_re` throws BoundsError when idx > nextind(str, lastindex(str)),
+    # i.e. when it exceeds ncodeunits(s) + 1.
+    if ii > ncodeunits(s) + 1
+        throw(BoundsError(s, ii))
+    end
+    # Upstream converts `idx - 1` to the PCRE UInt offset, so a non-positive
+    # index raises InexactError (e.g. convert(UInt64, -1)); reproduce that by
+    # performing the same conversion instead of silently returning nothing
+    # (Issue #10736).
+    if ii < 1
+        UInt64(ii - 1)
+    end
+    m = _regex_findnext(re, s, ii)
+    m === nothing && return nothing
+    start = m.offset
+    stop = start + ncodeunits(m.match) - 1
+    return start:stop
+end
+
+function findfirst(re::Regex, s::AbstractString)
+    return findnext(re, s, firstindex(s))
 end

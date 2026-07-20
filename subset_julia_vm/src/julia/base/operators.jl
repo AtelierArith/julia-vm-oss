@@ -56,6 +56,13 @@ function ∌(itr, x)
     return !in(x, itr)
 end
 
+# Function composition. Upstream defines `∘` and `ComposedFunction` in
+# base/operators.jl. The VM keeps the callable carrier as an internal boundary;
+# public composition is a Julia method that calls it.
+compose(f, g) = _compose(f, g)
+∘(f) = f
+∘(f, g) = _compose(f, g)
+
 # minmax: return (min, max) as a tuple
 function minmax(x, y)
     if x < y
@@ -106,6 +113,26 @@ function isless(x, y)
     end
     return x < y
 end
+
+# Float total order (upstream base/float.jl `isless(a::T, b::T) where T<:IEEEFloat`):
+# floats form a genuine total order for sorting — NaN sorts greatest and
+# `-0.0 < 0.0`. The generic `isless` above returns `false` for `isless(-0.0, 0.0)`
+# because `-0.0 < 0.0` is `false`; these same-type specializations restore the
+# signed-zero ordering so `sort`/`issorted`/Dict ordering match Julia (Issue #9344).
+function _float_isless(a, b)
+    a != a && return false # a is NaN: NaN is the largest, never less than anything
+    b != b && return true  # b is NaN (a is not): a < NaN
+    if a == b
+        # `-0.0 == 0.0` is true; distinguish the signed zeros via the sign of 1/x
+        # (`1/-0.0 == -Inf`, `1/0.0 == Inf`). Non-zero equal values are not `isless`.
+        return (a == 0.0) && ((1.0 / a) < (1.0 / b))
+    end
+    return a < b
+end
+
+isless(a::Float64, b::Float64) = _float_isless(a, b)
+isless(a::Float32, b::Float32) = _float_isless(a, b)
+isless(a::Float16, b::Float16) = _float_isless(a, b)
 
 # isequal: equality comparison (NaN == NaN is true, unlike ==)
 function isequal(x, y)
@@ -327,11 +354,14 @@ end
 # Type equality
 # =============================================================================
 # Based on Julia's base/operators.jl:295-297
-# In Julia, Type equality uses ccall(:jl_types_equal). For SubsetJuliaVM,
-# we use identity comparison which is correct for DataType values.
+# In Julia, Type equality uses ccall(:jl_types_equal). SubsetJuliaVM routes this
+# through a VM intrinsic so UnionAll aliases compare semantically without making
+# `===` accept aliases that Julia keeps distinct.
 
-==(T::Type, S::Type) = T === S
-!=(T::Type, S::Type) = !(T === S)
+==(T::Type, S::Type) = _type_equal(T, S)
+!=(T::Type, S::Type) = !_type_equal(T, S)
+
+==(f::Function, g::Function) = f === g
 
 # Unicode aliases for identity operators (≡ and ≢)
 # Based on Julia's base/operators.jl:348,370

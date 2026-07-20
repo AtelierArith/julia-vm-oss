@@ -119,3 +119,27 @@ name = "bigint_inv_bigint_7309"
 file = "inv_bigint_7309.jl"
 expected = true
 description = "inv(::BigInt) returns a BigFloat (inv(big(2)) == 0.5) instead of integer division (1 ÷ 2 == 0); mirrors upstream inv(x::Integer) = float(one(x))/float(x), while inv(::Int)/inv(::Float64) stay Float64 (Issue #7309)"
+
+[[tests]]
+name = "bigint_div_zero_8900"
+file = "bigint_div_zero_8900.jl"
+expected = true
+description = "BigInt `/` returns BigFloat Inf/NaN on division by zero (instead of exiting); div(::BigInt,::BigInt) still returns BigInt via integer division (Issue #8900)"
+
+[[tests]]
+name = "bigint_from_bigfloat_9424"
+file = "bigint_from_bigfloat_9424.jl"
+expected = true
+description = "BigInt(::BigFloat) converts exactly for integer-valued BigFloats (any magnitude/precision) and throws InexactError for fractional or non-finite values; round(BigInt, ::BigFloat) rounds to nearest (ties to even) first, mirroring upstream base/mpfr.jl (Issue #9424)"
+
+[[tests]]
+name = "bigint_int_pow_bigint_9352"
+file = "int_pow_bigint_9352.jl"
+expected = true
+description = "Machine-integer base ^ BigInt exponent promotes the base to BigInt (2^big(3) == big(8), typeof BigInt), Bool base keeps a Bool result via power_by_squaring semantics, and negative BigInt exponents throw DomainError; mirrors upstream base/gmp.jl ^(x::Integer, y::BigInt) (Issue #9352)"
+
+[[tests]]
+name = "bigint_broadcast_shift_8867"
+file = "broadcast_shift_8867.jl"
+expected = true
+description = "Broadcast left shift `.<<` parses and executes for BigInt scalars over integer arrays (`BigInt(1) .<< [1:3;]`) (Issue #8867)"

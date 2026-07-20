@@ -6,21 +6,21 @@ using Test
     # Complex with positive imaginary
     buf = IOBuffer()
     show(buf, 1 + 2im)
-    @test take!(buf) == "1 + 2im"
+    @test String(take!(buf)) == "1 + 2im"
 
     # Complex with negative imaginary
     buf = IOBuffer()
     show(buf, 3 - 4im)
-    @test take!(buf) == "3 - 4im"
+    @test String(take!(buf)) == "3 - 4im"
 
     # Rational
     buf = IOBuffer()
     show(buf, 1//2)
-    @test take!(buf) == "1//2"
+    @test String(take!(buf)) == "1//2"
 
     buf = IOBuffer()
     show(buf, 3//4)
-    @test take!(buf) == "3//4"
+    @test String(take!(buf)) == "3//4"
 end
 
 true

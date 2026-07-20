@@ -1,0 +1,23 @@
+# Files whose serialized Rust data shapes affect persistent/embedded Base cache compatibility.
+# Paths are relative to subset_julia_vm/.
+# Note: paths may use ../ to reach sibling crates (Issue #8655).
+src/compile/precompile.rs
+src/compile/instr_wire_ids.rs
+../subset_julia_vm_types/src/inference_cache_key.rs
+../subset_julia_vm_bytecode/src/builtins.rs
+../subset_julia_vm_bytecode/src/intrinsics.rs
+../subset_julia_vm_bytecode/src/array_element.rs
+../subset_julia_vm_bytecode/src/operands.rs
+../subset_julia_vm_bytecode/src/instr.rs
+../subset_julia_vm_bytecode/src/metadata.rs
+../subset_julia_vm_bytecode/src/slot_metadata.rs
+../subset_julia_vm_bytecode/src/specialization.rs
+../subset_julia_vm_bytecode/src/value_type.rs
+../subset_julia_vm_bytecode/src/wire_ids.rs
+../subset_julia_vm_bytecode/src/method_table.rs
+../subset_julia_vm_types/src/runtime_types/lattice.rs
+src/compile/abstract_interp/engine/mod.rs
+../subset_julia_vm_types/src/inference_core/type_core/repr.rs
+../subset_julia_vm_bytecode/src/program.rs
+../subset_julia_vm_bytecode/src/value/value_enum.rs
+../subset_julia_vm_bytecode/src/module_intern.rs

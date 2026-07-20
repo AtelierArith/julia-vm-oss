@@ -1,10 +1,9 @@
 using Test
 
 # Issue #3701: UInt8/UInt16/UInt32/UInt64 ÷ previously fell to the generic
-# `div(x, y) = floor(x / y)` and widened to Float64. With Pure Julia
-# `div(::UIntN, ::UIntN)` specializations (cast-through-Int64 for the
-# narrow widths, native U64 sdiv_int arm for UInt64) the result stays
-# UIntN — including for UInt64 values above i64::MAX.
+# `div(x, y) = floor(x / y)` and widened to Float64. Pure Julia fixed-width
+# dispatch keeps the result as UIntN — including for UInt64 values above
+# i64::MAX.
 @testset "Narrow UInt div preservation (Issue #3701)" begin
     # Type preservation
     @test typeof(UInt8(10) ÷ UInt8(3)) == UInt8

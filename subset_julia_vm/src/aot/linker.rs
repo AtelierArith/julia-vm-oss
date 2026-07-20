@@ -328,6 +328,13 @@ fn is_clang_like(program: &Path) -> bool {
 mod tests {
     use super::*;
 
+    const MAIN_OBJ: &str = "main.o";
+    const MAIN_OBJ_MSVC: &str = "main.obj";
+    const RUNTIME_LIB: &str = "libsjulia_runtime.a";
+    const LINUX_SHARED_LIB: &str = "libapp.so";
+    const DARWIN_SHARED_LIB: &str = "libapp.dylib";
+    const WINDOWS_SHARED_LIB: &str = "app.dll";
+
     fn strings(args: &[OsString]) -> Vec<String> {
         args.iter()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -337,8 +344,8 @@ mod tests {
     #[test]
     fn linux_cc_driver_orders_objects_runtime_and_libm_issue_7089() {
         let mut config = LinkerConfig::new("app");
-        config.object_files.push("main.o".into());
-        config.runtime_libraries.push("libsjulia_runtime.a".into());
+        config.object_files.push(MAIN_OBJ.into());
+        config.runtime_libraries.push(RUNTIME_LIB.into());
         config.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
         config.linker = Some("clang".into());
 
@@ -350,8 +357,8 @@ mod tests {
             strings(&invocation.args),
             vec![
                 "--target=x86_64-unknown-linux-gnu",
-                "main.o",
-                "libsjulia_runtime.a",
+                MAIN_OBJ,
+                RUNTIME_LIB,
                 "-o",
                 "app",
                 "-lm"
@@ -362,7 +369,7 @@ mod tests {
     #[test]
     fn linux_lld_driver_links_libc_before_libm_issue_7089() {
         let mut config = LinkerConfig::new("app");
-        config.object_files.push("main.o".into());
+        config.object_files.push(MAIN_OBJ.into());
         config.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
         config.linker = Some("ld.lld".into());
 
@@ -371,14 +378,14 @@ mod tests {
         assert_eq!(invocation.kind, LinkerKind::UnixLd);
         assert_eq!(
             strings(&invocation.args),
-            vec!["main.o", "-o", "app", "-lc", "-lm"]
+            vec![MAIN_OBJ, "-o", "app", "-lc", "-lm"]
         );
     }
 
     #[test]
     fn linux_cc_driver_shared_library_uses_shared_flag_issue_7085() {
-        let mut config = LinkerConfig::new("libapp.so");
-        config.object_files.push("main.o".into());
+        let mut config = LinkerConfig::new(LINUX_SHARED_LIB);
+        config.object_files.push(MAIN_OBJ.into());
         config.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
         config.linker = Some("clang".into());
         config.output_kind = LinkOutputKind::SharedLibrary;
@@ -390,9 +397,9 @@ mod tests {
             vec![
                 "--target=x86_64-unknown-linux-gnu",
                 "-shared",
-                "main.o",
+                MAIN_OBJ,
                 "-o",
-                "libapp.so",
+                LINUX_SHARED_LIB,
                 "-lm"
             ]
         );
@@ -401,7 +408,7 @@ mod tests {
     #[test]
     fn darwin_cc_driver_uses_libsystem_implicitly_issue_7089() {
         let mut config = LinkerConfig::new("app");
-        config.object_files.push("main.o".into());
+        config.object_files.push(MAIN_OBJ.into());
         config.target_triple = Some("x86_64-apple-darwin".to_string());
         config.linker = Some("cc".into());
 
@@ -409,13 +416,13 @@ mod tests {
 
         assert_eq!(invocation.kind, LinkerKind::CcDriver);
         assert_eq!(invocation.target_family, LinkTargetFamily::Darwin);
-        assert_eq!(strings(&invocation.args), vec!["main.o", "-o", "app"]);
+        assert_eq!(strings(&invocation.args), vec![MAIN_OBJ, "-o", "app"]);
     }
 
     #[test]
     fn darwin_cc_driver_shared_library_uses_dynamiclib_issue_7085() {
-        let mut config = LinkerConfig::new("libapp.dylib");
-        config.object_files.push("main.o".into());
+        let mut config = LinkerConfig::new(DARWIN_SHARED_LIB);
+        config.object_files.push(MAIN_OBJ.into());
         config.target_triple = Some("x86_64-apple-darwin".to_string());
         config.linker = Some("clang".into());
         config.output_kind = LinkOutputKind::SharedLibrary;
@@ -427,9 +434,9 @@ mod tests {
             vec![
                 "--target=x86_64-apple-darwin",
                 "-dynamiclib",
-                "main.o",
+                MAIN_OBJ,
                 "-o",
-                "libapp.dylib"
+                DARWIN_SHARED_LIB
             ]
         );
     }
@@ -437,7 +444,7 @@ mod tests {
     #[test]
     fn windows_msvc_link_adds_out_and_crt_issue_7089() {
         let mut config = LinkerConfig::new("app.exe");
-        config.object_files.push("main.obj".into());
+        config.object_files.push(MAIN_OBJ_MSVC.into());
         config.target_triple = Some("x86_64-pc-windows-msvc".to_string());
         config.linker = Some("lld-link".into());
 
@@ -447,14 +454,14 @@ mod tests {
         assert_eq!(invocation.target_family, LinkTargetFamily::WindowsMsvc);
         assert_eq!(
             strings(&invocation.args),
-            vec!["/NOLOGO", "/OUT:app.exe", "main.obj", "msvcrt.lib"]
+            vec!["/NOLOGO", "/OUT:app.exe", MAIN_OBJ_MSVC, "msvcrt.lib"]
         );
     }
 
     #[test]
     fn windows_msvc_link_shared_library_uses_dll_issue_7085() {
-        let mut config = LinkerConfig::new("app.dll");
-        config.object_files.push("main.obj".into());
+        let mut config = LinkerConfig::new(WINDOWS_SHARED_LIB);
+        config.object_files.push(MAIN_OBJ_MSVC.into());
         config.target_triple = Some("x86_64-pc-windows-msvc".to_string());
         config.linker = Some("lld-link".into());
         config.output_kind = LinkOutputKind::SharedLibrary;
@@ -463,7 +470,13 @@ mod tests {
 
         assert_eq!(
             strings(&invocation.args),
-            vec!["/NOLOGO", "/DLL", "/OUT:app.dll", "main.obj", "msvcrt.lib"]
+            vec![
+                "/NOLOGO",
+                "/DLL",
+                "/OUT:app.dll",
+                MAIN_OBJ_MSVC,
+                "msvcrt.lib"
+            ]
         );
     }
 
@@ -481,7 +494,7 @@ mod tests {
     #[test]
     fn link_objects_reports_launch_failure_issue_7089() {
         let mut config = LinkerConfig::new("app");
-        config.object_files.push("main.o".into());
+        config.object_files.push(MAIN_OBJ.into());
         config.linker = Some("/definitely/missing/sjulia-linker".into());
 
         let err = link_objects(&config).unwrap_err();

@@ -12,6 +12,10 @@ fn assert_parses(source: &str) {
     );
 }
 
+fn assert_parse_fails(source: &str) {
+    assert!(parse(source).is_err(), "Expected parse failure: {source}");
+}
+
 fn assert_root_child_kind(source: &str, expected_kind: NodeKind) {
     let cst = parse(source).unwrap_or_else(|_| panic!("Failed to parse: {}", source));
     assert_eq!(cst.kind, NodeKind::SourceFile);
@@ -35,10 +39,27 @@ fn test_identifier_ascii() {
 }
 
 #[test]
+fn test_var_string_identifier_issue_8754() {
+    assert_parses("var\"dict key\" = 1");
+    assert_parses("f(var\"my weird name\")");
+    assert_parses("TypeError(:var\"dict key\", K, key)");
+    assert_parses("Base.:var\"dict key\"");
+}
+
+#[test]
 fn test_identifier_unicode() {
     assert_root_child_kind("α", NodeKind::Identifier);
     assert_root_child_kind("αβγ", NodeKind::Identifier);
     assert_root_child_kind("日本語", NodeKind::Identifier);
+}
+
+#[test]
+fn test_extended_unicode_identifiers_issue_8751() {
+    assert_parses("🏡 = 1");
+    assert_parses("😎 = 🏡 + 1");
+    assert_parses("⛵ = 2");
+    assert_parses("d´ = 1");
+    assert_parses("tʼ = 2");
 }
 
 // Math symbols
@@ -66,6 +87,19 @@ fn test_field_expression() {
 }
 
 #[test]
+fn test_field_expression_bang_mid_name_issue_8759() {
+    assert_parses("info.cpu_times!user");
+    assert_parses("d(info.cpu_times!idle / ms_per_s)");
+    assert_parses("M1.var\"#foo#\"");
+
+    let source = "info.cpu_times!user";
+    let cst = parse(source).expect("bang field should parse");
+    let field = &cst.children[0].children[1];
+    assert_eq!(field.kind, NodeKind::Identifier);
+    assert_eq!(field.text_from_source(source), "cpu_times!user");
+}
+
+#[test]
 fn test_field_expression_with_call() {
     assert_parses("a.b()");
     assert_parses("a.b.c()");
@@ -80,7 +114,7 @@ fn test_index_expression() {
     assert_root_child_kind("a[1]", NodeKind::IndexExpression);
     assert_root_child_kind("a[1, 2]", NodeKind::IndexExpression);
     assert_root_child_kind("a[]", NodeKind::IndexExpression);
-    // a[1:end] - end keyword not yet supported
+    assert_root_child_kind("a[1:end]", NodeKind::IndexExpression);
 }
 
 #[test]
@@ -184,6 +218,11 @@ fn test_do_block_with_args() {
     assert_parses("map(xs) do x, y\n  x + y\nend");
 }
 
+#[test]
+fn test_do_block_tuple_params_issue_8759() {
+    assert_parses("afoldl(((), init), xs...) do (ys, acc), x\n  (ys..., x), x\nend");
+}
+
 // =============================================================================
 // Macro Call Expression
 // =============================================================================
@@ -204,6 +243,38 @@ fn test_macro_call_with_args() {
 fn test_macro_call_with_parens() {
     assert_root_child_kind("@show(x)", NodeKind::MacrocallExpression);
     assert_root_child_kind("@assert(x > 0)", NodeKind::MacrocallExpression);
+}
+
+#[test]
+fn test_macro_statement_args_issue_8759() {
+    assert_parses("@eval const x = 1");
+    assert_parses("@eval using Base.TOML: Foo");
+    assert_parses("@eval using Base.TOML: $(Symbol(errtype))");
+    assert_parses("(@eval (using Foreign))");
+    assert_parses("@eval macro MethodTable(name::Symbol)\n  esc(:x)\nend");
+    assert_parses("@eval(module Foo\nend)");
+    assert_parses("Base.@__doc__(primitive type X <: Integer 8 end)");
+}
+
+#[test]
+fn test_doc_macro_newline_statement_arg_issue_8759() {
+    assert_parses("(@doc raw\"\"\"doc\"\"\"\nfunction f()\nend)");
+    assert_parses("(@doc \"doc\"\nstruct S\nend)");
+    assert_parse_fails("(@m x\nfunction f()\nend)");
+}
+
+#[test]
+fn test_macro_comma_argument_newline_issue_8759() {
+    assert_parses("@m a,\n  b");
+    assert_parses(
+        "@test (@eval ccall(\"llvm.floor\", llvmcall, Float64, (Float64,), 0.0),\n             ccall(\"llvm.floor\", llvmcall, Float32, (Float32,), 0.0)) === (0.0, 0.0f0)",
+    );
+}
+
+#[test]
+fn test_do_block_vararg_params_issue_8759() {
+    assert_parses("code_typed((Int,Int)) do x, y...\n  x\nend");
+    assert_parses("map(xs) do x::Int...\n  x\nend");
 }
 
 // Qualified macro calls - parsed differently
@@ -381,6 +452,25 @@ fn test_quote_expression() {
 }
 
 #[test]
+fn test_quote_statement_items_issue_8759() {
+    assert_parses(":(const x = y)");
+    assert_parses(":(global x = 1)");
+    assert_parses(":(export import_me1)");
+    assert_parses(":(export var\"#\")");
+    assert_parses(":(import A: var\"#\")");
+    assert_parses(":(macro var\"#\" end)");
+    assert_parses(":(*{1, 2})");
+    assert_parses(":(*{1, x})");
+    assert_parses(":(-{x})");
+    assert_parses(":`ls x y`");
+    assert_parses(":(.&, b)");
+    assert_parses(":((a = 3, ! = 4, var\"a b\" = 5))");
+    assert_parses(":(x for x in y for z in w)");
+    assert_parses(":(x for x in y if aa for z in w if bb)");
+    assert_parses(":(z for z = 1:5, y = 1:5)");
+}
+
+#[test]
 fn test_quote_block() {
     assert_parses("quote\n  x + 1\nend");
 }
@@ -403,6 +493,7 @@ fn test_interpolation_in_quote() {
 #[test]
 fn test_adjoint_expression() {
     assert_root_child_kind("A'", NodeKind::AdjointExpression);
+    assert_root_child_kind("a'ᵀ", NodeKind::CallExpression);
     assert_parses("(A * B)'");
 }
 
@@ -415,6 +506,19 @@ fn test_juxtaposition() {
     assert_parses("2x");
     assert_parses("2π");
     assert_parses("3im");
+}
+
+#[test]
+fn test_expression_identifier_juxtaposition_issue_8759() {
+    assert_root_child_kind("Float32(1.0)im", NodeKind::JuxtapositionExpression);
+    assert_root_child_kind(
+        "prevfloat(BigFloat(-1, precision=32))im",
+        NodeKind::JuxtapositionExpression,
+    );
+    assert_root_child_kind("float(pi)im", NodeKind::JuxtapositionExpression);
+    assert_root_child_kind("(x)y", NodeKind::JuxtapositionExpression);
+    assert_root_child_kind("a[1]x", NodeKind::JuxtapositionExpression);
+    assert_root_child_kind("f(x)(y)", NodeKind::CallExpression);
 }
 
 #[test]
@@ -438,12 +542,59 @@ fn test_arrow_function_multiple_args() {
 }
 
 #[test]
+fn test_arrow_function_body_line_continuation_issue_8753() {
+    assert_root_child_kind("f = (acc, i) ->\n    (acc + i)", NodeKind::Assignment);
+}
+
+#[test]
+fn test_binary_operator_line_continuation_issue_8753() {
+    assert_root_child_kind("x = a +\n    b", NodeKind::Assignment);
+    assert_root_child_kind("x = a =>\n    b", NodeKind::Assignment);
+}
+
+#[test]
+fn test_line_leading_binary_operator_in_group_issue_8759() {
+    assert_root_child_kind("x = (a\n    | b)", NodeKind::Assignment);
+    assert_root_child_kind("x = (1\n    : 2)", NodeKind::Assignment);
+    assert_root_child_kind(
+        "return IPv6((parseipv6fields(fields[1:(end-1)],6))\n    | parse(IPv4, fields[end]).host )",
+        NodeKind::ReturnStatement,
+    );
+    assert_parse_fails("x = a\n    | b");
+}
+
+#[test]
+fn test_ternary_line_continuation_issue_8753() {
+    assert_root_child_kind("x = (cond\n    ? a\n    : b)", NodeKind::Assignment);
+    assert_root_child_kind(
+        "x = l * first(r) + (iseven(l) ? (step(r) * (l-1)) * (l>>1)\n        : (step(r) * l) * ((l-1)>>1))",
+        NodeKind::Assignment,
+    );
+    assert_root_child_kind(
+        "x = ((acc, i) -> i in dims\n    ? ((acc[1]..., Base.OneTo(1)), acc[2])\n    : ((acc[1]..., axes(A, acc[2])), acc[2] + 1))",
+        NodeKind::Assignment,
+    );
+    assert_parse_fails("x = cond\n    ? a\n    : b");
+    assert_parse_fails("x = cond ? a\n    : b");
+}
+
+#[test]
+fn test_delimited_expression_line_continuation_issue_8753() {
+    assert_root_child_kind(
+        "x = Union{\n    DenseArray{Int8},\n    FastSubArray{Int8,N} where N\n}",
+        NodeKind::Assignment,
+    );
+    assert_root_child_kind("x = f(a,\n    maxlog =\n        1\n)", NodeKind::Assignment);
+}
+
+#[test]
 fn test_arrow_function_pair_body_precedence() {
-    let cst = parse("(x, y) -> x => y").expect("parse arrow function with pair body");
+    let source = "(x, y) -> x => y";
+    let cst = parse(source).expect("parse arrow function with pair body");
     let arrow = &cst.children[0];
     assert_eq!(arrow.kind, NodeKind::ArrowFunctionExpression);
     assert_eq!(arrow.children[1].kind, NodeKind::BinaryExpression);
-    assert_eq!(arrow.children[1].children[1].text.as_deref(), Some("=>"));
+    assert_eq!(arrow.children[1].children[1].text_from_source(source), "=>");
 }
 
 #[test]
@@ -457,6 +608,14 @@ fn test_arrow_function_block() {
     assert_parses("x -> begin\n  y = x + 1\n  y * 2\nend");
 }
 
+#[test]
+fn test_statement_expression_bodies_issue_8759() {
+    assert_parses("f(a) = for _ in 1:100; push!(a, 1); end");
+    assert_parses("chnlprod(x) = Channel(c -> for i in x; put!(c, i); end)");
+    assert_parses("f(for x in xs; x; end)");
+    assert_parses("LazyLibrary(path; on_load_callback = () -> global loaded = true)");
+}
+
 // =============================================================================
 // Range Expression
 // =============================================================================
@@ -467,10 +626,9 @@ fn test_range_expression() {
     assert_root_child_kind("1:2:10", NodeKind::RangeExpression);
 }
 
-// Range with end keyword - not yet implemented
+// `end` is valid in a range only under a bracket ref expression (Issue #10918).
 #[test]
 fn test_range_with_end() {
-    assert_parses("1:end");
     assert_parses("a[1:end]");
     assert_parses("a[begin:end]");
 }
@@ -485,6 +643,44 @@ fn test_typed_expression() {
     // Parametric types x::Vector{Float64} - not yet supported
 }
 
+/// A bare `::` is never a first-class operator value: `::` after `::` must
+/// recurse into the unary-typed grammar (upstream parses `:::: Int` as
+/// `::(::Int)`) and a trailing `::` with nothing after it is a premature
+/// end of input, exactly like upstream Julia (Issue #10915).
+#[test]
+fn test_double_colon_requires_type_expression_issue_10915() {
+    // Valid unary/binary typed expressions stay green.
+    assert_root_child_kind("::Int", NodeKind::UnaryTypedExpression);
+    assert_root_child_kind("::Type{Int}", NodeKind::UnaryTypedExpression);
+    assert_root_child_kind("x::Int", NodeKind::TypedExpression);
+    assert_parses("f(::Type{T}) where T = T");
+    // Upstream parses `:::: Int` / `::(::Int)` as nested unary-typed forms.
+    assert_root_child_kind(":::: Int", NodeKind::UnaryTypedExpression);
+    assert_root_child_kind("::(::Int)", NodeKind::UnaryTypedExpression);
+    // Quoted `::` remains a symbol.
+    assert_parses(":(::)");
+
+    // A `::` with no type expression after it is incomplete input
+    // (upstream: "premature end of input"), reported at end of input.
+    for source in ["::::", "::", "x::", "f = ::"] {
+        let error = subset_julia_vm_parser::parse(source)
+            .expect_err("bare `::` must not parse as an operator value");
+        assert!(
+            error.is_incomplete_input(),
+            "source: {source:?}, error: {error:?}"
+        );
+        let span = error.span().expect("eof error carries a span");
+        assert_eq!(
+            span.start..span.end,
+            source.len()..source.len(),
+            "source: {source:?}"
+        );
+    }
+
+    // A `::` followed by a non-type token is a typed error, not a value.
+    assert!(subset_julia_vm_parser::parse("(::)").is_err());
+}
+
 // =============================================================================
 // Ternary Expression
 // =============================================================================
@@ -493,6 +689,19 @@ fn test_typed_expression() {
 fn test_ternary_expression() {
     assert_root_child_kind("a ? b : c", NodeKind::TernaryExpression);
     assert_root_child_kind("x > 0 ? x : -x", NodeKind::TernaryExpression);
+}
+
+#[test]
+fn test_ternary_then_assignment_and_pair_issue_8759() {
+    assert_root_child_kind(
+        "isletter(c) ? c = shft + (c - shft + 13) % 26 : c",
+        NodeKind::TernaryExpression,
+    );
+    assert_root_child_kind(
+        "x.first > 2 ? x.first=>2*x.second : x",
+        NodeKind::TernaryExpression,
+    );
+    assert_root_child_kind("kv[2] == 1 ? kv[1]=>2 : kv", NodeKind::TernaryExpression);
 }
 
 // =============================================================================
@@ -525,6 +734,12 @@ fn test_parenthesized_expression() {
     assert_root_child_kind("(1 + 2)", NodeKind::ParenthesizedExpression);
 }
 
+#[test]
+fn test_parenthesized_block_expressions_issue_8756() {
+    assert_root_child_kind("(for x in itr; f(x); end; nothing)", NodeKind::Block);
+    assert_root_child_kind("(while cond; body; end)", NodeKind::ParenthesizedExpression);
+}
+
 // =============================================================================
 // Splat Expression
 // =============================================================================
@@ -544,16 +759,17 @@ fn test_pair_expression() {
     assert_parses("a => b");
     assert_parses(":key => value");
 
-    let cst = parse(":f => +").expect("parse Pair with bare operator RHS");
+    let source = ":f => +";
+    let cst = parse(source).expect("parse Pair with bare operator RHS");
     assert_eq!(cst.children.len(), 1);
     let pair = &cst.children[0];
     assert_eq!(pair.kind, NodeKind::BinaryExpression);
     assert_eq!(pair.children.len(), 3);
     assert_eq!(pair.children[0].kind, NodeKind::QuoteExpression);
     assert_eq!(pair.children[1].kind, NodeKind::Operator);
-    assert_eq!(pair.children[1].text.as_deref(), Some("=>"));
+    assert_eq!(pair.children[1].text_from_source(source), "=>");
     assert_eq!(pair.children[2].kind, NodeKind::Operator);
-    assert_eq!(pair.children[2].text.as_deref(), Some("+"));
+    assert_eq!(pair.children[2].text_from_source(source), "+");
 }
 
 // =============================================================================
@@ -564,6 +780,13 @@ fn test_pair_expression() {
 fn test_where_expression_simple() {
     assert_root_child_kind("T where T", NodeKind::WhereExpression);
     assert_root_child_kind("Array{T} where T", NodeKind::WhereExpression);
+}
+
+#[test]
+fn test_where_soft_keyword_expression_identifier_issue_8755() {
+    assert_parses("where.name");
+    assert_parses("f(where)");
+    assert_parses("where + 1");
 }
 
 #[test]
@@ -593,4 +816,62 @@ fn test_where_expression_complex() {
     // assert_parses("Tuple{T, S} where {T <: Number, S <: Number}");
     // Use chained where instead:
     assert_parses("Tuple{T, S} where S <: Number where T <: Number");
+}
+
+#[test]
+fn test_macrocall_generator_body_inside_call_issue_8961() {
+    assert_parses("all(@inbounds iszero(a[i]) for i in 1:n)");
+}
+
+#[test]
+fn test_qualified_prefixed_string_literal_issue_8961() {
+    assert_parses("Dates.dateformat\"YYYY-mm-dd\"");
+    assert_parses("Dates.format(value, Dates.dateformat\"YYYY-mm-dd\")");
+}
+
+#[test]
+fn test_prefixed_string_and_command_suffix_flags_issue_9046() {
+    assert_parses(":(x\"s\"flag)");
+    assert_parses(":(x`s`)");
+    assert_parses(":(x`s`flag)");
+}
+
+#[test]
+fn test_dotted_not_and_tilde_issue_9046() {
+    assert_parses("x .~ y");
+    assert_parses(".~[1, 2]");
+    assert_parses("(.!)(x)");
+    assert_parses("[a .!b]");
+}
+
+#[test]
+fn test_macro_braces_with_optional_space_issue_9046() {
+    assert_parses(":(@foo{})");
+    assert_parses(":(@foo {bar})");
+    assert_parses(":(@foo {bar,baz})");
+}
+
+#[test]
+fn test_qualified_macrocall_do_issue_9046() {
+    assert_parses(":(@M.test() do; end)");
+    assert_parses(":(M.@test() do; end)");
+    assert_parses("@M.test() do; 1 end");
+}
+
+#[test]
+fn test_remaining_syntax_corpus_expression_gaps_issue_9046() {
+    assert_parses(":(a.[1])");
+    assert_parses(":(a.{1})");
+    assert_parses(":(sin.[1])");
+    assert_parses(":(global $(esc(:x)) = 1)");
+    assert_parses(":(x->import Foo)");
+    assert_parses(":(x->module Foo end)");
+    assert_parses(":(x->struct Foo end)");
+    assert_parses(":(x->abstract type Foo end)");
+    assert_parses(":(function g end = 1)");
+    assert_parses("quote if false end, b+=2 end");
+    assert_parses(":(ccall(:a, Cvoid, (Cint,), &x))");
+    assert_parses(":(a.<-->b .<--> c)");
+    assert_parses(":(a --> b.-->c)");
+    assert_parses(":(a +ꜝ b)");
 }

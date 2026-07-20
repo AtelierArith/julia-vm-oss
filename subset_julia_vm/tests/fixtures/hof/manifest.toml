@@ -244,7 +244,7 @@ description = "any(f, arr) and all(f, arr) return Bool, not Int64 (Issue #2031)"
 name = "hof_builtin_as_argument"
 file = "builtin_as_hof_argument.jl"
 expected = true
-description = "Builtin functions (uppercase, lowercase, string) as HOF arguments (Issue #2070)"
+description = "Builtin functions (uppercase, lowercase, string, repr, bitstring) as HOF arguments, including mapped string indexing (Issues #2070, #10512, #10538)"
 
 [[tests]]
 name = "hof_nested_hof_calls"
@@ -377,3 +377,15 @@ name = "hof_value_mode_nested_wrapper_result_6807"
 file = "value_mode_nested_wrapper_result_6807.jl"
 expected = true
 description = "Value-mode HOF result builder emits the Array{T,N} wrapper and keeps nested array-wrapper elements (no native conversion); nested map results display bare and stay indexable/mutable (Issue #6807)"
+
+[[tests]]
+name = "hof_polymorphic_call_site_dispatch_cache_9739"
+file = "hof_polymorphic_call_site_dispatch_cache_9739.jl"
+expected = true
+description = "The VM's per-call-site dynamic dispatch cache, extended from CallDynamic to CallFunctionVariable (Issue #9739), keys each call site on [callee, args...]: a shared bytecode call site (map's/broadcast's single f(args...) inside Pure Julia's _broadcast_apply) reused across distinct HOF callbacks in one program must not let one callback's cached func_index leak into another reusing the same call site, including when callee AND argument type alternate simultaneously"
+
+[[tests]]
+name = "hof_int_ctor_specializer_fastpath_11198_11215"
+file = "int_ctor_specializer_fastpath_11198_11215.jl"
+expected = true
+description = "Runtime specializer's Int/Int64 constructor fast path (compile_call) and convert(Int64, x) (compile_convert_call) must not silently truncate a lossy Float64 source without raising InexactError (Issue #11198, and the convert sibling Issue #11487), and must not bypass a user-defined Base.Int64(::T) method with the primitive conversion when the operand is a struct reached through an untyped function parameter (Issue #11215). Verified vs julia 1.12.6."

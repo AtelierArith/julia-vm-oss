@@ -1,9 +1,10 @@
-use subset_julia_vm::compile::compile_core_program;
+use subset_julia_vm::compile::host_support::compile_core_program;
 use subset_julia_vm::intrinsics::Intrinsic;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{CompiledProgram, Instr, Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::{CompiledProgram, Instr, Value};
 
 fn main() {
     // Test 1: Direct VM execution
@@ -17,20 +18,27 @@ fn main() {
 
     let program = CompiledProgram {
         code,
+        source_map: vec![],
         functions: vec![],
         struct_defs: vec![],
         abstract_types: vec![],
         primitive_types: vec![],
+        enum_defs: vec![],
         show_methods: vec![],
+        print_methods: vec![],
         entry: 0,
         specializable_functions: vec![],
         runtime_specialization_map: vec![],
+        inference_global_types_snapshot: vec![],
+        specialization_disable_flags: Default::default(),
         compile_context: None,
         base_function_count: 0,
         macro_bindings: std::collections::HashMap::new(),
+        module_registry: Default::default(),
         global_slot_names: vec![],
         global_slot_types: vec![],
         global_slot_count: 0,
+        main_scope_names: Default::default(),
     };
 
     let rng = StableRng::new(0);

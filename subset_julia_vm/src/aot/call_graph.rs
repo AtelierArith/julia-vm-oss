@@ -34,6 +34,20 @@ pub(crate) fn is_intercepted_string_builtin(name: &str) -> bool {
     )
 }
 
+/// Numeric Base bodies AoT intercepts as builtins at the call site
+/// (Issue #10131): the total order (`isless`), the div-family, and float
+/// classification predicates. Like the string builtins above (Issue #7058),
+/// their pure-Julia bodies must be call-graph leaves — otherwise rooting
+/// e.g. `isless` marks its transitive Base machinery (VersionNumber
+/// comparison, missing-propagation methods, ...) reachable, and those pull
+/// literals AoT conversion cannot lower.
+pub(crate) fn is_intercepted_numeric_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "isless" | "fld" | "cld" | "mod" | "rem" | "isnan" | "isinf" | "isfinite" | "signbit"
+    )
+}
+
 /// Binary operators that the AoT IR converter always folds into nested binary
 /// `BinOp` nodes when called with >= 2 non-splat positional arguments. Julia's
 /// parser flattens chained `+`/`*` into n-ary calls like `+(a, b, c)`, and the
@@ -95,7 +109,9 @@ impl CallGraph {
             // call graph: not traversing their pure-Julia bodies prunes the
             // parametric/iterator machinery (`HasShape{1}`, …) they would
             // otherwise keep reachable (Issue #7058).
-            let calls = if is_intercepted_string_builtin(&func.name) {
+            let calls = if is_intercepted_string_builtin(&func.name)
+                || is_intercepted_numeric_builtin(&func.name)
+            {
                 HashSet::new()
             } else {
                 graph.collect_calls_in_block(&func.body)
@@ -279,7 +295,12 @@ impl CallGraph {
                 calls.extend(self.collect_calls_in_block(&func.body));
             }
             // Metadata, labels, gotos, and enum declarations don't contain function calls.
-            Stmt::Meta { .. } | Stmt::Label { .. } | Stmt::Goto { .. } | Stmt::EnumDef { .. } => {}
+            Stmt::Meta { .. }
+            | Stmt::LocalDecl { .. }
+            | Stmt::Label { .. }
+            | Stmt::Goto { .. }
+            | Stmt::EnumDef { .. }
+            | Stmt::RuntimeNominalDef { .. } => {}
         }
     }
 
@@ -305,7 +326,7 @@ impl CallGraph {
                     && args.len() >= 2
                     && !splat_mask.iter().any(|&splatted| splatted);
                 if !folded_operator_call {
-                    calls.insert(function.clone());
+                    calls.insert(function.to_string());
                 }
                 for arg in args {
                     self.collect_calls_in_expr(arg, calls);
@@ -322,7 +343,7 @@ impl CallGraph {
                 ..
             } => {
                 calls.insert(format!("{}.{}", module, function));
-                calls.insert(function.clone()); // Also add short name
+                calls.insert(function.to_string()); // Also add short name
                 for arg in args {
                     self.collect_calls_in_expr(arg, calls);
                 }
@@ -445,17 +466,15 @@ impl CallGraph {
                 self.collect_calls_in_expr(value, calls);
             }
             Expr::FunctionRef { name, .. } => {
-                calls.insert(name.clone());
+                calls.insert(name.to_string());
             }
             Expr::New { args, .. } => {
                 for arg in args {
                     self.collect_calls_in_expr(arg, calls);
                 }
             }
-            Expr::Var(name, _) => {
-                if self.all_functions.contains(name) {
-                    calls.insert(name.clone());
-                }
+            Expr::Var(name, _) if self.all_functions.contains(name.as_str()) => {
+                calls.insert(name.to_string());
             }
             Expr::Literal(_, _) | Expr::SliceAll { .. } | Expr::TypedEmptyArray { .. } => {}
             // Handle other expression types
@@ -607,7 +626,7 @@ impl CallGraph {
                 kwargs,
                 ..
             } => {
-                self.referenced_modules.insert(module.clone());
+                self.referenced_modules.insert(module.to_string());
                 for arg in args {
                     self.collect_module_refs_in_expr(arg);
                 }
@@ -678,7 +697,7 @@ impl CallGraph {
         let reachable = self.reachable_functions();
 
         // Filter functions
-        let filtered_functions: Vec<Function> = program
+        let filtered_functions: Vec<std::sync::Arc<Function>> = program
             .functions
             .iter()
             .filter(|f| reachable.contains(&f.name))
@@ -853,7 +872,7 @@ impl CallGraph {
                     if let Some((base, _)) = StaticType::parametric_type_parts(function) {
                         refs.insert(base.to_string());
                     } else {
-                        refs.insert(function.clone());
+                        refs.insert(function.to_string());
                     }
                 }
                 for arg in args {
@@ -961,7 +980,7 @@ impl CallGraph {
             // definition so type-level uses such as static subtype folding can
             // see the struct/abstract hierarchy (Issue #7037).
             Expr::Var(name, _) if name.chars().next().is_some_and(char::is_uppercase) => {
-                refs.insert(name.clone());
+                refs.insert(name.to_string());
             }
             _ => {}
         }
@@ -1005,7 +1024,7 @@ mod tests {
 
     fn make_call_expr(name: &str) -> Expr {
         Expr::Call {
-            function: name.to_string(),
+            function: name.to_string().into(),
             args: vec![],
             kwargs: vec![],
             splat_mask: vec![],
@@ -1016,10 +1035,10 @@ mod tests {
 
     fn make_call_expr_with_var_args(name: &str, arg_vars: &[&str]) -> Expr {
         Expr::Call {
-            function: name.to_string(),
+            function: name.to_string().into(),
             args: arg_vars
                 .iter()
-                .map(|v| Expr::Var(v.to_string(), dummy_span()))
+                .map(|v| Expr::Var(v.to_string().into(), dummy_span()))
                 .collect(),
             kwargs: vec![],
             splat_mask: vec![false; arg_vars.len()],
@@ -1036,6 +1055,7 @@ mod tests {
     #[test]
     fn nary_operator_call_does_not_mark_operator_reachable_8180() {
         let f = Function {
+            new_struct_name: None,
             name: "f".to_string(),
             params: vec![],
             kwparams: vec![],
@@ -1064,7 +1084,7 @@ mod tests {
         };
         let program = Program {
             functions: vec![
-                f,
+                std::sync::Arc::new(f),
                 make_function("+", vec![]),
                 make_function("*", vec![]),
                 make_function("user_sum", vec![]),
@@ -1107,7 +1127,7 @@ mod tests {
         );
     }
 
-    fn make_function(name: &str, calls: Vec<&str>) -> Function {
+    fn make_function(name: &str, calls: Vec<&str>) -> std::sync::Arc<Function> {
         let stmts: Vec<Stmt> = calls
             .into_iter()
             .map(|c| Stmt::Expr {
@@ -1116,7 +1136,8 @@ mod tests {
             })
             .collect();
 
-        Function {
+        std::sync::Arc::new(Function {
+            new_struct_name: None,
             name: name.to_string(),
             params: vec![],
             kwparams: vec![],
@@ -1129,13 +1150,15 @@ mod tests {
             is_base_extension: false,
             is_runtime_eval: false,
             span: dummy_span(),
-        }
+        })
     }
 
     fn make_parametric_box_struct() -> StructDef {
         StructDef {
+            global_new_helpers: Vec::new(),
             name: "Box".to_string(),
             is_mutable: false,
+            is_base_origin: false,
             type_params: vec![TypeParam::new("T".to_string())],
             parent_type: None,
             fields: vec![StructField {
@@ -1185,7 +1208,7 @@ mod tests {
     #[test]
     fn filter_program_keeps_parametric_struct_constructed_inside_let_issue_7040() {
         let inner = Expr::LetBlock {
-            bindings: vec![("b".to_string(), make_call_expr("Box{Int64}"))],
+            bindings: vec![("b".to_string().into(), make_call_expr("Box{Int64}"))],
             body: Block {
                 stmts: vec![],
                 span: dummy_span(),
@@ -1310,7 +1333,7 @@ mod tests {
                 stmts: vec![Stmt::Assign {
                     var: "#result#1".to_string(),
                     value: Expr::AssignExpr {
-                        var: "grid".to_string(),
+                        var: "grid".to_string().into(),
                         value: Box::new(make_call_expr("foo")),
                         span: dummy_span(),
                     },
@@ -1348,8 +1371,8 @@ mod tests {
 
     fn make_module_call_expr(module: &str, function: &str) -> Expr {
         Expr::ModuleCall {
-            module: module.to_string(),
-            function: function.to_string(),
+            module: module.to_string().into(),
+            function: function.to_string().into(),
             args: vec![],
             kwargs: vec![],
             splat_mask: vec![],
@@ -1362,6 +1385,8 @@ mod tests {
         Module {
             name: name.to_string(),
             is_bare: false,
+            is_package_origin: false,
+            is_base_origin: false,
             functions: vec![],
             structs: vec![],
             abstract_types: vec![],

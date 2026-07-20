@@ -12,6 +12,8 @@ function ts_closure_generator_4291(a::Int64)
     collect(f(x) for x in 1:3)
 end
 
+# Issue #9990: these overloads are both visible before the caller below, so
+# source-world runtime dispatch must not widen the caller's inferred return type.
 ts_dispatch_4291(x::Integer) = 1
 ts_dispatch_4291(x::Number) = 1.0
 ts_dispatch_caller_4291(x::Int64) = ts_dispatch_4291(x)

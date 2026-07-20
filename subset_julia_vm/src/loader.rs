@@ -1,3 +1,12 @@
+// Issue #10906 (Phase 1c of #10869): the package loader's persistent
+// `.ji.json` cache-load boundary — zero real unwrap_used/expect_used sites
+// in production code (every match is inside the cfg(test) module, which
+// carries an explicit allow). `read_cache` already collapses every parse/
+// version/schema failure to `None` (a cache miss) via `.ok()?`, never
+// panicking.
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
@@ -8,12 +17,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{SyntaxError, UnsupportedFeature};
-use crate::ir::core::{Block, Expr, Literal, Module, Program, Stmt, TypeAliasDef, UsingImport};
+use crate::ir::core::{
+    Block, Expr, Function, InnerConstructor, Literal, Module, Program, Stmt, StructDef,
+    TypeAliasDef, UsingImport,
+};
 use crate::lowering::LoweringWithInclude;
 use crate::packages;
 use crate::parser::Parser;
 use crate::span::Span;
 use crate::stdlib;
+use crate::types::TypeExpr;
 
 /// Persistent package-loader cache format version.
 ///
@@ -37,7 +50,51 @@ use crate::stdlib;
 /// 14 -> 15: `let` tuple destructuring now introduces destructured bindings in
 /// the body scope (Issue #8403/#8408), so cached QuadGK modules compiled with
 /// stale `let (s0, si) = ...` lowering must be rebuilt.
-const CACHE_VERSION: u32 = 15;
+/// 15 -> 16: static type-object literals now lower to `Literal::DataType`
+/// instead of `typeof("TypeName")`, so cached packages must rebuild to avoid
+/// stale string/type sentinel semantics (Issue #9741).
+/// 17 -> 18: `InnerConstructor.is_explicit_parametric` (bare `Type{Foo}` vs
+/// explicit `Type{Foo{T}}` constructor-self identity) is now load-bearing for
+/// dispatch: the `has_where_params()` fallback that used to compensate for a
+/// wrong/missing value was removed (Issue #10962/#10974). Cache entries
+/// written before this field was reliably populated for every constructor
+/// shape silently defaulted it to `false` via `#[serde(default)]` — the
+/// `module_schema_fingerprint` probe below did not include a representative
+/// `StructDef`/`InnerConstructor`, so that drift was never caught by the
+/// fingerprint alone (`packages_data_structures_binary_max_heap_8509`
+/// regressed this way against a stale on-disk `.ji.json`; root-caused and
+/// fixed as Issue #11004). Bump forces a rebuild; the probe below is also
+/// extended to cover this shape going forward.
+/// 18 -> 19: definition spans carry a serialized evaluation ordinal so
+/// constructor last-definition-wins semantics remain comparable across
+/// included files (Issue #11028), and inner constructors with positional
+/// defaults now lower reduced-
+/// arity forwarding stubs; source-identical package caches must be rebuilt to
+/// gain those additional methods (Issues #11003/#11019). The schema probe now
+/// includes a representative `Function` as well as `StructDef`.
+/// 19 -> 20: annotated optional keywords now lower a two-phase default-
+/// materialization / type-assertion prologue. The serialized `Function` shape
+/// is unchanged, so the schema fingerprint cannot distinguish an old body from
+/// a newly lowered one; rebuild source-identical package caches (Issue #11154).
+/// 20 -> 21: `UsingImport.is_import` distinguishes Julia's `import` from
+/// `using`. Older package caches deserialize the new field as `false`, silently
+/// turning `import M` into `using M`; include a representative import in the
+/// schema probe and force source-identical caches to rebuild (Issue #11216).
+/// 21 -> 22: `using`/`import` spans consume serialized evaluation ordinals so
+/// independently lowered package Modules can be inserted at source chronology
+/// rather than after the whole user Program (Issues #11036/#11128).
+/// 23 -> 24: lowering-generated callables carry an explicit private-helper
+/// provenance marker; cached zero-order helpers would otherwise be mistaken
+/// for source functions (Issue #11685).
+/// 24 -> 25: bound-form callable-struct receivers are marked structurally at
+/// lowering time — the synthesized `self` parameter name carries
+/// `CALLABLE_SELF_BOUND_MARKER` and the runtime's
+/// `callable_struct_needs_self` trusts that marker instead of guessing from
+/// arity (Issues #11386/#11553). A stale cached package Module still carries
+/// the unmarked parameter name, so its bound callables would silently stop
+/// receiving the prepended receiver (`MethodError: no method matching
+/// __callable_<Type>(...)`); force source-identical caches to rebuild.
+const CACHE_VERSION: u32 = 25;
 
 #[derive(Debug, Clone)]
 pub enum LoadPathEntry {
@@ -155,6 +212,7 @@ struct ResolvedPackage {
     project_toml: String,
     source: String,
     base_dir: Option<PathBuf>,
+    is_stdlib_origin: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -185,8 +243,15 @@ struct ProjectToml {
 pub struct PackageLoader {
     config: LoaderConfig,
     loaded: HashMap<String, Module>,
+    dependencies: HashMap<String, Vec<DependencyAnchor>>,
     load_order: Vec<String>,
     loading_stack: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DependencyAnchor {
+    module: String,
+    definition_order: u64,
 }
 
 impl PackageLoader {
@@ -194,6 +259,7 @@ impl PackageLoader {
         Self {
             config,
             loaded: HashMap::new(),
+            dependencies: HashMap::new(),
             load_order: Vec::new(),
             loading_stack: Vec::new(),
         }
@@ -213,6 +279,88 @@ impl PackageLoader {
             }
         }
         Ok(modules)
+    }
+
+    /// Load every external top-level import into `program` at its stamped
+    /// evaluation position. Each requested package is first composed with its
+    /// dependencies at the package-local stamped imports, then the whole
+    /// fragment is inserted at the caller's import (Issues #11036 and #11128).
+    pub fn load_into_program(&mut self, program: &mut Program) -> Result<(), LoadError> {
+        let mut using_indices: Vec<usize> = program
+            .usings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, using)| (!using.is_relative).then_some(index))
+            .collect();
+        using_indices.sort_by_key(|index| (program.usings[*index].span.definition_order, *index));
+
+        let mut existing_modules: HashSet<String> = program
+            .modules
+            .iter()
+            .map(|module| module.name.clone())
+            .collect();
+        let mut chronology = program.definition_order_cursor();
+        for using_index in using_indices {
+            let using = program.usings[using_index].clone();
+            if existing_modules.contains(&using.module) || !should_load_module(&using.module) {
+                continue;
+            }
+            self.load_module(&using.module)?;
+            let mut included = HashSet::new();
+            let mut fragment =
+                self.compose_loaded_fragment(&using.module, &existing_modules, &mut included);
+            // Keep the established dependency-first DFS vector order used by
+            // compilation and module initialization. Definition ordinals carry
+            // the finer source chronology independently; changing both signals
+            // at once perturbs unrelated package dispatch and inference.
+            fragment.modules.sort_by_key(|module| {
+                self.load_order
+                    .iter()
+                    .position(|name| name == &module.name)
+                    .unwrap_or(usize::MAX)
+            });
+            let anchor = program.usings[using_index].span.definition_order;
+            chronology.insert_fragment_after(program, anchor, &mut fragment);
+            for module in fragment.modules.drain(..) {
+                existing_modules.insert(module.name.clone());
+                program.modules.push(module);
+            }
+        }
+        Ok(())
+    }
+
+    fn compose_loaded_fragment(
+        &self,
+        module: &str,
+        existing_modules: &HashSet<String>,
+        included: &mut HashSet<String>,
+    ) -> Program {
+        if existing_modules.contains(module) || !included.insert(module.to_string()) {
+            return empty_program();
+        }
+        let Some(root) = self.loaded.get(module) else {
+            return empty_program();
+        };
+
+        let mut fragment = empty_program();
+        fragment.modules.push(root.clone());
+        let mut chronology = fragment.definition_order_cursor();
+        let mut inserted_width = 0u64;
+        for dependency in self.dependencies.get(module).into_iter().flatten() {
+            let mut dependency_fragment =
+                self.compose_loaded_fragment(&dependency.module, existing_modules, included);
+            let anchor = dependency.definition_order.saturating_add(inserted_width);
+            let inserted_end =
+                chronology.insert_fragment_after(&mut fragment, anchor, &mut dependency_fragment);
+            inserted_width = inserted_width.saturating_add(inserted_end.saturating_sub(anchor));
+            fragment.modules.append(&mut dependency_fragment.modules);
+        }
+
+        // Dependencies must be initialized before the package that imports
+        // them, even when the package has definitions before its first import.
+        let root = fragment.modules.remove(0);
+        fragment.modules.push(root);
+        fragment
     }
 
     fn load_module(&mut self, module: &str) -> Result<(), LoadError> {
@@ -237,7 +385,8 @@ impl PackageLoader {
             resolved.base_dir.as_deref(),
         );
 
-        let module_value = if let Some(cached) = read_cache(&self.config, module, &source_hash) {
+        let mut module_value = if let Some(cached) = read_cache(&self.config, module, &source_hash)
+        {
             cached
         } else {
             let program =
@@ -256,21 +405,56 @@ impl PackageLoader {
 
             module_value
         };
-        let deps = parse_project_deps(module, &resolved.project_toml)?;
-        for dep in deps {
-            if should_load_module(&dep) {
-                self.load_module(&dep)?;
+        module_value.mark_as_package_origin();
+        if resolved.is_stdlib_origin {
+            // PackageLoader inserts stdlibs into `Program.modules` before the
+            // compiler derives module provenance. Preserve the same Base/stdlib
+            // constructor identity as the compiler's fallback stdlib loader;
+            // bundled and filesystem packages deliberately remain source-owned.
+            module_value.mark_structs_as_base_origin();
+        }
+        let project_deps = parse_project_deps(module, &resolved.project_toml)?;
+        let mut dependencies = Vec::new();
+        collect_module_usings(&module_value, &mut dependencies);
+        let body_dep_names: HashSet<String> = dependencies
+            .iter()
+            .map(|dependency| dependency.module.clone())
+            .collect();
+        // Preserve the established dependency-first DFS module order: sorted
+        // Project.toml dependencies are loaded before body-only imports. The
+        // source-anchor ordering below is a separate semantic chronology and
+        // must not reorder compiler/module initialization vectors.
+        for dep in &project_deps {
+            if should_load_module(dep) {
+                self.load_module(dep)?;
             }
         }
-
-        let mut body_usings = HashSet::new();
-        collect_module_usings(&module_value, &mut body_usings);
-        for dep in body_usings {
-            if should_load_module(&dep) {
-                self.load_module(&dep)?;
+        for dependency in &dependencies {
+            if should_load_module(&dependency.module) {
+                self.load_module(&dependency.module)?;
             }
         }
+        for dep in project_deps {
+            if !body_dep_names.contains(&dep) {
+                dependencies.push(DependencyAnchor {
+                    module: dep,
+                    definition_order: 0,
+                });
+            }
+        }
+        dependencies.sort_by(|left, right| {
+            (left.definition_order, left.module.as_str())
+                .cmp(&(right.definition_order, right.module.as_str()))
+        });
+        let mut seen_dependencies = HashSet::new();
+        dependencies.retain(|dependency| seen_dependencies.insert(dependency.module.clone()));
 
+        // Fresh lowering and `.ji.json` restore must leave the thread-local
+        // nominal registry identical. Commit the reconstructed declarations
+        // only after dependency loading succeeds so a failed load leaves no
+        // partial package registration behind (Issue #11280).
+        register_module_nominal_types(&module_value);
+        self.dependencies.insert(module.to_string(), dependencies);
         self.loaded.insert(module.to_string(), module_value);
         self.load_order.push(module.to_string());
         self.loading_stack.pop();
@@ -306,6 +490,8 @@ fn parse_module_source(
     })?;
 
     let source_file = base_dir.map(|dir| dir.join(format!("{module}.jl")));
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    crate::macro_runtime::install();
     let mut lowering = LoweringWithInclude::new_with_file(
         source,
         crate::lowering::IncludeContext::new(base_dir.cloned()),
@@ -382,14 +568,65 @@ fn is_ignorable_package_entry_stmt(stmt: &Stmt) -> bool {
     )
 }
 
-fn collect_module_usings(module: &Module, out: &mut HashSet<String>) {
-    for stmt in &module.body.stmts {
-        if let Stmt::Using { module, .. } = stmt {
-            out.insert(module.clone());
+fn collect_module_usings(module: &Module, out: &mut Vec<DependencyAnchor>) {
+    // Module.usings retains whether an import was relative. Executable
+    // Stmt::Using markers deliberately carry only the canonical module name,
+    // so reading dependencies from the body would mistake an internal import
+    // such as `import ..LinearAlgebra` for an external self-dependency.
+    for using in &module.usings {
+        if !using.is_relative && should_load_module(&using.module) {
+            out.push(DependencyAnchor {
+                module: using.module.clone(),
+                definition_order: using.span.definition_order,
+            });
         }
     }
     for submodule in &module.submodules {
         collect_module_usings(submodule, out);
+    }
+}
+
+fn register_module_nominal_types(module: &Module) {
+    fn register(module: &Module, prefix: &str) {
+        let module_path = if prefix.is_empty() {
+            module.name.clone()
+        } else {
+            format!("{prefix}.{}", module.name)
+        };
+
+        for definition in &module.structs {
+            crate::types::register_type_name(&format!("{module_path}.{}", definition.name));
+        }
+        for definition in &module.abstract_types {
+            crate::types::register_type_name(&format!("{module_path}.{}", definition.name));
+        }
+        for definition in &module.primitive_types {
+            crate::types::register_type_name(&format!("{module_path}.{}", definition.name));
+        }
+        for submodule in &module.submodules {
+            register(submodule, &module_path);
+        }
+    }
+
+    register(module, "");
+}
+
+fn empty_program() -> Program {
+    Program {
+        abstract_types: Vec::new(),
+        primitive_types: Vec::new(),
+        type_aliases: Vec::new(),
+        structs: Vec::new(),
+        functions: Vec::new(),
+        base_function_count: 0,
+        modules: Vec::new(),
+        usings: Vec::new(),
+        macros: Vec::new(),
+        enums: Vec::new(),
+        main: Block {
+            stmts: Vec::new(),
+            span: Span::new(0, 0, 0, 0, 0, 0),
+        },
     }
 }
 
@@ -415,6 +652,7 @@ fn resolve_package(module: &str, config: &LoaderConfig) -> Result<ResolvedPackag
                         project_toml: pkg.project_toml.to_string(),
                         source: pkg.source.to_string(),
                         base_dir: None,
+                        is_stdlib_origin: true,
                     });
                 }
             }
@@ -429,6 +667,7 @@ fn resolve_package(module: &str, config: &LoaderConfig) -> Result<ResolvedPackag
                         project_toml: pkg.project_toml.to_string(),
                         source: pkg.source.to_string(),
                         base_dir: Some(virtual_dir),
+                        is_stdlib_origin: false,
                     });
                 }
             }
@@ -448,6 +687,7 @@ fn resolve_package(module: &str, config: &LoaderConfig) -> Result<ResolvedPackag
                         project_toml,
                         source,
                         base_dir: Some(src_dir),
+                        is_stdlib_origin: false,
                     });
                 }
             }
@@ -602,11 +842,14 @@ fn cache_dir_from_env() -> Option<PathBuf> {
 }
 
 fn load_path_from_env() -> Vec<LoadPathEntry> {
-    let env_val = env::var("SUBSETJULIA_LOAD_PATH")
-        .or_else(|_| env::var("JULIA_LOAD_PATH"))
-        .unwrap_or_else(|_| "@stdlib:@packages".to_string());
+    match env::var("SUBSETJULIA_LOAD_PATH").or_else(|_| env::var("JULIA_LOAD_PATH")) {
+        Ok(env_val) => parse_load_path(&env_val),
+        Err(_) => default_load_path(),
+    }
+}
 
-    parse_load_path(&env_val)
+fn default_load_path() -> Vec<LoadPathEntry> {
+    vec![LoadPathEntry::Stdlib, LoadPathEntry::Packages]
 }
 
 fn parse_load_path(raw: &str) -> Vec<LoadPathEntry> {
@@ -748,8 +991,55 @@ fn module_schema_fingerprint() -> String {
     let probe = Module {
         name: String::new(),
         is_bare: false,
-        functions: Vec::new(),
-        structs: Vec::new(),
+        is_package_origin: false,
+        is_base_origin: false,
+        functions: vec![Function {
+            name: String::new(),
+            params: Vec::new(),
+            kwparams: Vec::new(),
+            type_params: Vec::new(),
+            return_type: None,
+            body: Block {
+                stmts: Vec::new(),
+                span: dummy_span,
+            },
+            is_base_extension: false,
+            is_runtime_eval: false,
+            span: dummy_span,
+            new_struct_name: None,
+        }],
+        structs: vec![StructDef {
+            name: String::new(),
+            is_mutable: false,
+            type_params: Vec::new(),
+            parent_type: None,
+            fields: Vec::new(),
+            is_base_origin: false,
+            // One representative inner constructor with the self-family
+            // marker set, so any future shape change to `StructDef` or
+            // `InnerConstructor` (including `is_explicit_parametric` itself,
+            // Issue #10962/#10974/#11004) changes this fingerprint and
+            // invalidates stale `.ji.json` entries instead of silently
+            // reusing them with `#[serde(default)]`-filled defaults.
+            inner_constructors: vec![InnerConstructor {
+                params: Vec::new(),
+                kwparams: Vec::new(),
+                type_params: Vec::new(),
+                is_explicit_parametric: true,
+                explicit_type_parameter_names: vec!["T".to_string()],
+                explicit_type_arguments: vec![TypeExpr::TypeVar("T".to_string())],
+                body: Block {
+                    stmts: Vec::new(),
+                    span: dummy_span,
+                },
+                span: dummy_span,
+            }],
+            // Struct-body `global` helpers are moved into `functions` during
+            // lowering, so a serialized `StructDef` always carries an empty
+            // list here (Issue #11005).
+            global_new_helpers: Vec::new(),
+            span: dummy_span,
+        }],
         abstract_types: Vec::new(),
         primitive_types: Vec::new(),
         type_aliases: vec![TypeAliasDef {
@@ -759,7 +1049,15 @@ fn module_schema_fingerprint() -> String {
             span: dummy_span,
         }],
         submodules: Vec::new(),
-        usings: Vec::new(),
+        usings: vec![UsingImport {
+            module: "Probe".to_string(),
+            is_import: true,
+            symbols: None,
+            is_relative: false,
+            relative_level: 0,
+            alias_bindings: Vec::new(),
+            span: dummy_span,
+        }],
         macros: Vec::new(),
         exports: Vec::new(),
         publics: Vec::new(),
@@ -793,6 +1091,7 @@ fn format_lower_error(error: &UnsupportedFeature) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -812,7 +1111,16 @@ mod tests {
 
     #[test]
     fn test_parse_load_path_stdlib_and_packages() {
-        let entries = parse_load_path("@stdlib:@packages");
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        let entries = parse_load_path(&format!("@stdlib{separator}@packages"));
+        assert_eq!(entries.len(), 2);
+        assert!(matches!(entries[0], LoadPathEntry::Stdlib));
+        assert!(matches!(entries[1], LoadPathEntry::Packages));
+    }
+
+    #[test]
+    fn test_default_load_path_is_platform_independent() {
+        let entries = default_load_path();
         assert_eq!(entries.len(), 2);
         assert!(matches!(entries[0], LoadPathEntry::Stdlib));
         assert!(matches!(entries[1], LoadPathEntry::Packages));
@@ -911,6 +1219,8 @@ end
         Module {
             name: name.to_string(),
             is_bare: false,
+            is_package_origin: false,
+            is_base_origin: false,
             functions: Vec::new(),
             structs: Vec::new(),
             abstract_types: Vec::new(),
@@ -929,6 +1239,124 @@ end
         }
     }
 
+    fn nominal_struct_11280(name: &str) -> StructDef {
+        StructDef {
+            name: name.to_string(),
+            is_mutable: false,
+            is_base_origin: false,
+            type_params: Vec::new(),
+            parent_type: None,
+            fields: Vec::new(),
+            inner_constructors: Vec::new(),
+            global_new_helpers: Vec::new(),
+            span: Span::new(0, 0, 0, 0, 0, 0),
+        }
+    }
+
+    fn nominal_parametric_struct_11280(name: &str) -> StructDef {
+        StructDef {
+            type_params: vec![crate::types::TypeParam::new("T".to_string())],
+            ..nominal_struct_11280(name)
+        }
+    }
+
+    fn cached_nominal_module_11280(package: &str) -> Module {
+        let span = Span::new(0, 0, 0, 0, 0, 0);
+        let nested = Module {
+            structs: vec![nominal_struct_11280("NestedStructReplay11280")],
+            ..empty_module("NestedReplay11280")
+        };
+        Module {
+            structs: vec![
+                nominal_struct_11280("StructReplay11280"),
+                nominal_parametric_struct_11280("ParametricReplay11280"),
+            ],
+            abstract_types: vec![crate::ir::core::AbstractTypeDef {
+                name: "AbstractReplay11280".to_string(),
+                parent: None,
+                type_params: Vec::new(),
+                span,
+            }],
+            primitive_types: vec![crate::ir::core::PrimitiveTypeDef {
+                name: "PrimitiveReplay11280".to_string(),
+                parent: None,
+                bits: 8,
+                span,
+            }],
+            submodules: vec![nested],
+            ..empty_module(package)
+        }
+    }
+
+    #[test]
+    fn restored_module_replays_qualified_nominal_declarations_11280(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        const PACKAGE: &str = "NominalReplayPkg11280";
+        const FAMILIES: &[&str] = &[
+            "StructReplay11280",
+            "ParametricReplay11280",
+            "AbstractReplay11280",
+            "PrimitiveReplay11280",
+            "NestedStructReplay11280",
+        ];
+
+        let temp = tempfile::tempdir()?;
+        let package_root = temp.path().join(PACKAGE);
+        let source_dir = package_root.join("src");
+        let cache_dir = temp.path().join("cache");
+        fs::create_dir_all(&source_dir)?;
+        let project_toml = format!(
+            "name = \"{PACKAGE}\"\n\
+             uuid = \"11280000-0000-0000-0000-000000000000\"\n\
+             version = \"0.1.0\"\n"
+        );
+        let source = format!("module {PACKAGE}\nend\n");
+        fs::write(package_root.join("Project.toml"), &project_toml)?;
+        fs::write(source_dir.join(format!("{PACKAGE}.jl")), &source)?;
+
+        let config = LoaderConfig {
+            load_path: vec![LoadPathEntry::Path(temp.path().to_path_buf())],
+            cache_dir: Some(cache_dir),
+        };
+        let hash = compute_source_hash(&project_toml, &source, Some(&source_dir));
+        write_cache(
+            &config,
+            PACKAGE,
+            &hash,
+            &cached_nominal_module_11280(PACKAGE),
+        )?;
+
+        for family in FAMILIES {
+            crate::types::register_type_name(&format!("Base.{family}"));
+            assert!(
+                !crate::types::has_qualified_nominal_family_collision(family),
+                "the package owner must be absent before cache restore: {family}"
+            );
+        }
+
+        let mut loader = PackageLoader::new(config);
+        loader.load_module(PACKAGE)?;
+
+        for family in FAMILIES {
+            assert!(
+                crate::types::has_qualified_nominal_family_collision(family),
+                "cache restore must register the qualified package owner: {family}"
+            );
+        }
+
+        let loaded = loader
+            .loaded
+            .get(PACKAGE)
+            .ok_or_else(|| std::io::Error::other("cached module was not committed"))?;
+        assert_eq!(loaded.structs[0].name, "StructReplay11280");
+        assert_eq!(loaded.structs[1].type_params[0].name, "T");
+        assert_eq!(
+            loaded.submodules[0].structs[0].name,
+            "NestedStructReplay11280"
+        );
+        Ok(())
+    }
+
     fn cache_config(dir: &Path) -> LoaderConfig {
         LoaderConfig {
             load_path: vec![LoadPathEntry::Stdlib],
@@ -944,6 +1372,66 @@ end
         assert!(!module_schema_fingerprint().is_empty());
     }
 
+    /// Issue #10962/#10974/#11004: `InnerConstructor.is_explicit_parametric`
+    /// (bare `Type{Foo}` vs explicit `Type{Foo{T}}` constructor-self
+    /// identity) used to be backstopped by a `has_where_params()` dispatch
+    /// fallback, so a wrong/missing value silently self-healed. That
+    /// fallback was removed once the field became load-bearing, which
+    /// exposed a real bug: the `module_schema_fingerprint` probe carried no
+    /// representative `StructDef`/`InnerConstructor`, so an on-disk
+    /// `.ji.json` cache entry written before this field was reliably
+    /// populated for every constructor shape kept matching the fingerprint
+    /// and got reused with `#[serde(default)]`-filled `false` values
+    /// (`packages_data_structures_binary_max_heap_8509` regressed exactly
+    /// this way against a real stale cache). This test pins that the probe
+    /// extended below is actually sensitive to struct/inner-constructor shape
+    /// by comparing against the pre-fix probe shape (no representative
+    /// struct at all) — the two must hash differently so old entries are
+    /// invalidated by the fingerprint alone, independent of `CACHE_VERSION`.
+    #[test]
+    fn test_schema_fingerprint_covers_struct_inner_constructor_shape_10962() {
+        let dummy_span = Span::new(0, 0, 0, 0, 0, 0);
+        let pre_fix_probe = Module {
+            name: String::new(),
+            is_bare: false,
+            is_package_origin: false,
+            is_base_origin: false,
+            functions: Vec::new(),
+            // Pre-fix shape: no representative struct/inner-constructor.
+            structs: Vec::new(),
+            abstract_types: Vec::new(),
+            primitive_types: Vec::new(),
+            type_aliases: vec![TypeAliasDef {
+                name: String::new(),
+                target_type: String::new(),
+                params: Vec::new(),
+                span: dummy_span,
+            }],
+            submodules: Vec::new(),
+            usings: Vec::new(),
+            macros: Vec::new(),
+            exports: Vec::new(),
+            publics: Vec::new(),
+            body: Block {
+                stmts: Vec::new(),
+                span: dummy_span,
+            },
+            span: dummy_span,
+        };
+        let pre_fix_json = serde_json::to_string(&pre_fix_probe).expect("serialize pre-fix probe");
+        let mut hasher = Sha256::new();
+        hasher.update(pre_fix_json.as_bytes());
+        let pre_fix_fingerprint = format!("{:x}", hasher.finalize());
+
+        assert_ne!(
+            pre_fix_fingerprint,
+            module_schema_fingerprint(),
+            "the schema-fingerprint probe must change when a representative \
+             StructDef/InnerConstructor is added, so cache entries written \
+             against the narrower pre-fix probe shape are invalidated"
+        );
+    }
+
     #[test]
     fn test_cache_roundtrip_hits_with_matching_schema() {
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -956,12 +1444,10 @@ end
         assert_eq!(read.as_ref().map(|m| m.name.as_str()), Some("Roundtrip"));
     }
 
-    /// Issue #7921: a cache entry that matches version / vm_version / target /
-    /// source_hash but predates a `Module` metadata-shape change (here simulated
-    /// by an empty `schema_fingerprint`, as written by binaries before the field
-    /// existed) must be treated as stale rather than silently reused.
+    /// Issues #7921/#11019: cache entries with an obsolete schema fingerprint
+    /// or cache version must be treated as stale rather than silently reused.
     #[test]
-    fn test_stale_cache_with_mismatched_schema_is_rejected() {
+    fn test_stale_cache_with_mismatched_schema_or_version_is_rejected() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let config = cache_config(dir.path());
         let module = "StaleSchema";
@@ -984,17 +1470,58 @@ end
         // stale metadata; with the guard it must miss.
         assert!(read_cache(&config, module, hash).is_none());
 
-        // A differently shaped (non-empty but wrong) fingerprint is also rejected.
-        let stale_wrong = CachedModule {
-            schema_fingerprint: "0000000000000000000000000000000000000000000000000000000000000000"
-                .to_string(),
+        // Version 18 predates inner-constructor identity/default-stub metadata.
+        let stale_old_version = CachedModule {
+            version: 18,
+            schema_fingerprint: module_schema_fingerprint(),
             ..stale
         };
         fs::write(
             &path,
-            serde_json::to_string(&stale_wrong).expect("serialize"),
+            serde_json::to_string(&stale_old_version).expect("serialize"),
         )
         .expect("write stale");
         assert!(read_cache(&config, module, hash).is_none());
+    }
+
+    /// Issue #10906 (Phase 1c of #10869): malformed/truncated `.ji.json`
+    /// bytes on disk (partial write, disk corruption) must fall back to a
+    /// cache miss (`None`), never panic — `read_cache`'s `.ok()?` chain
+    /// already collapses every parse failure this way; this proves it holds
+    /// for genuinely invalid JSON and truncated JSON, not just
+    /// well-formed-but-stale entries (the case the test above covers).
+    #[test]
+    fn test_malformed_and_truncated_cache_json_is_a_cache_miss_not_a_panic() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let config = cache_config(dir.path());
+        let module = "Malformed10906";
+        let hash = "badc0ffee";
+        let path = cache_path(&config, module, hash).expect("cache path");
+
+        // Not JSON at all.
+        fs::write(&path, b"this is not valid json at all, oops").expect("write garbage");
+        assert!(
+            read_cache(&config, module, hash).is_none(),
+            "garbage bytes must be a cache miss, not a panic"
+        );
+
+        // Valid JSON, but truncated mid-object (a partial write).
+        let module_value = empty_module(module);
+        let cached = CachedModule {
+            version: CACHE_VERSION,
+            vm_version: env!("CARGO_PKG_VERSION").to_string(),
+            target: cache_target(),
+            schema_fingerprint: module_schema_fingerprint(),
+            module_name: module.to_string(),
+            source_hash: hash.to_string(),
+            module: module_value,
+        };
+        let full_json = serde_json::to_string(&cached).expect("serialize");
+        let truncated = &full_json[..full_json.len() / 2];
+        fs::write(&path, truncated).expect("write truncated json");
+        assert!(
+            read_cache(&config, module, hash).is_none(),
+            "truncated JSON must be a cache miss, not a panic"
+        );
     }
 }

@@ -63,3 +63,9 @@ name = "literals_octal_int"
 file = "octal_int.jl"
 expected = true
 description = "Octal integer literals: 0o0, 0o7, 0o10, 0o777"
+
+[[tests]]
+name = "literals_var_quoted_identifier_8754"
+file = "var_quoted_identifier_8754.jl"
+expected = true
+description = "var\"...\" non-standard identifier syntax: assignment, params, functions, structs, symbols (Issue #8754)"

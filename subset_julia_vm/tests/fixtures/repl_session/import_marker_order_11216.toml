@@ -1,0 +1,85 @@
+name = "repl_session_import_marker_order_11216"
+description = "Issues #11203/#11216: persisted imports replay before the current input so an existing function observes A, then ambiguity with B, then explicit C."
+
+[[steps]]
+name = "define_exporting_modules"
+input = """
+module ReplA11216
+module Sub
+greet() = "A"
+end
+export Sub
+end
+module ReplB11216
+module Sub
+greet() = "B"
+end
+export Sub
+end
+module ReplC11216
+module Sub
+greet() = "C"
+end
+export Sub
+end;
+"""
+success = true
+stdout = ""
+
+[[steps]]
+name = "activate_first_export"
+input = "using .ReplA11216;"
+success = true
+stdout = ""
+
+[[steps]]
+name = "define_function_using_imported_name"
+input = "repl_alias_call_11216() = Sub.greet();"
+success = true
+stdout = ""
+
+[[steps]]
+name = "first_export_is_callable"
+input = "repl_alias_call_11216()"
+success = true
+stdout = ""
+display = '"A"'
+
+[[steps]]
+name = "activate_conflicting_export"
+input = "using .ReplB11216;"
+success = true
+stdout = ""
+
+[[steps]]
+name = "conflicting_exports_are_ambiguous"
+input = """
+repl_alias_ambiguous_11216 = try
+    repl_alias_call_11216()
+    false
+catch err
+    typeof(err) === UndefVarError
+end;
+"""
+success = true
+stdout = ""
+
+[[steps]]
+name = "verify_ambiguity_result"
+input = "repl_alias_ambiguous_11216"
+success = true
+stdout = ""
+display = "true"
+
+[[steps]]
+name = "activate_explicit_import"
+input = "using .ReplC11216: Sub;"
+success = true
+stdout = ""
+
+[[steps]]
+name = "explicit_import_replaces_ambiguity"
+input = "repl_alias_call_11216()"
+success = true
+stdout = ""
+display = '"C"'

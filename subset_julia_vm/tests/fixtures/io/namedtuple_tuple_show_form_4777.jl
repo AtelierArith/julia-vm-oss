@@ -5,7 +5,7 @@
 # NamedTuple- and Tuple-specific format arms in format_value_slow.
 #
 # Fix: NamedTuple and Tuple value mapping in
-# subset_julia_vm/src/vm/formatting.rs now uses
+# subset_julia_vm_vm/src/vm/formatting.rs now uses
 # format_value_show_field, which quotes Value::Str and Value::Char.
 # As part of the same change, single-element Tuple format now emits
 # the trailing comma `(1,)` to match upstream's disambiguation form.

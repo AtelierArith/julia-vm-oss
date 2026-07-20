@@ -2,6 +2,9 @@
 //!
 //! Handles parsing of tuples, arrays, comprehensions, and matrices.
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::{ParseError, ParseResult};
 use crate::node_kind::NodeKind;
@@ -18,10 +21,15 @@ impl<'a> Parser<'a> {
         // `-` inside `[1 (2 - 3)]` stays binary (Issue #7196).
         let saved_space_sensitive = std::mem::replace(&mut self.macro_arg_space_sensitive, false);
         let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, false);
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, false);
         let saved_in_ternary_then = std::mem::replace(&mut self.in_ternary_then, false);
+        self.grouping_depth += 1;
         let result = self.parse_parenthesized_or_tuple_inner();
+        self.grouping_depth -= 1;
         self.macro_arg_space_sensitive = saved_space_sensitive;
         self.in_matrix_row = saved_in_matrix_row;
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
         self.in_ternary_then = saved_in_ternary_then;
         result
     }
@@ -36,7 +44,8 @@ impl<'a> Parser<'a> {
 
         // Check for empty tuple
         if self.check(&Token::RParen) {
-            let end_token = self.advance().unwrap();
+            let end_token =
+                self.advance_checked("RParen token already matched by check() above")?;
             let span = self.source_map.span(start, end_token.span.end);
             return Ok(CstNode::new(NodeKind::TupleExpression, span));
         }
@@ -44,16 +53,20 @@ impl<'a> Parser<'a> {
         // Check for operator as value: (+), (-), (*), etc.
         // Look ahead: is it `(operator)`?
         if let Some(token) = &self.current {
-            if token.token.is_operator() {
+            if token.token.is_operator_identifier() {
                 // Peek at next token to see if it's )
                 if let Some(next) = self.peek_next() {
                     if next == Token::RParen {
                         // It's an operator as value
-                        let op_token = self.advance().unwrap();
-                        let end_token = self.advance().unwrap();
+                        let op_token = self.advance_checked(
+                            "operator token already matched by token.token.is_operator() above",
+                        )?;
+                        let end_token = self.advance_checked(
+                            "RParen token already confirmed by peek_next() == Token::RParen above",
+                        )?;
                         let span = self.source_map.span(start, end_token.span.end);
                         let op_span = op_token.span;
-                        let op_node = CstNode::leaf(NodeKind::Operator, op_span, op_token.text);
+                        let op_node = CstNode::leaf(NodeKind::Operator, op_span);
                         return Ok(CstNode::with_children(
                             NodeKind::ParenthesizedExpression,
                             span,
@@ -69,8 +82,14 @@ impl<'a> Parser<'a> {
             return self.parse_arrow_parameter_list_rest(start, Vec::new());
         }
 
-        // Parse first expression
-        let first = self.parse_expression()?;
+        // Parse first expression. Julia allows parenthesized block statements
+        // such as `(for x in itr; f(x); end; nothing)`, `(while c; b; end)`,
+        // and `(global x = y; x)` in expression positions.
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, true);
+        let first = self.parse_group_item_or_expression();
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
+        let first = first?;
         while self.check(&Token::Newline) {
             self.advance();
         }
@@ -102,9 +121,23 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
 
-                // Allow trailing comma
-                if self.check(&Token::RParen) {
+                // Allow trailing comma, or trailing comma before semicolon.
+                // Issue #8759: `(a=1, ; b=2)` — named tuple with positional args before `;`
+                // and keyword args after. After the trailing comma we may see `;` (not `)`).
+                if self.check(&Token::RParen) || self.check(&Token::Semicolon) {
                     break;
+                }
+
+                if self.check(&Token::Semicolon) {
+                    let semi_token =
+                        self.advance_checked("Semicolon token already matched by check() above")?;
+                    elements.push(CstNode::leaf(NodeKind::Semicolon, semi_token.span));
+                    while self.check(&Token::Newline) {
+                        self.advance();
+                    }
+                    if self.check(&Token::RParen) {
+                        break;
+                    }
                 }
 
                 elements.push(self.parse_expression()?);
@@ -160,11 +193,7 @@ impl<'a> Parser<'a> {
         // `,` separates keyword parameters in the arrow form.
         while self.check(&Token::Semicolon) {
             let semi_token = self.expect(Token::Semicolon)?;
-            params.push(CstNode::leaf(
-                NodeKind::Semicolon,
-                semi_token.span,
-                semi_token.text,
-            ));
+            params.push(CstNode::leaf(NodeKind::Semicolon, semi_token.span));
             while self.check(&Token::Newline) {
                 self.advance();
             }
@@ -172,7 +201,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             loop {
-                params.push(self.parse_expression()?);
+                params.push(self.parse_group_item_or_expression()?);
                 while self.check(&Token::Newline) {
                     self.advance();
                 }
@@ -210,10 +239,32 @@ impl<'a> Parser<'a> {
         // `KwParameter [name, value]` so the arrow lowering recognizes it. (The
         // leading-`;` NamedTuple lowering accepts either shape, so only the arrow
         // form needs this.)
+        //
+        // ONLY nodes AFTER the `;` are keyword parameters. Issue #10354: this
+        // rewrap used to run over the WHOLE parameter list, so an optional
+        // POSITIONAL default before the `;` (`(y, x = 2; k = 3) -> (y, x, k)`,
+        // whose `x = 2` is the same `Assignment[Identifier, =, value]` shape) was
+        // also rewrapped into a `KwParameter` and lowered as a KEYWORD. `f(1, 5)`
+        // then raised `NoMethodFound` instead of upstream's `(1, 5, 3)` — the
+        // arity was wrong because the positional parameter had silently become a
+        // keyword. Splitting at the `Semicolon` marker is what makes the pre-`;`
+        // `Assignment` reach the arrow lowering's positional-default arm
+        // (Issue #8047) and the post-`;` one reach its keyword arm.
         if self.check(&Token::Arrow) {
+            let first_kwarg_index = params
+                .iter()
+                .position(|node| node.kind == NodeKind::Semicolon)
+                .map(|semi| semi + 1)
+                .unwrap_or(params.len());
             params = params
                 .into_iter()
-                .map(|node| {
+                .enumerate()
+                .map(|(index, node)| {
+                    if index < first_kwarg_index {
+                        // Positional parameter (before the `;`) — an `Assignment`
+                        // here is an optional positional DEFAULT, not a keyword.
+                        return node;
+                    }
                     if node.kind == NodeKind::Assignment
                         && node.children.len() == 3
                         && node.children[0].kind == NodeKind::Identifier
@@ -228,6 +279,10 @@ impl<'a> Parser<'a> {
                         // `kwargs...` keyword-varargs parameter
                         CstNode::with_children(NodeKind::SplatParameter, node.span, node.children)
                     } else {
+                        // An ANNOTATED keyword (`k::Integer = 3`) is an `Assignment`
+                        // with a `TypedExpression` LHS, not an `Identifier` — it stays
+                        // as-is and is lowered by `signature::parse_kwparam_node`,
+                        // which handles that shape (and carries its declared type).
                         node
                     }
                 })
@@ -268,15 +323,17 @@ impl<'a> Parser<'a> {
         // parses identically to the single-line form (Issue #8008).
         self.skip_newlines();
 
-        // Parse for clause(s)
-        while self.check(&Token::KwFor) {
-            children.push(self.parse_for_clause()?);
+        // Parse generator clauses. Julia accepts nested generator tails such as
+        // `(x for x in y if p for z in w if q)`, so `for` and `if` clauses may
+        // alternate rather than being restricted to all `for` clauses followed
+        // by one final `if` (Issue #8759).
+        while self.check(&Token::KwFor) || self.check(&Token::KwIf) {
+            if self.check(&Token::KwFor) {
+                children.push(self.parse_for_clause()?);
+            } else {
+                children.push(self.parse_if_clause()?);
+            }
             self.skip_newlines();
-        }
-
-        // Parse optional if clause
-        if self.check(&Token::KwIf) {
-            children.push(self.parse_if_clause()?);
         }
 
         let end = if consume_rparen {
@@ -298,10 +355,15 @@ impl<'a> Parser<'a> {
         // re-establishes it per element/row.
         let saved_space_sensitive = std::mem::replace(&mut self.macro_arg_space_sensitive, false);
         let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, false);
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, false);
         let saved_in_ternary_then = std::mem::replace(&mut self.in_ternary_then, false);
+        self.grouping_depth += 1;
         let result = self.parse_array_or_comprehension_inner();
+        self.grouping_depth -= 1;
         self.macro_arg_space_sensitive = saved_space_sensitive;
         self.in_matrix_row = saved_in_matrix_row;
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
         self.in_ternary_then = saved_in_ternary_then;
         result
     }
@@ -320,9 +382,14 @@ impl<'a> Parser<'a> {
 
         // Check for empty array
         if self.check(&Token::RBracket) {
-            let end_token = self.advance().unwrap();
+            let end_token =
+                self.advance_checked("RBracket token already matched by check() above")?;
             let span = self.source_map.span(start, end_token.span.end);
             return Ok(CstNode::new(NodeKind::VectorExpression, span));
+        }
+
+        if self.check(&Token::Semicolon) {
+            return self.parse_empty_ncat_rest(start, Token::RBracket);
         }
 
         // Parse first element. A `[...]` literal may turn out to be a matrix
@@ -332,8 +399,11 @@ impl<'a> Parser<'a> {
         // This only affects a space-separated `+`/`-` with no trailing space;
         // `[1, -2]` (comma) and `[1 - 2]` (binary, space after) are unchanged.
         let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, true);
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, true);
         let first = self.parse_expression()?;
         self.in_matrix_row = saved_in_matrix_row;
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
 
         if self.check(&Token::Newline) && self.peek_next() == Some(Token::KwFor) {
             self.advance();
@@ -347,7 +417,10 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
             // Comprehension: [expr for x in iter]
-            self.parse_comprehension_rest(start, first)
+            // Only the element expression inherits an enclosing ref's special
+            // `end` binding. Iterator/filter clauses reset it, while nested
+            // refs in those clauses can establish a fresh binding (Issue #10918).
+            self.with_end_symbol_depth(0, |parser| parser.parse_comprehension_rest(start, first))
         } else if self.check(&Token::Comma) {
             // Vector: [a, b, c]
             self.parse_vector_rest(start, first)
@@ -356,7 +429,8 @@ impl<'a> Parser<'a> {
             self.parse_matrix_rest(start, first)
         } else if self.check(&Token::RBracket) {
             // Single element vector
-            let end_token = self.advance().unwrap();
+            let end_token =
+                self.advance_checked("RBracket token already matched by check() above")?;
             let span = self.source_map.span(start, end_token.span.end);
             Ok(CstNode::with_children(
                 NodeKind::VectorExpression,
@@ -385,12 +459,19 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
 
-            // Allow trailing comma
-            if self.check(&Token::RBracket) {
+            // Allow trailing comma, and Julia's `[1, 2;]` vector form.
+            if self.check(&Token::RBracket) || self.check(&Token::Semicolon) {
                 break;
             }
 
             elements.push(self.parse_expression()?);
+        }
+
+        while self.check(&Token::Semicolon) {
+            self.advance();
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
         }
 
         // Skip newlines before the closing bracket so the no-trailing-
@@ -410,6 +491,30 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    pub(crate) fn parse_empty_ncat_rest(
+        &mut self,
+        start: usize,
+        end_token: Token,
+    ) -> ParseResult<CstNode> {
+        let mut children = Vec::new();
+        while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
+            if self.check(&Token::Semicolon) {
+                let semi =
+                    self.advance_checked("Semicolon token already matched by check() above")?;
+                children.push(CstNode::leaf(NodeKind::Semicolon, semi.span));
+            } else {
+                self.advance();
+            }
+        }
+        let end = self.expect(end_token)?.span.end;
+        let span = self.source_map.span(start, end);
+        Ok(CstNode::with_children(
+            NodeKind::VectorExpression,
+            span,
+            children,
+        ))
+    }
+
     /// Parse rest of comprehension [first for ...]
     pub(crate) fn parse_comprehension_rest(
         &mut self,
@@ -425,16 +530,18 @@ impl<'a> Parser<'a> {
         // form (Issue #8008).
         self.skip_newlines();
 
-        // Parse for clause(s)
-        while self.check(&Token::KwFor) {
-            children.push(self.parse_for_clause()?);
+        // Parse interleaved `for`/`if` clauses. Julia's flatten/filter
+        // comprehension syntax allows any number of `for` and `if` clauses in
+        // sequence, e.g. `[x for x in y if aa for z in w if bb]` (Issue #8759).
+        loop {
             self.skip_newlines();
-        }
-
-        // Parse optional if clause
-        if self.check(&Token::KwIf) {
-            children.push(self.parse_if_clause()?);
-            self.skip_newlines();
+            if self.check(&Token::KwFor) {
+                children.push(self.parse_for_clause()?);
+            } else if self.check(&Token::KwIf) {
+                children.push(self.parse_if_clause()?);
+            } else {
+                break;
+            }
         }
 
         let end_token = self.expect(Token::RBracket)?;
@@ -453,6 +560,8 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_for_clause(&mut self) -> ParseResult<CstNode> {
         let start_token = self.expect(Token::KwFor)?;
         let start = start_token.span.start;
+
+        self.skip_newlines();
 
         let mut bindings = vec![self.parse_for_binding()?];
 
@@ -474,7 +583,10 @@ impl<'a> Parser<'a> {
             break;
         }
 
-        let end = bindings.last().unwrap().span.end;
+        let end = self.last_span_end(
+            &bindings,
+            "for clause always pushes at least one binding above",
+        )?;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(NodeKind::ForClause, span, bindings))
     }
@@ -513,7 +625,9 @@ impl<'a> Parser<'a> {
         }
 
         // Check for tuple pattern: (a, b, ...)
-        let var = if self.check(&Token::LParen) {
+        let var = if self.check(&Token::Dollar) {
+            self.parse_prefix()?
+        } else if self.check(&Token::LParen) {
             self.parse_tuple_pattern()?
         } else {
             let ident = self.parse_identifier()?;
@@ -542,6 +656,7 @@ impl<'a> Parser<'a> {
             ));
         }
         self.advance(); // consume in/=/∈
+        self.skip_newlines();
 
         let iter = self.parse_expression()?;
         let end = iter.span.end;
@@ -551,11 +666,8 @@ impl<'a> Parser<'a> {
 
         // If outer, add a marker node at the beginning
         if has_outer {
-            let outer_marker = CstNode::leaf(
-                NodeKind::Identifier,
-                self.source_map.span(start, start + 5), // "outer" is 5 chars
-                "outer".to_string(),
-            );
+            let outer_marker =
+                CstNode::leaf(NodeKind::Identifier, self.source_map.span(start, start + 5));
             children.insert(0, outer_marker);
         }
 
@@ -569,8 +681,16 @@ impl<'a> Parser<'a> {
         let start = start_token.span.start;
         let mut elements = Vec::new();
 
+        if self.check(&Token::Semicolon) {
+            let semi_token =
+                self.advance_checked("Semicolon token already matched by check() above")?;
+            elements.push(CstNode::leaf(NodeKind::Semicolon, semi_token.span));
+        }
+
         // Parse first identifier
-        elements.push(self.parse_identifier()?);
+        if !self.check(&Token::RParen) {
+            elements.push(self.parse_tuple_pattern_element()?);
+        }
 
         // Parse remaining comma-separated identifiers
         while self.check(&Token::Comma) {
@@ -581,7 +701,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            elements.push(self.parse_identifier()?);
+            elements.push(self.parse_tuple_pattern_element()?);
         }
 
         let end_token = self.expect(Token::RParen)?;
@@ -591,6 +711,201 @@ impl<'a> Parser<'a> {
             span,
             elements,
         ))
+    }
+
+    fn parse_tuple_pattern_element(&mut self) -> ParseResult<CstNode> {
+        if self.check(&Token::LParen) {
+            return self.parse_tuple_pattern();
+        }
+
+        let ident = self.parse_identifier()?;
+        let mut node = ident;
+        if self.check(&Token::DoubleColon) {
+            node = self.parse_type_declaration(node)?;
+        }
+        if self.check(&Token::Ellipsis) {
+            let ellipsis =
+                self.advance_checked("Ellipsis token already matched by check() above")?;
+            let span = self.source_map.span(node.span.start, ellipsis.span.end);
+            return Ok(CstNode::with_children(
+                NodeKind::SplatParameter,
+                span,
+                vec![node],
+            ));
+        }
+        Ok(node)
+    }
+
+    /// Consume one array-literal row separator (the gap between two matrix
+    /// rows), emitting one [`NodeKind::Semicolon`] leaf per `;` token
+    /// consumed to preserve Julia's `;`/`;;`/`;;;`/... dimension-separator
+    /// level (`N` semicolons concatenate along dimension `N`; a run made up
+    /// only of newlines is level 1, same as a single `;`) so the lowering
+    /// pass can recover the literal's true N-dimensional shape (Issue
+    /// #10190).
+    ///
+    /// Also enforces two of upstream Julia's parse-time restrictions on
+    /// separator *placement* that sjulia previously accepted leniently
+    /// (Issue #10398):
+    ///
+    ///   * A `;;` run (exactly two semicolons — upstream only special-cases
+    ///     this exact count, not `;;;`/...) that follows a row which already
+    ///     used bare space to join >= 2 elements ("row-major") is illegal
+    ///     *unless* the run is immediately followed by a newline. That one
+    ///     shape is Julia's "wrap a line" idiom (`[a b ;;\n c d]` continues
+    ///     the same row/dimension, not a real separator); anything else —
+    ///     `[a b;; c d]`, a `;;` split by a bare space (`[a b; ; c d]`, which
+    ///     still counts as a 2-run), or a trailing `[a b;;]` — raises
+    ///     upstream's own "cannot mix space and ;; separators..."
+    ///     diagnostic.
+    ///   * A `;`-run never resumes across a newline: `[a b;\n;c d]` stops
+    ///     the run at the (insignificant, absorbed) newline rather than
+    ///     treating the following `;` as a continuation, unlike the
+    ///     legitimate `;;\n` line-wrap above. The dangling `;` is left for
+    ///     the caller, which then fails to parse it as the start of the next
+    ///     row's first expression — matching upstream's "Expected `]`"
+    ///     rejection of a `;`-run split across a line break.
+    ///   * More generally, a `;` may not be split from its neighbor(s) in
+    ///     the same run by a bare space at all — `[a; ;b]` and `[a;;3 4;; ;
+    ///     b]` are both rejected upstream ("whitespace is not allowed
+    ///     here"), independent of the exactly-two-semicolons mixing rule
+    ///     above (which only fires for a 2-run and only after a row-major
+    ///     row — see the Form B doc comment on the mixing check for why
+    ///     that one specific case surfaces the "cannot mix" message
+    ///     instead).
+    pub(crate) fn consume_row_separator_run(
+        &mut self,
+        children: &mut Vec<CstNode>,
+    ) -> ParseResult<bool> {
+        // Newlines *before* a semicolon run are never significant.
+        while self.check(&Token::Newline) {
+            self.advance();
+        }
+
+        if !self.check(&Token::Semicolon) {
+            // Pure newline separator (or nothing left to consume): level 1,
+            // no leaves — unchanged from before.
+            return Ok(false);
+        }
+
+        let run_span = self.current_span();
+        let mut n_semis = 0usize;
+        let mut had_interior_space = false;
+        loop {
+            let semi = self.advance_checked(
+                "Semicolon token already matched by check() above (loop entry) or the trailing check() before `continue` (loop repeat)",
+            )?;
+            let semi_end = semi.span.end;
+            children.push(CstNode::leaf(NodeKind::Semicolon, semi.span));
+            n_semis += 1;
+            if self.check(&Token::Semicolon) {
+                // Adjacent (or space-separated — Issue #10398 Form B) `;`:
+                // still the same run.
+                if self.current_span().start > semi_end {
+                    had_interior_space = true;
+                }
+                continue;
+            }
+            break;
+        }
+
+        let immediately_followed_by_newline = self.check(&Token::Newline);
+        if immediately_followed_by_newline {
+            // Newlines *after* a semicolon run are never significant, but
+            // (unlike the run itself) they never resume it: any further `;`
+            // past this point starts the next row's content, not more of
+            // this run (Issue #10398 Form C).
+            while self.check(&Token::Newline) {
+                self.advance();
+            }
+        }
+
+        if n_semis == 2
+            && !immediately_followed_by_newline
+            && Self::array_literal_is_row_major(children)
+        {
+            return Err(ParseError::invalid_syntax(
+                "cannot mix space and ;; separators in an array expression, except to wrap a line",
+                run_span,
+            ));
+        }
+        if had_interior_space {
+            return Err(ParseError::invalid_syntax(
+                "whitespace is not allowed between semicolons in an array expression",
+                run_span,
+            ));
+        }
+
+        // In a row-major literal, `;;` followed immediately by a newline is
+        // Julia's line-wrap spelling: the next physical row continues the
+        // current MatrixRow rather than introducing dimension 2 (Issue #10519).
+        // Remove the just-recorded separators and let the caller append the
+        // following physical row's elements to the preceding row.
+        let continues_current_row = n_semis == 2
+            && immediately_followed_by_newline
+            && Self::array_literal_is_row_major(children);
+        if continues_current_row {
+            children.truncate(children.len() - n_semis);
+        }
+
+        Ok(continues_current_row)
+    }
+
+    /// Has any row parsed so far in this array literal joined >= 2 elements
+    /// with a bare space (i.e. established Julia's "row-major"/`hcat`
+    /// reading)? Used by [`Self::consume_row_separator_run`] to detect an
+    /// illegal mix of space- and `;;`-separators (Issue #10398).
+    fn array_literal_is_row_major(children: &[CstNode]) -> bool {
+        children
+            .iter()
+            .any(|child| child.kind == NodeKind::MatrixRow && child.children.len() > 1)
+    }
+
+    /// Whether a `;;` (or higher) separator has already established Julia's
+    /// column-major ncat reading for this literal (Issue #10518).
+    fn array_literal_is_column_major(children: &[CstNode]) -> bool {
+        let mut run = 0usize;
+        for child in children {
+            if child.kind == NodeKind::Semicolon {
+                run += 1;
+            } else {
+                if run == 2 {
+                    return true;
+                }
+                run = 0;
+            }
+        }
+        run == 2
+    }
+
+    pub(crate) fn push_matrix_row(
+        &mut self,
+        rows: &mut Vec<CstNode>,
+        continuation: bool,
+    ) -> ParseResult<()> {
+        let column_major = Self::array_literal_is_column_major(rows);
+        let mut row = self.parse_matrix_row(column_major)?;
+        if continuation {
+            // `continuation` can only be `true` when `consume_row_separator_run`
+            // returned it, which requires `array_literal_is_row_major(rows)` to
+            // hold — and that in turn requires `rows` to already contain a
+            // qualifying `MatrixRow`, so `rows` is guaranteed non-empty here.
+            // Proof-backed by caller discipline rather than the type system
+            // (Issue #10904); converted from a direct `expect` call to a
+            // checked internal error instead of asserting `unreachable!()`.
+            let previous = match rows.last_mut() {
+                Some(previous) => previous,
+                None => {
+                    return Err(self
+                        .internal_parser_error("row continuation requires a preceding matrix row"))
+                }
+            };
+            previous.children.append(&mut row.children);
+            previous.span = self.source_map.span(previous.span.start, row.span.end);
+        } else {
+            rows.push(row);
+        }
+        Ok(())
     }
 
     /// Parse rest of matrix [first row; ...]
@@ -615,27 +930,30 @@ impl<'a> Parser<'a> {
         }
         self.in_matrix_row = saved_in_matrix_row;
 
+        let (first_row_start, first_row_end) = self.span_bounds(
+            &first_row,
+            "matrix's first row always pushes the leading element above",
+        )?;
         let mut rows = vec![CstNode::with_children(
             NodeKind::MatrixRow,
-            self.source_map
-                .span(first_row[0].span.start, first_row.last().unwrap().span.end),
+            self.source_map.span(first_row_start, first_row_end),
             first_row,
         )];
 
-        // Parse remaining rows
+        // Parse remaining rows. Each separator run's semicolon count (its
+        // dimension level) is preserved as `Semicolon` leaves interleaved
+        // with the `MatrixRow` children (Issue #10190); a trailing run with
+        // no following row (`[1 2;;;]`) is dropped by the `RBracket` check
+        // below, keeping the existing higher-dimension trailing leniency
+        // (Issue #8759).
         while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
-            self.advance(); // consume ; or newline
-
-            // Skip extra newlines
-            while self.check(&Token::Newline) {
-                self.advance();
-            }
+            let continuation = self.consume_row_separator_run(&mut rows)?;
 
             if self.check(&Token::RBracket) {
                 break;
             }
 
-            rows.push(self.parse_matrix_row()?);
+            self.push_matrix_row(&mut rows, continuation)?;
         }
 
         let end_token = self.expect(Token::RBracket)?;
@@ -667,12 +985,16 @@ impl<'a> Parser<'a> {
 
         // If just one row ending with ], it's a row vector
         if self.check(&Token::RBracket) {
-            let end_token = self.advance().unwrap();
+            let end_token =
+                self.advance_checked("RBracket token already matched by check() above")?;
             let span = self.source_map.span(start, end_token.span.end);
+            let (elements_start, elements_end) = self.span_bounds(
+                &elements,
+                "matrix row-rest always pushes the leading element above",
+            )?;
             let row = CstNode::with_children(
                 NodeKind::MatrixRow,
-                self.source_map
-                    .span(elements[0].span.start, elements.last().unwrap().span.end),
+                self.source_map.span(elements_start, elements_end),
                 elements,
             );
             return Ok(CstNode::with_children(
@@ -683,29 +1005,35 @@ impl<'a> Parser<'a> {
         }
 
         // Create first row from all collected elements
+        let (elements_start, elements_end) = self.span_bounds(
+            &elements,
+            "matrix row-rest always pushes the leading element above",
+        )?;
         let first_row = CstNode::with_children(
             NodeKind::MatrixRow,
-            self.source_map
-                .span(elements[0].span.start, elements.last().unwrap().span.end),
+            self.source_map.span(elements_start, elements_end),
             elements,
         );
 
         let mut rows = vec![first_row];
 
-        // Parse remaining rows
+        // Parse remaining rows. As in `parse_matrix_rest`, each separator
+        // run's semicolon count is preserved as `Semicolon` leaves so
+        // higher-dimensional literals (`;;`, `;;;`, ...) lower correctly
+        // instead of collapsing to a 2-D matrix (Issue #10190). The
+        // typed-matrix path already accepted trailing higher-dimensional
+        // separators such as `T[1 2;;;]`; untyped row vectors need the same
+        // syntax-level leniency for Julia hvncat forms like `[1 2;;;]`
+        // (Issue #8759) — a trailing run with no following row is simply
+        // dropped by the `RBracket` check below.
         while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
-            self.advance(); // consume ; or newline
-
-            // Skip extra newlines
-            while self.check(&Token::Newline) {
-                self.advance();
-            }
+            let continuation = self.consume_row_separator_run(&mut rows)?;
 
             if self.check(&Token::RBracket) {
                 break;
             }
 
-            rows.push(self.parse_matrix_row()?);
+            self.push_matrix_row(&mut rows, continuation)?;
         }
 
         let end_token = self.expect(Token::RBracket)?;
@@ -718,7 +1046,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a single matrix row
-    pub(crate) fn parse_matrix_row(&mut self) -> ParseResult<CstNode> {
+    pub(crate) fn parse_matrix_row(&mut self, column_major: bool) -> ParseResult<CstNode> {
         // The whole row — including its first element — is whitespace-sensitive
         // so `[1 1; 2 -3]` parses `2 -3` as two elements (Issue #7196).
         let saved_in_matrix_row = std::mem::replace(&mut self.in_matrix_row, true);
@@ -730,11 +1058,18 @@ impl<'a> Parser<'a> {
         while !self.check_any(&[Token::Semicolon, Token::Newline, Token::RBracket])
             && !self.is_at_end()
         {
+            if column_major && elements.len() == 1 {
+                self.in_matrix_row = saved_in_matrix_row;
+                return Err(ParseError::invalid_syntax(
+                    "cannot mix space and ;; separators in an array expression, except to wrap a line",
+                    self.current_span(),
+                ));
+            }
             elements.push(self.parse_expression()?);
         }
         self.in_matrix_row = saved_in_matrix_row;
 
-        let end = elements.last().unwrap().span.end;
+        let end = self.last_span_end(&elements, "matrix row always pushes `first` above")?;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(NodeKind::MatrixRow, span, elements))
     }

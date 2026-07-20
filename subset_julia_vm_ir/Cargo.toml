@@ -1,0 +1,28 @@
+[package]
+name = "subset_julia_vm_ir"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+authors = ["SubsetJuliaVM Team"]
+description = "Span, error, and IR types for SubsetJuliaVM — the shared foundation below the type system"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AtelierArith/SubsetJuliaVM"
+keywords = ["julia", "ir", "compiler"]
+categories = ["compilers"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+subset_julia_vm_parser = { path = "../subset_julia_vm_parser" }
+
+[dev-dependencies]
+# Only used by `interned::tests` to assert `InternedStr`'s wire encoding is
+# byte-identical to `String`'s (Issue #10124). Same crate/version already a
+# direct dependency of `subset_julia_vm` for Base cache serialization.
+bincode = "1"
+
+[lib]
+crate-type = ["rlib"]
+
+[lints]
+workspace = true

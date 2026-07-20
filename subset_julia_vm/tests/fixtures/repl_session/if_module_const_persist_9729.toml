@@ -1,0 +1,36 @@
+name = "repl_session_if_module_const_persist_9729"
+description = "Issue #9729: a module top-level const/global binding inside an if branch persists across REPL evals, matching upstream Julia module realization semantics."
+
+[[steps]]
+name = "define_if_wrapped_module_const"
+input = """
+module Mif9729
+    if true
+        const xs = Int[]
+    end
+    bump() = (push!(xs, 1); length(xs))
+end
+"""
+success = true
+stdout = ""
+
+[[steps]]
+name = "first_bump"
+input = "Mif9729.bump()"
+success = true
+stdout = ""
+display = "1"
+
+[[steps]]
+name = "second_bump_persists_module_const"
+input = "Mif9729.bump()"
+success = true
+stdout = ""
+display = "2"
+
+[[steps]]
+name = "module_const_length_persisted"
+input = "length(Mif9729.xs)"
+success = true
+stdout = ""
+display = "2"

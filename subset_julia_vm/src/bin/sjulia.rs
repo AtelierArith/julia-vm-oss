@@ -1,4 +1,5 @@
 #![deny(clippy::expect_used)]
+#![deny(clippy::unwrap_used)]
 //! SubsetJuliaVM Command-Line Interface
 //!
 //! Usage:
@@ -10,6 +11,8 @@
 //!   sjulia --compile-vm file.jl -o out # Compile to VM bytecode file (.sjvmbc)
 //!   sjulia --run-vm-bytecode file.sjvmbc # Execute VM bytecode file
 //!   sjulia --dump-bytecode file.jl  # Dump compiled VM bytecode
+//!   sjulia --emit-artifact file.jl  # Print display artifact (plot JSON/image) to stdout
+//!   sjulia --cache-status           # Print cache source/fingerprint status as JSON
 
 use std::env;
 use std::fs;
@@ -19,7 +22,6 @@ use std::path::Path;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use subset_julia_vm::base;
-use subset_julia_vm::compile::compile_core_program;
 use subset_julia_vm::loader;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
@@ -28,8 +30,15 @@ use subset_julia_vm::repl::completions::{
 };
 use subset_julia_vm::repl::REPLSession;
 use subset_julia_vm::rng::StableRng;
-use subset_julia_vm::vm::{CompiledProgram, FunctionInfo, Instr, Value, VarTypeTag, Vm};
+use subset_julia_vm::vm::Vm;
 use subset_julia_vm::{core_ir_file, vm_bytecode_file};
+use subset_julia_vm_bytecode::{
+    value::{
+        array_wrapper_value_to_array_value, native_array_value_ref, new_array_ref, ArrayData,
+        ArrayRef, StructInstance,
+    },
+    CompiledProgram, FunctionInfo, Instr, Value, VarTypeTag,
+};
 
 // Import REPL dependencies
 use rustyline::completion::{Completer, Pair};
@@ -464,12 +473,17 @@ impl Highlighter for JuliaHelper {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() > 1 && args[1] == "--cache-status" {
+        print_cache_status();
+        return;
+    }
+
     // Overlap the Base-cache deserialize and Base IR clones with the
     // prelude-load/merge window on the main thread (Issue #6348). Harmless
     // for non-run subcommands: unconsumed prefetch results are dropped.
-    subset_julia_vm::compile::cache::begin_warm_start_prefetch();
-
-    let args: Vec<String> = env::args().collect();
+    subset_julia_vm::compile::host_support::begin_warm_start_prefetch();
 
     if args.len() == 1 {
         // No arguments. Match official Julia behavior: when stdin is a TTY,
@@ -592,6 +606,46 @@ fn main() {
         } else {
             dump_bytecode_for_file(args_filtered[1], include_all);
         }
+    } else if args[1] == "--emit-artifact" || args[1] == "--dump-plot" {
+        // --emit-artifact option: run a program and print its display artifact
+        // (the same `application/vnd.plotly+json` / image the iOS/Web hosts render
+        // via `try_value_to_artifact`). Diagnostic MIME + byte count go to stderr;
+        // the artifact DATA goes to stdout so it can be redirected to a file:
+        //   sjulia --emit-artifact sample.jl > out.json
+        //   sjulia --emit-artifact -e 'using Plots; plot(sin)' > out.json
+        //   sjulia --emit-artifact -              # read program from stdin
+        let args_filtered: Vec<&String> = args
+            .iter()
+            .filter(|a| *a != "--emit-artifact" && *a != "--dump-plot")
+            .collect();
+
+        if args_filtered.len() < 2 {
+            eprintln!("Error: --emit-artifact requires an input file, '-' or -e 'code'");
+            std::process::exit(1);
+        }
+
+        if args_filtered[1] == "-e" {
+            if args_filtered.len() < 3 {
+                eprintln!("Error: -e requires a code argument");
+                std::process::exit(1);
+            }
+            emit_artifact_for_code(args_filtered[2]);
+        } else if args_filtered[1] == "-" {
+            let mut source = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut source) {
+                eprintln!("Error reading stdin: {}", e);
+                std::process::exit(1);
+            }
+            emit_artifact_for_code(&source);
+        } else {
+            match fs::read_to_string(args_filtered[1]) {
+                Ok(source) => emit_artifact_for_code(&source),
+                Err(e) => {
+                    eprintln!("Error reading file '{}': {}", args_filtered[1], e);
+                    std::process::exit(1);
+                }
+            }
+        }
     } else if args[1] == "--dump-ast" {
         // --dump-ast option: show AST structure for debugging parser tests
         // Supports: --dump-ast [--json] <file.jl>
@@ -632,6 +686,22 @@ fn main() {
             std::process::exit(1);
         }
         precompile_prelude(&args[2]);
+    } else if args[1] == "--precompile-packages" {
+        // --precompile-packages: generate preloaded-package bytecode cache
+        // for embedding/persistent-cache seeding (Issue #9189)
+        if args.len() < 3 {
+            eprintln!("Error: --precompile-packages requires an output file path");
+            std::process::exit(1);
+        }
+        precompile_packages(&args[2], args.get(3).map(String::as_str));
+    } else if args[1] == "--precompile-seeded" {
+        // --precompile-seeded: generate the seeded PROGRAM_CACHE entries for
+        // common short programs, for embedding (Issue #10120)
+        if args.len() < 3 {
+            eprintln!("Error: --precompile-seeded requires an output file path");
+            std::process::exit(1);
+        }
+        precompile_seeded(&args[2]);
     } else if args[1] == "-h" || args[1] == "--help" {
         print_usage();
     } else {
@@ -646,6 +716,12 @@ fn main() {
             _ => run_file(file_path),
         }
     }
+
+    // Opt-in inference budget metrics report (Issue #8546):
+    // `SJULIA_INFER_BUDGET_METRICS=1 sjulia file.jl` dumps the attributable
+    // widening counters after the run. Compilation is synchronous on this
+    // thread, so the thread-local counters cover the whole compile.
+    subset_julia_vm::compile::budget_metrics::report_to_stderr_if_enabled();
 }
 
 /// Read the entire stdin as a script source and execute it via `run_code`.
@@ -660,6 +736,64 @@ fn run_stdin_script() {
         std::process::exit(1);
     }
     run_code(&source);
+}
+
+/// Run `code` and print its display artifact (plot / image) exactly as the C FFI
+/// (`compile_and_run_detailed` → `try_value_to_artifact`) would hand it to the
+/// iOS/Web hosts. The artifact DATA is written to stdout (redirect-friendly);
+/// the MIME type and byte count go to stderr. Exits non-zero if the program
+/// fails or its result is not a display artifact. Useful for diagnosing what the
+/// hosts actually render (e.g. the Aizawa `framesCompact` payload, Issue #9218).
+fn emit_artifact_for_code(code: &str) {
+    use subset_julia_vm::compile::host_support::compile_with_cache;
+    use subset_julia_vm::pipeline::parse_and_lower;
+    use subset_julia_vm::plotting::try_value_to_artifact;
+
+    let program = match parse_and_lower(code) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Error: parse/lower failed: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    let compiled = match compile_with_cache(&program) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: compile failed: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    let mut vm = Vm::new_program(compiled, StableRng::new(0));
+    // `--emit-artifact` is an artifact-rendering host, so activate the graphical
+    // display: `display(plot(cos))` routes into the artifact sink (Issue #9262).
+    vm.enable_graphical_display();
+    let result = match vm.run() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error: VM run failed: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    // Prefer an artifact emitted by an explicit `display(x)` (Issue #9262);
+    // otherwise render the trailing result value.
+    let emitted = vm
+        .take_display_artifacts()
+        .pop()
+        .or_else(|| try_value_to_artifact(&result, vm.get_struct_heap()));
+    match emitted {
+        Some(artifact) => {
+            eprintln!("MIME: {}", artifact.mime);
+            eprintln!("bytes: {}", artifact.data.len());
+            let mut out = io::stdout();
+            let _ = out.write_all(artifact.data.as_bytes());
+            let _ = out.write_all(b"\n");
+            let _ = out.flush();
+        }
+        None => {
+            eprintln!("Error: program result is not a display artifact (no plot/image)");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn print_usage() {
@@ -683,8 +817,14 @@ USAGE:
     sjulia --dump-ast -e <code>         Dump AST for code string
     sjulia --dump-bytecode -e <code>    Dump bytecode for code string
     sjulia --dump-ast --json <file.jl>  Dump AST in JSON format
+    sjulia --emit-artifact <file.jl>    Print the display artifact (plot JSON/image) to stdout
+    sjulia --emit-artifact -e <code>    Print the display artifact for a code string
+    sjulia --cache-status               Print cache source/fingerprint status as JSON
     sjulia --precompile-base <out.bin> Generate Base cache for embedding
     sjulia --precompile-prelude <out.bin> Generate prelude Program cache for embedding
+    sjulia --precompile-packages <out.bin> [PkgA,PkgB]
+                                      Generate preloaded-package bytecode cache
+    sjulia --precompile-seeded <out.bin> Generate seeded PROGRAM_CACHE entries for embedding
 
 OPTIONS:
     -e <code>             Execute code string
@@ -699,9 +839,16 @@ OPTIONS:
         --dump-ast        Dump AST structure (useful for debugging parser tests)
         --dump-bytecode   Dump compiled VM bytecode (user functions + main by default)
         --all             Include Base/prelude functions in --dump-bytecode output
+        --cache-status    Print cache source/fingerprint status as JSON
         --precompile-base Generate Base bytecode cache for build-time embedding
         --precompile-prelude
                           Generate parsed/lowered prelude Program cache for build-time embedding
+        --precompile-packages
+                          Generate preloaded-package bytecode cache (Issue #9189);
+                          optional package list overrides build-time config
+        --precompile-seeded
+                          Generate seeded PROGRAM_CACHE entries for common short
+                          programs, for build-time embedding (Issue #10120)
     -h, --help            Show this help message
 
 EXAMPLES:
@@ -718,6 +865,76 @@ EXAMPLES:
     sjulia --dump-bytecode -e "f(x)=x+1; f(41)"
 "#
     );
+}
+
+fn print_cache_status() {
+    let base = subset_julia_vm::compile::host_support::base_cache_debug_status();
+    let prelude = subset_julia_vm::pipeline::prelude_program_cache_debug_status();
+    let output = serde_json::json!({
+        "crate_version": VERSION,
+        "compiler_build_fingerprint": subset_julia_vm::compile::precompile::compiler_build_fingerprint(),
+        "base_cache": {
+            "load_source": base.load_source,
+            "compile_cache_disabled": base.compile_cache_disabled,
+            "persistent_disabled": base.persistent_disabled,
+            "fingerprints": {
+                "cache_hash": base.fingerprints.cache_hash,
+                "schema_fingerprint": base.fingerprints.schema_fingerprint,
+                "compiler_build_fingerprint": base.fingerprints.compiler_build_fingerprint,
+                "enum_variant_fingerprint": base.fingerprints.enum_variant_fingerprint,
+            },
+            "embedded": cache_artifact_status_json(
+                base.embedded.state,
+                base.embedded.path.as_deref(),
+                base.embedded.detail.as_deref(),
+            ),
+            "persistent": cache_artifact_status_json(
+                base.persistent.state,
+                base.persistent.path.as_deref(),
+                base.persistent.detail.as_deref(),
+            ),
+        },
+        "prelude_program_cache": {
+            "load_source": prelude.load_source,
+            "persistent_disabled": prelude.persistent_disabled,
+            "fingerprints": {
+                "version": prelude.fingerprints.version,
+                "source_hash": prelude.fingerprints.source_hash,
+                "compiler_build_fingerprint": prelude.fingerprints.compiler_build_fingerprint,
+                "enum_variant_fingerprint": prelude.fingerprints.enum_variant_fingerprint,
+            },
+            "embedded": cache_artifact_status_json(
+                prelude.embedded.state,
+                prelude.embedded.path.as_deref(),
+                prelude.embedded.detail.as_deref(),
+            ),
+            "persistent": cache_artifact_status_json(
+                prelude.persistent.state,
+                prelude.persistent.path.as_deref(),
+                prelude.persistent.detail.as_deref(),
+            ),
+        },
+    });
+
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => println!("{json}"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize cache status: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cache_artifact_status_json(
+    state: &str,
+    path: Option<&Path>,
+    detail: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "state": state,
+        "path": path.map(|p| p.display().to_string()),
+        "detail": detail,
+    })
 }
 
 fn precompile_prelude(output_path: &str) {
@@ -739,6 +956,31 @@ fn precompile_prelude(output_path: &str) {
         "Prelude Program cache written to {} ({} bytes, {:.1}ms)",
         output_path,
         bytes.len(),
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
+
+fn precompile_seeded(output_path: &str) {
+    eprintln!("Precompiling seeded PROGRAM_CACHE entries...");
+    let start = std::time::Instant::now();
+
+    let bytes = subset_julia_vm::compile::seeded_cache::generate_seeded_program_cache()
+        .unwrap_or_else(|e| {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        });
+
+    std::fs::write(output_path, &bytes).unwrap_or_else(|e| {
+        eprintln!("Error: Failed to write seeded cache file: {}", e);
+        std::process::exit(1);
+    });
+
+    let elapsed = start.elapsed();
+    eprintln!(
+        "Seeded program cache written to {} ({} bytes, {} programs, {:.1}ms)",
+        output_path,
+        bytes.len(),
+        subset_julia_vm::compile::seeded_cache::SEEDED_PROGRAM_SOURCES.len(),
         elapsed.as_secs_f64() * 1000.0,
     );
 }
@@ -766,6 +1008,36 @@ fn precompile_base(output_path: &str) {
     );
 }
 
+fn precompile_packages(output_path: &str, package_csv: Option<&str>) {
+    eprintln!("Precompiling preloaded-package bytecode cache (Issue #9189)...");
+    let start = std::time::Instant::now();
+
+    let bytes = if let Some(raw_packages) = package_csv {
+        let packages =
+            subset_julia_vm::compile::preload_cache::parse_preload_package_list(raw_packages);
+        subset_julia_vm::compile::preload_cache::generate_preload_cache_for(&packages)
+    } else {
+        subset_julia_vm::compile::preload_cache::generate_preload_cache()
+    }
+    .unwrap_or_else(|e| {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    });
+
+    std::fs::write(output_path, &bytes).unwrap_or_else(|e| {
+        eprintln!("Error: Failed to write preload cache file: {}", e);
+        std::process::exit(1);
+    });
+
+    let elapsed = start.elapsed();
+    eprintln!(
+        "Preload cache written to {} ({} bytes, {:.1}ms)",
+        output_path,
+        bytes.len(),
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
+
 fn dump_bytecode_for_file(file_path: &str, include_all: bool) {
     if !Path::new(file_path).exists() {
         eprintln!("Error: File '{}' not found", file_path);
@@ -787,111 +1059,60 @@ fn dump_bytecode_for_code(source: &str, include_all: bool) {
 }
 
 fn compile_source_for_bytecode_dump(source: &str) -> (CompiledProgram, HashSet<String>) {
+    // Collect the caller's own function names from a STANDALONE parse+lower of
+    // the raw user source, before any prelude/package merge. This must happen
+    // pre-merge: once merged, `program.modules` also carries prelude/package
+    // modules, so their functions would otherwise be misclassified as "user"
+    // functions in the default (non `--all`) dump output.
     let mut parser = Parser::new().unwrap_or_else(|e| {
         eprintln!("Error: failed to create parser: {}", e);
         std::process::exit(1);
     });
-
-    let prelude_src = base::get_prelude();
-    let prelude_outcome = parser.parse(&prelude_src).unwrap_or_else(|e| {
-        eprintln!("Error: failed to parse prelude: {:?}", e);
-        std::process::exit(1);
-    });
-    let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
-        eprintln!("Prelude lowering error: {:?}", e);
-        std::process::exit(1);
-    });
-
     let outcome = parser.parse(source).unwrap_or_else(|e| {
         eprintln!("Error: failed to parse source: {:?}", e);
         std::process::exit(1);
     });
-
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut lowering = Lowering::new(source);
-    let mut program = lowering.lower(outcome).unwrap_or_else(|e| {
+    let user_only_program = lowering.lower(outcome).unwrap_or_else(|e| {
         eprintln!("Lowering error: {:?}", e);
         std::process::exit(1);
     });
+    let user_function_names = collect_dump_user_function_names(&user_only_program);
 
-    let user_function_names = collect_dump_user_function_names(&program);
-    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
-    let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
-
-    let mut all_structs: Vec<_> = prelude_program
-        .structs
-        .into_iter()
-        .filter(|s| !user_struct_names.contains(s.name.as_str()))
-        .collect();
-    all_structs.append(&mut program.structs);
-    program.structs = all_structs;
-
-    let user_abstract_names: HashSet<_> = program
-        .abstract_types
-        .iter()
-        .map(|a| a.name.as_str())
-        .collect();
-    let mut all_abstract_types: Vec<_> = prelude_program
-        .abstract_types
-        .into_iter()
-        .filter(|a| !user_abstract_names.contains(a.name.as_str()))
-        .collect();
-    all_abstract_types.append(&mut program.abstract_types);
-    program.abstract_types = all_abstract_types;
-
-    let mut all_functions: Vec<_> = prelude_program
-        .functions
-        .into_iter()
-        .filter(|f| !user_method_sigs.contains(&get_method_signature(f)))
-        .collect();
-    let base_function_count = all_functions.len();
-    all_functions.append(&mut program.functions);
-    program.functions = all_functions;
-    program.base_function_count = base_function_count;
-
-    let mut merged_main_stmts = prelude_program.main.stmts;
-    merged_main_stmts.push(subset_julia_vm::ir::core::Stmt::Meta {
-        annotation: subset_julia_vm::ir::core::MetaAnnotation {
-            name: subset_julia_vm::ir::core::BASE_USER_MAIN_BOUNDARY_META.to_string(),
-            args: Vec::new(),
-        },
-        span: subset_julia_vm::span::Span::new(0, 0, 0, 0, 0, 0),
-    });
-    merged_main_stmts.extend(program.main.stmts);
-    program.main = subset_julia_vm::ir::core::Block {
-        stmts: merged_main_stmts,
-        span: program.main.span,
-    };
-
-    let existing_modules: HashSet<String> =
-        program.modules.iter().map(|m| m.name.clone()).collect();
-    let usings_to_load: Vec<subset_julia_vm::ir::core::UsingImport> = program
-        .usings
-        .iter()
-        .filter(|u| !u.is_relative && !existing_modules.contains(&u.module))
-        .cloned()
-        .collect();
-
-    if !usings_to_load.is_empty() {
-        let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
-        let loaded_modules = package_loader
-            .load_for_usings(&usings_to_load)
-            .unwrap_or_else(|e| {
-                eprintln!("Load error: {}", e);
-                std::process::exit(1);
-            });
-
-        for module in loaded_modules {
-            if !existing_modules.contains(&module.name) {
-                program.modules.push(module);
-            }
-        }
-    }
-
-    let compiled = compile_core_program(&program).unwrap_or_else(|e| {
-        eprintln!("Compilation error: {:?}", e);
+    // Compile through the SAME shared pipeline (prelude/package merge) and
+    // cache-aware compile entry point (`compile_with_cache`) that normal
+    // execution uses (Issue #9964). The previous hand-rolled merge here (a)
+    // never merged `prelude_program.modules` into `program.modules`, and (b)
+    // always compiled the fully merged program from scratch via
+    // `compile_core_program`, forcing Base's OWN functions to be recompiled in
+    // a struct-table context polluted by later-loaded package modules that
+    // share a bare struct name with a Base/prelude struct (e.g. Base's
+    // top-level `Partition` vs. a package's `Pkg.Partition`): registering the
+    // package struct's bare-name alias in the shared struct table clobbered
+    // Base's own `Partition` entry, so recompiling Base's `partition()` body
+    // resolved its `Partition(...)` constructor to the WRONG (package) struct
+    // and later field access failed with "Unknown field ... on struct
+    // 'Pkg.Partition'". Normal execution never recompiles Base — it reuses the
+    // frozen precompiled Base cache via `compile_with_cache` — so routing the
+    // dump path through the identical pipeline + cache-aware compile makes it
+    // structurally match what the VM actually runs, sidestepping the stale
+    // struct-table entry the same way normal execution does. The underlying
+    // bare-name clobber in `build_struct_tables` is still reachable from
+    // normal execution too, whenever `should_skip_base_cache_for_program`
+    // bypasses the Base cache for an unrelated reason (Issue #10078,
+    // deliberately not fixed here — see that issue for why).
+    let program = subset_julia_vm::pipeline::parse_and_lower_strict(source).unwrap_or_else(|e| {
+        eprintln!("Pipeline error: {e}");
         std::process::exit(1);
     });
+
+    let compiled = subset_julia_vm::compile::host_support::compile_with_cache(&program)
+        .unwrap_or_else(|e| {
+            eprintln!("Compilation error: {:?}", e);
+            std::process::exit(1);
+        });
 
     (compiled, user_function_names)
 }
@@ -1163,6 +1384,10 @@ fn instr_comment(
         let stop = slot_comment(*stop_slot, slot_names, slot_types);
         return Some(format!("slot {}, delta {}, stop {}", slot, delta, stop));
     }
+    if let Instr::JumpIfCmpI64SlotConst(slot, konst, cmp, _) = instr {
+        let slot = slot_comment(*slot, slot_names, slot_types);
+        return Some(format!("if {} {:?} {} jump", slot, cmp, konst));
+    }
 
     if let Some(slot) = instr_slot_operand(instr) {
         return Some(slot_comment(slot, slot_names, slot_types));
@@ -1196,7 +1421,9 @@ fn instr_comment(
     }
 
     if let Instr::CallSpecializeI64Slots(operands)
-    | Instr::CallSpecializeInboundsI64Slots(operands) = instr
+    | Instr::CallSpecializeInboundsI64Slots(operands)
+    | Instr::CallSpecializeF64Slots(operands)
+    | Instr::CallSpecializeInboundsF64Slots(operands) = instr
     {
         let name = compiled
             .specializable_functions
@@ -1307,7 +1534,10 @@ fn instr_slot_operand(instr: &Instr) -> Option<usize> {
         | Instr::LoadAddF64Slot(slot)
         | Instr::LoadSubF64Slot(slot)
         | Instr::LoadMulF64Slot(slot)
-        | Instr::LoadDivF64Slot(slot) => Some(*slot),
+        | Instr::LoadDivF64Slot(slot)
+        // Issue #9126: annotate the destination slot of fused F64 slot adds.
+        | Instr::AddF64Slots(slot, _, _)
+        | Instr::AddF64I64Slots(slot, _, _) => Some(*slot),
         _ => None,
     }
 }
@@ -1395,7 +1625,7 @@ fn dump_ast_for_code(source: &str, json_output: bool) {
     if json_output {
         // JSON output mode
         let output = serde_json::json!({
-            "ast": cst.to_json(),
+            "ast": cst.to_json(source),
             "errors": errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
             "has_error": cst.has_error(),
             "source_lines": source.lines().enumerate().map(|(i, line)| {
@@ -1405,7 +1635,13 @@ fn dump_ast_for_code(source: &str, json_output: bool) {
                 })
             }).collect::<Vec<_>>()
         });
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("Error serializing AST to JSON: {}", e);
+                std::process::exit(1);
+            }
+        }
     } else {
         // Human-readable output with source line annotations
         let source_lines: Vec<&str> = source.lines().collect();
@@ -1417,7 +1653,7 @@ fn dump_ast_for_code(source: &str, json_output: bool) {
         println!();
 
         println!("=== AST Structure ===\n");
-        debug_ast_with_lines(&cst, 0, &source_lines);
+        debug_ast_with_lines(&cst, 0, &source_lines, source);
         println!();
 
         if !errors.is_empty() {
@@ -1449,10 +1685,14 @@ fn dump_ast_for_code(source: &str, json_output: bool) {
 }
 
 /// Print AST with source line annotations for better debugging
+///
+/// `source` recovers leaf text from `span` — `CstNode` no longer stores an
+/// owned `text` copy (Issue #10126).
 fn debug_ast_with_lines(
     node: &subset_julia_vm_parser::CstNode,
     indent: usize,
     _source_lines: &[&str],
+    source: &str,
 ) {
     let pad = "  ".repeat(indent);
 
@@ -1462,9 +1702,10 @@ fn debug_ast_with_lines(
         None => String::new(),
     };
 
-    let text_suffix = match &node.text {
-        Some(t) => format!(" = {:?}", t),
-        None => String::new(),
+    let text_suffix = if node.children.is_empty() {
+        format!(" = {:?}", node.text_from_source(source))
+    } else {
+        String::new()
     };
 
     // Add line annotation for better navigation
@@ -1476,7 +1717,7 @@ fn debug_ast_with_lines(
     );
 
     for child in &node.children {
-        debug_ast_with_lines(child, indent + 1, _source_lines);
+        debug_ast_with_lines(child, indent + 1, _source_lines, source);
     }
 }
 
@@ -1492,7 +1733,7 @@ fn compile_to_ir(input_file: &str, output_file: &str) {
         std::process::exit(1);
     });
 
-    // Parse using tree-sitter
+    // Parse using the pure-Rust `subset_julia_vm_parser`
     let mut parser = Parser::new().unwrap_or_else(|e| {
         eprintln!("Error: failed to create parser: {}", e);
         std::process::exit(1);
@@ -1504,11 +1745,14 @@ fn compile_to_ir(input_file: &str, output_file: &str) {
         eprintln!("Error: failed to parse prelude: {:?}", e);
         std::process::exit(1);
     });
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
+    let mut prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
         eprintln!("Prelude lowering error: {:?}", e);
         std::process::exit(1);
     });
+    prelude_program.mark_structs_as_base_origin();
 
     // Parse user source
     let outcome = parser.parse(&source).unwrap_or_else(|e| {
@@ -1517,14 +1761,23 @@ fn compile_to_ir(input_file: &str, output_file: &str) {
     });
 
     // Lower to Core IR
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut lowering = Lowering::new(&source);
     let mut program = lowering.lower(outcome).unwrap_or_else(|e| {
         eprintln!("Lowering error: {:?}", e);
         std::process::exit(1);
     });
+    let mut chronology =
+        subset_julia_vm::ir::core::DefinitionOrderCursor::after_program(&prelude_program);
+    chronology.append_fragment(&mut program);
 
     // Merge prelude with user program
-    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
+    let user_method_sigs: HashSet<_> = program
+        .functions
+        .iter()
+        .map(|f| get_method_signature(f))
+        .collect();
     let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
 
     // Merge structs (prelude first, skip if user defines same name)
@@ -1579,31 +1832,14 @@ fn compile_to_ir(input_file: &str, output_file: &str) {
         span: program.main.span,
     };
 
-    // Load external modules if needed
-    let existing_modules: HashSet<String> =
-        program.modules.iter().map(|m| m.name.clone()).collect();
-    let usings_to_load: Vec<subset_julia_vm::ir::core::UsingImport> = program
-        .usings
-        .iter()
-        .filter(|u| !u.is_relative && !existing_modules.contains(&u.module))
-        .cloned()
-        .collect();
-
-    if !usings_to_load.is_empty() {
-        let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
-        let loaded_modules = package_loader
-            .load_for_usings(&usings_to_load)
-            .unwrap_or_else(|e| {
-                eprintln!("Load error: {}", e);
-                std::process::exit(1);
-            });
-
-        for module in loaded_modules {
-            if !existing_modules.contains(&module.name) {
-                program.modules.push(module);
-            }
-        }
-    }
+    // Load external modules at their stamped `using` evaluation positions.
+    let mut package_loader = loader::PackageLoader::new(loader::LoaderConfig::from_env());
+    package_loader
+        .load_into_program(&mut program)
+        .unwrap_or_else(|e| {
+            eprintln!("Load error: {}", e);
+            std::process::exit(1);
+        });
 
     // Save to Core IR file
     if let Err(e) = core_ir_file::save(&program, output_file) {
@@ -1631,10 +1867,11 @@ fn compile_to_vm_bytecode(input_file: &str, output_file: &str) {
             eprintln!("Pipeline error: {e}");
             std::process::exit(1);
         });
-    let compiled = subset_julia_vm::compile::compile_with_cache(&program).unwrap_or_else(|e| {
-        eprintln!("Compilation error: {e:?}");
-        std::process::exit(1);
-    });
+    let compiled = subset_julia_vm::compile::host_support::compile_with_cache(&program)
+        .unwrap_or_else(|e| {
+            eprintln!("Compilation error: {e:?}");
+            std::process::exit(1);
+        });
 
     if let Err(e) = vm_bytecode_file::save(&program, &compiled, output_file) {
         eprintln!("Error saving VM bytecode: {}", e);
@@ -1660,7 +1897,7 @@ fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: 
         std::process::exit(1);
     });
 
-    // Parse using tree-sitter
+    // Parse using the pure-Rust `subset_julia_vm_parser`
     let mut parser = Parser::new().unwrap_or_else(|e| {
         eprintln!("Error: failed to create parser: {}", e);
         std::process::exit(1);
@@ -1672,11 +1909,14 @@ fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: 
         eprintln!("Error: failed to parse prelude: {:?}", e);
         std::process::exit(1);
     });
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut prelude_lowering = Lowering::new(&prelude_src);
-    let prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
+    let mut prelude_program = prelude_lowering.lower(prelude_outcome).unwrap_or_else(|e| {
         eprintln!("Prelude lowering error: {:?}", e);
         std::process::exit(1);
     });
+    prelude_program.mark_structs_as_base_origin();
 
     // Parse user source
     let outcome = parser.parse(&source).unwrap_or_else(|e| {
@@ -1685,14 +1925,23 @@ fn run_type_stability_analysis(file_path: &str, strict_mode: bool, json_output: 
     });
 
     // Lower to Core IR
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    subset_julia_vm::macro_runtime::install();
     let mut lowering = Lowering::new(&source);
     let mut program = lowering.lower(outcome).unwrap_or_else(|e| {
         eprintln!("Lowering error: {:?}", e);
         std::process::exit(1);
     });
+    let mut chronology =
+        subset_julia_vm::ir::core::DefinitionOrderCursor::after_program(&prelude_program);
+    chronology.append_fragment(&mut program);
 
     // Merge prelude with user program (same as run_file)
-    let user_method_sigs: HashSet<_> = program.functions.iter().map(get_method_signature).collect();
+    let user_method_sigs: HashSet<_> = program
+        .functions
+        .iter()
+        .map(|f| get_method_signature(f))
+        .collect();
     let user_struct_names: HashSet<_> = program.structs.iter().map(|s| s.name.as_str()).collect();
 
     let mut all_structs: Vec<_> = prelude_program
@@ -1806,72 +2055,11 @@ fn is_incomplete(input: &str) -> bool {
         return false;
     }
 
-    let mut paren_depth = 0i32;
-    let mut bracket_depth = 0i32;
-    let mut brace_depth = 0i32;
-    let mut in_string = false;
-    let mut escape_next = false;
-
-    for ch in trimmed.chars() {
-        if escape_next {
-            escape_next = false;
-            continue;
-        }
-        if ch == '\\' && in_string {
-            escape_next = true;
-            continue;
-        }
-        if ch == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-
-        match ch {
-            '(' => paren_depth += 1,
-            ')' => paren_depth -= 1,
-            '[' => bracket_depth += 1,
-            ']' => bracket_depth -= 1,
-            '{' => brace_depth += 1,
-            '}' => brace_depth -= 1,
-            _ => {}
-        }
-    }
-
-    if paren_depth > 0 || bracket_depth > 0 || brace_depth > 0 {
-        return true;
-    }
-
-    let keywords_open = [
-        "function", "if", "for", "while", "try", "begin", "module", "struct",
-    ];
-    let keyword_close = "end";
-
-    let mut depth = 0i32;
-    for line in trimmed.lines() {
-        let line = line.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        let line = if let Some(idx) = line.find('#') {
-            &line[..idx]
-        } else {
-            line
-        };
-
-        for word in line.split_whitespace() {
-            let word_lower = word.to_lowercase();
-            if keywords_open.iter().any(|k| word_lower == *k) {
-                depth += 1;
-            } else if word_lower == keyword_close {
-                depth -= 1;
-            }
-        }
-    }
-
-    depth > 0
+    // The parser owns the Julia grammar and classifies appendable EOF errors.
+    // Keeping a second opener/closer table here caused every new block form to
+    // drift until the REPL submitted it early (Issues #10235/#10262/#10862).
+    let (_, errors) = subset_julia_vm_parser::parse_with_errors(trimmed);
+    errors.is_incomplete_input()
 }
 
 fn print_result_with_context(
@@ -1971,10 +2159,7 @@ fn format_f64(v: f64) -> String {
 /// consistent with that method — including the `Complex{Bool}` / imaginary-unit
 /// cases — so REPL output matches upstream Julia (Issue #5155). The numeric
 /// arms additionally wrap the text in the REPL's NUMBER color.
-fn format_complex_repl(
-    s: &subset_julia_vm::vm::StructInstance,
-    struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
-) -> String {
+fn format_complex_repl(s: &StructInstance, struct_heap: Option<&[StructInstance]>) -> String {
     if s.values.len() != 2 {
         return "Complex(?, ?)".to_string();
     }
@@ -2028,10 +2213,7 @@ fn format_complex_repl(
 /// `Value::StructRef` display paths so a heap-resident Rational no longer
 /// falls through to the generic `Rational(num, den)` rendering — the same
 /// inline/heap display gap that Issue #5155 closed for Complex.
-fn format_rational_repl(
-    s: &subset_julia_vm::vm::StructInstance,
-    struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
-) -> String {
+fn format_rational_repl(s: &StructInstance, struct_heap: Option<&[StructInstance]>) -> String {
     let fields: Vec<String> = s
         .values
         .iter()
@@ -2065,8 +2247,8 @@ fn format_range_float(v: f64) -> String {
 /// match arm; routed through the shared `native_array_value_ref` helper
 /// (Issue #3908).
 fn format_native_array_with_vm(
-    arr_ref: &subset_julia_vm::vm::value::ArrayRef,
-    struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
+    arr_ref: &ArrayRef,
+    struct_heap: Option<&[StructInstance]>,
 ) -> String {
     let arr_borrow = arr_ref.borrow();
     // Calculate total number of elements from shape
@@ -2085,7 +2267,7 @@ fn format_native_array_with_vm(
     } else if arr_borrow.shape.len() == 2 {
         // 2D matrix: special handling for F64, otherwise use to_value_vec
         match &arr_borrow.data {
-            subset_julia_vm::vm::value::ArrayData::F64(data) => {
+            ArrayData::F64(data) => {
                 let rows = arr_borrow.shape[0];
                 let cols = arr_borrow.shape[1];
                 let element_type = arr_borrow.element_type();
@@ -2134,14 +2316,11 @@ fn format_native_array_with_vm(
     }
 }
 
-fn format_value_with_vm(
-    value: &Value,
-    struct_heap: Option<&[subset_julia_vm::vm::StructInstance]>,
-) -> String {
+fn format_value_with_vm(value: &Value, struct_heap: Option<&[StructInstance]>) -> String {
     // Route the legacy native-array carrier through the shared
     // `native_array_value_ref` helper so the match below no longer holds a
     // native-array arm (Issue #3908).
-    if let Some(arr_ref) = subset_julia_vm::vm::value::native_array_value_ref(value) {
+    if let Some(arr_ref) = native_array_value_ref(value) {
         return format_native_array_with_vm(arr_ref, struct_heap);
     }
     match value {
@@ -2207,14 +2386,8 @@ fn format_value_with_vm(
         // #6864): materialize and reuse the native array formatter for the
         // shape-aware `[…]` display, not the generic `StructName(...)` form.
         Value::Struct(s) if s.array_wrapper_julia_type().is_some() => {
-            match subset_julia_vm::vm::value::array_wrapper_value_to_array_value(
-                value,
-                struct_heap.unwrap_or(&[]),
-            ) {
-                Ok(Some(arr)) => format_native_array_with_vm(
-                    &subset_julia_vm::vm::value::new_array_ref(arr),
-                    struct_heap,
-                ),
+            match array_wrapper_value_to_array_value(value, struct_heap.unwrap_or(&[])) {
+                Ok(Some(arr)) => format_native_array_with_vm(&new_array_ref(arr), struct_heap),
                 _ => {
                     let fields: Vec<String> = s
                         .values
@@ -2312,7 +2485,24 @@ fn format_value_with_vm(
             format!("pairs({})", pairs.join(", "))
         }
         Value::Regex(r) => format!("r\"{}\"", r.pattern),
-        Value::RegexMatch(m) => format!("RegexMatch(\"{}\")", m.match_str),
+        Value::RegexMatch(m) => {
+            // Upstream `show(::IO, ::RegexMatch)` form (Issue #10182):
+            // `RegexMatch("a", 1="a", 2=nothing)`, named groups keyed by name.
+            let mut out = format!("RegexMatch(\"{}\"", m.match_str);
+            for (i, capture) in m.captures.iter().enumerate() {
+                let key = match m.capture_names.get(i).and_then(|name| name.as_deref()) {
+                    Some(name) => name.to_string(),
+                    None => (i + 1).to_string(),
+                };
+                let shown = match capture {
+                    Some(text) => format!("\"{}\"", text),
+                    None => "nothing".to_string(),
+                };
+                out.push_str(&format!(", {}={}", key, shown));
+            }
+            out.push(')');
+            out
+        }
         Value::Enum { type_name, value } => format!("{}({})", type_name, value),
         Value::Closure(c) => format!("{} (closure)", c.name),
         Value::Memory(mem) => {
@@ -2406,4 +2596,81 @@ fn dirs_path() -> Option<std::path::PathBuf> {
     env::var("HOME")
         .ok()
         .map(|home| std::path::PathBuf::from(home).join(".subset_julia_vm"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_incomplete;
+
+    #[test]
+    fn repl_incomplete_keeps_module_open_after_one_line_type_block_10235() {
+        let source = r#"
+module Typed10235
+  struct Pt
+    x::Int
+  end
+  abstract type A10235 end
+"#;
+        assert!(is_incomplete(source));
+
+        let complete = format!("{source}end\n");
+        assert!(!is_incomplete(&complete));
+    }
+
+    #[test]
+    fn repl_incomplete_counts_end_closed_block_openers_10235() {
+        let cases = [
+            "abstract type A10235 end",
+            "primitive type Word10235 8 end",
+            "let x = 1\nx\nend",
+            "quote\nx + 1\nend",
+            "macro m10235()\n:(1)\nend",
+            "baremodule Bare10235\nend",
+            "map([1]) do x\nx + 1\nend",
+        ];
+
+        for case in cases {
+            assert!(
+                !is_incomplete(case),
+                "standalone closed block should be complete: {case}"
+            );
+            assert!(
+                is_incomplete(&format!("module Wrap10235\n{case}\n")),
+                "closed inner block must not close the surrounding module: {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn repl_incomplete_is_parser_owned_and_rejects_real_syntax_errors_10262() {
+        for source in [
+            "function f(x)",
+            "if true\n1",
+            "x = (1 +",
+            "x = [1, 2",
+            "\"unterminated",
+            "#= unterminated block comment",
+            "'",
+            "'a",
+            "f('a",
+        ] {
+            assert!(is_incomplete(source), "must request continuation: {source}");
+        }
+
+        for source in [
+            "type",
+            "x = )",
+            "if )",
+            "end",
+            "''",
+            "'ab'",
+            "abstract type A10262 end; # adjacent punctuation/comment",
+            "module M10262\nend; # closes before a comment",
+        ] {
+            assert!(
+                !is_incomplete(source),
+                "must submit complete/invalid input for evaluation: {source}"
+            );
+        }
+    }
 }

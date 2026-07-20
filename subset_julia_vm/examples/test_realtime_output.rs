@@ -1,4 +1,4 @@
-use subset_julia_vm::compile::compile_core_program;
+use subset_julia_vm::compile::host_support::compile_core_program;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;

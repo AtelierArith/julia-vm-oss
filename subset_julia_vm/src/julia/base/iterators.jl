@@ -2,6 +2,7 @@
 # iterators.jl - Iterator types and utilities
 # =============================================================================
 # Based on Julia's base/iterators.jl
+# upstream: julia/base/iterators.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-06-30)
 #
 # The iterate protocol:
 #   iterate(collection) -> (element, state) | nothing
@@ -1273,6 +1274,10 @@ function _collect(cont, itr, ::EltypeUnknown, isz::SizeUnknown)
     return _collect_unknown_sizeunknown(cont, itr)
 end
 
+function _collect(cont, itr::Filter, ::EltypeUnknown, isz::SizeUnknown)
+    return _collect_unknown_widen(itr)
+end
+
 function _collect(cont, itr, et, isz::IteratorSize)
     if isa(et, EltypeUnknown)
         if isa(isz, HasLength)
@@ -1752,6 +1757,10 @@ end
 #   pairs(::IndexLinear, A::AbstractArray) = Pairs(A, LinearIndices(A))
 #   iterate(p::Pairs) yields Pair(index, data[index])
 
+# Mirrors Julia's base/namedtuple.jl keys(::NamedTuple) method while keeping
+# the field-name lookup available to runtime dynamic dispatch (Issue #11400).
+keys(nt::NamedTuple) = propertynames(nt)
+
 struct Pairs{K,V,I,A} <: AbstractDict{K,V}
     data::A
     itr::I
@@ -1779,7 +1788,8 @@ function pairs(m::Memory)
 end
 
 function keys(p::Pairs)
-    return p.itr
+    itr = getfield(p, :itr)
+    return itr === nothing ? keys(getfield(p, :data)) : itr
 end
 
 function values(p::Pairs)
@@ -1794,12 +1804,17 @@ function axes(p::Pairs)
     return axes(keys(p))
 end
 
-function keytype(p::Pairs{K,V,I,A}) where {K,V,I,A}
-    return K
+function _pairs_eltype_parameter(p::Pairs, index::Int64)
+    T = eltype(typeof(p))
+    return T.parameters[index]
 end
 
-function valtype(p::Pairs{K,V,I,A}) where {K,V,I,A}
-    return V
+function keytype(p::Pairs)
+    return _pairs_eltype_parameter(p, 1)
+end
+
+function valtype(p::Pairs)
+    return _pairs_eltype_parameter(p, 2)
 end
 
 function eltype(::Type{Pairs{K,V,I,A}}) where {K,V,I,A}
@@ -1819,7 +1834,10 @@ function eltype(p::Pairs{K,V,I,A}) where {K,V,I,A}
 end
 
 function _pairs_collect_result(::Type{Int64}, ::Type{Int8}, n::Int64)
-    mem = Memory{Pair{Int64,Int8}}(n)
+    # Use the (undef, n) form: single-arg Memory{T}(n) was removed to match
+    # upstream, which MethodErrors on it (Issue #10324). Mirrors the generic
+    # _pairs_collect_result overload's _array_undef_from_dims allocation.
+    mem = Memory{Pair{Int64,Int8}}(undef, n)
     return wrap(Array, mem, (n,))
 end
 
@@ -1838,11 +1856,12 @@ function _pairs_collect(::Type{K}, ::Type{V}, p) where {K,V}
 end
 
 function _pairs_collect_dynamic(p)
-    result = _array_undef_from_dims(eltype(p), (length(p),))
-    return _collect_to!(result, p)
+    K = keytype(p)
+    V = valtype(p)
+    return _pairs_collect(K, V, p)
 end
 
-function collect(p::Pairs)
+function collect(p::Pairs{K,V,I,A}) where {K,V,I,A}
     return _pairs_collect_dynamic(p)
 end
 
@@ -1908,9 +1927,9 @@ end
 function only(x)
     n = length(x)
     if n == 0
-        error("ArgumentError: Collection is empty, must contain exactly one element")
+        throw(ArgumentError("Collection is empty, must contain exactly one element"))
     elseif n > 1
-        error("ArgumentError: Collection has multiple elements, must contain exactly one element")
+        throw(ArgumentError("Collection has multiple elements, must contain exactly one element"))
     end
     return x[1]
 end
@@ -2167,9 +2186,54 @@ function IteratorSize(f::Flatten)
     return SizeUnknown()
 end
 
+# Type-level trait mirroring upstream
+# `IteratorSize(::Type{<:Flatten}) = SizeUnknown()` (julia/base/iterators.jl):
+# the total number of yielded elements depends on the (runtime) inner
+# collections, so it is unknown from the type (Issue #9200 slice 1).
+function IteratorSize(::Type{<:Flatten})
+    return SizeUnknown()
+end
+
+# Upstream `IteratorEltype(::Type{Flatten{I}}) = _flatteneltype(I, IteratorEltype(I))`
+# with `_flatteneltype(I, ::HasEltype) = IteratorEltype(eltype(I))` and
+# `_flatteneltype(I, et) = EltypeUnknown()` (julia/base/iterators.jl). A flatten's
+# element type is statically known only when BOTH the outer iterator has a known
+# eltype AND the inner iterables (the outer's element type) have a known eltype.
+# For a `Generator` outer/inner, `IteratorEltype` is `EltypeUnknown()`, so `collect`
+# must route through value-based `grow_to!` widening (recovering e.g. `Vector{Int64}`
+# / `Vector{Float64}`) rather than joining `eltype(::Generator)==Any` into
+# `Vector{Any}`. Previously sjulia hardcoded `HasEltype()`, which widened
+# flatten-over-generators to `Vector{Any}` (Issue #9438; iterator-trait algebra of
+# #10050 / #10463). This is the value-level mirror of the type-level upstream trait.
 function IteratorEltype(f::Flatten)
+    return _flatteneltype(f.it, IteratorEltype(f.it))
+end
+
+# A Tuple/NamedTuple outer has statically-known, heterogeneous per-field element
+# types. Upstream computes `IteratorEltype(eltype(Flatten{I<:Union{Tuple,NamedTuple}}))`
+# where `eltype(I)` is the per-field `promote_typejoin` of the field types
+# (julia/base/iterators.jl). sjulia's runtime `eltype(::Tuple)` collapses a
+# heterogeneous tuple to `Any`, so mirror the trait per field instead: the flatten
+# has a known eltype iff EVERY inner iterable (each field) has a known eltype. All
+# fields with known eltype (arrays/ranges) -> `HasEltype()`, letting `collect` route
+# through `_flatten_runtime_eltype` (which recovers the per-field join even for empty
+# typed inners like `(Int8[], Int16[]) -> Vector{Signed}`, Issues #4018/#4663). Any
+# `Generator` field -> `EltypeUnknown()`, routing to value-based `grow_to!` widening
+# (matching upstream `Vector{Int64}` for a tuple of generators, Issue #9438).
+function _flatteneltype(itr::Union{Tuple,NamedTuple}, ::HasEltype)
+    for x in itr
+        if IteratorEltype(x) isa EltypeUnknown
+            return EltypeUnknown()
+        end
+    end
     return HasEltype()
 end
+# General wrapper: the flatten's element type is known only when the inner iterables
+# (the outer's element type) themselves have a known eltype. `IteratorEltype(eltype(
+# outer))` is `EltypeUnknown()` when the inner is a `Generator` (whose `eltype` is
+# `Any`), routing `collect` to value-based `grow_to!` widening (Issue #9438).
+_flatteneltype(itr, ::HasEltype) = IteratorEltype(eltype(itr))
+_flatteneltype(itr, ::EltypeUnknown) = EltypeUnknown()
 
 function eltype(f::Flatten)
     return _flatten_runtime_eltype(f)
@@ -2201,6 +2265,42 @@ function _flatten_runtime_eltype(f::Flatten)
     end
     return T
 end
+
+# length(f::Flatten) — mirrors upstream `length(f::Flatten{I}) where {I} =
+# flatten_length(f, eltype(I))` (julia/base/iterators.jl): the total flattened
+# length is known only when every inner iterable's length is statically
+# derivable from its TYPE — a fixed-size `NTuple` (each inner contributes a
+# constant N elements) or a `Number` (each inner is a scalar, contributing
+# exactly 1 element per outer element). Any other inner shape (a `Vector`,
+# `Generator`, ...) has a length that can vary per outer element, so upstream
+# raises `ArgumentError` rather than guess.
+#
+# sjulia's `Flatten` has no static outer-element type parameter (`it` is
+# untyped), so this dispatches on the RUNTIME type of the FIRST outer element
+# instead of the outer iterator's static eltype — the same value-level mirror
+# of the upstream type-level trait already used by `_flatten_runtime_eltype`
+# above. An empty outer iterator has zero elements to flatten regardless of
+# what the (unobserved) inner type would have been, so it returns 0 directly
+# without dispatching on `_flatten_length_from_first` (upstream's dedicated
+# `length(f::Flatten{Tuple{}}) = 0` mirrors the same fact through its type
+# system instead). Previously unimplemented, so `length` on a nested
+# generator/comprehension flatten fell through to `MethodError` — upstream
+# raises the diagnostic `ArgumentError` instead (Issue #10354's
+# fixture-fallout measurement, `generator/generator_trait_matrix_9566.jl`;
+# see docs/vm/EXCEPTION_PARITY.md).
+function length(f::Flatten)
+    outer_next = iterate(f.it)
+    if outer_next === nothing
+        return 0
+    end
+    return _flatten_length_from_first(f, outer_next[1])
+end
+
+_flatten_length_from_first(f::Flatten, first_inner::Tuple) = length(first_inner) * length(f.it)
+_flatten_length_from_first(f::Flatten, first_inner::Number) = length(f.it)
+_flatten_length_from_first(f::Flatten, first_inner) = throw(ArgumentError(
+    "Iterates of the argument to Flatten are not known to have constant length",
+))
 
 function collect(f::Flatten)
     return _collect(1:1, f, IteratorEltype(f), IteratorSize(f))
@@ -2241,6 +2341,38 @@ function iterate(f::Flatten, state)
         inner_next = iterate(inner)
     end
     return (inner_next[1], (inner, inner_next[2], outer_state))
+end
+
+# `first(f::Flatten)` / `isempty(f::Flatten)` must drive the iterate protocol,
+# not the generic `first(arr) = arr[1]` / `isempty(arr) = length(arr) == 0`
+# fallbacks (range.jl): a `Flatten` is `SizeUnknown()` with no `getindex`, so
+# `arr[1]` is a MethodError and `length` is undefined (Issue #9200 S4b). This
+# mirrors `first(g::Generator)` / `isempty(g::Generator)` (generator.jl) and
+# upstream's generic `first(itr)` / `isempty(itr)` (julia/base/*.jl), which sjulia
+# resolves per-iterable.
+function first(f::Flatten)
+    y = iterate(f)
+    y === nothing && throw(ArgumentError("collection must be non-empty"))
+    return y[1]
+end
+
+function isempty(f::Flatten)
+    return iterate(f) === nothing
+end
+
+# `sum(f::Flatten)` collects then sums, mirroring `sum(g::Generator)` (array.jl).
+# A `Flatten` is `SizeUnknown()`, so the generic `sum(arr)` (array.jl) — which
+# reads `length`/`arr[i]` — is a MethodError; upstream's `sum(itr)` reduces via
+# the iterate protocol, which `collect` drives here (Issue #9200 S4b).
+function sum(f::Flatten; init=nothing)
+    if init !== nothing
+        result = init
+        for x in f
+            result = result + x
+        end
+        return result
+    end
+    return sum(collect(f))
 end
 
 # =============================================================================
@@ -3735,6 +3867,19 @@ function IteratorSize(f::Filter)
     return SizeUnknown()
 end
 
+# Type-level trait mirroring upstream
+# `IteratorSize(::Type{<:Filter}) = SizeUnknown()` (julia/base/iterators.jl):
+# a filtered iterator drops an unknown number of elements, so its length can
+# never be predicted from the type alone (Issue #9200 slice 1). This is the
+# foundation the generator Filter-desugar (#9200 S3) relies on: once a filtered
+# generator wraps a real `Iterators.Filter` in `g.iter`, the generic
+# `IteratorSize(g::Generator) = IteratorSize(g.iter)` reaches this rule and
+# `length`/`size`/`IteratorSize` of a filtered generator become `SizeUnknown()`
+# / MethodError automatically (#9320, #9379).
+function IteratorSize(::Type{<:Filter})
+    return SizeUnknown()
+end
+
 function IteratorEltype(f::Filter)
     return IteratorEltype(f.itr)
 end
@@ -3888,7 +4033,7 @@ julia> reduce(*, [1, 2, 3, 4])
 function reduce(op::Function, itr)
     y = iterate(itr)
     if y === nothing
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = y[1]
     y = iterate(itr, y[2])
@@ -4058,7 +4203,7 @@ foldl(::typeof(max), A::Vector{Float64}, init::Float64) = _reduce_binary_with_in
 function _reduce_binary_nonempty(op, A)
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = A[1]
     for i in 2:n
@@ -4411,7 +4556,7 @@ _wrap_uint64_minus_result(acc) = unsigned(Int64(acc))
 
 function _foldl_identity_minus_int8(A::Vector{Int8})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4430,7 +4575,7 @@ end
 
 function _foldl_identity_minus_int16(A::Vector{Int16})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4449,7 +4594,7 @@ end
 
 function _foldl_identity_minus_int32(A::Vector{Int32})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4468,7 +4613,7 @@ end
 
 function _foldl_identity_minus_uint8(A::Vector{UInt8})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4487,7 +4632,7 @@ end
 
 function _foldl_identity_minus_uint16(A::Vector{UInt16})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4506,7 +4651,7 @@ end
 
 function _foldl_identity_minus_uint32(A::Vector{UInt32})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4525,7 +4670,7 @@ end
 
 function _foldl_identity_minus_uint64(A::Vector{UInt64})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[1]
     for i in 2:length(A)
@@ -4544,7 +4689,7 @@ end
 
 function _foldl_identity_minus_float32(A::Vector{Float32})
     if length(A) == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = A[1]
     for i in 2:length(A)
@@ -4564,7 +4709,7 @@ end
 function _foldr_identity_minus_int8(A::Vector{Int8})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4588,7 +4733,7 @@ end
 function _foldr_identity_minus_int16(A::Vector{Int16})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4612,7 +4757,7 @@ end
 function _foldr_identity_minus_int32(A::Vector{Int32})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4636,7 +4781,7 @@ end
 function _foldr_identity_minus_uint8(A::Vector{UInt8})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4660,7 +4805,7 @@ end
 function _foldr_identity_minus_uint16(A::Vector{UInt16})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4684,7 +4829,7 @@ end
 function _foldr_identity_minus_uint32(A::Vector{UInt32})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4708,7 +4853,7 @@ end
 function _foldr_identity_minus_uint64(A::Vector{UInt64})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = 0 + A[n]
     i = n - 1
@@ -4732,7 +4877,7 @@ end
 function _foldr_identity_minus_float32(A::Vector{Float32})
     n = length(A)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = A[n]
     i = n - 1
@@ -4780,7 +4925,7 @@ function foldr(op::Function, itr)
     arr = collect(itr)
     n = length(arr)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = arr[n]
     i = n - 1
@@ -4918,7 +5063,7 @@ foldr(::typeof(max), A::Vector{Float64}, init::Float64) = _reduce_binary_with_in
 function mapfoldl(f::Function, op::Function, itr)
     y = iterate(itr)
     if y === nothing
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = f(y[1])
     y = iterate(itr, y[2])
@@ -5055,7 +5200,7 @@ function mapfoldr(f::Function, op::Function, itr)
     arr = collect(itr)
     n = length(arr)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = f(arr[n])
     i = n - 1
@@ -5186,6 +5331,26 @@ mapfoldr(::typeof(identity), ::typeof(max), A::Vector{Float64}, init::Float64) =
 
 mapreduce(f::Function, op::Function, itr) = mapfoldl(f, op, itr)
 mapreduce(f::Function, op::Function, itr, init) = mapfoldl(f, op, itr, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Bool}) = _mapfoldl_identity_plus_bool(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Bool}, init::Bool) = _mapfoldl_identity_plus_bool(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int8}) = _mapfoldl_identity_plus_int8(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int8}, init::Int8) = _mapfoldl_identity_plus_int8(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int16}) = _mapfoldl_identity_plus_int16(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int16}, init::Int16) = _mapfoldl_identity_plus_int16(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int32}) = _mapfoldl_identity_plus_int32(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int32}, init::Int32) = _mapfoldl_identity_plus_int32(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Int64}) = _mapfoldl_identity_plus_int64(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt8}) = _mapfoldl_identity_plus_uint8(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt8}, init::UInt8) = _mapfoldl_identity_plus_uint8(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt16}) = _mapfoldl_identity_plus_uint16(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt16}, init::UInt16) = _mapfoldl_identity_plus_uint16(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt32}) = _mapfoldl_identity_plus_uint32(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt32}, init::UInt32) = _mapfoldl_identity_plus_uint32(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt64}) = _mapfoldl_identity_plus_uint64(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{UInt64}, init::UInt64) = _mapfoldl_identity_plus_uint64(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Float32}) = _mapfoldl_identity_plus_float32(A)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Float32}, init::Float32) = _mapfoldl_identity_plus_float32(A, init)
+mapreduce(::typeof(identity), ::typeof(+), A::Vector{Float64}) = _mapfoldl_identity_plus_float64(A)
 mapreduce(::typeof(identity), ::typeof(min), A::Vector{Int8}) = _reduce_binary_nonempty(min, A)
 mapreduce(::typeof(identity), ::typeof(min), A::Vector{Int8}, init::Int8) = _reduce_binary_with_init(min, A, init)
 mapreduce(::typeof(identity), ::typeof(min), A::Vector{Int16}) = _reduce_binary_nonempty(min, A)

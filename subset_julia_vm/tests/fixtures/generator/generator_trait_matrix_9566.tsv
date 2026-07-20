@@ -1,0 +1,153 @@
+id	category	transform	base	consumer	expr	status	result_type	result_repr	exception_type	issue_refs
+M_MAP_TYPED_ARRAY_ITERATOR_SIZE	matrix	map	typed_array	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) for x in matrix_typed_base_9566()))	ok	String	"HasShape{1}"	none	#9566,#9393
+M_MAP_TYPED_ARRAY_ITERATOR_ELTYPE	matrix	map	typed_array	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) for x in matrix_typed_base_9566()))	ok	String	"EltypeUnknown"	none	#9566
+M_MAP_TYPED_ARRAY_COLLECT	matrix	map	typed_array	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) for x in matrix_typed_base_9566())))	ok	Tuple{String, String}	("Vector{Int64}", "[1, 2, 3]")	none	#9566
+M_MAP_TYPED_ARRAY_SUM	matrix	map	typed_array	sum	sum((matrix_dispatch_9566(x) for x in matrix_typed_base_9566()))	ok	Int64	6	none	#9566
+M_MAP_TYPED_ARRAY_FOLDL	matrix	map	typed_array	foldl	foldl(+, (matrix_dispatch_9566(x) for x in matrix_typed_base_9566()); init=0)	ok	Int64	6	none	#9566
+M_MAP_TYPED_ARRAY_FIRST	matrix	map	typed_array	first	first((matrix_dispatch_9566(x) for x in matrix_typed_base_9566()))	ok	Int64	1	none	#9566
+M_MAP_TYPED_ARRAY_LENGTH	matrix	map	typed_array	length	length((matrix_dispatch_9566(x) for x in matrix_typed_base_9566()))	ok	Int64	3	none	#9566
+M_MAP_TYPED_ARRAY_FORLOOP	matrix	map	typed_array	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) for x in matrix_typed_base_9566()))	ok	Int64	6	none	#9566
+M_FILTER_TYPED_ARRAY_ITERATOR_SIZE	matrix	filter	typed_array	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	String	"SizeUnknown"	none	#9566
+M_FILTER_TYPED_ARRAY_ITERATOR_ELTYPE	matrix	filter	typed_array	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	String	"EltypeUnknown"	none	#9566
+M_FILTER_TYPED_ARRAY_COLLECT	matrix	filter	typed_array	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2)))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 3]")	none	#9566
+M_FILTER_TYPED_ARRAY_SUM	matrix	filter	typed_array	sum	sum((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	Int64	5	none	#9566
+M_FILTER_TYPED_ARRAY_FOLDL	matrix	filter	typed_array	foldl	foldl(+, (matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2); init=0)	ok	Int64	5	none	#9566
+M_FILTER_TYPED_ARRAY_FIRST	matrix	filter	typed_array	first	first((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	Int64	2	none	#9566
+M_FILTER_TYPED_ARRAY_LENGTH	matrix	filter	typed_array	length	length((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2))	error	none	none	MethodError	#9566
+M_FILTER_TYPED_ARRAY_FORLOOP	matrix	filter	typed_array	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) for x in matrix_typed_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	Int64	5	none	#9566
+M_FLATTEN_TYPED_ARRAY_ITERATOR_SIZE	matrix	flatten	typed_array	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2))	ok	String	"SizeUnknown"	none	#9566
+M_FLATTEN_TYPED_ARRAY_ITERATOR_ELTYPE	matrix	flatten	typed_array	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2))	ok	String	"EltypeUnknown"	none	#9566
+M_FLATTEN_TYPED_ARRAY_COLLECT	matrix	flatten	typed_array	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2)))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 3, 3, 4, 4, 5]")	none	#9566,#9438
+M_FLATTEN_TYPED_ARRAY_SUM	matrix	flatten	typed_array	sum	sum((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2))	ok	Int64	21	none	#9566
+M_FLATTEN_TYPED_ARRAY_FOLDL	matrix	flatten	typed_array	foldl	foldl(+, (matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2); init=0)	ok	Int64	21	none	#9566
+M_FLATTEN_TYPED_ARRAY_FIRST	matrix	flatten	typed_array	first	first((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2))	ok	Int64	2	none	#9566
+M_FLATTEN_TYPED_ARRAY_LENGTH	matrix	flatten	typed_array	length	length((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2))	error	none	none	ArgumentError	#9566
+M_FLATTEN_TYPED_ARRAY_FORLOOP	matrix	flatten	typed_array	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566() for y in 1:2))	ok	Int64	21	none	#9566
+M_PRODUCT_TYPED_ARRAY_ITERATOR_SIZE	matrix	product	typed_array	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2))	ok	String	"HasShape{2}"	none	#9566
+M_PRODUCT_TYPED_ARRAY_ITERATOR_ELTYPE	matrix	product	typed_array	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2))	ok	String	"EltypeUnknown"	none	#9566
+M_PRODUCT_TYPED_ARRAY_COLLECT	matrix	product	typed_array	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2)))	ok	Tuple{String, String}	("Matrix{Int64}", "[2 3; 3 4; 4 5]")	none	#9566
+M_PRODUCT_TYPED_ARRAY_SUM	matrix	product	typed_array	sum	sum((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2))	ok	Int64	21	none	#9566
+M_PRODUCT_TYPED_ARRAY_FOLDL	matrix	product	typed_array	foldl	foldl(+, (matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2); init=0)	ok	Int64	21	none	#9566
+M_PRODUCT_TYPED_ARRAY_FIRST	matrix	product	typed_array	first	first((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2))	ok	Int64	2	none	#9566
+M_PRODUCT_TYPED_ARRAY_LENGTH	matrix	product	typed_array	length	length((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2))	ok	Int64	6	none	#9566
+M_PRODUCT_TYPED_ARRAY_FORLOOP	matrix	product	typed_array	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for x in matrix_typed_base_9566(), y in 1:2))	ok	Int64	21	none	#9566
+M_ZIP_TYPED_ARRAY_ITERATOR_SIZE	matrix	zip	typed_array	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)))	ok	String	"HasShape{1}"	none	#9566
+M_ZIP_TYPED_ARRAY_ITERATOR_ELTYPE	matrix	zip	typed_array	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)))	ok	String	"EltypeUnknown"	none	#9566
+M_ZIP_TYPED_ARRAY_COLLECT	matrix	zip	typed_array	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12))))	ok	Tuple{String, String}	("Vector{Int64}", "[11, 13, 15]")	none	#9566
+M_ZIP_TYPED_ARRAY_SUM	matrix	zip	typed_array	sum	sum((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)))	ok	Int64	39	none	#9566
+M_ZIP_TYPED_ARRAY_FOLDL	matrix	zip	typed_array	foldl	foldl(+, (matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)); init=0)	ok	Int64	39	none	#9566
+M_ZIP_TYPED_ARRAY_FIRST	matrix	zip	typed_array	first	first((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)))	ok	Int64	11	none	#9566
+M_ZIP_TYPED_ARRAY_LENGTH	matrix	zip	typed_array	length	length((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)))	ok	Int64	3	none	#9566
+M_ZIP_TYPED_ARRAY_FORLOOP	matrix	zip	typed_array	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_typed_base_9566(), 10:12)))	ok	Int64	39	none	#9566
+M_ENUMERATE_TYPED_ARRAY_ITERATOR_SIZE	matrix	enumerate	typed_array	iterator_size	matrix_iteratorsize_label_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())))	ok	String	"HasShape{1}"	none	#9566
+M_ENUMERATE_TYPED_ARRAY_ITERATOR_ELTYPE	matrix	enumerate	typed_array	iterator_eltype	matrix_iteratoreltype_label_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())))	ok	String	"EltypeUnknown"	none	#9566
+M_ENUMERATE_TYPED_ARRAY_COLLECT	matrix	enumerate	typed_array	collect	matrix_collect_summary_9566(collect((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566()))))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 4, 6]")	none	#9566
+M_ENUMERATE_TYPED_ARRAY_SUM	matrix	enumerate	typed_array	sum	sum((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())))	ok	Int64	12	none	#9566
+M_ENUMERATE_TYPED_ARRAY_FOLDL	matrix	enumerate	typed_array	foldl	foldl(+, (i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())); init=0)	ok	Int64	12	none	#9566
+M_ENUMERATE_TYPED_ARRAY_FIRST	matrix	enumerate	typed_array	first	first((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())))	ok	Int64	2	none	#9566
+M_ENUMERATE_TYPED_ARRAY_LENGTH	matrix	enumerate	typed_array	length	length((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())))	ok	Int64	3	none	#9566
+M_ENUMERATE_TYPED_ARRAY_FORLOOP	matrix	enumerate	typed_array	forloop	matrix_for_sum_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_typed_base_9566())))	ok	Int64	12	none	#9566
+M_MAP_RANGE_ITERATOR_SIZE	matrix	map	range	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) for x in 1:3))	ok	String	"HasShape{1}"	none	#9566
+M_MAP_RANGE_ITERATOR_ELTYPE	matrix	map	range	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) for x in 1:3))	ok	String	"EltypeUnknown"	none	#9566
+M_MAP_RANGE_COLLECT	matrix	map	range	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) for x in 1:3)))	ok	Tuple{String, String}	("Vector{Int64}", "[1, 2, 3]")	none	#9566
+M_MAP_RANGE_SUM	matrix	map	range	sum	sum((matrix_dispatch_9566(x) for x in 1:3))	ok	Int64	6	none	#9566
+M_MAP_RANGE_FOLDL	matrix	map	range	foldl	foldl(+, (matrix_dispatch_9566(x) for x in 1:3); init=0)	ok	Int64	6	none	#9566
+M_MAP_RANGE_FIRST	matrix	map	range	first	first((matrix_dispatch_9566(x) for x in 1:3))	ok	Int64	1	none	#9566
+M_MAP_RANGE_LENGTH	matrix	map	range	length	length((matrix_dispatch_9566(x) for x in 1:3))	ok	Int64	3	none	#9566
+M_MAP_RANGE_FORLOOP	matrix	map	range	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) for x in 1:3))	ok	Int64	6	none	#9566
+M_FILTER_RANGE_ITERATOR_SIZE	matrix	filter	range	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2))	ok	String	"SizeUnknown"	none	#9566
+M_FILTER_RANGE_ITERATOR_ELTYPE	matrix	filter	range	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2))	ok	String	"EltypeUnknown"	none	#9566
+M_FILTER_RANGE_COLLECT	matrix	filter	range	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2)))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 3]")	none	#9566
+M_FILTER_RANGE_SUM	matrix	filter	range	sum	sum((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2))	ok	Int64	5	none	#9566
+M_FILTER_RANGE_FOLDL	matrix	filter	range	foldl	foldl(+, (matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2); init=0)	ok	Int64	5	none	#9566
+M_FILTER_RANGE_FIRST	matrix	filter	range	first	first((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2))	ok	Int64	2	none	#9566
+M_FILTER_RANGE_LENGTH	matrix	filter	range	length	length((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2))	error	none	none	MethodError	#9566
+M_FILTER_RANGE_FORLOOP	matrix	filter	range	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) for x in 1:3 if matrix_dispatch_9566(x) >= 2))	ok	Int64	5	none	#9566
+M_FLATTEN_RANGE_ITERATOR_SIZE	matrix	flatten	range	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2))	ok	String	"SizeUnknown"	none	#9566
+M_FLATTEN_RANGE_ITERATOR_ELTYPE	matrix	flatten	range	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2))	ok	String	"EltypeUnknown"	none	#9566
+M_FLATTEN_RANGE_COLLECT	matrix	flatten	range	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2)))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 3, 3, 4, 4, 5]")	none	#9566,#9438
+M_FLATTEN_RANGE_SUM	matrix	flatten	range	sum	sum((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2))	ok	Int64	21	none	#9566
+M_FLATTEN_RANGE_FOLDL	matrix	flatten	range	foldl	foldl(+, (matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2); init=0)	ok	Int64	21	none	#9566
+M_FLATTEN_RANGE_FIRST	matrix	flatten	range	first	first((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2))	ok	Int64	2	none	#9566
+M_FLATTEN_RANGE_LENGTH	matrix	flatten	range	length	length((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2))	error	none	none	ArgumentError	#9566
+M_FLATTEN_RANGE_FORLOOP	matrix	flatten	range	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for x in 1:3 for y in 1:2))	ok	Int64	21	none	#9566
+M_PRODUCT_RANGE_ITERATOR_SIZE	matrix	product	range	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2))	ok	String	"HasShape{2}"	none	#9566
+M_PRODUCT_RANGE_ITERATOR_ELTYPE	matrix	product	range	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2))	ok	String	"EltypeUnknown"	none	#9566
+M_PRODUCT_RANGE_COLLECT	matrix	product	range	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2)))	ok	Tuple{String, String}	("Matrix{Int64}", "[2 3; 3 4; 4 5]")	none	#9566
+M_PRODUCT_RANGE_SUM	matrix	product	range	sum	sum((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2))	ok	Int64	21	none	#9566
+M_PRODUCT_RANGE_FOLDL	matrix	product	range	foldl	foldl(+, (matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2); init=0)	ok	Int64	21	none	#9566
+M_PRODUCT_RANGE_FIRST	matrix	product	range	first	first((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2))	ok	Int64	2	none	#9566
+M_PRODUCT_RANGE_LENGTH	matrix	product	range	length	length((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2))	ok	Int64	6	none	#9566
+M_PRODUCT_RANGE_FORLOOP	matrix	product	range	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for x in 1:3, y in 1:2))	ok	Int64	21	none	#9566
+M_ZIP_RANGE_ITERATOR_SIZE	matrix	zip	range	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)))	ok	String	"HasShape{1}"	none	#9566
+M_ZIP_RANGE_ITERATOR_ELTYPE	matrix	zip	range	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)))	ok	String	"EltypeUnknown"	none	#9566
+M_ZIP_RANGE_COLLECT	matrix	zip	range	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12))))	ok	Tuple{String, String}	("Vector{Int64}", "[11, 13, 15]")	none	#9566
+M_ZIP_RANGE_SUM	matrix	zip	range	sum	sum((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)))	ok	Int64	39	none	#9566
+M_ZIP_RANGE_FOLDL	matrix	zip	range	foldl	foldl(+, (matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)); init=0)	ok	Int64	39	none	#9566
+M_ZIP_RANGE_FIRST	matrix	zip	range	first	first((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)))	ok	Int64	11	none	#9566
+M_ZIP_RANGE_LENGTH	matrix	zip	range	length	length((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)))	ok	Int64	3	none	#9566
+M_ZIP_RANGE_FORLOOP	matrix	zip	range	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(1:3, 10:12)))	ok	Int64	39	none	#9566
+M_ENUMERATE_RANGE_ITERATOR_SIZE	matrix	enumerate	range	iterator_size	matrix_iteratorsize_label_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)))	ok	String	"HasShape{1}"	none	#9566
+M_ENUMERATE_RANGE_ITERATOR_ELTYPE	matrix	enumerate	range	iterator_eltype	matrix_iteratoreltype_label_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)))	ok	String	"EltypeUnknown"	none	#9566
+M_ENUMERATE_RANGE_COLLECT	matrix	enumerate	range	collect	matrix_collect_summary_9566(collect((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3))))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 4, 6]")	none	#9566
+M_ENUMERATE_RANGE_SUM	matrix	enumerate	range	sum	sum((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)))	ok	Int64	12	none	#9566
+M_ENUMERATE_RANGE_FOLDL	matrix	enumerate	range	foldl	foldl(+, (i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)); init=0)	ok	Int64	12	none	#9566
+M_ENUMERATE_RANGE_FIRST	matrix	enumerate	range	first	first((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)))	ok	Int64	2	none	#9566
+M_ENUMERATE_RANGE_LENGTH	matrix	enumerate	range	length	length((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)))	ok	Int64	3	none	#9566
+M_ENUMERATE_RANGE_FORLOOP	matrix	enumerate	range	forloop	matrix_for_sum_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(1:3)))	ok	Int64	12	none	#9566
+M_MAP_ANY_MIXED_ITERATOR_SIZE	matrix	map	any_mixed	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) for x in matrix_any_base_9566()))	ok	String	"HasShape{1}"	none	#9566
+M_MAP_ANY_MIXED_ITERATOR_ELTYPE	matrix	map	any_mixed	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) for x in matrix_any_base_9566()))	ok	String	"EltypeUnknown"	none	#9566
+M_MAP_ANY_MIXED_COLLECT	matrix	map	any_mixed	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) for x in matrix_any_base_9566())))	ok	Tuple{String, String}	("Vector{Int64}", "[1, 2, 3]")	none	#9566
+M_MAP_ANY_MIXED_SUM	matrix	map	any_mixed	sum	sum((matrix_dispatch_9566(x) for x in matrix_any_base_9566()))	ok	Int64	6	none	#9566,#9399
+M_MAP_ANY_MIXED_FOLDL	matrix	map	any_mixed	foldl	foldl(+, (matrix_dispatch_9566(x) for x in matrix_any_base_9566()); init=0)	ok	Int64	6	none	#9566,#9399
+M_MAP_ANY_MIXED_FIRST	matrix	map	any_mixed	first	first((matrix_dispatch_9566(x) for x in matrix_any_base_9566()))	ok	Int64	1	none	#9566
+M_MAP_ANY_MIXED_LENGTH	matrix	map	any_mixed	length	length((matrix_dispatch_9566(x) for x in matrix_any_base_9566()))	ok	Int64	3	none	#9566
+M_MAP_ANY_MIXED_FORLOOP	matrix	map	any_mixed	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) for x in matrix_any_base_9566()))	ok	Int64	6	none	#9566
+M_FILTER_ANY_MIXED_ITERATOR_SIZE	matrix	filter	any_mixed	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	String	"SizeUnknown"	none	#9566
+M_FILTER_ANY_MIXED_ITERATOR_ELTYPE	matrix	filter	any_mixed	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	String	"EltypeUnknown"	none	#9566
+M_FILTER_ANY_MIXED_COLLECT	matrix	filter	any_mixed	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2)))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 3]")	none	#9566
+M_FILTER_ANY_MIXED_SUM	matrix	filter	any_mixed	sum	sum((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	Int64	5	none	#9566
+M_FILTER_ANY_MIXED_FOLDL	matrix	filter	any_mixed	foldl	foldl(+, (matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2); init=0)	ok	Int64	5	none	#9566
+M_FILTER_ANY_MIXED_FIRST	matrix	filter	any_mixed	first	first((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	Int64	2	none	#9566
+M_FILTER_ANY_MIXED_LENGTH	matrix	filter	any_mixed	length	length((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2))	error	none	none	MethodError	#9566
+M_FILTER_ANY_MIXED_FORLOOP	matrix	filter	any_mixed	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) for x in matrix_any_base_9566() if matrix_dispatch_9566(x) >= 2))	ok	Int64	5	none	#9566
+M_FLATTEN_ANY_MIXED_ITERATOR_SIZE	matrix	flatten	any_mixed	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2))	ok	String	"SizeUnknown"	none	#9566
+M_FLATTEN_ANY_MIXED_ITERATOR_ELTYPE	matrix	flatten	any_mixed	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2))	ok	String	"EltypeUnknown"	none	#9566
+M_FLATTEN_ANY_MIXED_COLLECT	matrix	flatten	any_mixed	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2)))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 3, 3, 4, 4, 5]")	none	#9566,#9438
+M_FLATTEN_ANY_MIXED_SUM	matrix	flatten	any_mixed	sum	sum((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2))	ok	Int64	21	none	#9566
+M_FLATTEN_ANY_MIXED_FOLDL	matrix	flatten	any_mixed	foldl	foldl(+, (matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2); init=0)	ok	Int64	21	none	#9566
+M_FLATTEN_ANY_MIXED_FIRST	matrix	flatten	any_mixed	first	first((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2))	ok	Int64	2	none	#9566
+M_FLATTEN_ANY_MIXED_LENGTH	matrix	flatten	any_mixed	length	length((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2))	error	none	none	ArgumentError	#9566
+M_FLATTEN_ANY_MIXED_FORLOOP	matrix	flatten	any_mixed	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566() for y in 1:2))	ok	Int64	21	none	#9566
+M_PRODUCT_ANY_MIXED_ITERATOR_SIZE	matrix	product	any_mixed	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2))	ok	String	"HasShape{2}"	none	#9566
+M_PRODUCT_ANY_MIXED_ITERATOR_ELTYPE	matrix	product	any_mixed	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2))	ok	String	"EltypeUnknown"	none	#9566
+M_PRODUCT_ANY_MIXED_COLLECT	matrix	product	any_mixed	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2)))	ok	Tuple{String, String}	("Matrix{Int64}", "[2 3; 3 4; 4 5]")	none	#9566
+M_PRODUCT_ANY_MIXED_SUM	matrix	product	any_mixed	sum	sum((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2))	ok	Int64	21	none	#9566
+M_PRODUCT_ANY_MIXED_FOLDL	matrix	product	any_mixed	foldl	foldl(+, (matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2); init=0)	ok	Int64	21	none	#9566
+M_PRODUCT_ANY_MIXED_FIRST	matrix	product	any_mixed	first	first((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2))	ok	Int64	2	none	#9566
+M_PRODUCT_ANY_MIXED_LENGTH	matrix	product	any_mixed	length	length((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2))	ok	Int64	6	none	#9566
+M_PRODUCT_ANY_MIXED_FORLOOP	matrix	product	any_mixed	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for x in matrix_any_base_9566(), y in 1:2))	ok	Int64	21	none	#9566
+M_ZIP_ANY_MIXED_ITERATOR_SIZE	matrix	zip	any_mixed	iterator_size	matrix_iteratorsize_label_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)))	ok	String	"HasShape{1}"	none	#9566
+M_ZIP_ANY_MIXED_ITERATOR_ELTYPE	matrix	zip	any_mixed	iterator_eltype	matrix_iteratoreltype_label_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)))	ok	String	"EltypeUnknown"	none	#9566
+M_ZIP_ANY_MIXED_COLLECT	matrix	zip	any_mixed	collect	matrix_collect_summary_9566(collect((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12))))	ok	Tuple{String, String}	("Vector{Int64}", "[11, 13, 15]")	none	#9566
+M_ZIP_ANY_MIXED_SUM	matrix	zip	any_mixed	sum	sum((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)))	ok	Int64	39	none	#9566
+M_ZIP_ANY_MIXED_FOLDL	matrix	zip	any_mixed	foldl	foldl(+, (matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)); init=0)	ok	Int64	39	none	#9566
+M_ZIP_ANY_MIXED_FIRST	matrix	zip	any_mixed	first	first((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)))	ok	Int64	11	none	#9566
+M_ZIP_ANY_MIXED_LENGTH	matrix	zip	any_mixed	length	length((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)))	ok	Int64	3	none	#9566
+M_ZIP_ANY_MIXED_FORLOOP	matrix	zip	any_mixed	forloop	matrix_for_sum_9566((matrix_dispatch_9566(x) + y for (x, y) in zip(matrix_any_base_9566(), 10:12)))	ok	Int64	39	none	#9566
+M_ENUMERATE_ANY_MIXED_ITERATOR_SIZE	matrix	enumerate	any_mixed	iterator_size	matrix_iteratorsize_label_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())))	ok	String	"HasShape{1}"	none	#9566
+M_ENUMERATE_ANY_MIXED_ITERATOR_ELTYPE	matrix	enumerate	any_mixed	iterator_eltype	matrix_iteratoreltype_label_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())))	ok	String	"EltypeUnknown"	none	#9566
+M_ENUMERATE_ANY_MIXED_COLLECT	matrix	enumerate	any_mixed	collect	matrix_collect_summary_9566(collect((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566()))))	ok	Tuple{String, String}	("Vector{Int64}", "[2, 4, 6]")	none	#9566
+M_ENUMERATE_ANY_MIXED_SUM	matrix	enumerate	any_mixed	sum	sum((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())))	ok	Int64	12	none	#9566
+M_ENUMERATE_ANY_MIXED_FOLDL	matrix	enumerate	any_mixed	foldl	foldl(+, (i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())); init=0)	ok	Int64	12	none	#9566
+M_ENUMERATE_ANY_MIXED_FIRST	matrix	enumerate	any_mixed	first	first((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())))	ok	Int64	2	none	#9566
+M_ENUMERATE_ANY_MIXED_LENGTH	matrix	enumerate	any_mixed	length	length((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())))	ok	Int64	3	none	#9566
+M_ENUMERATE_ANY_MIXED_FORLOOP	matrix	enumerate	any_mixed	forloop	matrix_for_sum_9566((i + matrix_dispatch_9566(x) for (i, x) in enumerate(matrix_any_base_9566())))	ok	Int64	12	none	#9566
+BUG_9403_DYNAMIC_FORLOOP	open_bug	iterate_only	custom_iterate_only	forloop	matrix_dynamic_loopsum_9566(matrix_iteronly_9566())	ok	Int64	15	none	#9403,#9566
+BUG_9405_NESTED_FILTERED_COLLECT	open_bug	nested_filtered	range	collect	matrix_collect_summary_9566(collect(v for v in (x for x in 1:5 if x > 2)))	ok	Tuple{String, String}	("Vector{Int64}", "[3, 4, 5]")	none	#9405,#9566
+BUG_9405_NESTED_FILTERED_MAP	open_bug	nested_filtered	range	map	matrix_collect_summary_9566(map(x -> x + 1, (v for v in (x for x in 1:5 if x > 2))))	ok	Tuple{String, String}	("Vector{Int64}", "[4, 5, 6]")	none	#9405,#9566
+BUG_9405_NESTED_FILTERED_SUM	open_bug	nested_filtered	range	sum	sum(v for v in (x^2 for x in 1:5 if isodd(x)))	ok	Int64	35	none	#9405,#9566
+BUG_9385_COMPREHENSION_ANY_NARROW	closed_bug	comprehension	any_mixed	collect	matrix_collect_summary_9566([matrix_dispatch_9566(x) for x in matrix_any_base_9566()])	ok	Tuple{String, String}	("Vector{Int64}", "[1, 2, 3]")	none	#9385,#9566
+BUG_9457_GENERATOR_GETINDEX_METHODERROR	closed_bug	indexing	range	getindex	((x for x in 1:3)[1])	error	none	none	MethodError	#9457,#9566
+BUG_9533_TUPLE_BROADCAST_ABS	closed_bug	tuple_broadcast	tuple	broadcast	matrix_collect_summary_9566(abs.((-1, -2, -3)))	ok	Tuple{String, String}	("Tuple{Int64, Int64, Int64}", "(1, 2, 3)")	none	#9533,#9566
+BUG_9547_TUPLE_BROADCAST_COMPARE	closed_bug	tuple_broadcast	tuple	broadcast	matrix_collect_summary_9566((1, 2, 3) .< (2, 2, 2))	ok	Tuple{String, String}	("Tuple{Bool, Bool, Bool}", "(true, false, false)")	none	#9547,#9566

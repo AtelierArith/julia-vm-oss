@@ -635,6 +635,38 @@ impl AotCodeGenerator {
         }
     }
 
+    /// Cast a mixed-type numeric operand pair to their Julia-promoted common
+    /// Rust type (Issue #10131): any `Float64` → `f64`, any float → `f32`,
+    /// otherwise the wider integer (equal widths promote to unsigned).
+    /// Same-type, Bool-containing, and unknown-type pairs are returned
+    /// unchanged (callers keep their existing behavior for those).
+    pub(super) fn promote_binary_numeric_operands(
+        left: &str,
+        right: &str,
+        left_ty: Option<&StaticType>,
+        right_ty: Option<&StaticType>,
+    ) -> (String, String) {
+        let (Some(lt), Some(rt)) = (left_ty, right_ty) else {
+            return (left.to_string(), right.to_string());
+        };
+        let Some(promoted) = StaticType::promote_numeric_args(&[lt.clone(), rt.clone()]) else {
+            return (left.to_string(), right.to_string());
+        };
+        let Some(target) =
+            Self::rust_float_type(&promoted).or_else(|| Self::rust_integer_type(&promoted))
+        else {
+            return (left.to_string(), right.to_string());
+        };
+        let cast = |expr: &str, ty: &StaticType| {
+            if ty == &promoted {
+                expr.to_string()
+            } else {
+                format!("({} as {})", expr, target)
+            }
+        };
+        (cast(left, lt), cast(right, rt))
+    }
+
     fn promoted_float_rust_type(left_ty: &StaticType, right_ty: &StaticType) -> &'static str {
         if matches!(left_ty, StaticType::F64) || matches!(right_ty, StaticType::F64) {
             "f64"

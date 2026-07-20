@@ -1,0 +1,7 @@
+# Test manifest for generated numeric-matrix parity category
+
+[[tests]]
+name = "numeric_matrix_reduced_integration_8697"
+file = "reduced_integration_8697.jl"
+expected = true
+description = "Reduced numeric matrix sjulia integration metadata: full TSV comparison is enforced by scripts/check_numeric_matrix_reduced.sh (Issue #8697)"

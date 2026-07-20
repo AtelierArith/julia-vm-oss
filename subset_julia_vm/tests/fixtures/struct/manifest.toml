@@ -49,6 +49,12 @@ expected = true
 description = "Calling a function stored in struct field (g.f(x) pattern)"
 
 [[tests]]
+name = "struct_unary_neg_call_returned_struct_9059"
+file = "unary_neg_call_returned_struct_9059.jl"
+expected = true
+description = "Unary - dispatches through the struct method when its operand is a call-returned struct, matching the same value stored in a local first (Issue #9059)"
+
+[[tests]]
 name = "struct_module_vs_field_call"
 file = "module_vs_field_call.jl"
 expected = true
@@ -196,10 +202,141 @@ description = "Issue #8103: a typed parametric outer constructor T{P...}(x::Numb
 name = "struct_parametric_inner_ctor_with_outer_8121"
 file = "parametric_inner_ctor_with_outer_8121.jl"
 expected = true
-description = "Issue #8121: a parametric struct with an explicit inner constructor has NO synthesized default field constructor, so bare Foo(args) and braces Foo{T}(args) must invoke the user inner/outer ctor. Regression: a same-arity user OUTER constructor made the working method table non-empty and (under the precompiled Base cache) mis-classified the user struct as a cached Base struct, skipping inner-ctor registration and falling back to raw default field construction (incl. a Rotations-style normalizing multi-field inner)."
+cache_sensitive = true
+description = "Issues #8121/#10959/#11003/#11019: parametric constructor self identity survives Base-cache method-table restore. Covers braced inner vs plain inner vs bare outer vs explicit outer, runtime type binding, cross-binder self correlation, built-in/user/lexically-scoped alias redefinitions, distinct qualified-owner bounds and bare/qualified lexical-bound redefinitions, owner-scoped and module-local nested-type selection, structured bounds, runtime misses, and positional-default forwarding stubs."
+
+[[tests]]
+name = "struct_runtime_bound_alias_matrix_11142"
+file = "runtime_bound_alias_matrix_11142.jl"
+expected = true
+description = "Issue #11142: runtime parametric-struct bounds use the same visible type-alias expansion for exact qualified and unique bare aliases, including Union targets, through both Core.apply_type and runtime new{T} construction. Resolver unit coverage separately locks ambiguous bare aliases and lower-bound expansion."
+
+[[tests]]
+name = "struct_qualified_alias_binder_collision_11019"
+file = "qualified_alias_binder_collision_11019.jl"
+expected = true
+description = "Issue #11019: a qualified constructor-self alias is expanded even when its leaf matches a where binder, preserving later-definition-wins identity."
+
+[[tests]]
+name = "struct_parametric_inner_ctor_outer_where_10959"
+file = "parametric_inner_ctor_outer_where_10959.jl"
+expected = true
+description = "Issues #10959/#10967/#10993: explicit `Foo{T}(...)` selects the declared explicit-parametric inner even when a bare outer has the same value signature and `where T`; bare calls still reach the outer, whose runtime T binding is forwarded to the normalizing inner body. Runtime expressions remain dynamic, duplicate inner definitions remain last-definition-wins, and statically known explicit parameters participate in value-signature overload selection."
 
 [[tests]]
 name = "struct_getproperty_override_8127"
 file = "getproperty_override_8127.jl"
 expected = true
 description = "Issue #8127: a custom `Base.getproperty(::T, ::Symbol)` override intercepts property access `x.f` — Julia lowers `x.f` to `getproperty(x, :f)` (default falls back to `getfield`). Computed (non-declared) properties resolve through the override, and declared-field access still works via the override's getfield fallback, both at top level and through a typed function parameter. Covers a Rotations.QuatRotation-style wrapper that stores one field and exposes derived components."
+
+[[tests]]
+name = "struct_alloc_loop_safepoint_10102"
+file = "struct_alloc_loop_safepoint_10102.jl"
+expected = true
+description = "Issue #10102: struct-allocating loops stay correct after the memory-waterline safepoint moved off the per-instruction dispatch path onto loop back-edges (jump_to) + Call/Return boundaries (handle_pending_call_depth_overflow). A per-iteration struct allocation, an array of live structs kept across the loop, and nested-call allocation all produce upstream-correct sums even when a back-edge compaction relocates live struct-heap storage."
+
+[[tests]]
+name = "struct_per_element_return_safepoint_10102"
+file = "struct_per_element_return_safepoint_10102.jl"
+expected = true
+description = "Issue #10102 follow-up: per-element struct/tuple/named-tuple/dict-returning drivers (struct-constructor broadcast, struct/named-tuple comprehensions, tuple broadcast, dict-returning function in a loop) stay correct after the container Return arms (ReturnStruct/ReturnTuple/ReturnNamedTuple/ReturnDict/ReturnSet) gained the handle_pending_call_depth_overflow safepoint postlude that the scalar Return arms already carried — restoring safepoint symmetry so a struct-returning HOF/generator callee (which bypasses jump_to and the Call postlude) still brackets struct-heap growth with a memory-waterline check."
+[[tests]]
+name = "struct_nested_in_let_top_level_10194"
+file = "nested_in_let_top_level_10194.jl"
+expected = true
+description = "struct/mutable struct nested inside a plain top-level let ... end lowers and runs, matching upstream Julia — let introduces a local variable scope but not a function boundary, so a nested struct still binds at module scope (Issue #10194)"
+
+[[tests]]
+name = "struct_nested_in_begin_assignment_rhs_10194"
+file = "nested_in_begin_assignment_rhs_10194.jl"
+expected = true
+description = "struct nested inside begin ... end used as an assignment RHS (Issue #7617's dedicated identifier-assignment/begin-RHS lowering path), and inside a bare top-level begin ... end statement (Issue #10194)"
+
+[[tests]]
+name = "struct_nested_in_let_inside_module_10382"
+file = "nested_in_let_inside_module_10382.jl"
+expected = true
+description = "struct nested inside a let ... end (and a begin ... end) block that is itself inside a module ... end body lowers and runs, matching upstream Julia — the narrower module-body gap left after #10194 fixed the same pattern at true top level (Issue #10382)"
+
+[[tests]]
+name = "struct_immutable_field_assign_runtime_error_10511"
+file = "immutable_field_assign_runtime_error_10511.jl"
+expected = true
+description = "Assignment to a statically-known immutable struct field reaches the VM and raises a catchable ErrorException instead of aborting compilation (Issue #10511)"
+[[tests]]
+name = "struct_runtime_control_flow_definition_10401"
+file = "runtime_control_flow_struct_10401.jl"
+expected = true
+description = "Issue #10401: struct definitions in top-level if/for/while/try execute through runtime eval only when reached, expose the binding to isdefined, and remain callable through opaque-eval dynamic dispatch."
+
+[[tests]]
+name = "struct_bare_constructor_last_definition_wins_11028"
+file = "bare_constructor_last_definition_wins_11028.jl"
+expected = true
+description = "A bare inner constructor and an ordinary bare constructor share the same implicit Type{Foo} callable self, so identical signatures obey Julia last-definition-wins semantics in either source order, including across files with incomparable local byte offsets (Issue #11028)."
+
+[[tests]]
+name = "struct_module_body_constructor_type_arg_scope_11034"
+file = "module_body_constructor_type_arg_scope_11034.jl"
+expected = true
+description = "Issues #11034/#8516: module-body explicit parametric constructor calls recursively qualify bare type arguments to their lexical module owner, even when sibling modules reuse the same constructor and type names; module-function and fully qualified external-call controls resolve the same owner-exact inner constructors."
+
+[[tests]]
+name = "struct_bounded_inner_ctor_where_10998"
+file = "bounded_inner_ctor_where_10998.jl"
+expected = true
+description = "Issue #10998: an explicit parametric inner constructor with a bounded `where` binder (`Foo{T}(x) where {T<:Number}`) binds `T` with its declared upper bound; valid instantiations construct and violating ones raise MethodError like upstream, including through a runtime type argument (`Foo{typeof(x)}(x)`), which now runs the declared inner constructor instead of the raw dynamic allocator."
+
+[[tests]]
+name = "struct_global_new_helper_11005"
+file = "global_new_helper_11005.jl"
+expected = true
+description = "Issues #11005/#11179/#11183/#11186/#11187/#11197/#11204: a struct body may declare a differently named `global` helper whose body calls `new`/`new{T}` (upstream's `Rational`/`unsafe_rational` shape). The helper is registered as an ordinary global method with privileged access to the enclosing struct's `new`, including through ordinary nested functions and a lifted closure but stopping at runtime @eval global-function boundaries; direct and nested ownerless calls use ordinary name lookup and raise UndefVarError, transparent begin/let/assignment-RHS/@kwdef paths keep the helper, and mixed positional/multiple-splat `new` preserves every argument."
+
+[[tests]]
+name = "struct_ownerless_new_lookup_11204"
+file = "ownerless_new_lookup_11204.jl"
+expected = true
+description = "Issue #11204: ownerless `new` and nested ownerless `new` use ordinary global lookup and raise UndefVarError when no binding exists. The source intentionally contains no later `new` definition because first-binding source visibility is tracked separately by Issue #11210."
+
+[[tests]]
+name = "struct_ownerless_new_keyword_lookup_11204"
+file = "ownerless_new_keyword_lookup_11204.jl"
+expected = true
+description = "Issue #11204: ownerless `new` preserves keyword values and keyword splats when an ordinary user binding exists."
+
+[[tests]]
+name = "struct_ownerless_parametric_new_lookup_11204"
+file = "ownerless_parametric_new_lookup_11204.jl"
+expected = true
+description = "Issue #11204: ownerless `new{T}` preserves and applies explicit type parameters to the ordinary user binding."
+
+[[tests]]
+name = "struct_global_helper_macro_context_11179"
+file = "global_helper_macro_context_11179.jl"
+expected = true
+description = "Issues #11179/#11193: a struct-body `global` helper (#11005) is an ordinary global method, so its body must be lowered through the central LambdaContext routing authority — the privileged `new` comes from `Function.new_struct_name`, orthogonally. Locks the MACRO case specifically: a user-defined macro call inside a helper body (short and long form, with and without a `where` binder). An earlier fix (#11179, commit d0dfe0578) kept `new` working by lowering these helpers context-FREE, which made a user macro in the body fail to lower at all (`UnsupportedFeature { kind: MacroCall }`) while every audit stayed green."
+
+[[tests]]
+name = "struct_explicit_outer_precedence_11404"
+file = "struct_explicit_outer_precedence_11404.jl"
+expected = true
+description = "A source-written explicit where-parametric outer constructor (ExplicitOuterGap{T}(x::T) where {T}) replaces the synthetic default inner for fully applied calls, while non-matching signatures, different arities, and delegating outers keep the default field constructor reachable (Issue #11404)"
+
+[[tests]]
+name = "struct_abstract_numeric_field_11407"
+file = "struct_abstract_numeric_field_11407.jl"
+expected = true
+description = "Abstract numeric field annotations (Number/Real/Integer/AbstractFloat) preserve the original runtime value across construction, direct reads, prints, function-boundary loads, and mutable setfield: NumberField(1).x stays Int64 1 instead of being forced through a concrete F64 VM representation (Issue #11407)"
+
+[[tests]]
+name = "struct_parametric_ctor_runtime_value_dispatch_10971"
+file = "parametric_ctor_runtime_value_dispatch_10971.jl"
+expected = true
+description = "Issue #10971: an explicit parametric constructor call whose type argument is statically known (`R{Int}(x)`) but whose value argument is runtime-unknown must select among overloaded braced inner constructors at runtime by value signature via `Instr::CallParametricConstructorDispatch`, binding the SELECTED candidate's own `where` binder name(s) — including when candidates name their binder differently (`where T` vs `where S`)."
+
+[[tests]]
+name = "struct_parametric_ctor_local_datatype_dispatch_10968"
+file = "parametric_ctor_local_datatype_dispatch_10968.jl"
+expected = true
+description = "Issue #10968: a parametric constructor call whose type argument is a local runtime `DataType` value (`make(T, x) = R{T}(x)`) must select and run the matching inner-constructor method (not raw field construction that skips every inner-constructor body) across a megamorphic call site and through an indirect `Function`-value call."

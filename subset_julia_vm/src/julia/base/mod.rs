@@ -22,6 +22,7 @@
 //! - range.jl: Range utilities (first, last, step, etc.)
 //! - generator.jl: Generator type and iterator traits
 //! - iterators.jl: Iterator types (Enumerate, Zip, Take, Drop, etc.)
+//! - namedtuple.jl: NamedTuple merge dispatch (Issue #11381)
 //! - reduce.jl: Reduction operations (extrema, count, diff, etc.)
 //! - accumulate.jl: Cumulative operations (cumsum, cumprod, accumulate)
 //! - combinatorics.jl: Combinatorial functions (binomial)
@@ -29,6 +30,95 @@
 //! - strings/: String/character utilities
 //! - tuple.jl: Tuple utilities (empty - use standard functions)
 //! - set.jl: Set operations (unique, union, intersect, setdiff, etc.)
+
+use std::sync::OnceLock;
+
+/// Base's exported binding metadata. This file is intentionally not executed;
+/// consumers use the parsed names for lexical `using Base` behavior.
+pub(crate) const EXPORTS_JL: &str = include_str!("exports.jl");
+
+pub(crate) fn exported_names() -> &'static [String] {
+    static EXPORTS: OnceLock<Vec<String>> = OnceLock::new();
+    EXPORTS.get_or_init(|| parse_exports(EXPORTS_JL)).as_slice()
+}
+
+pub(crate) fn is_exported(name: &str) -> bool {
+    exported_names()
+        .binary_search_by(|candidate| candidate.as_str().cmp(name))
+        .is_ok()
+}
+
+/// Whether the bundled Base source declares a module with this short name.
+///
+/// Precompiled-cache consumers do not always carry the module registry used
+/// while Base itself was compiled (notably the isolated program used for macro
+/// expansion). Derive this fallback from the same source list that builds Base
+/// so implicit `using Base` can still distinguish exported modules such as
+/// `Meta` from exported types such as `StepRangeLen`.
+pub(crate) fn declares_module(name: &str) -> bool {
+    static MODULE_NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    MODULE_NAMES
+        .get_or_init(|| {
+            let mut names = Vec::new();
+            for (_, src) in BASE_FILE_SOURCES {
+                for line in src.lines() {
+                    let line = line.split('#').next().unwrap_or("").trim();
+                    let declaration = line
+                        .strip_prefix("module ")
+                        .or_else(|| line.strip_prefix("baremodule "));
+                    let Some(declaration) = declaration else {
+                        continue;
+                    };
+                    let module_name: String = declaration
+                        .chars()
+                        .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+                        .collect();
+                    if !module_name.is_empty() {
+                        names.push(module_name);
+                    }
+                }
+            }
+            names.sort();
+            names.dedup();
+            names
+        })
+        .binary_search_by(|candidate| candidate.as_str().cmp(name))
+        .is_ok()
+}
+
+fn parse_exports(src: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut collecting_export = false;
+    for line in src.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let line = if let Some(rest) = line.strip_prefix("export") {
+            let rest = rest.trim();
+            if rest.is_empty() {
+                collecting_export = true;
+                continue;
+            }
+            rest
+        } else if collecting_export {
+            line
+        } else {
+            continue;
+        };
+        for name in line
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            names.push(name.to_string());
+        }
+        collecting_export = line.ends_with(',');
+    }
+    names.sort();
+    names.dedup();
+    names
+}
 
 /// Core.Intrinsics wrappers (add_int, sub_int, sdiv_int, etc.)
 /// + Abstract type hierarchy (Number, Real, Integer, etc.)
@@ -69,6 +159,10 @@ pub const INT_JL: &str = include_str!("int.jl");
 /// Integer/number-theoretic functions (gcd, lcm, factorial, etc.)
 pub const INTFUNCS_JL: &str = include_str!("intfuncs.jl");
 
+/// Checked integer arithmetic (checked_mul / mul_with_overflow)
+/// Based on Julia's base/checked.jl (Issues #9416 / #9422)
+pub const CHECKED_JL: &str = include_str!("checked.jl");
+
 /// Floating-point utilities (isinteger, modf, ldexp, etc.)
 pub const FLOATFUNCS_JL: &str = include_str!("floatfuncs.jl");
 
@@ -108,6 +202,10 @@ pub const GENERATOR_JL: &str = include_str!("generator.jl");
 /// Iterator types (Enumerate, Zip, Take, Drop, etc.)
 /// Based on Julia's base/iterators.jl
 pub const ITERATORS_JL: &str = include_str!("iterators.jl");
+
+/// NamedTuple merge dispatch (Issue #11381). Based on Julia's
+/// base/namedtuple.jl; must load after iterators.jl (references `Zip`).
+pub const NAMEDTUPLE_JL: &str = include_str!("namedtuple.jl");
 
 /// Abstract array utilities (foreach, etc.)
 /// Based on Julia's base/abstractarray.jl
@@ -169,6 +267,9 @@ pub const PRINTF_JL: &str = include_str!("printf.jl");
 /// Hash functions (hash, object_id)
 /// Based on Julia's base/hashing.jl
 pub const HASHING_JL: &str = include_str!("hashing.jl");
+
+/// Minimal Docs module for docstring storage/retrieval
+pub const DOCS_JL: &str = include_str!("docs.jl");
 
 /// IO operations (IOBuffer, sprint)
 pub const IO_JL: &str = include_str!("io.jl");
@@ -243,14 +344,32 @@ pub const SOME_JL: &str = include_str!("some.jl");
 /// Based on Julia's base/essentials.jl
 pub const ESSENTIALS_JL: &str = include_str!("essentials.jl");
 
+/// RefValue / Ref wrappers
+/// Based on Julia's base/refvalue.jl and base/refpointer.jl
+pub const REFVALUE_JL: &str = include_str!("refvalue.jl");
+
+/// GC utilities, WeakRef, and finalizers
+/// Based on Julia's base/gcutils.jl
+pub const GCUTILS_JL: &str = include_str!("gcutils.jl");
+
 /// Lock types and synchronization primitives (ReentrantLock, SpinLock, Condition)
 /// Based on Julia's base/lock.jl
 pub const LOCK_JL: &str = include_str!("lock.jl");
+
+/// WeakKeyDict
+/// Based on Julia's base/weakkeydict.jl
+pub const WEAKKEYDICT_JL: &str = include_str!("weakkeydict.jl");
 
 /// Task type and functions (Task, schedule, fetch, wait)
 /// Based on Julia's base/task.jl
 /// Implements cooperative multitasking for single-threaded execution
 pub const TASK_JL: &str = include_str!("task.jl");
+/// Base.Threads single-thread compatibility shim
+pub const THREADS_JL: &str = include_str!("threads.jl");
+/// Task support plus Threads shim; kept together to avoid changing the base-source
+/// placeholder count for a pure append.
+pub const TASK_AND_THREADS_JL: &str =
+    concat!(include_str!("task.jl"), "\n", include_str!("threads.jl"));
 
 /// Channel type for producer/consumer patterns
 /// Based on Julia's base/channels.jl
@@ -278,78 +397,102 @@ pub const BROADCAST_JL: &str = include_str!("broadcast.jl");
 /// Based on Julia's base/arraymath.jl
 pub const ARRAYMATH_JL: &str = include_str!("arraymath.jl");
 
+/// deepcopy wrapper
+/// Based on Julia's base/deepcopy.jl
+pub const DEEPCOPY_JL: &str = include_str!("deepcopy.jl");
+
+/// Ordered `(file name, source)` pairs used to build the concatenated Base
+/// source (`get_base()`). Order matters: abstract type hierarchy first, then
+/// basic types, math, arrays, and higher-order functions — a later file may
+/// reference an earlier file's definitions.
+///
+/// This is the single source of truth for file order/content so `get_base()`,
+/// the cold-start per-file profiler (Issue #10119), and the parallel prelude
+/// parser (Issue #10122) can never drift from each other.
+pub const BASE_FILE_SOURCES: &[(&str, &str)] = &[
+    ("boot.jl", BOOT_JL),                     // 1. Intrinsics + abstract types + Val
+    ("error.jl", ERROR_JL),                   // 2. Exceptions
+    ("promotion.jl", PROMOTION_JL),           // 3. Type promotion
+    ("irrationals.jl", IRRATIONALS_JL),       // 4. Irrational type
+    ("mathconstants.jl", MATHCONSTANTS_JL),   // 5. Math constants
+    ("rounding.jl", ROUNDING_JL),             // 6. Rounding modes
+    ("traits.jl", TRAITS_JL),                 // 7. Trait types
+    ("some.jl", SOME_JL),                     // 8. Some/something
+    ("essentials.jl", ESSENTIALS_JL),         // 9. ifelse, oftype
+    ("refvalue.jl", REFVALUE_JL),             // 10. Ref/RefValue wrappers
+    ("operators.jl", OPERATORS_JL),           // 11. Operators + Returns
+    ("number.jl", NUMBER_JL),                 // 12. Number predicates
+    ("bool.jl", BOOL_JL),                     // 13. Boolean ops
+    ("missing.jl", MISSING_JL),               // 14. Missing
+    ("math.jl", MATH_JL),                     // 15. Math
+    ("int.jl", INT_JL),                       // 16. Integer
+    ("intfuncs.jl", INTFUNCS_JL),             // 17. Integer functions
+    ("checked.jl", CHECKED_JL),               // 17a. Checked integer arithmetic (checked_mul)
+    ("floatfuncs.jl", FLOATFUNCS_JL),         // 18. Float functions
+    ("float.jl", FLOAT_JL),                   // 19. Float arithmetic/comparisons
+    ("special/trig.jl", TRIG_JL), // 19a. Special: trig functions (sin, cos, tan, asin, acos, atan)
+    ("special/exp.jl", SPECIAL_EXP_JL), // 19b. Special: exp function
+    ("special/log.jl", SPECIAL_LOG_JL), // 19c. Special: log function
+    ("rational.jl", RATIONAL_JL), // 20. Rational
+    ("complex.jl", COMPLEX_JL),   // 21. Complex
+    ("array.jl", ARRAY_JL),       // 22. Array
+    ("subarray.jl", SUBARRAY_JL), // 23. SubArray
+    ("genericmemory.jl", GENERICMEMORY_JL), // 23a. Memory{T} buffer
+    ("range.jl", RANGE_JL),       // 24. Range
+    ("generator.jl", GENERATOR_JL), // 25. Generator + traits
+    ("pair.jl", PAIR_JL),         // 26. Pair
+    ("iterators.jl", ITERATORS_JL), // 27. Iterators
+    ("namedtuple.jl", NAMEDTUPLE_JL), // 27a. NamedTuple merge dispatch (Issue #11381)
+    ("abstractarray.jl", ABSTRACTARRAY_JL), // 28. Abstract array utils (foreach)
+    ("reduce.jl", REDUCE_JL),     // 28. Reductions (+ any/all)
+    ("accumulate.jl", ACCUMULATE_JL), // 29. cumsum/cumprod
+    ("combinatorics.jl", COMBINATORICS_JL), // 30. Combinatorics
+    ("ordering.jl", ORDERING_JL), // 30a. Base.Order ordering helpers
+    ("sort.jl", SORT_JL),         // 31. Sort
+    ("strings/basic.jl", STRINGS_BASIC_JL), // 32. Char functions
+    ("strings/search.jl", STRINGS_SEARCH_JL), // 33. String search
+    ("strings/util.jl", STRINGS_UTIL_JL), // 34. String utils
+    ("strings/unicode.jl", STRINGS_UNICODE_JL), // 34a. Unicode (uppercase, lowercase)
+    ("tuple.jl", TUPLE_JL),       // 35. Tuple
+    ("dict.jl", DICT_JL),         // 36. Dict (must precede set.jl: Set{T} wraps Dict{T,Nothing})
+    ("set.jl", SET_JL),           // 37. Set (pure-Julia Dict{T,Nothing} wrapper, Issue #6721)
+    ("macros.jl", MACROS_JL),     // 38. Macros
+    ("timing.jl", TIMING_JL),     // 39. Timing macros
+    ("printf.jl", PRINTF_JL),     // 40. Printf macros
+    ("hashing.jl", HASHING_JL),   // 41. Hash functions
+    ("docs.jl", DOCS_JL),         // 42. Docs module
+    ("io.jl", IO_JL),             // 43. IO
+    ("errorshow.jl", ERRORSHOW_JL), // 44. Error display
+    ("multimedia.jl", MULTIMEDIA_JL), // 45. MIME
+    ("gmp.jl", GMP_JL),           // 46. BigInt/BigFloat
+    ("meta.jl", META_JL),         // 47. Meta
+    ("reflection.jl", REFLECTION_JL), // 48. Reflection
+    ("deepcopy.jl", DEEPCOPY_JL), // 49. deepcopy wrapper
+    ("runtime_internals.jl", RUNTIME_INTERNALS_JL), // 50. Runtime
+    ("version.jl", VERSION_JL),   // 51. Version
+    ("path.jl", PATH_JL),         // 52. Path
+    ("util.jl", UTIL_JL),         // 53. Util
+    ("docs/utils.jl", DOCS_UTILS_JL), // 54. Docs utilities
+    ("lock.jl", LOCK_JL),         // 55. Lock primitives
+    ("task.jl+threads.jl", TASK_AND_THREADS_JL), // 56. Task type + Threads single-thread shim
+    ("channels.jl", CHANNELS_JL), // 57. Channel type
+    ("parse.jl", PARSE_JL),       // 58. Parse/tryparse for Int64
+    ("broadcast.jl", BROADCAST_JL), // 59. Broadcast infrastructure
+    ("arraymath.jl", ARRAYMATH_JL), // 60. Array arithmetic
+    ("asyncmap.jl", ASYNCMAP_JL), // 61. asyncmap (Issue #3500)
+    ("gcutils.jl", GCUTILS_JL),   // 62. GC, WeakRef, finalizer
+    ("weakkeydict.jl", WEAKKEYDICT_JL), // 63. WeakKeyDict
+];
+
 /// Get the complete Base source code.
 /// This concatenates all Julia source files in the correct order.
 /// Order matters: abstract type hierarchy first, then basic types, math, arrays, and higher-order functions.
 pub fn get_base() -> String {
-    format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-        BOOT_JL,              // 1. Intrinsics + abstract types + Val
-        ERROR_JL,             // 2. Exceptions
-        PROMOTION_JL,         // 3. Type promotion
-        IRRATIONALS_JL,       // 4. Irrational type
-        MATHCONSTANTS_JL,     // 5. Math constants
-        ROUNDING_JL,          // 6. Rounding modes
-        TRAITS_JL,            // 7. Trait types
-        SOME_JL,              // 8. Some/something
-        ESSENTIALS_JL,        // 9. ifelse, oftype
-        OPERATORS_JL,         // 10. Operators + Returns
-        NUMBER_JL,            // 11. Number predicates
-        BOOL_JL,              // 12. Boolean ops
-        MISSING_JL,           // 13. Missing
-        MATH_JL,              // 14. Math
-        INT_JL,               // 15. Integer
-        INTFUNCS_JL,          // 16. Integer functions
-        FLOATFUNCS_JL,        // 17. Float functions
-        FLOAT_JL,             // 18. Float arithmetic/comparisons
-        TRIG_JL,              // 18a. Special: trig functions (sin, cos, tan, asin, acos, atan)
-        SPECIAL_EXP_JL,       // 18b. Special: exp function
-        SPECIAL_LOG_JL,       // 18c. Special: log function
-        RATIONAL_JL,          // 19. Rational
-        COMPLEX_JL,           // 20. Complex
-        ARRAY_JL,             // 21. Array
-        SUBARRAY_JL,          // 22. SubArray
-        GENERICMEMORY_JL,     // 22a. Memory{T} buffer
-        RANGE_JL,             // 23. Range
-        GENERATOR_JL,         // 24. Generator + traits
-        PAIR_JL,              // 25. Pair
-        ITERATORS_JL,         // 26. Iterators
-        ABSTRACTARRAY_JL,     // 27. Abstract array utils (foreach)
-        REDUCE_JL,            // 27. Reductions (+ any/all)
-        ACCUMULATE_JL,        // 28. cumsum/cumprod
-        COMBINATORICS_JL,     // 29. Combinatorics
-        ORDERING_JL,          // 29a. Base.Order ordering helpers
-        SORT_JL,              // 30. Sort
-        STRINGS_BASIC_JL,     // 31. Char functions
-        STRINGS_SEARCH_JL,    // 32. String search
-        STRINGS_UTIL_JL,      // 33. String utils
-        STRINGS_UNICODE_JL,   // 33a. Unicode (uppercase, lowercase)
-        TUPLE_JL,             // 34. Tuple
-        DICT_JL,              // 35. Dict (must precede SET_JL: Set{T} wraps Dict{T,Nothing})
-        SET_JL,               // 36. Set (pure-Julia Dict{T,Nothing} wrapper, Issue #6721)
-        MACROS_JL,            // 37. Macros
-        TIMING_JL,            // 38. Timing macros
-        PRINTF_JL,            // 39. Printf macros
-        HASHING_JL,           // 40. Hash functions
-        IO_JL,                // 41. IO
-        ERRORSHOW_JL,         // 42. Error display
-        MULTIMEDIA_JL,        // 43. MIME
-        GMP_JL,               // 44. BigInt/BigFloat
-        META_JL,              // 45. Meta
-        REFLECTION_JL,        // 46. Reflection
-        RUNTIME_INTERNALS_JL, // 47. Runtime
-        VERSION_JL,           // 48. Version
-        PATH_JL,              // 50. Path
-        UTIL_JL,              // 51. Util
-        DOCS_UTILS_JL,        // 52. Docs
-        LOCK_JL,              // 53. Lock primitives
-        TASK_JL,              // 54. Task type
-        CHANNELS_JL,          // 55. Channel type
-        PARSE_JL,             // 56. Parse/tryparse for Int64
-        BROADCAST_JL,         // 57. Broadcast infrastructure
-        ARRAYMATH_JL,         // 58. Array arithmetic
-        ASYNCMAP_JL,          // 59. asyncmap (Issue #3500)
-    )
+    BASE_FILE_SOURCES
+        .iter()
+        .map(|(_, src)| *src)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Check if Base is enabled.
@@ -377,8 +520,56 @@ pub fn is_prelude_enabled() -> bool {
 }
 
 #[cfg(test)]
+mod declared_module_tests {
+    #[test]
+    fn declared_base_modules_are_source_derived() {
+        for name in [
+            "Docs",
+            "GC",
+            "Iterators",
+            "MathConstants",
+            "Meta",
+            "Order",
+            "Threads",
+        ] {
+            assert!(
+                super::declares_module(name),
+                "missing bundled module {name}"
+            );
+        }
+        assert!(!super::declares_module("Random"));
+        assert!(!super::declares_module("StepRangeLen"));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reflection_modeled_exports_cover_upstream_bindings_11410() {
+        for name in [
+            "ComplexF32",
+            "SubString",
+            "StepRange",
+            "RegexMatch",
+            "Pipe",
+            "redirect_stdout",
+            "redirect_stderr",
+            "seek",
+            "position",
+            "skip",
+            "flush",
+            "names",
+            "memoryref",
+            ">:",
+        ] {
+            assert!(is_exported(name), "missing modeled Base export: {name}");
+        }
+        assert!(!is_exported("_ctpop_int"));
+        assert!(!is_exported("eval"));
+        assert!(!is_exported("include"));
+    }
 
     #[test]
     fn test_base_not_empty() {
@@ -511,10 +702,17 @@ mod tests {
         // Functions with where clause
         assert!(COMPLEX_JL.contains("function conj(z::Complex{T}) where {T<:Real}"));
         // Generic arithmetic operators for Complex types (Issue #2427)
-        assert!(COMPLEX_JL.contains("Base.:+(z::Complex, w::Complex)"));
-        assert!(COMPLEX_JL.contains("Base.:-(z::Complex, w::Complex)"));
-        assert!(COMPLEX_JL.contains("Base.:*(z::Complex, w::Complex)"));
-        assert!(COMPLEX_JL.contains("function Base.:/(z::Complex, w::Complex)"));
+        assert!(
+            COMPLEX_JL.contains("Base.:+(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}")
+        );
+        assert!(
+            COMPLEX_JL.contains("Base.:-(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}")
+        );
+        assert!(
+            COMPLEX_JL.contains("Base.:*(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}")
+        );
+        assert!(COMPLEX_JL
+            .contains("function Base.:/(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}"));
     }
 
     #[test]
@@ -889,8 +1087,8 @@ mod tests {
     fn test_channel_types() {
         // Channel{T} parametric mutable struct (Issue #3450)
         assert!(CHANNELS_JL.contains("mutable struct Channel{T}"));
-        // pending_puts overflow queue for cooperative blocking (Issue #3451)
-        assert!(CHANNELS_JL.contains("pending_puts::Vector{Any}"));
+        // VM-continuation wait queues for true blocking (Issue #10349)
+        assert!(CHANNELS_JL.contains("waiters::Any"));
         assert!(CHANNELS_JL.contains("isopen(c::Channel)"));
         assert!(CHANNELS_JL.contains("isbuffered(c::Channel)"));
         assert!(CHANNELS_JL.contains("isfull(c::Channel)"));
@@ -948,15 +1146,19 @@ mod tests {
             "boot.jl",
             "broadcast.jl",
             "channels.jl",
+            "checked.jl",
             "combinatorics.jl",
             "complex.jl",
             "dict.jl",
+            "docs.jl",
             "docs/utils.jl",
+            "deepcopy.jl",
             "error.jl",
             "errorshow.jl",
             "essentials.jl",
             "float.jl",
             "floatfuncs.jl",
+            "gcutils.jl",
             "genericmemory.jl",
             "generator.jl",
             "gmp.jl",
@@ -973,6 +1175,7 @@ mod tests {
             "meta.jl",
             "missing.jl",
             "multimedia.jl",
+            "namedtuple.jl",
             "number.jl",
             "operators.jl",
             "ordering.jl",
@@ -984,6 +1187,7 @@ mod tests {
             "range.jl",
             "rational.jl",
             "reduce.jl",
+            "refvalue.jl",
             "reflection.jl",
             "rounding.jl",
             "runtime_internals.jl",
@@ -999,11 +1203,13 @@ mod tests {
             "strings/util.jl",
             "subarray.jl",
             "task.jl",
+            "threads.jl",
             "timing.jl",
             "traits.jl",
             "tuple.jl",
             "util.jl",
             "version.jl",
+            "weakkeydict.jl",
         ]
         .into_iter()
         .collect();
@@ -1053,7 +1259,7 @@ mod tests {
         // This catches typos in the loaded_files list
         assert_eq!(
             loaded_files.len(),
-            65,
+            73,
             "loaded_files count mismatch - update test when adding new files"
         );
     }

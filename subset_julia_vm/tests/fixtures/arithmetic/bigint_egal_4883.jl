@@ -4,7 +4,7 @@
 # `x[1] === x` failed only for `x = big(7)`.
 #
 # Root cause: the `Egal` builtin in
-# `subset_julia_vm/src/vm/builtins_equality.rs` had no
+# `subset_julia_vm_vm/src/vm/builtins_equality.rs` had no
 # `(Value::BigInt, Value::BigInt)` arm, so comparison fell through to
 # `_ => false`. Same gap for `BigFloat`.
 #

@@ -3,7 +3,7 @@ using Test
 @testset "Memory{T} with larger allocations and iteration" begin
     # Large Memory{Int64}: 100 elements
     n = 100
-    m = Memory{Int64}(n)
+    m = Memory{Int64}(undef, n)
     @test length(m) == n
 
     # Populate with 1..n
@@ -22,7 +22,7 @@ using Test
     @test s == div(n * (n + 1), 2)  # n*(n+1)/2 = 5050
 
     # Large Float64 Memory: populate with squares
-    mf = Memory{Float64}(10)
+    mf = Memory{Float64}(undef, 10)
     for i in 1:10
         mf[i] = Float64(i * i)
     end

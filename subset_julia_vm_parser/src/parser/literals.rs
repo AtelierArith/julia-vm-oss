@@ -2,6 +2,9 @@
 //!
 //! Handles parsing of identifiers, macro calls, and literal values.
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::{ParseError, ParseResult};
 use crate::node_kind::NodeKind;
@@ -12,7 +15,7 @@ use super::Parser;
 impl<'a> Parser<'a> {
     /// Parse identifier, possibly as part of a symbol or qualified name
     pub(crate) fn parse_identifier_or_symbol(&mut self) -> ParseResult<CstNode> {
-        self.parse_identifier()
+        self.parse_identifier_like_name()
     }
 
     /// Parse a macro call: @macro args or @Module.macro args
@@ -53,6 +56,7 @@ impl<'a> Parser<'a> {
         name_end: usize,
         macro_id: CstNode,
     ) -> ParseResult<CstNode> {
+        let is_doc_macro = Self::is_doc_macro_identifier(&macro_id, self.source);
         let mut children = vec![macro_id];
 
         // Check if immediately followed by '{' (braces argument style).
@@ -61,22 +65,15 @@ impl<'a> Parser<'a> {
         // parsed into a CurlyExpression node whose children are the field
         // declarations (`a::Int`, `b`, ...).
         if self.check(&Token::LBrace) {
-            if let Some(lbrace_token) = self.current.as_ref() {
-                // Require no gap between the macro name and '{' so that
-                // `@foo {x}` (space-separated single-set argument) is left to
-                // the original space-separated parsing path.
-                if lbrace_token.span.start == name_end {
-                    let braces = self.parse_macro_braces()?;
-                    let end = braces.span.end;
-                    children.push(braces);
-                    let span = self.source_map.span(start, end);
-                    return Ok(CstNode::with_children(
-                        NodeKind::MacrocallExpression,
-                        span,
-                        children,
-                    ));
-                }
-            }
+            let braces = self.parse_macro_braces()?;
+            let end = braces.span.end;
+            children.push(braces);
+            let span = self.source_map.span(start, end);
+            return Ok(CstNode::with_children(
+                NodeKind::MacrocallExpression,
+                span,
+                children,
+            ));
         }
 
         // Check if immediately followed by '(' (parenthesized call style)
@@ -88,6 +85,14 @@ impl<'a> Parser<'a> {
                     // Parenthesized call style: @macro(args)
                     self.advance(); // consume '('
 
+                    // Inside the parentheses of @macro(...) newlines are
+                    // insignificant, just like in any other delimited context.
+                    // Increment grouping_depth so expression-level newline
+                    // continuation (binary-operator on next line, ternary `:`)
+                    // works inside macro argument expressions (Issue #8753).
+                    let saved_in_ternary_then = std::mem::replace(&mut self.in_ternary_then, false);
+                    self.grouping_depth += 1;
+
                     // Parse comma-separated arguments inside parentheses
                     if !self.check(&Token::RParen) {
                         loop {
@@ -98,12 +103,11 @@ impl<'a> Parser<'a> {
                             if self.check(&Token::RParen) {
                                 break;
                             }
-                            let arg =
-                                if self.check(&Token::KwStruct) || self.check(&Token::KwMutable) {
-                                    self.parse_struct_definition()?
-                                } else {
-                                    self.parse_expression()?
-                                };
+                            let arg = if let Some(arg) = self.parse_macro_statement_arg()? {
+                                arg
+                            } else {
+                                self.parse_expression()?
+                            };
                             children.push(arg);
                             if !self.check(&Token::Comma) {
                                 break;
@@ -112,8 +116,27 @@ impl<'a> Parser<'a> {
                         }
                     }
 
+                    // Skip newlines before the closing paren so multi-line
+                    // no-trailing-comma calls like:
+                    //   @macro(
+                    //     arg1,
+                    //     arg2
+                    //   )
+                    // parse correctly (Issue #8753).
+                    while self.check(&Token::Newline) {
+                        self.advance();
+                    }
+
+                    self.grouping_depth -= 1;
+                    self.in_ternary_then = saved_in_ternary_then;
+
                     let rparen = self.expect(Token::RParen)?;
-                    let end = rparen.span.end;
+                    let mut end = rparen.span.end;
+                    if self.check(&Token::KwDo) {
+                        let do_clause = self.parse_do_clause()?;
+                        end = do_clause.span.end;
+                        children.push(do_clause);
+                    }
                     let span = self.source_map.span(start, end);
                     return Ok(CstNode::with_children(
                         NodeKind::MacrocallExpression,
@@ -135,60 +158,21 @@ impl<'a> Parser<'a> {
             && !self.check(&Token::RParen)
             && !self.check(&Token::RBracket)
         {
-            // Special case: if we see `begin`, parse it as a block
-            if self.check(&Token::KwBegin) {
-                let block = self.parse_begin_block()?;
-                children.push(block);
-                break; // Block is the last argument
+            if self.macro_arg_stops_before_comprehension_for
+                && self.check(&Token::KwFor)
+                && children.len() > 1
+            {
+                break;
             }
 
-            // Special case: if we see `struct` or `mutable`, parse as struct definition
-            // This is needed for macros like @kwdef that take struct definitions
-            if self.check(&Token::KwStruct) || self.check(&Token::KwMutable) {
-                let struct_def = self.parse_struct_definition()?;
-                children.push(struct_def);
-                break; // Struct definition is the last argument
-            }
-
-            // Special case: if we see `for`, parse as for statement.
-            // This is needed for macros like @simd and @inbounds that take for loops.
-            // We do NOT break afterwards: upstream Julia collects any further
-            // space-separated arguments that follow the block on the same line,
-            // e.g. `@animate for ... end every 10` packs `:every` and `10` as extra
-            // macro arguments (Issue #7272). A newline after `end` ends the call (the
-            // while condition stops at `Token::Newline`), so next-line statements
-            // remain separate.
-            if self.check(&Token::KwFor) {
-                let for_stmt = self.parse_for_statement()?;
-                children.push(for_stmt);
-                continue;
-            }
-
-            // Special case: if we see `while`, parse as while statement.
-            // This is needed for macros like @inbounds that take while loops, and for
-            // `@animate while ... end every N` (Issue #7272). Like the for-loop case
-            // above we keep collecting trailing same-line arguments.
-            if self.check(&Token::KwWhile) {
-                let while_stmt = self.parse_while_statement()?;
-                children.push(while_stmt);
-                continue;
-            }
-
-            // Special case: if we see `if`, parse as if statement
-            // This is needed for macros like @inbounds that take if statements
-            if self.check(&Token::KwIf) {
-                let if_stmt = self.parse_if_statement()?;
-                children.push(if_stmt);
-                break; // If statement is the last argument
-            }
-
-            // Special case: if we see `function`, parse as function definition.
-            // This is needed for compiler annotation macros like @noinline and
-            // Base.@nospecializeinfer that decorate a method definition.
-            if self.check(&Token::KwFunction) {
-                let function_def = self.parse_function_definition()?;
-                children.push(function_def);
-                break; // Function definition is the last argument
+            if let Some(arg) = self.parse_macro_statement_arg()? {
+                let can_have_trailing_args =
+                    matches!(arg.kind, NodeKind::ForStatement | NodeKind::WhileStatement);
+                children.push(arg);
+                if can_have_trailing_args {
+                    continue;
+                }
+                break;
             }
 
             // Parse expression as argument.
@@ -209,9 +193,19 @@ impl<'a> Parser<'a> {
             if self.check(&Token::Comma) {
                 saw_comma = true;
                 self.advance();
+                while self.check(&Token::Newline) {
+                    self.advance();
+                }
             }
             // Don't break - let the while condition handle when to stop
             // Julia macros are space-separated, so continue parsing
+        }
+
+        if is_doc_macro && self.check(&Token::Newline) {
+            self.skip_newlines();
+            if let Some(arg) = self.parse_macro_statement_arg()? {
+                children.push(arg);
+            }
         }
 
         if saw_comma && children.len() > 1 {
@@ -226,13 +220,50 @@ impl<'a> Parser<'a> {
             children.push(tuple);
         }
 
-        let end = children.last().unwrap().span.end;
+        let end = self.last_span_end(&children, "macro call always pushes macro_id above")?;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::MacrocallExpression,
             span,
             children,
         ))
+    }
+
+    fn is_doc_macro_identifier(macro_id: &CstNode, source: &str) -> bool {
+        let Some(name) = macro_id.children.first() else {
+            return false;
+        };
+        Self::rightmost_identifier_text(name, source) == Some("doc")
+    }
+
+    fn rightmost_identifier_text<'s>(node: &CstNode, source: &'s str) -> Option<&'s str> {
+        match node.kind {
+            NodeKind::Identifier => Some(node.text_from_source(source)),
+            NodeKind::FieldExpression => node
+                .children
+                .last()
+                .and_then(|child| Self::rightmost_identifier_text(child, source)),
+            _ => None,
+        }
+    }
+
+    fn parse_macro_statement_arg(&mut self) -> ParseResult<Option<CstNode>> {
+        let arg = match self.current.as_ref().map(|token| &token.token) {
+            Some(Token::KwBegin) => self.parse_begin_block()?,
+            Some(Token::KwStruct | Token::KwMutable) => self.parse_struct_definition()?,
+            Some(Token::KwPrimitive) => self.parse_primitive_definition()?,
+            Some(Token::KwFor) => self.parse_for_statement()?,
+            Some(Token::KwWhile) => self.parse_while_statement()?,
+            Some(Token::KwIf) => self.parse_if_statement()?,
+            Some(Token::KwFunction) => self.parse_function_definition()?,
+            Some(Token::KwMacro) => self.parse_macro_definition()?,
+            Some(Token::KwConst) => self.parse_const_declaration()?,
+            Some(Token::KwUsing) => self.parse_using_statement()?,
+            Some(Token::KwImport) => self.parse_import_statement()?,
+            Some(Token::KwModule | Token::KwBaremodule) => self.parse_module_definition()?,
+            _ => return Ok(None),
+        };
+        Ok(Some(arg))
     }
 
     /// Parse a braced macro argument: `{ decl, decl, ... }`.
@@ -242,6 +273,8 @@ impl<'a> Parser<'a> {
     /// `CurlyExpression` node whose children are the declarations, which the
     /// lowering phase interprets per-macro (currently only `@NamedTuple`).
     pub(crate) fn parse_macro_braces(&mut self) -> ParseResult<CstNode> {
+        let saved_macro_for_stop =
+            std::mem::replace(&mut self.macro_arg_stops_before_comprehension_for, false);
         let start_token = self.expect(Token::LBrace)?;
         let start = start_token.span.start;
 
@@ -272,6 +305,7 @@ impl<'a> Parser<'a> {
         }
 
         let end_token = self.expect(Token::RBrace)?;
+        self.macro_arg_stops_before_comprehension_for = saved_macro_for_stop;
         let span = self.source_map.span(start, end_token.span.end);
         Ok(CstNode::with_children(
             NodeKind::CurlyExpression,
@@ -284,47 +318,37 @@ impl<'a> Parser<'a> {
 
     /// Parse an integer literal
     pub(crate) fn parse_integer_literal(&mut self) -> ParseResult<CstNode> {
-        let token = self.advance().unwrap();
-        Ok(CstNode::leaf(
-            NodeKind::IntegerLiteral,
-            token.span,
-            token.text,
-        ))
+        let token = self
+            .advance_checked("integer literal token already matched by parse_primary's dispatch")?;
+        Ok(CstNode::leaf(NodeKind::IntegerLiteral, token.span))
     }
 
     /// Parse a float literal
     pub(crate) fn parse_float_literal(&mut self) -> ParseResult<CstNode> {
-        let token = self.advance().unwrap();
-        Ok(CstNode::leaf(
-            NodeKind::FloatLiteral,
-            token.span,
-            token.text,
-        ))
+        let token = self
+            .advance_checked("float literal token already matched by parse_primary's dispatch")?;
+        Ok(CstNode::leaf(NodeKind::FloatLiteral, token.span))
     }
 
     /// Parse a boolean literal (true/false)
     pub(crate) fn parse_boolean_literal(&mut self) -> ParseResult<CstNode> {
-        let token = self.advance().unwrap();
-        Ok(CstNode::leaf(
-            NodeKind::BooleanLiteral,
-            token.span,
-            token.text,
-        ))
+        let token = self
+            .advance_checked("boolean literal token already matched by parse_primary's dispatch")?;
+        Ok(CstNode::leaf(NodeKind::BooleanLiteral, token.span))
     }
 
     /// Parse a character literal
     pub(crate) fn parse_character_literal(&mut self) -> ParseResult<CstNode> {
-        let token = self.advance().unwrap();
-        Ok(CstNode::leaf(
-            NodeKind::CharacterLiteral,
-            token.span,
-            token.text,
-        ))
+        let token = self.advance_checked(
+            "character literal token already matched by parse_primary's dispatch",
+        )?;
+        Ok(CstNode::leaf(NodeKind::CharacterLiteral, token.span))
     }
 
     /// Parse a string literal
     pub(crate) fn parse_string_literal(&mut self) -> ParseResult<CstNode> {
-        let start_token = self.advance().unwrap();
+        let start_token =
+            self.advance_checked("string quote token already matched by parse_primary's dispatch")?;
         let is_triple = matches!(start_token.token, Token::TripleDoubleQuote);
         let start = start_token.span.start;
 
@@ -350,14 +374,26 @@ impl<'a> Parser<'a> {
 
     /// Parse command literal: `command`
     pub(crate) fn parse_command_literal(&mut self) -> ParseResult<CstNode> {
-        let start_token = self.advance().unwrap();
+        let start_token =
+            self.advance_checked("backtick token already matched by parse_primary's dispatch")?;
         let is_triple = matches!(start_token.token, Token::TripleBacktick);
         let start = start_token.span.start;
 
         let content_start = start_token.span.end;
 
-        // Scan for command content until closing backtick
-        let end = self.scan_command_content(content_start, is_triple)?;
+        // Scan for command content until closing backtick, mirroring
+        // `scan_string_content`: the outer node's span covers the FULL
+        // literal including delimiters (callers such as
+        // `parse_prefixed_string_literal` rely on `span.end` pointing
+        // exactly past the closing delimiter to detect an adjacent suffix
+        // flag, e.g. `x`s`flag`), while the delimiter-free content is
+        // carried by a `Content` child (Issue #10126 review: a leaf's
+        // `text()` is derived from its span, so without this child a
+        // delimiter-inclusive outer span would leak backticks into
+        // `--dump-ast --json` output, regressing the pre-#10126
+        // delimiter-free command-literal text).
+        let mut children = Vec::new();
+        let end = self.scan_command_content(content_start, is_triple, &mut children)?;
 
         // Restart lexer from after the command to synchronize
         self.lexer.restart_from(end);
@@ -365,15 +401,20 @@ impl<'a> Parser<'a> {
         self.advance(); // Prime with next token
 
         let span = self.source_map.span(start, end);
-        let text = &self.source[content_start..end - if is_triple { 3 } else { 1 }];
-        Ok(CstNode::leaf(NodeKind::CommandLiteral, span, text))
+        Ok(CstNode::with_children(
+            NodeKind::CommandLiteral,
+            span,
+            children,
+        ))
     }
 
-    /// Scan command content until closing backtick
+    /// Scan command content until closing backtick, pushing a `Content` leaf
+    /// (content only, delimiters excluded) for the scanned text.
     pub(crate) fn scan_command_content(
         &mut self,
         start: usize,
         is_triple: bool,
+        children: &mut Vec<CstNode>,
     ) -> ParseResult<usize> {
         let bytes = self.source.as_bytes();
         let mut pos = start;
@@ -389,6 +430,10 @@ impl<'a> Parser<'a> {
 
             // Check for closing delimiter
             if pos + delim_len <= bytes.len() && &bytes[pos..pos + delim_len] == delimiter {
+                if pos > start {
+                    let span = self.source_map.span(start, pos);
+                    children.push(CstNode::leaf(NodeKind::Content, span));
+                }
                 return Ok(pos + delim_len);
             }
 
@@ -397,7 +442,7 @@ impl<'a> Parser<'a> {
 
         // Unterminated command literal
         let span = self.source_map.span(start, bytes.len());
-        Err(ParseError::UnterminatedString { span })
+        Err(ParseError::UnterminatedCommand { span })
     }
 
     /// Scan string content until closing quote
@@ -425,8 +470,7 @@ impl<'a> Parser<'a> {
                 // Add content before $
                 if pos > content_start {
                     let span = self.source_map.span(content_start, pos);
-                    let text = &self.source[content_start..pos];
-                    children.push(CstNode::leaf(NodeKind::Content, span, text));
+                    children.push(CstNode::leaf(NodeKind::Content, span));
                 }
 
                 // Parse interpolation
@@ -442,8 +486,7 @@ impl<'a> Parser<'a> {
                 // Add remaining content
                 if pos > content_start {
                     let span = self.source_map.span(content_start, pos);
-                    let text = &self.source[content_start..pos];
-                    children.push(CstNode::leaf(NodeKind::Content, span, text));
+                    children.push(CstNode::leaf(NodeKind::Content, span));
                 }
                 return Ok(pos + delim_len);
             }
@@ -481,31 +524,120 @@ impl<'a> Parser<'a> {
                 pos += 1;
             }
             let span = self.source_map.span(start, pos);
-            let text = &self.source[start..pos];
-            Ok(CstNode::leaf(NodeKind::StringInterpolation, span, text))
+            Ok(CstNode::leaf(NodeKind::StringInterpolation, span))
         } else {
-            // $identifier — In string interpolation, `!` is NOT part of the identifier.
-            // Julia treats only alphanumerics and `_` as valid identifier characters
-            // in $-interpolation context. (Issue #2130)
-            while pos < bytes.len() && is_interpolation_ident_continue(bytes[pos]) {
-                pos += 1;
+            // $identifier — upstream Julia treats `!` as a valid identifier
+            // continuation character, so `"$name!"` interpolates `name!` and
+            // `"$name!x"` interpolates `name!x`. The identifier stops before
+            // `!=` (which lexes as the operator), so `"$name!="` interpolates
+            // `name`. Issue #2130 previously asserted the opposite; corrected
+            // to match upstream julia 1.12 (Issue #10322).
+            let ident_start = pos;
+            while pos < bytes.len() {
+                let b = bytes[pos];
+                // A `!` continues the identifier only when it is not the first
+                // character and is not the start of `!=`.
+                let bang_continues =
+                    b == b'!' && pos > ident_start && bytes.get(pos + 1) != Some(&b'=');
+                if is_interpolation_ident_continue(b) || bang_continues {
+                    pos += 1;
+                } else {
+                    break;
+                }
             }
             let span = self.source_map.span(start, pos);
-            let text = &self.source[start..pos];
-            Ok(CstNode::leaf(NodeKind::StringInterpolation, span, text))
+            Ok(CstNode::leaf(NodeKind::StringInterpolation, span))
         }
     }
 
     /// Parse an identifier
+    ///
+    /// Unlike most `self.advance()` call sites in this crate, this one is
+    /// genuinely reachable at end-of-input: `parse_identifier` is called
+    /// wherever the grammar expects a name (function/struct/module names,
+    /// parameters, ...) right after consuming a keyword, with no lookahead
+    /// check that a token actually follows (e.g. a truncated `struct` or
+    /// `abstract type` with no name). Upstream Julia reports this as a
+    /// "premature end of input" `ParseError`; do the same instead of
+    /// panicking (Issue #10904).
     pub(crate) fn parse_identifier(&mut self) -> ParseResult<CstNode> {
-        let token = self.advance().unwrap();
-        Ok(CstNode::leaf(NodeKind::Identifier, token.span, token.text))
+        let token = self
+            .advance()
+            .ok_or_else(|| ParseError::unexpected_eof("identifier", self.current_span()))?;
+        Ok(CstNode::leaf(NodeKind::Identifier, token.span))
+    }
+
+    /// Parse an identifier-like name, including Julia's `var"..."` quoted
+    /// identifier spelling.
+    pub(crate) fn parse_identifier_like_name(&mut self) -> ParseResult<CstNode> {
+        if self.check_adjacent_prefixed_string("var") {
+            let prefix = self.parse_identifier()?;
+            let prefixed = self.parse_prefixed_string_literal(prefix)?;
+            Ok(self.merge_var_quoted_identifier(prefixed))
+        } else {
+            self.parse_identifier()
+        }
+    }
+
+    /// Merge a parsed `var"..."` prefixed-string literal into a plain
+    /// `Identifier` leaf (Issue #8754). Julia's `var"..."` non-standard
+    /// identifier syntax names a binding by the quoted string's exact
+    /// content — JuliaSyntax merges the `var` prefix and the string into a
+    /// single identifier token. The merged leaf's span covers the FULL
+    /// `var"..."` source range so that span-derived reconstruction of
+    /// enclosing expressions (e.g. macro-argument re-parsing) stays intact;
+    /// name extraction strips the wrapper via [`strip_var_quotes`], which
+    /// downstream text readers apply to `Identifier` leaves.
+    ///
+    /// Returns the node unchanged (a string-macro call downstream) when the
+    /// literal is not a plain mergeable string: interpolation children, a
+    /// trailing flag identifier, escape sequences, or empty content.
+    pub(crate) fn merge_var_quoted_identifier(&self, prefixed: CstNode) -> CstNode {
+        if prefixed.kind != NodeKind::PrefixedStringLiteral || prefixed.children.len() != 2 {
+            return prefixed;
+        }
+        let prefix = &prefixed.children[0];
+        let string = &prefixed.children[1];
+        if prefix.kind != NodeKind::Identifier
+            || &self.source[prefix.span.start..prefix.span.end] != "var"
+            || string.kind != NodeKind::StringLiteral
+            || string.children.iter().any(|c| c.kind != NodeKind::Content)
+        {
+            return prefixed;
+        }
+        let text = &self.source[string.span.start..string.span.end];
+        let delim = if text.starts_with("\"\"\"") { 3 } else { 1 };
+        let content_start = string.span.start + delim;
+        let content_end = string.span.end - delim;
+        if content_start >= content_end || self.source[content_start..content_end].contains('\\') {
+            return prefixed;
+        }
+        CstNode::leaf(NodeKind::Identifier, prefixed.span)
     }
 }
 
-/// Check if a byte is a valid identifier continuation in string interpolation context.
-/// Unlike general identifiers, `!` is NOT valid in $-interpolation.
-/// In Julia, `"$name!"` interpolates `name` and `!` is literal text. (Issue #2130)
+/// Strip the `var"..."` wrapper from a merged var-quoted identifier's raw
+/// source text, yielding the identifier name (the quoted content). Ordinary
+/// identifier text can never contain a `"`, so this only rewrites leaves
+/// produced by [`Parser::merge_var_quoted_identifier`] (Issue #8754).
+pub fn strip_var_quotes(text: &str) -> &str {
+    if let Some(rest) = text.strip_prefix("var\"\"\"") {
+        if let Some(inner) = rest.strip_suffix("\"\"\"") {
+            return inner;
+        }
+    }
+    if let Some(rest) = text.strip_prefix("var\"") {
+        if let Some(inner) = rest.strip_suffix('"') {
+            return inner;
+        }
+    }
+    text
+}
+
+/// Check if a byte is an unconditional identifier continuation in string
+/// interpolation context. `!` is handled separately at the call site: it
+/// continues the identifier only when it is not the first character and is
+/// not followed by `=` (matching the upstream lexer, Issue #10322).
 fn is_interpolation_ident_continue(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }

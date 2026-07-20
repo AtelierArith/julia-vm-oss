@@ -96,7 +96,7 @@ impl AotStrengthReducer {
                 self.reduction_count += reductions;
                 reductions
             }
-            AotStmt::Expr(expr) => {
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                 let (new_expr, reductions) = self.reduce_expr(expr);
                 if reductions > 0 {
                     *expr = new_expr;

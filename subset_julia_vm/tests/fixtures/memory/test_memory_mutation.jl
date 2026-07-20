@@ -2,7 +2,7 @@ using Test
 
 @testset "Memory{T} mutation patterns" begin
     # In-place update via loop
-    m = Memory{Int64}(5)
+    m = Memory{Int64}(undef, 5)
     for i in 1:5
         m[i] = i * 10
     end
@@ -11,7 +11,7 @@ using Test
     @test m[5] == 50
 
     # Element swap
-    m2 = Memory{Int64}(3)
+    m2 = Memory{Int64}(undef, 3)
     m2[1] = 1
     m2[2] = 2
     m2[3] = 3
@@ -23,7 +23,7 @@ using Test
     @test m2[3] == 1
 
     # Overwrite all elements with fill!
-    m3 = Memory{Float64}(4)
+    m3 = Memory{Float64}(undef, 4)
     m3[1] = 1.0
     m3[2] = 2.0
     m3[3] = 3.0
@@ -35,7 +35,7 @@ using Test
     @test m3[4] == -1.0
 
     # Accumulation via indexing
-    m4 = Memory{Int64}(5)
+    m4 = Memory{Int64}(undef, 5)
     fill!(m4, 0)
     for i in 1:5
         m4[i] = m4[i] + i

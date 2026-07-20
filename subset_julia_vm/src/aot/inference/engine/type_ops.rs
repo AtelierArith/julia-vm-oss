@@ -1,12 +1,25 @@
 use super::super::super::types::StaticType;
 use crate::inference_core::PrimitiveNumeric;
 use crate::ir::core::Expr;
+use crate::promotion::promote_type;
 
 use super::TypeInferenceEngine;
 
 impl TypeInferenceEngine {
     /// Numeric type promotion following Julia's type promotion rules.
+    ///
+    /// Primitive numeric pairs are routed through the **shared** string
+    /// `promote_type` path used by the VM runtime and compiler inference
+    /// (Issue #9351). Historically the AoT engine had its own rank-based
+    /// widener (`PrimitiveNumeric::promote`) that force-widened `Bool` and
+    /// every integer up to `UInt32` to `Int64`, diverging from upstream Julia
+    /// (`Int8 + Int8 === Int8`, `Int8 + Int16 === Int16`) and from the runtime.
+    /// This is the pure promotion of the operand *types*; op-specific result
+    /// rules (e.g. `Bool + Bool === Int64`) live in `binop_result_type`.
     pub(crate) fn numeric_promote(&self, left: &StaticType, right: &StaticType) -> StaticType {
+        if let Some(promoted) = Self::promote_bare_complex_with_numeric(left, right) {
+            return promoted;
+        }
         if matches!(left, StaticType::Struct { .. }) && right.is_numeric() {
             return left.clone();
         }
@@ -14,29 +27,86 @@ impl TypeInferenceEngine {
             return right.clone();
         }
 
-        // Same non-small types short-circuit (float, I64/U64, Struct, non-numeric).
-        // Small integers (Bool..U32) and mixed types fall through to rank-based widening.
-        if left == right
-            && !matches!(
-                left,
-                StaticType::Bool
-                    | StaticType::I8
-                    | StaticType::U8
-                    | StaticType::I16
-                    | StaticType::U16
-                    | StaticType::I32
-                    | StaticType::U32
-            )
-        {
+        // Same type: no promotion needed (covers primitives, structs, and
+        // non-numeric variants). `promote_type` short-circuits identical names
+        // as well, but this keeps struct/non-numeric identities exact.
+        if left == right {
             return left.clone();
         }
 
         match (left.primitive_numeric(), right.primitive_numeric()) {
-            (Some(l), Some(r)) => primitive_numeric_to_static(l.promote(r)),
+            (Some(l), Some(r)) => Self::promote_primitive_pair(l, r),
             (Some(_), None) => left.clone(),
             (None, Some(_)) => right.clone(),
             _ => StaticType::Any,
         }
+    }
+
+    /// Promote a pair of primitive numerics through the shared string
+    /// `promote_type` path (Issue #9351), preserving upstream narrow-int result
+    /// kinds instead of widening to `Int64`.
+    fn promote_primitive_pair(left: PrimitiveNumeric, right: PrimitiveNumeric) -> StaticType {
+        let promoted = promote_type(left.julia_name(), right.julia_name());
+        PrimitiveNumeric::from_julia_name(&promoted)
+            .map(StaticType::from_primitive_numeric)
+            .unwrap_or(StaticType::Any)
+    }
+
+    fn promote_bare_complex_with_numeric(
+        left: &StaticType,
+        right: &StaticType,
+    ) -> Option<StaticType> {
+        match (left, right) {
+            (
+                StaticType::Struct {
+                    name: bare_name, ..
+                },
+                concrete @ StaticType::Struct {
+                    name: concrete_name,
+                    ..
+                },
+            ) if Self::is_bare_complex_name(bare_name)
+                && StaticType::complex_param_type_from_name(concrete_name).is_some() =>
+            {
+                Some(concrete.clone())
+            }
+            (
+                concrete @ StaticType::Struct {
+                    name: concrete_name,
+                    ..
+                },
+                StaticType::Struct {
+                    name: bare_name, ..
+                },
+            ) if StaticType::complex_param_type_from_name(concrete_name).is_some()
+                && Self::is_bare_complex_name(bare_name) =>
+            {
+                Some(concrete.clone())
+            }
+            (complex @ StaticType::Struct { name, .. }, numeric)
+                if Self::is_bare_complex_name(name) =>
+            {
+                Self::complex_type_for_numeric(numeric).or_else(|| Some(complex.clone()))
+            }
+            (numeric, complex @ StaticType::Struct { name, .. })
+                if Self::is_bare_complex_name(name) =>
+            {
+                Self::complex_type_for_numeric(numeric).or_else(|| Some(complex.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn is_bare_complex_name(name: &str) -> bool {
+        name == "Complex"
+    }
+
+    fn complex_type_for_numeric(numeric: &StaticType) -> Option<StaticType> {
+        let param = numeric.primitive_numeric()?.julia_name();
+        Some(StaticType::Struct {
+            type_id: 0,
+            name: format!("Complex{{{param}}}"),
+        })
     }
 
     /// Get common integer type for integer division and modulo.
@@ -160,6 +230,12 @@ impl TypeInferenceEngine {
     /// Unify two types (alias for join_types with promotion).
     ///
     /// `Any` is absorbing: unify(Any, T) = Any. (Issue #3461)
+    ///
+    /// Numeric pairs are delegated to `join_types` → `numeric_promote`, which
+    /// routes through the shared `promote_type` path. The previous hardcoded
+    /// mixed-pair table (I32/I64/F32/F64 only) was an independent promotion
+    /// table that duplicated — and could drift from — that shared path
+    /// (Issue #9351); it is removed in favour of the single converged route.
     pub fn unify_types(&self, t1: &StaticType, t2: &StaticType) -> StaticType {
         if t1 == t2 {
             return t1.clone();
@@ -167,29 +243,46 @@ impl TypeInferenceEngine {
 
         match (t1, t2) {
             (StaticType::Any, _) | (_, StaticType::Any) => StaticType::Any,
-            (StaticType::I64, StaticType::F64) | (StaticType::F64, StaticType::I64) => {
-                StaticType::F64
-            }
-            (StaticType::I32, StaticType::F64) | (StaticType::F64, StaticType::I32) => {
-                StaticType::F64
-            }
-            (StaticType::I32, StaticType::F32) | (StaticType::F32, StaticType::I32) => {
-                StaticType::F32
-            }
-            (StaticType::I64, StaticType::F32) | (StaticType::F32, StaticType::I64) => {
-                StaticType::F32
-            }
-            (StaticType::I64, StaticType::I32) | (StaticType::I32, StaticType::I64) => {
-                StaticType::I64
-            }
-            (StaticType::F64, StaticType::F32) | (StaticType::F32, StaticType::F64) => {
-                StaticType::F64
-            }
             _ => self.join_types(t1, t2),
         }
     }
 }
 
-fn primitive_numeric_to_static(kind: PrimitiveNumeric) -> StaticType {
-    StaticType::from_primitive_numeric(kind)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bare_complex() -> StaticType {
+        StaticType::Struct {
+            type_id: 0,
+            name: "Complex".to_string(),
+        }
+    }
+
+    fn complex_type(param: &str) -> StaticType {
+        StaticType::Struct {
+            type_id: 0,
+            name: format!("Complex{{{param}}}"),
+        }
+    }
+
+    #[test]
+    fn bare_complex_numeric_promotion_uses_shared_numeric_taxonomy_9909() {
+        let engine = TypeInferenceEngine::new();
+        for (numeric, param) in [
+            (StaticType::Bool, "Bool"),
+            (StaticType::I128, "Int128"),
+            (StaticType::U128, "UInt128"),
+            (StaticType::F16, "Float16"),
+        ] {
+            assert_eq!(
+                engine.numeric_promote(&bare_complex(), &numeric),
+                complex_type(param)
+            );
+            assert_eq!(
+                engine.numeric_promote(&numeric, &bare_complex()),
+                complex_type(param)
+            );
+        }
+    }
 }

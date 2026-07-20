@@ -3,14 +3,14 @@
 
 function _arraymath_check_same_shape(A::Vector, B::Vector)
     if length(A) != length(B)
-        error("DimensionMismatch: arrays could not be broadcast to a common size")
+        throw(DimensionMismatch("arrays could not be broadcast to a common size"))
     end
     return nothing
 end
 
 function _arraymath_check_same_shape(A::Matrix, B::Matrix)
     if size(A, 1) != size(B, 1) || size(A, 2) != size(B, 2)
-        error("DimensionMismatch: arrays could not be broadcast to a common size")
+        throw(DimensionMismatch("arrays could not be broadcast to a common size"))
     end
     return nothing
 end

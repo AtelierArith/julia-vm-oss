@@ -69,3 +69,9 @@ name = "reduce_prod_func"
 file = "prod_func.jl"
 expected = true
 description = "prod(f, A) - function argument form (Issue #2000)"
+
+[[tests]]
+name = "reduce_non_indexable_iterators_8816"
+file = "non_indexable_iterators_8816.jl"
+expected = true
+description = "sum/prod/minimum/maximum/count over non-indexable iterators such as Dict values and Set use iterate instead of getindex (Issue #8816)"

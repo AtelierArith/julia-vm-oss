@@ -1,10 +1,8 @@
-# Issue #7971: the `Bool(x)` numeric constructor is now callable. Previously it
-# errored with "Unknown function: Bool" — `Bool` was registered as a type but had
-# no constructor builtin (unlike `Int8(x)`, `Float64(x)`, ...).
+# Issue #7971: the `Bool(x)` numeric constructor is callable. Issue #8768 moved
+# the implementation back to Pure Julia instead of keeping a Rust builtin.
 #
 # It mirrors upstream `Bool(x::Real) = x==0 ? false : x==1 ? true :
-# throw(InexactError(:Bool, Bool, x))`, routing through the range-checked
-# `convert(Bool, x)` (Issue #7970), so only 0/1 succeed.
+# throw(InexactError(:Bool, Bool, x))`, so only 0/1 succeed.
 using Test
 
 @testset "Issue #7971: Bool(x) constructor" begin

@@ -1,5 +1,8 @@
 //! Type definition parsers (struct, abstract, primitive, module)
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::ParseResult;
 use crate::node_kind::NodeKind;
@@ -22,7 +25,7 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::KwStruct)?;
 
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_like_name()?;
 
         // Optional type parameters
         let type_params = if self.check(&Token::LBrace) {
@@ -89,18 +92,74 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Parse single type parameter: T or T <: Bound
+    /// Parse single type parameter: T, T <: Bound, <:Bound, or a type
+    /// expression used in method heads such as Foo{T, Bar{T}}.
     pub(crate) fn parse_type_parameter(&mut self) -> ParseResult<CstNode> {
-        let name = self.parse_identifier()?;
+        if self.check(&Token::Subtype) || self.check(&Token::Supertype) {
+            let op = self.advance_checked("Subtype/Supertype token already matched above")?;
+            let bound = self.parse_type_expression()?;
+            let span = self.source_map.span(op.span.start, bound.span.end);
+            let kind = if op.token == Token::Subtype {
+                NodeKind::SubtypeConstraint
+            } else {
+                NodeKind::SupertypeConstraint
+            };
+            let constraint = CstNode::with_children(kind, span, vec![bound]);
+            return Ok(CstNode::with_children(
+                NodeKind::TypeParameter,
+                span,
+                vec![constraint],
+            ));
+        }
+
+        let name = self.parse_type_expression()?;
         let start = name.span.start;
         let mut children = vec![name];
 
-        if self.check(&Token::Subtype) {
+        if self.check(&Token::Subtype) || self.check(&Token::Supertype) {
+            let first_is_subtype = self.check(&Token::Subtype);
             self.advance();
-            children.push(self.parse_type_expression()?);
+            let second = self.parse_type_expression()?;
+
+            // Double-bounded parameter (Issue #10644): `Lo <: T <: Hi` (and
+            // the mirrored `Hi >: T >: Lo`), matching upstream's comparison
+            // chain for struct/abstract parameters. Emit the same
+            // `SubtypeConstraint` with three children `[name, upper, lower]`
+            // that the `where`-clause double bound produces (Issue #5051),
+            // so lowering recovers both bounds through one shape.
+            let chains = if first_is_subtype {
+                self.check(&Token::Subtype)
+            } else {
+                self.check(&Token::Supertype)
+            };
+            if chains {
+                self.advance();
+                let third = self.parse_type_expression()?;
+                let span = self.source_map.span(start, third.span.end);
+                let first = children.remove(0);
+                let (name, upper, lower) = if first_is_subtype {
+                    // Lo <: T <: Hi
+                    (second, third, first)
+                } else {
+                    // Hi >: T >: Lo
+                    (second, first, third)
+                };
+                let constraint = CstNode::with_children(
+                    NodeKind::SubtypeConstraint,
+                    span,
+                    vec![name, upper, lower],
+                );
+                return Ok(CstNode::with_children(
+                    NodeKind::TypeParameter,
+                    span,
+                    vec![constraint],
+                ));
+            }
+
+            children.push(second);
         }
 
-        let end = children.last().unwrap().span.end;
+        let end = self.last_span_end(&children, "type parameter always pushes `name` above")?;
         let span = self.source_map.span(start, end);
         Ok(CstNode::with_children(
             NodeKind::TypeParameter,
@@ -118,7 +177,7 @@ impl<'a> Parser<'a> {
         // keyword half of `abstract type` here.
         self.expect_contextual_keyword("type")?;
 
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_like_name()?;
 
         // Optional type parameters: abstract type Foo{T} end
         let type_params = if self.check(&Token::LBrace) {
@@ -134,6 +193,10 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+
+        while self.check(&Token::Newline) || self.check(&Token::Semicolon) {
+            self.advance();
+        }
 
         let end_token = self.expect(Token::KwEnd)?;
 
@@ -162,7 +225,13 @@ impl<'a> Parser<'a> {
         // keyword half of `primitive type` here.
         self.expect_contextual_keyword("type")?;
 
-        let name = self.parse_identifier()?;
+        // Primitive type names can be parametric or interpolated in generated
+        // code, e.g. `primitive type T{N} 8 end` and
+        // `primitive type $(esc(:T)) $(bits) end`.
+        let saved_space_sensitive = std::mem::replace(&mut self.macro_arg_space_sensitive, true);
+        let name = self.parse_type_expression();
+        self.macro_arg_space_sensitive = saved_space_sensitive;
+        let name = name?;
 
         // Optional supertype
         let supertype = if self.check(&Token::Subtype) {
@@ -172,8 +241,14 @@ impl<'a> Parser<'a> {
             None
         };
 
-        // Bit size (an integer literal)
-        let bits = self.parse_expression()?;
+        // Bit size. Parenthesized constant expressions such as `(18 * 8)` must
+        // stop at the closing paren and leave the following `end` as the
+        // primitive declaration terminator (Issue #9050).
+        let bits = if self.check(&Token::LParen) {
+            self.parse_parenthesized_or_tuple()?
+        } else {
+            self.parse_expression()?
+        };
 
         let end_token = self.expect(Token::KwEnd)?;
 
@@ -202,7 +277,7 @@ impl<'a> Parser<'a> {
             self.expect(Token::KwModule)?;
         }
 
-        let name = self.parse_identifier()?;
+        let name = self.parse_identifier_like_name()?;
 
         while self.check(&Token::Newline) || self.check(&Token::Semicolon) {
             self.advance();

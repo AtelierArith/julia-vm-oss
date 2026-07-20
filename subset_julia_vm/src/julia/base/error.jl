@@ -88,6 +88,27 @@ struct StringIndexError <: Exception
 end
 
 # =============================================================================
+# FieldError Exception
+# =============================================================================
+# Defined in julia/base/boot.jl (Julia 1.12+)
+
+"""
+    FieldError(type::DataType, field::Symbol)
+
+An attempt was made to access a field `field` that does not exist in `type`.
+
+# Examples
+```julia
+julia> (x=1, y=2).z
+ERROR: FieldError: type NamedTuple has no field `z`, available fields: `x`, `y`
+```
+"""
+struct FieldError <: Exception
+    type::DataType
+    field::Symbol
+end
+
+# =============================================================================
 # BoundsError Exception
 # =============================================================================
 # Defined in julia/base/boot.jl
@@ -106,7 +127,9 @@ ERROR: BoundsError: attempt to access 7-element Vector{Float64} at index [8]
 """
 struct BoundsError <: Exception
     a
-    i::Int64
+    # Untyped like upstream boot.jl: the index may be an Int, a range
+    # (`checkbounds(s, 2:4)`, Issue #10958), or a tuple of indices.
+    i
 end
 
 # Constructor with just index
@@ -240,9 +263,9 @@ DomainError(val) = DomainError(val, "")
 # Defined in julia/base/boot.jl
 
 """
-    InexactError(name::Symbol, T, val)
+    InexactError(name::Symbol, args...)
 
-Cannot exactly convert `val` to type `T` in a method of function `name`.
+Cannot exactly convert in a method of function `name`.
 
 # Examples
 ```julia
@@ -252,9 +275,10 @@ ERROR: InexactError: Int64(3.14)
 """
 struct InexactError <: Exception
     func::Symbol
-    T
-    val
+    args
 end
+
+InexactError(name::Symbol, args...) = InexactError(name, args)
 
 # =============================================================================
 # TypeError Exception
@@ -344,9 +368,15 @@ end
 # Defined in julia/base/boot.jl
 
 """
-    UndefVarError(var::Symbol)
+    UndefVarError(var::Symbol, [scope])
 
 A symbol in the current scope is not defined.
+
+`scope` (Issue #10318) is the scope the binding was looked up in — a module
+path string such as `Main.SomeModule` (or `nothing` for a bare local/global
+lookup). Upstream Julia 1.12 carries the scope as a `Module`/`Symbol`; the
+subset uses a string (or `nothing`) rendered by `showerror` as
+`not defined in \`<scope>\``.
 
 # Examples
 ```julia
@@ -356,7 +386,10 @@ ERROR: UndefVarError: `a` not defined in `Main`
 """
 struct UndefVarError <: Exception
     var::Symbol
+    scope
 end
+# Bare lookup with no known scope (matches the 1-arg upstream constructor).
+UndefVarError(var::Symbol) = UndefVarError(var, nothing)
 
 # =============================================================================
 # MethodError Exception
@@ -388,6 +421,33 @@ end
 # =============================================================================
 # Defined in julia/base/meta.jl
 
+# Structured parser detail types carried by ParseError.detail. Upstream owns
+# these under Base.JuliaSyntax; sjulia preserves the JuliaSyntax owner here,
+# while the independently tracked Base-qualified submodule binding gap remains
+# Issue #11614.
+module JuliaSyntax
+struct SourceFile
+    code::AbstractString
+    byte_offset::Int
+    filename
+    first_line::Int
+    line_starts::Vector{Int}
+end
+
+struct Diagnostic
+    first_byte::Int
+    last_byte::Int
+    level::Symbol
+    message::String
+end
+
+struct ParseError
+    source::SourceFile
+    diagnostics::Vector{Diagnostic}
+    incomplete_tag::Symbol
+end
+end
+
 """
     ParseError(msg)
     ParseError(msg, detail)
@@ -403,12 +463,15 @@ ERROR: ParseError:
 #  └ ── Expected `end`
 ```
 
-Note: In official Julia, the `detail` field provides additional parsing context.
-Here we use a simplified version where `detail` defaults to `nothing`.
+The `detail` field carries structured `JuliaSyntax` source and diagnostics for
+parser-raised errors. The one-argument constructor retains Julia's documented
+`nothing` default for manually constructed errors.
 """
 struct ParseError <: Exception
     msg::AbstractString
     detail
+    # Workaround: keep the Base-owned two-field constructor explicit so a same-leaf JuliaSyntax.ParseError does not hide the cached default. (Issue #10445)
+    ParseError(msg::AbstractString, detail) = new(msg, detail)
 end
 ParseError(msg::AbstractString) = ParseError(msg, nothing)
 
@@ -891,27 +954,26 @@ function retry(f; delays=ExponentialBackOff(), check=nothing)
 end
 
 # =============================================================================
-# Backtrace Functions (Stub Implementations)
+# Backtrace Functions
 # =============================================================================
-# These functions require deep VM integration to inspect the call stack.
-# They are provided as stubs that return empty results, allowing code that
-# uses them to compile and run without errors.
+# SubsetJuliaVM exposes VM frame snapshots as Vector{String}. This is not yet
+# Julia's StackFrame object model, but it preserves function and source-line
+# information for user code that inspects non-empty backtraces.
 
 """
     backtrace()
 
 Get a backtrace object for the current program point.
 
-Note: In SubsetJuliaVM, this returns an empty array as backtrace inspection
-is not yet implemented.
+Note: In SubsetJuliaVM, this returns a vector of rendered VM stack frames.
 
 # Examples
 ```julia
-bt = backtrace()  # Returns empty array
+bt = backtrace()
 ```
 """
 function backtrace()
-    return Int64[]  # Stub: return empty backtrace
+    return _sjulia_backtrace()
 end
 
 """
@@ -919,20 +981,20 @@ end
 
 Get the backtrace of the current exception, for use within `catch` blocks.
 
-Note: In SubsetJuliaVM, this returns an empty array as backtrace inspection
-is not yet implemented.
+Note: In SubsetJuliaVM, this returns the rendered VM stack frames captured for
+the current exception.
 
 # Examples
 ```julia
 try
     error("oops")
 catch
-    bt = catch_backtrace()  # Returns empty array
+    bt = catch_backtrace()
 end
 ```
 """
 function catch_backtrace()
-    return Int64[]  # Stub: return empty backtrace
+    return _sjulia_catch_backtrace()
 end
 
 """
@@ -965,16 +1027,15 @@ end
 
 Get a stack trace in a more user-friendly format than `backtrace()`.
 
-Note: In SubsetJuliaVM, this returns an empty array as stack trace
-inspection is not yet implemented.
+Note: In SubsetJuliaVM, this returns a vector of rendered VM stack frames.
 
 # Examples
 ```julia
-st = stacktrace()  # Returns empty array
+st = stacktrace()
 ```
 """
 function stacktrace()
-    return String[]  # Stub: return empty stacktrace
+    return _sjulia_stacktrace()
 end
 
 """
@@ -982,9 +1043,9 @@ end
 
 Returns stack frame information from the given backtrace.
 
-Note: In SubsetJuliaVM, this returns an empty array as stack trace
-inspection is not yet implemented.
+Note: In SubsetJuliaVM, backtrace objects are already rendered frame strings,
+so this returns `trace` unchanged.
 """
 function stacktrace(trace)
-    return String[]  # Stub: return empty stacktrace
+    return _sjulia_stacktrace(trace)
 end

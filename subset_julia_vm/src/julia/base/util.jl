@@ -12,33 +12,33 @@
 # due to SubsetJuliaVM limitations (Issue #1443). Functions generate
 # escape sequences inline instead.
 
-const _ESC = string(Char(27))
-const _ANSI_RESET = string(Char(27), "[0m")
-const _ANSI_BOLD = string(Char(27), "[1m")
+const _ESC = string(_int_to_char(27))
+const _ANSI_RESET = string(_int_to_char(27), "[0m")
+const _ANSI_BOLD = string(_int_to_char(27), "[1m")
 
 # Pre-computed color codes (for documentation; not used in functions)
-const _ANSI_BLACK = string(Char(27), "[30m")
-const _ANSI_RED = string(Char(27), "[31m")
-const _ANSI_GREEN = string(Char(27), "[32m")
-const _ANSI_YELLOW = string(Char(27), "[33m")
-const _ANSI_BLUE = string(Char(27), "[34m")
-const _ANSI_MAGENTA = string(Char(27), "[35m")
-const _ANSI_CYAN = string(Char(27), "[36m")
-const _ANSI_WHITE = string(Char(27), "[37m")
-const _ANSI_LIGHT_BLACK = string(Char(27), "[90m")
-const _ANSI_LIGHT_RED = string(Char(27), "[91m")
-const _ANSI_LIGHT_GREEN = string(Char(27), "[92m")
-const _ANSI_LIGHT_YELLOW = string(Char(27), "[93m")
-const _ANSI_LIGHT_BLUE = string(Char(27), "[94m")
-const _ANSI_LIGHT_MAGENTA = string(Char(27), "[95m")
-const _ANSI_LIGHT_CYAN = string(Char(27), "[96m")
-const _ANSI_LIGHT_WHITE = string(Char(27), "[97m")
-const _ANSI_DEFAULT = string(Char(27), "[39m")
+const _ANSI_BLACK = string(_int_to_char(27), "[30m")
+const _ANSI_RED = string(_int_to_char(27), "[31m")
+const _ANSI_GREEN = string(_int_to_char(27), "[32m")
+const _ANSI_YELLOW = string(_int_to_char(27), "[33m")
+const _ANSI_BLUE = string(_int_to_char(27), "[34m")
+const _ANSI_MAGENTA = string(_int_to_char(27), "[35m")
+const _ANSI_CYAN = string(_int_to_char(27), "[36m")
+const _ANSI_WHITE = string(_int_to_char(27), "[37m")
+const _ANSI_LIGHT_BLACK = string(_int_to_char(27), "[90m")
+const _ANSI_LIGHT_RED = string(_int_to_char(27), "[91m")
+const _ANSI_LIGHT_GREEN = string(_int_to_char(27), "[92m")
+const _ANSI_LIGHT_YELLOW = string(_int_to_char(27), "[93m")
+const _ANSI_LIGHT_BLUE = string(_int_to_char(27), "[94m")
+const _ANSI_LIGHT_MAGENTA = string(_int_to_char(27), "[95m")
+const _ANSI_LIGHT_CYAN = string(_int_to_char(27), "[96m")
+const _ANSI_LIGHT_WHITE = string(_int_to_char(27), "[97m")
+const _ANSI_DEFAULT = string(_int_to_char(27), "[39m")
 
 # Helper function to get color code from symbol
 # Note: Generates escape sequences inline due to global const limitation
 function _get_ansi_color(color::Symbol)
-    esc = Char(27)
+    esc = _int_to_char(27)
     if color === :black
         return string(esc, "[30m")
     elseif color === :red
@@ -97,7 +97,7 @@ end
 # Note: Using separate print calls due to VM limitation with multi-arg print
 # where the first arg contains escape sequences
 function printstyled(text, color::Symbol)
-    esc = Char(27)
+    esc = _int_to_char(27)
     code = _get_ansi_color(color)
     print(code)
     print(text)
@@ -107,7 +107,7 @@ end
 
 # With bold: printstyled(text, color, bold)
 function printstyled(text, color::Symbol, bold::Bool)
-    esc = Char(27)
+    esc = _int_to_char(27)
     code = _get_ansi_color(color)
     if bold
         code = code * string(esc, "[1m")

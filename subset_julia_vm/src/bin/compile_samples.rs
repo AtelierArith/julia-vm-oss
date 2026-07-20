@@ -190,6 +190,8 @@ println(grid[12, 25])"##,
     for (i, (name, code)) in samples.iter().enumerate() {
         match parser.parse(code) {
             Ok(outcome) => {
+                // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+                subset_julia_vm::macro_runtime::install();
                 let mut lowering = Lowering::new(code);
                 match lowering.lower(outcome) {
                     Ok(program) => {

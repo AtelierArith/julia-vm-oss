@@ -1,0 +1,58 @@
+[package]
+name = "subset_julia_vm_compile"
+version = "0.10.3"
+edition = "2021"
+rust-version.workspace = true
+license = "MIT OR Apache-2.0"
+
+[features]
+default = []
+profiling = []
+
+[dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+subset_julia_vm_ir = { path = "../subset_julia_vm_ir" }
+subset_julia_vm_lowering = { path = "../subset_julia_vm_lowering" }
+subset_julia_vm_bytecode = { path = "../subset_julia_vm_bytecode" }
+subset_julia_vm_parser = { path = "../subset_julia_vm_parser" }
+subset_julia_vm_types = { path = "../subset_julia_vm_types" }
+sha2 = "0.10"
+once_cell = "1.19"
+toml = "0.9"
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+smallvec = "1"
+regex = "1.10"
+half = { version = "2.4", default-features = false, features = ["serde"] }
+bincode = "1"
+postcard = { version = "1", features = ["use-std"] }
+strum = { version = "0.27", features = ["derive"] }
+astro-float = "0.9"
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
+
+[build-dependencies]
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+subset_julia_vm = { path = "../subset_julia_vm" }
+
+[lints.rust]
+# The extraction widens compiler-internal visibility across the integration
+# crate boundary; these are not user-facing API types.
+missing_debug_implementations = "allow"
+
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+only_used_in_recursion = "allow"
+large_enum_variant = "allow"
+wrong_self_convention = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+items_after_test_module = "allow"
+cast_sign_loss = "warn"

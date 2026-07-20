@@ -1,6 +1,6 @@
 # Issue #3908 - exercise the routed PushElem / FinalizeArray / PushElemTyped /
 # FinalizeArrayTyped / LoadArray / StoreArray paths in
-# subset_julia_vm/src/vm/exec/array_basic.rs after their native-Array
+# subset_julia_vm_vm/src/vm/exec/array_basic.rs after their native-Array
 # destructure sites were centralized through the file-local
 # `legacy_array_value_mut_ref` (PushElem / FinalizeArray / PushElemTyped /
 # FinalizeArrayTyped), `legacy_array_value_into` (LoadArray's four owned-value

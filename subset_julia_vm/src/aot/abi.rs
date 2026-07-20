@@ -9,7 +9,7 @@ use crate::aot::types::StaticType;
 
 /// ABI contract version expected by generated Rust when linking
 /// `subset_julia_vm_runtime` (Issue #6952).
-pub const AOT_RUNTIME_ABI_VERSION: usize = 1;
+pub const AOT_RUNTIME_ABI_VERSION: usize = 2;
 
 /// Backend-neutral representation class for an AoT value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

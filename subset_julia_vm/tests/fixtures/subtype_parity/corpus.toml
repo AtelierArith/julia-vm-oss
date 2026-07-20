@@ -1,0 +1,301 @@
+definitions = """
+abstract type ParityAnimal8439 end
+abstract type ParityMammal8439 <: ParityAnimal8439 end
+struct ParityDog8439 <: ParityMammal8439 end
+struct ParityRock8439 end
+# Issue #8560: user-declared subtypes of built-in abstract families.
+struct ParitySet8560{T} <: AbstractSet{T} end
+struct ParityIO8560 <: IO end
+struct ParityFunctor8560 <: Function end
+abstract type ParityCallable8560 <: Function end
+struct ParityDeepFunctor8560 <: ParityCallable8560 end
+struct ParityStr8560 <: AbstractString end
+struct ParityChar8560 <: AbstractChar end
+struct ParityRange8560 <: AbstractRange{Int} end
+struct ParityUnitRange8560 <: AbstractUnitRange{Int} end
+# Distributions-style parametric abstract chain.
+abstract type ParitySampleable8560{F} end
+abstract type ParityDistribution8560{F} <: ParitySampleable8560{F} end
+struct ParityNormal8560 <: ParityDistribution8560{Int} end
+# Parametric abstract chain that pins the array rank.
+abstract type ParityContainer8560{T} <: AbstractArray{T,2} end
+struct ParityMatrixLike8560{T} <: ParityContainer8560{T} end
+# Issue #10460: dependent bounds must remain structural in the generated
+# upstream/sjulia subtype comparison below.
+struct ParityDependent10460{A,B<:A} end
+"""
+
+[[cases]]
+name = "int64_is_integer"
+left = "Int64"
+right = "Integer"
+expected = true
+
+[[cases]]
+name = "float64_is_not_integer"
+left = "Float64"
+right = "Integer"
+expected = false
+
+[[cases]]
+name = "vector_int64_is_abstract_vector_covariant_real"
+left = "Vector{Int64}"
+right = "AbstractVector{<:Real}"
+expected = true
+
+[[cases]]
+name = "vector_int64_is_not_invariant_abstract_vector_real"
+left = "Vector{Int64}"
+right = "AbstractVector{Real}"
+expected = false
+
+[[cases]]
+name = "type_int64_is_type_of_subtype_real"
+left = "Type{Int64}"
+right = "Type{<:Real}"
+expected = true
+
+[[cases]]
+name = "type_int64_is_not_type_integer"
+left = "Type{Int64}"
+right = "Type{Integer}"
+expected = false
+
+[[cases]]
+name = "tuple_type_int64_is_not_tuple_type_union_nothing_int64"
+left = "Tuple{Type{Int64}}"
+right = "Tuple{Type{Union{Nothing,Int64}}}"
+expected = false
+
+[[cases]]
+name = "tuple_vector_int64_is_not_tuple_vector_union_nothing_int64"
+left = "Tuple{Vector{Int64}}"
+right = "Tuple{Vector{Union{Nothing,Int64}}}"
+expected = false
+
+[[cases]]
+name = "tuple_type_union_nothing_int64_exact"
+left = "Tuple{Type{Union{Nothing,Int64}}}"
+right = "Tuple{Type{Union{Nothing,Int64}}}"
+expected = true
+
+[[cases]]
+name = "tuple_vector_union_nothing_int64_exact"
+left = "Tuple{Vector{Union{Nothing,Int64}}}"
+right = "Tuple{Vector{Union{Nothing,Int64}}}"
+expected = true
+
+[[cases]]
+name = "tuple_covariance"
+left = "Tuple{Int64, String}"
+right = "Tuple{Real, Any}"
+expected = true
+
+[[cases]]
+name = "tuple_string_is_not_tuple_real"
+left = "Tuple{String}"
+right = "Tuple{Real}"
+expected = false
+
+# ---------------------------------------------------------------------------
+# Issue #10460: structured UnionAll / TypeVar differential corpus.
+# ---------------------------------------------------------------------------
+
+[[cases]]
+name = "alpha_renamed_unionall_equivalent"
+left = "Tuple{T,Vector{T}} where T<:Real"
+right = "Tuple{S,Vector{S}} where S<:Real"
+expected = true
+
+[[cases]]
+name = "dependent_bound_accepts_ordered_parameters"
+left = "ParityDependent10460{Int64,Int64}"
+right = "ParityDependent10460{A,B} where {A<:Real,B<:A}"
+expected = true
+
+[[cases]]
+name = "dependent_bound_rejects_inverted_parameters"
+left = "ParityDependent10460{Real,Int64}"
+right = "ParityDependent10460{A,B} where {A<:Integer,B<:A}"
+expected = false
+
+[[cases]]
+name = "lower_bound_unionall_accepts_supertype"
+left = "Vector{Real}"
+right = "Vector{T} where T>:Int64"
+expected = true
+
+[[cases]]
+name = "lower_bound_unionall_rejects_unrelated_type"
+left = "Vector{String}"
+right = "Vector{T} where T>:Int64"
+expected = false
+
+[[cases]]
+name = "value_parameter_rank_is_preserved"
+left = "Array{Int64,2}"
+right = "Array{T,N} where {T<:Real,N}"
+expected = true
+
+[[cases]]
+name = "value_parameter_rank_is_invariant"
+left = "Array{Int64,2}"
+right = "Array{Int64,1}"
+expected = false
+
+[[cases]]
+name = "user_struct_transitive_abstract_parent"
+left = "ParityDog8439"
+right = "ParityAnimal8439"
+expected = true
+
+[[cases]]
+name = "unrelated_user_struct_not_abstract_parent"
+left = "ParityRock8439"
+right = "ParityAnimal8439"
+expected = false
+
+# ---------------------------------------------------------------------------
+# Issue #8560: abstract-family membership derived from DECLARED supertypes.
+# User structs / abstracts declared `<:` a built-in abstract family must agree
+# with upstream on `<:` for the family itself, its ancestors, and its
+# non-ancestors (directional lattice preserved).
+# ---------------------------------------------------------------------------
+
+[[cases]]
+name = "user_set_is_abstract_set"
+left = "ParitySet8560"
+right = "AbstractSet"
+expected = true
+
+[[cases]]
+name = "user_set_parametric_is_abstract_set"
+left = "ParitySet8560{Int}"
+right = "AbstractSet{Int}"
+expected = true
+
+[[cases]]
+name = "user_set_is_not_abstract_dict"
+left = "ParitySet8560"
+right = "AbstractDict"
+expected = false
+
+[[cases]]
+name = "user_io_is_io"
+left = "ParityIO8560"
+right = "IO"
+expected = true
+
+[[cases]]
+name = "user_io_is_not_function"
+left = "ParityIO8560"
+right = "Function"
+expected = false
+
+[[cases]]
+name = "functor_struct_is_function"
+left = "ParityFunctor8560"
+right = "Function"
+expected = true
+
+[[cases]]
+name = "functor_via_user_abstract_is_function"
+left = "ParityDeepFunctor8560"
+right = "Function"
+expected = true
+
+[[cases]]
+name = "base_fix1_is_function"
+left = "Base.Fix1"
+right = "Function"
+expected = true
+
+[[cases]]
+name = "user_string_is_abstract_string"
+left = "ParityStr8560"
+right = "AbstractString"
+expected = true
+
+[[cases]]
+name = "user_string_is_not_abstract_char"
+left = "ParityStr8560"
+right = "AbstractChar"
+expected = false
+
+[[cases]]
+name = "user_char_is_abstract_char"
+left = "ParityChar8560"
+right = "AbstractChar"
+expected = true
+
+[[cases]]
+name = "user_range_is_abstract_range"
+left = "ParityRange8560"
+right = "AbstractRange"
+expected = true
+
+[[cases]]
+name = "user_range_is_abstract_vector"
+left = "ParityRange8560"
+right = "AbstractVector"
+expected = true
+
+[[cases]]
+name = "user_range_is_abstract_array"
+left = "ParityRange8560"
+right = "AbstractArray"
+expected = true
+
+[[cases]]
+name = "user_range_is_not_abstract_unit_range"
+left = "ParityRange8560"
+right = "AbstractUnitRange"
+expected = false
+
+[[cases]]
+name = "user_range_is_not_dense_array"
+left = "ParityRange8560"
+right = "DenseArray"
+expected = false
+
+[[cases]]
+name = "user_unit_range_is_abstract_unit_range"
+left = "ParityUnitRange8560"
+right = "AbstractUnitRange"
+expected = true
+
+[[cases]]
+name = "user_unit_range_is_abstract_range"
+left = "ParityUnitRange8560"
+right = "AbstractRange"
+expected = true
+
+[[cases]]
+name = "distributions_style_chain_reaches_grandparent"
+left = "ParityNormal8560"
+right = "ParitySampleable8560"
+expected = true
+
+[[cases]]
+name = "distributions_style_chain_parametric_parent"
+left = "ParityNormal8560"
+right = "ParityDistribution8560"
+expected = true
+
+[[cases]]
+name = "parametric_abstract_chain_to_abstract_array"
+left = "ParityMatrixLike8560{Float64}"
+right = "AbstractArray"
+expected = true
+
+[[cases]]
+name = "parametric_abstract_chain_to_abstract_matrix"
+left = "ParityMatrixLike8560{Float64}"
+right = "AbstractMatrix"
+expected = true
+
+[[cases]]
+name = "parametric_abstract_chain_not_abstract_vector"
+left = "ParityMatrixLike8560{Float64}"
+right = "AbstractVector"
+expected = false

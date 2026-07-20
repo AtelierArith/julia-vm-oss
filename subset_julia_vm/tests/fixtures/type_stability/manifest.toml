@@ -37,10 +37,16 @@ description = "End-to-end type narrowing: compound &&/||, negation, nested, earl
 name = "type_stability_diagnostic_parity_4291"
 file = "diagnostic_parity_4291.jl"
 expected = true
-description = "Type-stability diagnostic parity source cases for arrays, tuples, generators, closures, and dispatch (Issue #4291)"
+description = "Type-stability diagnostic parity source cases for arrays, tuples, generators, closures, and dispatch (Issues #4291, #9990)"
 
 [[tests]]
 name = "type_stability_tuple_element_sharpening"
 file = "tuple_element_sharpening.jl"
 expected = true
 description = "Tuple/NamedTuple element-type sharpening at constant index, destructuring, and first/last (Issue #5183)"
+
+[[tests]]
+name = "type_stability_widen_union_same_wrapper"
+file = "widen_union_same_wrapper.jl"
+expected = true
+description = "widen_union should widen same-container unions (Array, Set, Dict) to their joined element type instead of Top (Issue #9110)"

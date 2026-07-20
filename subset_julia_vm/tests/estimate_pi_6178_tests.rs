@@ -1,10 +1,11 @@
 use std::collections::HashSet;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
 use subset_julia_vm::vm::specialize::specialize_function;
-use subset_julia_vm::vm::{CompiledProgram, FunctionInfo, Instr, Value, ValueType, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::{CompiledProgram, FunctionInfo, Instr, Value, ValueType};
 
 fn compile_source(source: &str) -> CompiledProgram {
     let mut parser = Parser::new().expect("create parser");

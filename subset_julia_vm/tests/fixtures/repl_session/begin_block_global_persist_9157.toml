@@ -1,0 +1,73 @@
+name = "repl_session_begin_block_global_persist_9157"
+description = "Issue #9157: a top-level begin block's global assignment persists across REPL evals, matching upstream Julia (`begin` introduces no scope). Root cause was NOT begin-specific: a bytecode peephole fusion (`PushI64; StoreSlot; Load...; Return` -> `PushI64(folded)`) dropped the observable store for ANY main-scope variable whose only use was building the tail value of the same eval, not just ones inside begin blocks."
+
+# The exact MWE from the issue report.
+[[steps]]
+name = "begin_block_eval"
+input = """
+begin
+    bz = 5
+    bz + 1
+end
+"""
+success = true
+stdout = ""
+display = "6"
+
+[[steps]]
+name = "begin_block_global_persists"
+input = "bz"
+success = true
+stdout = ""
+display = "5"
+
+# Same bug, no begin block: a plain two-statement eval where the first
+# statement's variable is only read while building the second (tail) statement's
+# return value. This reproduced identically before the fix, confirming the root
+# cause is a general main-frame peephole issue, not begin/LetBlock scoping.
+[[steps]]
+name = "plain_two_statement_eval"
+input = """
+cz = 7
+cz + 1
+"""
+success = true
+stdout = ""
+display = "8"
+
+[[steps]]
+name = "plain_two_statement_global_persists"
+input = "cz"
+success = true
+stdout = ""
+display = "7"
+
+# Guard: `let` still introduces a real scope — a brand-new local it introduces
+# must NOT leak as a module global (mirrors semantics_matrix.toml's
+# let_does_not_overwrite_global, repeated here so this fixture stands alone as
+# a regression test for #9157). The fix scopes its main-store protection to
+# names still bound in `initialized_locals` when compilation finishes, which
+# excludes `let`-locals — so this narrow immediate-return shape is covered.
+# NOTE: a `let`-local whose body contains more than a single immediately
+# tail-returned assignment (e.g. a side-effecting statement in between) can
+# still leak via a separate, pre-existing gap in the REPL's
+# `Vm::get_global`-based persistence, unrelated to this fix — tracked as
+# Issue #9182.
+[[steps]]
+name = "let_block_eval"
+input = """
+let
+    dz = 42
+    dz + 1
+end
+"""
+success = true
+stdout = ""
+display = "43"
+
+[[steps]]
+name = "let_block_local_does_not_leak"
+input = "dz"
+success = false
+stdout = ""
+error_contains = "UndefVarError"

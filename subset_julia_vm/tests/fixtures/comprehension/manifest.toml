@@ -58,7 +58,19 @@ description = "Typed-Any comprehension Any[expr for x in iter] produces a Vector
 name = "comprehension_any_body_fallback_4822"
 file = "any_body_fallback_4822.jl"
 expected = true
-description = "Comprehension whose body has an Any-typed value (convert(Any, x), or any call returning Any) no longer silently coerces to Vector{Float64} via the F64 fallback in compile_comprehension — defaults to Vector{Any} preserving source values (Issue #4822)"
+description = "Comprehension whose body has an Any-typed value (convert(Any, x), or any call returning Any) no longer silently coerces to Vector{Float64}; non-empty results now use the runtime typejoin path to preserve values and narrow to the observed upstream eltype where possible (Issues #4822/#9385)"
+
+[[tests]]
+name = "comprehension_runtime_any_body_typejoin_9385"
+file = "runtime_any_body_typejoin_9385.jl"
+expected = true
+description = "Untyped array comprehensions whose body still infers as Any or a non-numeric Union now materialize through ArrayPushTypejoin, matching collect(generator) and upstream Julia for non-empty runtime values: zero-arg Float32/String bodies narrow to Vector{Float32}/Vector{String}, convert(Any,x) narrows from observed Int values, a conditional body with a constant String result narrows to Vector{String}, numeric heterogeneity typejoins to Real, and irreducible heterogeneity stays Vector{Any} (Issue #9385)."
+
+[[tests]]
+name = "comprehension_empty_runtime_body_eltype_9789"
+file = "empty_runtime_body_eltype_9789.jl"
+expected = true
+description = "Empty array comprehensions and empty collect(generator) preserve the same defensible body eltype as upstream Julia when runtime typejoin has no observed values: zero-arg Float32/String bodies, convert(Any,x), numeric joins to Real, and irreducible Any fallbacks. The same fixture pairs each empty case with its non-empty runtime-typejoin counterpart for prevention coverage (Issues #9789/#9796)."
 
 [[tests]]
 name = "comprehension_multi_2d_matrix_4779"
@@ -101,3 +113,33 @@ name = "comprehension_flatten_vs_cartesian_8014"
 file = "flatten_vs_cartesian_8014.jl"
 expected = true
 description = "A comprehension with two `for` clauses separated by WHITESPACE (`[expr for x in A for y in B]`) is a flattened generator and produces a 1-D Vector (Iterators.flatten semantics); only the comma form `for x in A, y in B` is the cartesian N-D Array. Previously sjulia treated every multi-`for` comprehension as N-D by clause count, so the flatten form was wrongly built as a 2-D Matrix. Lowering now carries the comma-vs-whitespace distinction (MultiComprehension.flatten); the flatten compile path nests iterators outermost-first, re-evaluates inner iterators per outer step (dependent ranges) and skips the reshape. Covers the flatten/comma/three-clause/dependent/mixed/filtered/typed/empty forms. Verified against upstream julia 1.12 (Issue #8014)."
+
+[[tests]]
+name = "comprehension_range_elem_type_9293"
+file = "comprehension_range_elem_type_9293.jl"
+expected = true
+description = "A comprehension over an INLINE range (`[u for u in 0:0.5:6]`) infers the loop-variable element type by joining start/step/stop, not from `start` alone. Previously an integer start pinned the loop var to Int64 while a float step made the runtime elements Float64, so the element store failed with `expected I64, got Float64` (int start + float/Any step). The `Expr::Range` arms of the single-var, cartesian, and flatten comprehension compile paths now route a float-anywhere range to its float element type and an `Any`-inferred step to the runtime-typed (typejoin) path, mirroring the Stmt::For needs_typed_range gate fixed for Issue #9291. Guards the three failing MWEs plus the three already-working control cases, integer fast-path preservation (`1:n`, `1:2:10`), Float32 single-width, and the cartesian/flatten forms. Verified against upstream julia 1.12 (Issue #9293)."
+
+[[tests]]
+name = "comprehension_runtime_float_bound_9321"
+file = "comprehension_runtime_float_bound_9321.jl"
+expected = true
+description = "An integer-typed comprehension / for-head range (`[i for i in 1:n]`, `for i in 1:n`) whose BOUND infers `Any` but arrives as a Float at runtime (`n = 5.5`) keeps the Int64 element/counter fast path (deliberate scope choice from #9291/#9293) and now coerces the runtime bound to Int with upstream range last-element semantics (`CoerceRangeStopI64`: floor for an ascending step, ceil for a descending one) instead of crashing with `expected I64, got Float64` (comprehension) or truncating the bound toward zero (for-head, which mis-counted a negative Float bound: `-3:-1.5` ran three times, not two). Covers unit / positive-step / negative-step / negative-bound comprehensions, the four for-head variants (unit, negative bound, constant negative step, runtime variable step), integer-bound fast-path preservation, and the static-Float-literal-bound control that still diverts to the Float element path. LENGTH/count parity only (the element type stays Int64 on this fast path vs upstream Float64). Verified against upstream julia 1.12 (Issue #9321)."
+
+[[tests]]
+name = "comprehension_range_bound_inexact_9377"
+file = "comprehension_range_bound_inexact_9377.jl"
+expected = true
+description = "The integer comprehension / for-head range fast path (`[i for i in 1:n]`, cartesian/flatten arms, `for i in 1:n` const- and dynamic-step heads) raises the upstream catchable InexactError when a runtime Float / BigInt bound is non-finite (NaN / ±Inf) or out of the Int64 range AND the range counts toward it (upstream `q = (stop - start) / step >= 0`: `1:NaN`, `1:Inf`, `1:1e30`, `1:big(10)^30`, `10:-2:-Inf`), while the legal EMPTY direction stays error-free (`1:-Inf`, `10:-2:Inf`, `1:-big(10)^30` all give length 0). Before the fix `CoerceRangeStopI64` only saw step+stop and silently floored/ceiled the bound into a 0-length or i64::MAX-saturated range (`g(NaN) == 0`, `g(Inf)` looped ~typemax(Int) times); it now also receives `start` and mirrors the upstream direction test, raising via the VM handler chain so try/catch binds an InexactError. Verified against upstream julia 1.12 (Issue #9377)."
+
+[[tests]]
+name = "comprehension_module_top_level_generator_10227"
+file = "module_top_level_generator_10227.jl"
+expected = true
+description = "Module-body top-level generator and comprehension expressions collect nested `__gen_body_*` helpers from assignment RHS call arguments, so `sum(i*i for ...)`, `[x+1 for ...]`, and `collect(2x for ...)` work inside a module instead of raising UndefVarError (Issue #10227)"
+
+[[tests]]
+name = "comprehension_partition_iterate_protocol_10442"
+file = "partition_iterate_protocol_10442.jl"
+expected = true
+description = "Single-variable array comprehensions over iterate-only struct iterators, including Iterators.partition and a custom length-only iterator without getindex, drive the iterate protocol instead of public getindex (Issue #10442)"

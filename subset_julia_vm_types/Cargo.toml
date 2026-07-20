@@ -1,0 +1,47 @@
+[package]
+name = "subset_julia_vm_types"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+authors = ["SubsetJuliaVM Team"]
+description = "Julia type system, inference primitives, and type lattice for SubsetJuliaVM"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AtelierArith/SubsetJuliaVM"
+keywords = ["julia", "types", "inference"]
+categories = ["compilers"]
+
+[dependencies]
+half = { version = "2.4", default-features = false, features = ["serde"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+strum = { version = "0.27", features = ["derive"] }
+subset_julia_vm_ir = { path = "../subset_julia_vm_ir" }
+
+[dev-dependencies]
+# Only used by `ir::core::tests` to assert `Expr::Var`/`Expr::FunctionRef`'s
+# InternedStr fields keep a byte-identical bincode wire encoding to a plain
+# `String` (Issue #10124), mirroring `test_value_str_bincode_wire_is_stable_8631`.
+# Same crate/version already a direct dependency of `subset_julia_vm` for Base
+# cache serialization.
+bincode = "1"
+
+[lib]
+crate-type = ["rlib"]
+
+[lints.rust]
+missing_debug_implementations = "warn"
+
+# Mirror the main crate's clippy allow-list so that types that moved here
+# (ir/core.rs Stmt enum, etc.) don't trigger lints that were already
+# accepted in `subset_julia_vm` (Issue #8656).
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+only_used_in_recursion = "allow"
+large_enum_variant = "allow"
+wrong_self_convention = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+items_after_test_module = "allow"
+cast_sign_loss = "warn"

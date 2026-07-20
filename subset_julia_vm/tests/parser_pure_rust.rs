@@ -298,7 +298,7 @@ fn test_parse_show_macro() {
 /// Fixed in Issue #1330: Macro-local variables are now correctly substituted.
 #[allow(dead_code)]
 fn test_show_macro_end_to_end() {
-    use subset_julia_vm::compile::compile_core_program;
+    use subset_julia_vm::compile::host_support::compile_core_program;
     use subset_julia_vm::lowering::Lowering;
     use subset_julia_vm::parser::{ParseOutcome, RustParsedSource};
     use subset_julia_vm::rng::StableRng;
@@ -308,6 +308,11 @@ fn test_show_macro_end_to_end() {
 f(x) = 2x + 1
 @show f(3)
 "#;
+
+    // This test drives Lowering directly (not through pipeline.rs), so it
+    // must install the VM-backed macro expander seam itself or built-in
+    // macros like @show fail to lower (Issues #8656 / #9115).
+    subset_julia_vm::macro_runtime::install();
 
     // Parse with Pure Rust parser
     let cst = parse(source).expect("Failed to parse");
@@ -515,11 +520,12 @@ println(g_short_5122(4))
 
 /// Helper function for end-to-end tests
 fn run_source(source: &str) -> Result<(String, f64), String> {
-    use subset_julia_vm::compile::compile_core_program;
+    use subset_julia_vm::compile::host_support::compile_core_program;
     use subset_julia_vm::lowering::Lowering;
     use subset_julia_vm::parser::{ParseOutcome, RustParsedSource};
     use subset_julia_vm::rng::StableRng;
-    use subset_julia_vm::vm::{Value, Vm};
+    use subset_julia_vm::vm::Vm;
+    use subset_julia_vm_bytecode::Value;
 
     // Parse with Pure Rust parser
     let cst = parse(source).map_err(|e| format!("Parse error: {:?}", e))?;

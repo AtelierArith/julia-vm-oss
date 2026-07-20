@@ -1,5 +1,8 @@
 //! Postfix expression parsers
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::ParseResult;
 use crate::node_kind::NodeKind;
@@ -28,11 +31,17 @@ impl<'a> Parser<'a> {
         {
             return Ok(None);
         }
+        if self.in_matrix_row
+            && matches!(token.token, Token::LParen | Token::LBracket)
+            && left.span.end != token.span.start
+        {
+            return Ok(None);
+        }
 
         match &token.token {
             // Numeric coefficient followed by parentheses: `2(x + 1)` means
             // `2 * (x + 1)` in Julia, not a call with integer callee.
-            Token::LParen if self.is_juxtaposition_context(left, token) => {
+            Token::LParen if self.is_numeric_juxtaposition_context(left, token) => {
                 Ok(Some(self.parse_parenthesized_juxtaposition(left.clone())?))
             }
 
@@ -57,18 +66,34 @@ impl<'a> Parser<'a> {
             // Adjoint/transpose: A'
             Token::Prime => Ok(Some(self.parse_adjoint_expression(left.clone())?)),
 
-            // Prefixed string literal: r"...", b"...", raw"..."
-            // Only applies when left is an identifier AND immediately adjacent (no whitespace)
-            // e.g., r"..." or raw"..." - NOT r "..." (with space)
-            Token::DoubleQuote | Token::TripleDoubleQuote
-                if left.kind == NodeKind::Identifier && left.span.end == token.span.start =>
+            // Julia parses `a'ᵀ` as a call to the special transpose suffix
+            // operator `'ᵀ` with `a` as the argument, not as multiplication by a
+            // standalone identifier (Issue #8759).
+            Token::Identifier
+                if left.kind == NodeKind::AdjointExpression
+                    && left.span.end == token.span.start
+                    && token.text == "ᵀ" =>
             {
-                Ok(Some(self.parse_prefixed_string_literal(left.clone())?))
+                Ok(Some(self.parse_adjoint_suffix_call(left.clone())?))
             }
 
-            // Juxtaposition: 3.0im, 2x (implicit multiplication)
-            // Only applies when left is a numeric literal and identifier is immediately adjacent
-            Token::Identifier if self.is_juxtaposition_context(left, token) => {
+            // Prefixed string/command literal: r"...", b"...", raw"...",
+            // Module.prefix"...", x`cmd`
+            // Only applies when left is an identifier AND immediately adjacent (no whitespace)
+            // e.g., r"..." or raw"..." - NOT r "..." (with space)
+            Token::DoubleQuote
+            | Token::TripleDoubleQuote
+            | Token::Backtick
+            | Token::TripleBacktick
+                if self.is_prefixed_literal_context(left, token) =>
+            {
+                let prefixed = self.parse_prefixed_string_literal(left.clone())?;
+                Ok(Some(self.merge_var_quoted_identifier(prefixed)))
+            }
+
+            // Juxtaposition: 3.0im, 2x, f(x)y, (x)y (implicit multiplication).
+            // Only applies when the identifier is immediately adjacent.
+            Token::Identifier if self.is_identifier_juxtaposition_context(left, token) => {
                 Ok(Some(self.parse_juxtaposition(left.clone())?))
             }
 
@@ -76,20 +101,57 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Check if we're in a juxtaposition context (number followed by identifier without whitespace)
-    fn is_juxtaposition_context(
+    fn is_prefixed_literal_context(
         &self,
         left: &CstNode,
         token: &crate::lexer::SpannedToken<'a>,
     ) -> bool {
-        // Left must be a numeric literal
-        let is_numeric = matches!(left.kind, NodeKind::IntegerLiteral | NodeKind::FloatLiteral);
-        if !is_numeric {
-            return false;
-        }
+        matches!(left.kind, NodeKind::Identifier | NodeKind::FieldExpression)
+            && left.span.end == token.span.start
+    }
 
-        // Token must immediately follow left (no whitespace)
-        left.span.end == token.span.start
+    fn parse_adjoint_suffix_call(&mut self, left: CstNode) -> ParseResult<CstNode> {
+        let Some(arg) = left.children.first().cloned() else {
+            return Ok(left);
+        };
+        let suffix = self.parse_identifier()?;
+        let op_start = arg.span.end;
+        let op_span = self.source_map.span(op_start, suffix.span.end);
+        let callee = CstNode::leaf(NodeKind::Operator, op_span);
+        let args = CstNode::with_children(NodeKind::ArgumentList, arg.span, vec![arg.clone()]);
+        let span = self.source_map.span(arg.span.start, suffix.span.end);
+        Ok(CstNode::with_children(
+            NodeKind::CallExpression,
+            span,
+            vec![callee, args],
+        ))
+    }
+
+    /// Check if we're in a numeric juxtaposition context (`2(x + 1)`).
+    fn is_numeric_juxtaposition_context(
+        &self,
+        left: &CstNode,
+        token: &crate::lexer::SpannedToken<'a>,
+    ) -> bool {
+        matches!(left.kind, NodeKind::IntegerLiteral | NodeKind::FloatLiteral)
+            && left.span.end == token.span.start
+    }
+
+    /// Check if we're in an identifier-suffix juxtaposition context (`3im`,
+    /// `f(x)y`, `(x)y`, `a[1]x`).
+    fn is_identifier_juxtaposition_context(
+        &self,
+        left: &CstNode,
+        token: &crate::lexer::SpannedToken<'a>,
+    ) -> bool {
+        matches!(
+            left.kind,
+            NodeKind::IntegerLiteral
+                | NodeKind::FloatLiteral
+                | NodeKind::CallExpression
+                | NodeKind::IndexExpression
+                | NodeKind::ParenthesizedExpression
+        ) && left.span.end == token.span.start
     }
 
     /// Parse juxtaposition expression: 3.0im, 2x, 2f(x), 4n^2
@@ -113,16 +175,16 @@ impl<'a> Parser<'a> {
         let start = left.span.start;
         let mut right = self.parse_parenthesized_or_tuple()?;
         if self
-            .current
-            .as_ref()
-            .and_then(|token| token.token.binary_precedence())
+            .current_binary_precedence()
             .is_some_and(|(prec, _)| prec == crate::token::Precedence::Power)
         {
-            let op_token = self.advance().unwrap();
+            let op_token = self.advance_checked(
+                "Power-precedence operator token already confirmed by current_binary_precedence() above",
+            )?;
             let exponent =
                 self.parse_expression_with_precedence(crate::token::Precedence::Power)?;
             let span = self.source_map.span(right.span.start, exponent.span.end);
-            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span, op_token.text);
+            let op_node = CstNode::leaf(NodeKind::Operator, op_token.span);
             right = CstNode::with_children(
                 NodeKind::BinaryExpression,
                 span,
@@ -137,30 +199,30 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Parse a prefixed string literal: r"...", b"...", raw"..."
+    /// Parse a prefixed string/command literal: r"...", b"...", raw"...", x`cmd`
     pub(crate) fn parse_prefixed_string_literal(
         &mut self,
         prefix: CstNode,
     ) -> ParseResult<CstNode> {
         let start = prefix.span.start;
 
-        // Parse the string literal
-        let string = self.parse_string_literal()?;
+        let literal = if self.check(&Token::Backtick) || self.check(&Token::TripleBacktick) {
+            self.parse_command_literal()?
+        } else {
+            self.parse_string_literal()?
+        };
 
-        let mut end = string.span.end;
-        let mut children = vec![prefix, string];
+        let mut end = literal.span.end;
+        let mut children = vec![prefix, literal];
 
-        // A regex literal may carry flag characters (`i`, `m`, `s`, `x`) immediately
-        // after the closing quote with no whitespace: `r"abc"i`, `r"x"ims`
-        // (Issue #5709). Capture them as a third `Identifier` child so lowering can
-        // pass them to the `Regex` constructor. Restricted to the `r` prefix so other
-        // prefixed literals (`raw"..."`, `big"..."`, ...) keep their two-child shape.
-        let is_regex_prefix = &self.source[children[0].span.start..children[0].span.end] == "r";
+        // Non-standard string and command literal macros may carry flag text
+        // immediately after the closing delimiter: `r"abc"i`, `x"s"flag`,
+        // `x`s`flag`. Capture it as a third `Identifier` child.
         let adjacent_ident = self
             .current
             .as_ref()
             .is_some_and(|tok| matches!(tok.token, Token::Identifier) && tok.span.start == end);
-        if is_regex_prefix && adjacent_ident {
+        if adjacent_ident {
             let flags = self.parse_identifier()?;
             end = flags.span.end;
             children.push(flags);

@@ -1,0 +1,40 @@
+[package]
+name = "subset_julia_vm_lowering"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+authors = ["SubsetJuliaVM Team"]
+description = "Julia CST-to-Core-IR lowering for SubsetJuliaVM"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AtelierArith/SubsetJuliaVM"
+keywords = ["julia", "lowering", "compiler"]
+categories = ["compilers"]
+
+[dependencies]
+num-bigint = "0.4"
+once_cell = "1.19"
+subset_julia_vm_bytecode = { path = "../subset_julia_vm_bytecode" }
+subset_julia_vm_ir = { path = "../subset_julia_vm_ir" }
+subset_julia_vm_parser = { path = "../subset_julia_vm_parser" }
+subset_julia_vm_types = { path = "../subset_julia_vm_types" }
+
+[lib]
+crate-type = ["rlib"]
+
+[lints.rust]
+# Extraction exposes lowering-internal helper types across the integration
+# boundary; they are not a stable user-facing API.
+missing_debug_implementations = "allow"
+
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+only_used_in_recursion = "allow"
+large_enum_variant = "allow"
+wrong_self_convention = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+items_after_test_module = "allow"
+cast_sign_loss = "warn"

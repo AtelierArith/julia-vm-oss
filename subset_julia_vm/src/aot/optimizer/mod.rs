@@ -1164,7 +1164,7 @@ mod tests {
         assert!(
             matches!(&program.main[0], AotStmt::Let { .. }),
             "Expected AotStmt::Let, got {:?}",
-            &program.main[0]
+            program.main[0]
         );
         if let AotStmt::Let { value, .. } = &program.main[0] {
             assert!(

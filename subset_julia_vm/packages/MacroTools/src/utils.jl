@@ -354,7 +354,7 @@ longdef(ex) = prewalk(longdef1, ex)
 function shortdef1(ex)
   @match ex begin
     function f_(args__) body_ end => Expr(:(=), Expr(:call, f, args...), Expr(:block, body.args...))
-    # Workaround: avoid nested @q splatted interpolation in shortdef patterns
+    # Workaround: avoid nested @q splatted interpolation in shortdef patterns. (Issue #7541)
     # while preserving the upstream Expr shape. (Issue #7541)
     function f_(args__) where T__ body_ end => Expr(:(=), Expr(:where, Expr(:call, f, args...), T...), Expr(:block, body.args...))
     function f_(args__)::rtype_ body_ end => Expr(:(=), Expr(:(::), Expr(:call, f, args...), rtype), Expr(:block, body.args...))
@@ -521,7 +521,7 @@ end
 """
 function combinearg(arg_name, arg_type, is_splat, default)
     @assert arg_name !== nothing || arg_type !== nothing
-    # Workaround: quoted type-annotation syntax with interpolation currently
+    # Workaround: quoted type-annotation syntax with interpolation currently lowers incorrectly. (Issue #7628)
     # lowers as a runtime typeassert instead of constructing Expr(:(::), ...).
     # Build the syntax tree explicitly. (Issue #7628)
     a = arg_name===nothing ? Expr(:(::), arg_type) :

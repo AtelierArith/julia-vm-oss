@@ -401,9 +401,8 @@ end
 #       :(evalpoly($zesc, ($(pesc...),)))
 #   end
 #
-# Since we don't have broadcast on tuples (esc.(p)), we use a simplified
-# version without explicit esc(). This works because our hygiene system
-# handles variable renaming automatically.
+# This subset keeps the simplified form without explicit esc(). The macro
+# hygiene system handles variable renaming automatically.
 #
 # Usage:
 #   @evalpoly(2, 1, 2, 3)  # = 1 + 2*2 + 3*2^2 = 1 + 4 + 12 = 17

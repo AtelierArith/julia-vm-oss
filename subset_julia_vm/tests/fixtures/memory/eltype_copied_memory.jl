@@ -1,9 +1,9 @@
-m = Memory{Int64}(2)
+m = Memory{Int64}(undef, 2)
 m[1] = 11
 m[2] = 12
 c = copy(m)
 
-mf = Memory{Float64}(2)
+mf = Memory{Float64}(undef, 2)
 mf[1] = 1.5
 mf[2] = 2.5
 cf = copy(mf)

@@ -8,7 +8,11 @@ struct _PrevTestMinType
     value::Int64
 end
 
-function min(x::_PrevTestMinType, y::_PrevTestMinType)
+# Extend Base.min explicitly. A bare `function min(...)` would create a NEW
+# `Main.min` upstream (shadowing Base.min, so `min(1, 2)` errors); qualifying
+# with `Base.min` adds a method to the existing generic function under both
+# upstream julia and sjulia (Issue #10237).
+function Base.min(x::_PrevTestMinType, y::_PrevTestMinType)
     _PrevTestMinType(x.value < y.value ? x.value : y.value)
 end
 

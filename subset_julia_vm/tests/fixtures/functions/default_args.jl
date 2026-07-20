@@ -7,7 +7,9 @@ power(x, n=2) = x^n
     @test greet("World") == "Hello World"
     @test greet("World", "Hi") == "Hi World"
     @test power(3) == 9
+    @test typeof(power(3)) === Int64
     @test power(3, 3) == 27
+    @test typeof(power(3, 3)) === Int64
     @test power(2, 10) == 1024
 end
 

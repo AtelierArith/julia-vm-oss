@@ -186,7 +186,8 @@ abstract type AbstractSet <: Any end
 
 # Range hierarchy (non-parametric for parser compatibility)
 abstract type AbstractRange <: Any end
-abstract type AbstractUnitRange <: AbstractRange end
+abstract type OrdinalRange <: AbstractRange end
+abstract type AbstractUnitRange <: OrdinalRange end
 
 # IO hierarchy (for custom show methods)
 abstract type IO <: Any end

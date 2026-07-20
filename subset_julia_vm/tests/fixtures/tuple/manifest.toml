@@ -253,6 +253,12 @@ expected = true
 description = "filter/cumsum/cumprod over a Tuple return a Tuple (Issue #5681). filter previously returned an Array, cumsum/cumprod an Array of Float64. Collected into a type-preserving Any[] (#5717) then rebuilt by output arity (no tuple splat / Tuple(vector) in the subset). Covers empty/odd/even filters, cumulative sum/prod, type preservation, and a 10-tuple."
 
 [[tests]]
+name = "tuple_sum_function_tuple_9763"
+file = "sum_function_tuple_9763.jl"
+expected = true
+description = "sum(f, tuple) reduces mapped tuple values and unblocks _hypot(::NTuple) without array materialization (Issue #9763)."
+
+[[tests]]
 name = "tuple_empty_namedtuple_5776"
 file = "empty_namedtuple_5776.jl"
 expected = true
@@ -274,4 +280,34 @@ description = "Tuple-literal destructuring swaps (a, b = b, a % b) lower to per-
 name = "tuple_vector_element_equality_7803"
 file = "vector_element_equality_7803.jl"
 expected = true
-description = "== / != on tuples whose elements are mutable Vectors compares the vectors structurally by value, not heap index, so ([0.2, 0.5, 0.8],) == ([0.2, 0.5, 0.8],) is true; covers single/multiple/mixed/nested Vector elements (Issue #7803)."
+description = "== / != on tuples whose elements are mutable Vectors compares the vectors structurally by value, not heap index or concrete element type, so ([0.2, 0.5, 0.8],) == ([0.2, 0.5, 0.8],) and (Any[1,2],) == ([1,2],) are true; covers single/multiple/mixed/nested Vector elements and missing propagation (Issues #7803/#10631)."
+
+[[tests]]
+name = "tuple_namedtuple_destructure_9786"
+file = "namedtuple_destructure_9786.jl"
+expected = true
+description = "Destructuring a NamedTuple binds its field values in declaration order (x, y, z = nt binds x=nt[1], …); covers the svd-shaped MWE, too-few (extra ignored) and too-many (BoundsError) arity, nested destructure, and nt[i]/first/last/collect iterating values — matching upstream julia. Regression for the Persistent-REPL TupleUnpack NamedTuple gap (Issue #9786)."
+
+[[tests]]
+name = "tuple_destructure_assignment_expr_9792"
+file = "destructure_assignment_expr_9792.jl"
+expected = true
+description = "Tuple and NamedTuple destructuring assignments used in expression position return the original RHS value while binding targets, including nested patterns, function-body expression tails, indexed destructuring targets, and @test_throws arity errors (Issue #9792)."
+
+[[tests]]
+name = "tuple_vector_index_9614"
+file = "vector_index_9614.jl"
+expected = true
+description = "Tuple indexing with vector/range-like index arrays returns a tuple of selected elements, including Int32/UInt8/Float64/Any numeric index arrays, Bool masks with tuple-length checking, empty index arrays, and scalar Bool staying scalar (Issue #9614)."
+
+[[tests]]
+name = "tuple_literal_destructure_tail_value_10444"
+file = "literal_destructure_tail_value_10444.jl"
+expected = true
+description = "Independent literal-tuple destructuring retains explicit IR identity, returns the full RHS tuple in tail position (including duplicate targets), and keeps non-tail bindings typed without tuple allocation (Issues #6569, #10444)"
+
+[[tests]]
+name = "tuple_flat_nonliteral_destructure_ir_10464"
+file = "flat_nonliteral_destructure_ir_10464.jl"
+expected = true
+description = "Flat identifier destructuring retains explicit IR identity for tuple, Array, and Range RHS values; evaluates the RHS once; preserves statement bindings and tail identity; ignores extra RHS values; and raises BoundsError at runtime for a short RHS (Issue #10464)"

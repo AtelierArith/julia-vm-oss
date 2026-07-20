@@ -118,31 +118,38 @@ mod strict_subtype_dominance_5925 {
         assert!(!dominates("Tuple{Any, Int64}", "Tuple{Int64, Any}"));
     }
 
-    /// Issue #5925: regression-pin the KNOWN DIVERGENCE from upstream
-    /// `type_morespecific_`. `strict_subtype_dominates` is only the
-    /// subtype-decidable fragment of the `morespecific` partial order; it omits
-    /// upstream's diagonal/argument-count rules. The canonical counterexample:
-    /// upstream `morespecific(Tuple{Int64,Number}, Tuple{T,T} where T<:Number)`
-    /// is `true`, yet neither side is a strict subtype of the other here, so this
-    /// predicate is `false` in BOTH directions. Downstream #5072 dispatch
-    /// integration must therefore NOT treat the two as equivalent.
+    /// Issue #8439: align the former case-H divergence with upstream
+    /// `type_morespecific_`. Upstream reports
+    /// `morespecific(Tuple{Int64,Number}, Tuple{T,T} where T<:Number)` as
+    /// `true` even though neither side is a strict subtype of the other.
     #[test]
-    fn dominance_diverges_from_upstream_morespecific_case_H() {
+    fn dominance_matches_upstream_morespecific_case_H() {
         let specific = CoreType::from_julia_name("Tuple{Int64, Number}");
+        let mixed_concrete = CoreType::from_julia_name("Tuple{Int64, Float64}");
+        let bound_tuple = CoreType::from_julia_name("Tuple{Number, Number}");
+        let any_tuple = CoreType::from_julia_name("Tuple{Any, Any}");
         let diagonal = CoreType::from_julia_name("Tuple{T, T} where T<:Number");
 
-        // Neither is a `<:` of the other in this core engine ...
+        // Neither is a `<:` of the other in this core engine.
         assert!(!specific.is_subtype_of(&diagonal));
         assert!(!diagonal.is_subtype_of(&specific));
 
-        // ... so `strict_subtype_dominates` is false both ways, EVEN THOUGH
-        // upstream `morespecific(Tuple{Int64,Number}, Tuple{T,T} where T<:Number)`
-        // is `true`. This asymmetry is the contract downstream must respect.
-        assert!(!specific.strict_subtype_dominates(&diagonal));
+        // But the concrete/bounded tuple is more specific under upstream's
+        // diagonal-aware method order.
+        assert!(specific.strict_subtype_dominates(&diagonal));
         assert!(!diagonal.strict_subtype_dominates(&specific));
+        assert!(mixed_concrete.strict_subtype_dominates(&diagonal));
+        assert!(!diagonal.strict_subtype_dominates(&mixed_concrete));
 
-        // Sanity: the diagonal DOES dominate the fully-concrete equal-element
-        // tuple, where the subtype order and `morespecific` agree.
+        // If all tuple slots are exactly at or above the diagonal bound, the
+        // diagonal signature is the more-specific side, matching upstream.
+        assert!(!bound_tuple.strict_subtype_dominates(&diagonal));
+        assert!(diagonal.strict_subtype_dominates(&bound_tuple));
+        assert!(!any_tuple.strict_subtype_dominates(&diagonal));
+        assert!(diagonal.strict_subtype_dominates(&any_tuple));
+
+        // Sanity: the fully-concrete equal-element tuple dominates the
+        // diagonal, where the subtype order and `morespecific` agree.
         let equal = CoreType::from_julia_name("Tuple{Int64, Int64}");
         assert!(equal.strict_subtype_dominates(&diagonal));
         assert!(!diagonal.strict_subtype_dominates(&equal));

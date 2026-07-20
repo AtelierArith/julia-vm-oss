@@ -9,7 +9,7 @@
 # abs(x) = -x if signbit(x) else x in base/number.jl, which routed
 # through dynamic_neg whose narrow-integer arms were missing.
 #
-# Fix: subset_julia_vm/src/vm/dynamic_ops/mod.rs::dynamic_neg now
+# Fix: subset_julia_vm_vm/src/vm/dynamic_ops/mod.rs::dynamic_neg now
 # uses wrapping_neg for all signed integer widths (I8/I16/I32/I64/
 # I128), matching upstream's two's-complement semantics.
 

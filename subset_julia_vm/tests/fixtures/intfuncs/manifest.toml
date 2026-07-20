@@ -71,3 +71,58 @@ name = "intfuncs_bitcount_function_values_5333"
 file = "bitcount_function_values_5333.jl"
 expected = true
 description = "bit-count helpers (count_ones/leading_zeros/bitrotate/…) as first-class function values (Issue #5333)"
+
+# --- merged from `int_ops` category (Issue #9671 Phase 2) ---
+[[tests]]
+name = "int_ops_basic"
+file = "int_basic.jl"
+expected = true
+description = "Integer operations: parity, abs, gcd, divrem, bitwise"
+
+[[tests]]
+name = "int_ops_conversion"
+file = "int_ops_conversion.jl"
+expected = true
+description = "Integer conversion, count_ones, ndigits, min/max (Issue #3123)"
+
+[[tests]]
+name = "int_ops_narrow_int_locals"
+file = "narrow_int_locals.jl"
+expected = true
+description = "Narrow integer types (I8/I16/I32/U8/U16/U32/U64) preserve type through local vars and params (Issue #3255)"
+
+[[tests]]
+name = "int_ops_mixed_type_bitwise_8221"
+file = "mixed_type_bitwise_8221.jl"
+expected = true
+description = "Mixed-type integer bitwise &/|/⊻ promote operands to a common type (0x05 & 5 === 5) per upstream base/promotion.jl, while same-type calls keep their concrete type (exact methods win). Uses direct intrinsic on promoted values to avoid the #5966 BigInt promote-fallback recursion (Issue #8221)"
+
+[[tests]]
+name = "int_ops_signed_unsigned_mixed_9336"
+file = "signed_unsigned_mixed_9336.jl"
+expected = true
+description = "Mixed Signed×Unsigned comparisons (== != < <= > >=) return the correct Bool without InexactError, and div/fld/cld/rem follow the dividend's signedness while mod follows the divisor's (Bool×Bool stays Bool), matching upstream julia/base/int.jl per-operator sign rules (Issues #9336, #9337)"
+
+[[tests]]
+name = "int_ops_signed_unsigned_truediv_9442"
+file = "signed_unsigned_truediv_9442.jl"
+expected = true
+description = "Mixed Signed×Unsigned true division `/` promotes both operands to Float64 (float(x)/float(y)) instead of the integer promote fallback, so Int16(-1)/UInt16(5) returns -0.2 rather than throwing InexactError; same-type/Bool/BigInt division and div-by-zero (Inf/NaN) are unchanged (Issue #9442)"
+
+[[tests]]
+name = "int_ops_signed_unsigned_additive_9441"
+file = "signed_unsigned_additive_9441.jl"
+expected = true
+description = "Mixed Signed×Unsigned +, -, * return the UNSIGNED result type (Int128(-1)*UInt128 :: UInt128, and narrower signed × UInt128 promotes to UInt128), converting the signed operand via sign-extend + reinterpret (x % UInt128) instead of a checked convert. Residual of #9337 restricted to additive/multiplicative operators (Issue #9441)"
+
+[[tests]]
+name = "int_ops_typemin_neg1_divrem_9429"
+file = "typemin_neg1_divrem_9429.jl"
+expected = true
+description = "rem/mod of typemin(T) by -1 return 0 for all signed widths (wrapping remainder instead of a process-aborting Rust remainder-overflow panic, incl. the array-loaded % I64 fast path), and div/fld/cld on the same pairs throw DivideError — narrow widths used to leak InexactError from the cast-through-Int64 narrowing (Issue #9429)"
+
+[[tests]]
+name = "intfuncs_lcm_gcd_wide_int_types_8812"
+file = "lcm_gcd_wide_int_types_8812.jl"
+expected = true
+description = "gcd/lcm cover the full same-type integer matrix (Int128, UInt8..UInt128): generic lcm(a::T,b::T) where T<:Integer via checked_abs(checked_mul(...)) preserves the operand type and upstream's OverflowError on overflow; checked_abs/checked_neg ported to checked.jl (Issue #8812)"

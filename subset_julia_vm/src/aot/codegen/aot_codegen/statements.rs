@@ -67,6 +67,8 @@ impl AotCodeGenerator {
                 self.emit_compound_assign(target, *op, value)?;
             }
 
+            AotStmt::ValueCarrier(_) => {}
+
             AotStmt::Expr(expr) => {
                 let expr_str = self.emit_expr_to_string(expr)?;
                 self.write_line(&format!("{};", expr_str));
@@ -153,7 +155,7 @@ impl AotCodeGenerator {
 
         match stmt {
             // Expression statement - emit without semicolon
-            AotStmt::Expr(expr) => {
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                 let expr_str = if AotAbiValue::from_static_type(return_type).needs_runtime_value() {
                     self.emit_expr_as_value(expr)?
                 } else {

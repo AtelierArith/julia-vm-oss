@@ -13,9 +13,12 @@ using Test
 end
 
 @testset "Task scheduling and fetch" begin
-    # Schedule and run a task
+    # schedule marks the task runnable; wait/fetch drives it to completion.
     t = Task(() -> 2 * 3)
     schedule(t)
+    @test istaskdone(t) == false
+    @test istaskstarted(t) == false
+    wait(t)
     @test istaskdone(t) == true
     @test istaskstarted(t) == true
     @test istaskfailed(t) == false
@@ -53,9 +56,13 @@ end
 end
 
 @testset "yield function" begin
-    # yield is a no-op in cooperative model
-    yield()  # should not throw
-    @test true
+    ran = Int[]
+    t = Task(() -> push!(ran, 1))
+    schedule(t)
+    @test isempty(ran)
+    yield()
+    @test ran == [1]
+    @test istaskdone(t)
 end
 
 true

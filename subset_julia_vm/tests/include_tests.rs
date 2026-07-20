@@ -19,7 +19,7 @@ fn create_test_files(files: &[(&str, &str)]) -> TempDir {
 
 /// Helper to run Julia code with a specific base directory.
 fn run_with_base_dir(src: &str, base_dir: PathBuf) -> f64 {
-    use subset_julia_vm::compile::compile_core_program;
+    use subset_julia_vm::compile::host_support::compile_core_program;
     use subset_julia_vm::lowering::LoweringWithInclude;
     use subset_julia_vm::parser::Parser;
     use subset_julia_vm::rng::StableRng;
@@ -37,8 +37,8 @@ fn run_with_base_dir(src: &str, base_dir: PathBuf) -> f64 {
     let rng = StableRng::new(42);
     let mut vm = Vm::new_program(compiled, rng);
     match vm.run() {
-        Ok(subset_julia_vm::vm::Value::I64(x)) => x as f64,
-        Ok(subset_julia_vm::vm::Value::F64(x)) => x,
+        Ok(subset_julia_vm_bytecode::Value::I64(x)) => x as f64,
+        Ok(subset_julia_vm_bytecode::Value::F64(x)) => x,
         _ => f64::NAN,
     }
 }
@@ -227,7 +227,7 @@ x + y
 
 #[test]
 fn test_eval_include_file_path_in_expression_position_7766() {
-    use subset_julia_vm::compile::compile_with_cache;
+    use subset_julia_vm::compile::host_support::compile_with_cache;
     use subset_julia_vm::pipeline::parse_and_lower;
     use subset_julia_vm::rng::StableRng;
     use subset_julia_vm::vm::Vm;
@@ -242,4 +242,130 @@ fn test_eval_include_file_path_in_expression_position_7766() {
     vm.run().expect("run include expression");
 
     assert_eq!(vm.get_output(), "true\n");
+}
+
+#[test]
+fn test_eval_include_file_with_using_statement_8474() {
+    use subset_julia_vm::compile::host_support::compile_with_cache;
+    use subset_julia_vm::pipeline::parse_and_lower;
+    use subset_julia_vm::rng::StableRng;
+    use subset_julia_vm::vm::Vm;
+
+    let temp_dir = create_test_files(&[("included.jl", "using LinearAlgebra\ntrue\n")]);
+    let include_path = temp_dir.path().join("included.jl");
+    let src = format!("println(include(\"{}\"))", include_path.display());
+
+    let program = parse_and_lower(&src).expect("parse and lower include expression");
+    let compiled = compile_with_cache(&program).expect("compile include expression");
+    let mut vm = Vm::new_program(compiled, StableRng::new(42));
+    vm.run()
+        .expect("run include expression with using statement");
+
+    assert_eq!(vm.get_output(), "true\n");
+}
+
+/// Representative source exercising every construct the source-file
+/// top-level loop special-cases: a docstring on a struct/function/const, a
+/// dangling docstring that must NOT leak to a later definition, an abstract
+/// type, a primitive type, a short-function definition, a user-defined macro
+/// definition + call, a plain type-alias assignment, a nested `module`, and a
+/// `@kwdef struct`. No `include()` call appears, so an `IncludeContext`-aware
+/// pass has nothing include-specific to diverge on.
+const REPRESENTATIVE_LOWERING_SOURCE_10628: &str = r#"
+"""
+Point docstring
+"""
+struct Point
+    x::Int
+    y::Int
+end
+
+abstract type Shape end
+
+primitive type Meters 64 end
+
+"""
+area doc
+"""
+function area(p::Point)
+    p.x * p.y
+end
+
+norm2(p::Point) = sqrt(p.x^2 + p.y^2)
+
+macro double(ex)
+    return :(2 * $(esc(ex)))
+end
+
+"""
+MY_CONST doc
+"""
+const MY_CONST = 42
+
+MyAlias = Point
+
+"""
+stray doc that should not leak
+"""
+some_global = 1
+
+module Inner
+x = 1
+y = 2
+end
+
+@kwdef struct KwPoint
+    x::Int = 0
+    y::Int = 0
+end
+
+result = @double(21)
+"#;
+
+/// Issue #10628: `Lowering` (plain — Base/prelude and REPL one-shot eval, no
+/// `include()` support) and `LoweringWithInclude` (file/CLI lowering) drive
+/// two hand-synced copies of the same source-file top-level `NodeKind` loop.
+/// This locks in that, for [`REPRESENTATIVE_LOWERING_SOURCE_10628`], both
+/// entry points lower the exact same include()-free source text to
+/// byte-for-byte identical `Program` IR (`Program`/`Function`/`Stmt`/`Expr`
+/// all derive `PartialEq`, including spans — both paths walk the same parsed
+/// source, so spans line up too).
+///
+/// This must stay green across the entry-point unification: a future
+/// lowering feature that is implemented in only one of the two loops (the
+/// bug class Issue #10628 targets) would show up here as a diff instead of
+/// silently shipping with divergent Base-vs-user-program behavior.
+#[test]
+fn plain_and_include_aware_lowering_agree_on_representative_source_10628() {
+    use subset_julia_vm::lowering::{IncludeContext, Lowering, LoweringWithInclude};
+    use subset_julia_vm::parser::Parser;
+
+    let source = REPRESENTATIVE_LOWERING_SOURCE_10628;
+
+    // Macro expansion seam (Issue #8656): both real entry points
+    // (`pipeline::parse_source` / `parse_source_with_include`) install this
+    // before lowering; the source above uses a user-defined macro (`@double`).
+    subset_julia_vm::macro_runtime::install();
+
+    let mut plain_parser = Parser::new().expect("parser init");
+    let plain_outcome = plain_parser.parse(source).expect("plain parse");
+    let mut plain_lowering = Lowering::new(source);
+    let plain_program = plain_lowering
+        .lower(plain_outcome)
+        .expect("plain `Lowering` should lower the representative source");
+
+    let mut include_parser = Parser::new().expect("parser init");
+    let include_outcome = include_parser.parse(source).expect("include-aware parse");
+    let mut include_lowering = LoweringWithInclude::new(source, IncludeContext::new(None));
+    let include_program = include_lowering
+        .lower(include_outcome)
+        .expect("`LoweringWithInclude` should lower the representative source");
+
+    assert_eq!(
+        plain_program, include_program,
+        "plain `Lowering` and `LoweringWithInclude` must lower the same \
+         include()-free source to identical IR (Issue #10628); a diff here \
+         means one of the two hand-synced source-file loops special-cases a \
+         construct the other does not"
+    );
 }

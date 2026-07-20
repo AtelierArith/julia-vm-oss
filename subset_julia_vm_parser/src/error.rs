@@ -26,6 +26,14 @@ pub enum ParseError {
     #[error("unterminated string literal starting at {span}")]
     UnterminatedString { span: Span },
 
+    /// Unterminated command literal
+    #[error("unterminated command literal starting at {span}")]
+    UnterminatedCommand { span: Span },
+
+    /// Unterminated character literal
+    #[error("unterminated character literal starting at {span}")]
+    UnterminatedCharacter { span: Span },
+
     /// Unterminated block comment
     #[error("unterminated block comment starting at {span}")]
     UnterminatedBlockComment { span: Span },
@@ -60,6 +68,25 @@ pub enum ParseError {
 }
 
 impl ParseError {
+    /// Whether this diagnostic means a REPL can become valid by appending more
+    /// source, rather than by editing the text already entered.
+    ///
+    /// This classification belongs to the parser because it is defined by
+    /// lexer/parser recovery state, not by a second list of Julia block
+    /// keywords maintained by a CLI consumer (Issues #10235/#10262/#10862).
+    pub fn is_incomplete_input(&self) -> bool {
+        match self {
+            ParseError::UnexpectedEof { .. }
+            | ParseError::UnterminatedString { .. }
+            | ParseError::UnterminatedCommand { .. }
+            | ParseError::UnterminatedCharacter { .. }
+            | ParseError::UnterminatedBlockComment { .. }
+            | ParseError::UnclosedBracket { .. } => true,
+            ParseError::UnexpectedToken { found, .. } => found == "end of input",
+            _ => false,
+        }
+    }
+
     /// Get the span of the error
     pub fn span(&self) -> Option<&Span> {
         match self {
@@ -67,6 +94,8 @@ impl ParseError {
             ParseError::UnexpectedEof { span, .. } => Some(span),
             ParseError::InvalidEscape { span, .. } => Some(span),
             ParseError::UnterminatedString { span } => Some(span),
+            ParseError::UnterminatedCommand { span } => Some(span),
+            ParseError::UnterminatedCharacter { span } => Some(span),
             ParseError::UnterminatedBlockComment { span } => Some(span),
             ParseError::InvalidNumber { span, .. } => Some(span),
             ParseError::InvalidCharacter { span } => Some(span),
@@ -77,14 +106,57 @@ impl ParseError {
         }
     }
 
+    /// Format the diagnostic payload without rendering its source span.
+    ///
+    /// `Display` remains the human-facing parser error (and therefore includes
+    /// `at <span>`).  `Base.JuliaSyntax.Diagnostic.message`, however, stores
+    /// only the diagnostic text; its byte bounds live in sibling fields
+    /// (Issue #11572).
+    pub fn diagnostic_message(&self) -> String {
+        match self {
+            ParseError::UnexpectedToken {
+                found, expected, ..
+            } => format!("unexpected token '{found}', expected {expected}"),
+            ParseError::UnexpectedEof { expected, .. } => {
+                format!("unexpected end of input, expected {expected}")
+            }
+            ParseError::InvalidEscape { sequence, .. } => {
+                format!("invalid escape sequence '{sequence}'")
+            }
+            ParseError::UnterminatedString { .. } => "unterminated string literal".to_string(),
+            ParseError::UnterminatedCommand { .. } => "unterminated string literal".to_string(),
+            ParseError::UnterminatedCharacter { .. } => {
+                "unterminated character literal".to_string()
+            }
+            ParseError::UnterminatedBlockComment { .. } => "unterminated block comment".to_string(),
+            ParseError::InvalidNumber { literal, .. } => {
+                format!("invalid number literal '{literal}'")
+            }
+            ParseError::InvalidCharacter { .. } => "invalid character literal".to_string(),
+            ParseError::MismatchedBrackets {
+                expected, found, ..
+            } => format!("mismatched brackets: expected '{expected}', found '{found}'"),
+            ParseError::UnclosedBracket { bracket, .. } => {
+                format!("unclosed bracket '{bracket}'")
+            }
+            ParseError::InvalidSyntax { message, .. } => message.clone(),
+            ParseError::LexerError { .. } => "unrecognized token".to_string(),
+        }
+    }
+
     /// Create an unexpected token error
     pub fn unexpected_token(
         found: impl Into<String>,
         expected: impl Into<String>,
         span: Span,
     ) -> Self {
+        let found = found.into();
         ParseError::UnexpectedToken {
-            found: display_token_text(found.into()),
+            found: if found.is_empty() {
+                "end of input".to_string()
+            } else {
+                display_token_text(found)
+            },
             expected: expected.into(),
             span,
         }
@@ -165,6 +237,10 @@ fn display_token_text(text: String) -> String {
     }
 }
 
+fn expected_is_block_end(expected: &str) -> bool {
+    expected == "KwEnd" || expected == "end" || expected.contains("`end`")
+}
+
 /// Result type for parsing operations
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -188,6 +264,63 @@ impl ParseErrors {
     /// Check if there are any errors
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
+    }
+
+    /// Whether every reported error is an appendable end-of-input condition.
+    /// A mixed or ordinary syntax error is submitted immediately so the REPL
+    /// can report it instead of waiting for continuation lines forever.
+    pub fn is_incomplete_input(&self) -> bool {
+        !self.errors.is_empty() && self.errors.iter().all(ParseError::is_incomplete_input)
+    }
+
+    /// Upstream-shaped reason for an appendable parser failure.
+    ///
+    /// This is structural parser state, not a consumer-side keyword/message
+    /// heuristic.  It feeds `Base.JuliaSyntax.ParseError.incomplete_tag`
+    /// (Issue #11572) and refines the existing boolean classification used by
+    /// the REPL (Issues #10235/#10262/#10862).
+    pub fn incomplete_tag(&self) -> &'static str {
+        if !self.is_incomplete_input() {
+            return "none";
+        }
+        if self
+            .errors
+            .iter()
+            .any(|error| matches!(error, ParseError::UnterminatedCommand { .. }))
+        {
+            return "cmd";
+        }
+        if self
+            .errors
+            .iter()
+            .any(|error| matches!(error, ParseError::UnterminatedString { .. }))
+        {
+            return "string";
+        }
+        if self
+            .errors
+            .iter()
+            .any(|error| matches!(error, ParseError::UnterminatedCharacter { .. }))
+        {
+            return "char";
+        }
+        if self
+            .errors
+            .iter()
+            .any(|error| matches!(error, ParseError::UnterminatedBlockComment { .. }))
+        {
+            return "comment";
+        }
+        if self.errors.iter().any(|error| match error {
+            ParseError::UnexpectedEof { expected, .. } => expected_is_block_end(expected),
+            ParseError::UnexpectedToken {
+                found, expected, ..
+            } => found == "end of input" && expected_is_block_end(expected),
+            _ => false,
+        }) {
+            return "block";
+        }
+        "other"
     }
 
     /// Get the number of errors
@@ -290,6 +423,144 @@ mod tests {
         assert_eq!(errors.len(), 2);
         assert!(!errors.is_empty());
         assert!(errors.first().is_some());
+    }
+
+    #[test]
+    fn incomplete_input_classification_uses_parser_recovery_state_issue_10262() {
+        for source in [
+            "function f(x)",
+            "if true\n1",
+            "x = (1 +",
+            "\"unterminated",
+            "#= unterminated",
+            "'",
+            "'a",
+            "f('a",
+        ] {
+            let (_, errors) = crate::parse_with_errors(source);
+            assert!(
+                errors.is_incomplete_input(),
+                "expected appendable EOF diagnostics for {source:?}: {errors:?}"
+            );
+        }
+
+        for source in ["x = )", "if )", "end", "''", "'ab'"] {
+            let (_, errors) = crate::parse_with_errors(source);
+            assert!(
+                !errors.is_incomplete_input(),
+                "ordinary syntax error must be submitted for reporting: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_message_omits_span_issue_11572() {
+        let error = ParseError::unexpected_token(")", "expression", Span::new(0, 1, 1, 1, 1, 2));
+        assert_eq!(
+            error.diagnostic_message(),
+            "unexpected token ')', expected expression"
+        );
+        assert!(!error.diagnostic_message().contains("1:1"));
+    }
+
+    #[test]
+    fn incomplete_tag_is_structural_issue_11572() {
+        for (source, expected) in [
+            ("", "none"),
+            ("\"", "string"),
+            ("'", "char"),
+            ("#=", "comment"),
+            ("`", "cmd"),
+            ("begin;", "block"),
+            ("quote;", "block"),
+            ("let;", "block"),
+            ("for i=1;", "block"),
+            ("function f();", "block"),
+            ("f() do x;", "block"),
+            ("module X;", "block"),
+            ("mutable struct X;", "block"),
+            ("struct X;", "block"),
+            ("(", "other"),
+            ("[", "other"),
+            ("for", "other"),
+            ("function", "other"),
+            ("f() do", "other"),
+            ("module", "other"),
+            ("mutable struct", "other"),
+            ("struct", "other"),
+            ("quote", "block"),
+            ("let", "block"),
+            ("begin", "block"),
+            ("x = )", "none"),
+        ] {
+            let (_, errors) = crate::parse_with_errors(source);
+            assert_eq!(
+                errors.incomplete_tag(),
+                expected,
+                "source={source:?}, errors={errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_one_error_extent_stops_after_recovery_newline_11634() {
+        let (_, errors, consumed) = crate::Parser::new(")\nx").parse_one();
+        assert!(!errors.is_empty());
+        assert_eq!(consumed, 2);
+        assert_eq!(
+            errors
+                .first()
+                .and_then(ParseError::span)
+                .map(|span| (span.start, span.end)),
+            Some((0, 1))
+        );
+    }
+
+    #[test]
+    fn parse_one_success_stops_before_next_line_11637() {
+        let (node, errors, consumed) = crate::Parser::new("x\n)").parse_one();
+        assert!(errors.is_empty());
+        assert!(node.is_some());
+        assert_eq!(consumed, 2);
+    }
+
+    #[test]
+    fn parse_one_consumes_only_one_newline_separator_11636() {
+        let (node, errors, consumed) = crate::Parser::new("x\n\n)").parse_one();
+        assert!(errors.is_empty());
+        assert!(node.is_some());
+        assert_eq!(consumed, 2);
+    }
+
+    #[test]
+    fn parse_one_groups_same_line_semicolon_expressions_11636() {
+        let (node, errors, consumed) = crate::Parser::new("x;y\n)").parse_one();
+        assert!(errors.is_empty());
+        assert!(node.is_some(), "semicolon group was not returned");
+        if let Some(node) = node {
+            assert_eq!(node.kind, crate::NodeKind::SourceFile);
+            assert_eq!(node.children.len(), 2);
+        }
+        assert_eq!(consumed, 4);
+    }
+
+    #[test]
+    fn parse_one_extra_token_span_includes_intervening_whitespace_11634() {
+        let (node, errors, consumed) = crate::Parser::new("é )").parse_one();
+        assert!(node.is_none());
+        assert_eq!(consumed, 4);
+        assert!(matches!(
+            errors.first(),
+            Some(ParseError::InvalidSyntax { message, .. })
+                if message == "extra tokens after end of expression"
+        ));
+        assert_eq!(
+            errors
+                .first()
+                .and_then(ParseError::span)
+                .map(|span| (span.start, span.end)),
+            Some((2, 4))
+        );
     }
 
     #[test]

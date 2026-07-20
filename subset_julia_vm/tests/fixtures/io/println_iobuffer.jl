@@ -8,48 +8,38 @@ using Test
 
 @testset "println(io::IOBuffer, ...) (#3573)" begin
     # Single-arg form: writes "msg\n" to the buffer.
-    @testset "single message + newline" begin
-        io = IOBuffer()
-        println(io, "msg")
-        result = String(take!(io))
-        @test result == "msg\n"
-    end
+    io = IOBuffer()
+    println(io, "msg")
+    result = String(take!(io))
+    @test result == "msg\n"
 
     # Empty form: writes just "\n".
-    @testset "empty form writes newline only" begin
-        io = IOBuffer()
-        println(io)
-        result = String(take!(io))
-        @test result == "\n"
-    end
+    io = IOBuffer()
+    println(io)
+    result = String(take!(io))
+    @test result == "\n"
 
     # Multiple args concatenate without separators, then newline.
-    @testset "multiple args concatenated" begin
-        io = IOBuffer()
-        println(io, "a", 1, "b")
-        result = String(take!(io))
-        @test result == "a1b\n"
-    end
+    io = IOBuffer()
+    println(io, "a", 1, "b")
+    result = String(take!(io))
+    @test result == "a1b\n"
 
     # Successive println calls accumulate in the buffer.
-    @testset "accumulation across calls" begin
-        io = IOBuffer()
-        println(io, "first")
-        println(io, "second")
-        result = String(take!(io))
-        @test result == "first\nsecond\n"
-    end
+    io = IOBuffer()
+    println(io, "first")
+    println(io, "second")
+    result = String(take!(io))
+    @test result == "first\nsecond\n"
 
     # Mixed print + println: the println still appends a newline; the print
     # does not.
-    @testset "mixed print and println" begin
-        io = IOBuffer()
-        print(io, "a")
-        println(io, "b")
-        print(io, "c")
-        result = String(take!(io))
-        @test result == "ab\nc"
-    end
+    io = IOBuffer()
+    print(io, "a")
+    println(io, "b")
+    print(io, "c")
+    result = String(take!(io))
+    @test result == "ab\nc"
 end
 
 true

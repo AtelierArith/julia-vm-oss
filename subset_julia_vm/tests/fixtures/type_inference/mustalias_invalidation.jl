@@ -8,7 +8,7 @@
 # assign-after-narrow, var-rebind-after-narrow) ensures the inference engine
 # at least *runs* the new invalidation hooks. Soundness of the resulting
 # refinement table is covered by unit tests in
-# `subset_julia_vm/src/compile/abstract_interp/env.rs::tests`.
+# `subset_julia_vm_compile/src/compile/abstract_interp/env.rs::tests`.
 
 mutable struct Box
     val::Union{Int64, Nothing}

@@ -103,7 +103,7 @@ end
 # runtime `T` as Array while compiling `similar(a, T, dims...)` (Issue #4018).
 function wrap(::Type{Array}, m::Array, dims::Tuple)
     dims = _array_wrap_check(m, dims)
-    mem = Memory{eltype(m)}(_array_length_from_size(dims))
+    mem = Memory{eltype(m)}(undef, _array_length_from_size(dims))
     for i in 1:length(mem)
         mem[i] = m[i]
     end
@@ -156,11 +156,16 @@ function _array_memory(a::Array{T,N}) where {T,N}
     return a._mem
 end
 
+_array_memory_get(m, i::Int64) = m[i]
+_array_memory_get(m::MemoryRef, i::Int64) = memoryrefget(m, i)
+_array_memory_set!(m, i::Int64, v) = (m[i] = v; v)
+_array_memory_set!(m::MemoryRef, i::Int64, v) = (memoryrefset!(m, i, v); v)
+
 function size(a::Array{T,N}) where {T,N}
     return _array_dims(a)
 end
 
-function size(a::Array{T,N}, d::Int64) where {T,N}
+function size(a::Array{T,N}, d::Int) where {T,N}
     dims = _array_dims(a)
     if d > length(dims)
         return 1
@@ -201,7 +206,7 @@ _array_memory(a::BitArray) = a._mem
 
 size(a::BitArray) = _array_dims(a)
 
-function size(a::BitArray, d::Int64)
+function size(a::BitArray, d::Int)
     dims = _array_dims(a)
     if d > length(dims)
         return 1
@@ -231,7 +236,7 @@ function reshape(a::Array{T,N}, dims::Tuple) where {T,N}
     return _array_reshape_tuple(a, dims)
 end
 
-function reshape(a::Array{T,N}, dims::Int64...) where {T,N}
+function reshape(a::Array{T,N}, dims::Int...) where {T,N}
     return _array_reshape_tuple(a, dims)
 end
 
@@ -241,7 +246,7 @@ function reshape(r::AbstractRange, dims::Tuple)
     return reshape(collect(r), dims)
 end
 
-function reshape(r::AbstractRange, dims::Int64...)
+function reshape(r::AbstractRange, dims::Int...)
     return reshape(collect(r), dims)
 end
 
@@ -253,7 +258,7 @@ end
 
 function _array_similar_typed_tuple(a::Array{T,N}, ::Type{S}, dims::Tuple) where {T,N,S}
     len = _array_length_from_size(dims)
-    mem = Memory{S}(len)
+    mem = Memory{S}(undef, len)
     return wrap(Array, mem, dims)
 end
 
@@ -274,6 +279,8 @@ function _array_is_bitarray_surface(a)
     return tname == "BitVector" || tname == "BitMatrix" ||
            (length(tname) >= 9 && tname[1:9] == "BitArray{")
 end
+
+_array_bitarray_surface_like(a, result::BitArray) = result
 
 function _array_bitarray_surface_like(a::Array{T,N}, result::Array) where {T,N}
     if eltype(result) != Bool
@@ -321,11 +328,11 @@ function similar(a::Array{T,N}, ::Type{S}, dims::Tuple) where {T,N,S}
     return _array_bitarray_surface_like(a, _array_similar_typed_tuple(a, S, dims))
 end
 
-function similar(a::Array{T,N}, dims::Int64...) where {T,N}
+function similar(a::Array{T,N}, dims::Int...) where {T,N}
     return _array_bitarray_surface_like(a, _array_similar_tuple(a, dims))
 end
 
-function similar(a::Array{T,N}, ::Type{S}, dims::Int64...) where {T,N,S}
+function similar(a::Array{T,N}, ::Type{S}, dims::Int...) where {T,N,S}
     return _array_bitarray_surface_like(a, _array_similar_typed_tuple(a, S, dims))
 end
 
@@ -355,22 +362,22 @@ similar(a::BitArray, dims::Tuple) = _similar_bitarray(a, Bool, dims)
 similar(a::BitVector, ::Type{S}, dims::Tuple) where S = _similar_bitarray(a, S, dims)
 similar(a::BitMatrix, ::Type{S}, dims::Tuple) where S = _similar_bitarray(a, S, dims)
 similar(a::BitArray, ::Type{S}, dims::Tuple) where S = _similar_bitarray(a, S, dims)
-similar(a::BitVector, dims::Int64...) = _similar_bitarray(a, Bool, dims)
-similar(a::BitMatrix, dims::Int64...) = _similar_bitarray(a, Bool, dims)
-similar(a::BitArray, dims::Int64...) = _similar_bitarray(a, Bool, dims)
-similar(a::BitVector, ::Type{S}, dims::Int64...) where S = _similar_bitarray(a, S, dims)
-similar(a::BitMatrix, ::Type{S}, dims::Int64...) where S = _similar_bitarray(a, S, dims)
-similar(a::BitArray, ::Type{S}, dims::Int64...) where S = _similar_bitarray(a, S, dims)
+similar(a::BitVector, dims::Int...) = _similar_bitarray(a, Bool, dims)
+similar(a::BitMatrix, dims::Int...) = _similar_bitarray(a, Bool, dims)
+similar(a::BitArray, dims::Int...) = _similar_bitarray(a, Bool, dims)
+similar(a::BitVector, ::Type{S}, dims::Int...) where S = _similar_bitarray(a, S, dims)
+similar(a::BitMatrix, ::Type{S}, dims::Int...) where S = _similar_bitarray(a, S, dims)
+similar(a::BitArray, ::Type{S}, dims::Int...) where S = _similar_bitarray(a, S, dims)
 
 function similar(::Type{Array{T}}, dims::Tuple) where T
     len = _array_length_from_size(dims)
-    mem = Memory{T}(len)
+    mem = Memory{T}(undef, len)
     return wrap(Array, mem, dims)
 end
 
 function similar(::Type{Array{Pair}}, dims::Tuple)
     len = _array_length_from_size(dims)
-    mem = Memory{Pair}(len)
+    mem = Memory{Pair}(undef, len)
     return wrap(Array, mem, dims)
 end
 
@@ -380,19 +387,19 @@ function similar(::Type{Array{Pair{K,V}}}, dims::Tuple) where {K,V}
     return wrap(Array, mem, dims)
 end
 
-function similar(::Type{Array{T}}, dims::Int64...) where T
+function similar(::Type{Array{T}}, dims::Int...) where T
     len = _array_length_from_size(dims)
-    mem = Memory{T}(len)
+    mem = Memory{T}(undef, len)
     return wrap(Array, mem, dims)
 end
 
-function similar(::Type{Array{Pair}}, dims::Int64...)
+function similar(::Type{Array{Pair}}, dims::Int...)
     len = _array_length_from_size(dims)
-    mem = Memory{Pair}(len)
+    mem = Memory{Pair}(undef, len)
     return wrap(Array, mem, dims)
 end
 
-function similar(::Type{Array{Pair{K,V}}}, dims::Int64...) where {K,V}
+function similar(::Type{Array{Pair{K,V}}}, dims::Int...) where {K,V}
     len = _array_length_from_size(dims)
     mem = Memory{Pair{K,V}}(len)
     return wrap(Array, mem, dims)
@@ -444,9 +451,11 @@ function eltype(a::Array)
     return eltype(typeof(a))
 end
 
-function _array_check_linear_index(a, i::Int64)
+function _array_check_linear_index(a, i::Int)
     if !(1 <= i <= length(a))
-        throw(BoundsError(a, i))
+        # Upstream wraps the scalar index in a tuple: A[10] reports
+        # BoundsError(A, (10,)) (Issue #11374).
+        throw(BoundsError(a, (i,)))
     end
     return nothing
 end
@@ -454,7 +463,7 @@ end
 function _array_linear_index(a, indices::Tuple)
     dims = _array_dims(a)
     if length(indices) != length(dims)
-        throw(BoundsError(a, 1))
+        throw(BoundsError(a, indices))
     end
     linear = 1
     stride = 1
@@ -462,7 +471,9 @@ function _array_linear_index(a, indices::Tuple)
         i = indices[k]
         dim = dims[k]
         if !(1 <= i <= dim)
-            throw(BoundsError(a, i))
+            # Upstream reports the complete index tuple, not the first
+            # offending component (Issue #11374).
+            throw(BoundsError(a, indices))
         end
         linear = linear + (i - 1) * stride
         stride = stride * dim
@@ -470,11 +481,11 @@ function _array_linear_index(a, indices::Tuple)
     return linear
 end
 
-function _array_linear_index(a, i::Int64, j::Int64)
+function _array_linear_index(a, i::Int, j::Int)
     return _array_linear_index(a, (i, j))
 end
 
-function _array_linear_index_tail(a, i::Int64, j::Int64, tail)
+function _array_linear_index_tail(a, i::Int, j::Int, tail)
     dims = _array_dims(a)
     if 2 + length(tail) != length(dims)
         throw(BoundsError(a, i))
@@ -496,7 +507,7 @@ function _array_linear_index_tail(a, i::Int64, j::Int64, tail)
     return linear
 end
 
-function _array_memory_index(a, i::Int64)
+function _array_memory_index(a, i::Int)
     return _array_offset(a) + i - 1
 end
 
@@ -507,20 +518,20 @@ function getindex(a::Array{T,N}) where {T,N}
     throw(ArgumentError("invalid zero-dimensional array index"))
 end
 
-function getindex(a::Array{T,N}, i::Int64) where {T,N}
+function getindex(a::Array{T,N}, i::Int) where {T,N}
     _array_check_linear_index(a, i)
-    return _array_memory(a)[_array_memory_index(a, i)]
+    return _array_memory_get(_array_memory(a), _array_memory_index(a, i))
 end
 
-function getindex(a::Array{T,N}, i::Int64, j::Int64) where {T,N}
-    return _array_memory(a)[_array_memory_index(a, _array_linear_index(a, i, j))]
+function getindex(a::Array{T,N}, i::Int, j::Int) where {T,N}
+    return _array_memory_get(_array_memory(a), _array_memory_index(a, _array_linear_index(a, i, j)))
 end
 
-function getindex(a::Array{T,N}, i::Int64, j::Int64, I::Int64...) where {T,N}
-    return _array_memory(a)[_array_memory_index(a, _array_linear_index_tail(a, i, j, I))]
+function getindex(a::Array{T,N}, i::Int, j::Int, I::Int...) where {T,N}
+    return _array_memory_get(_array_memory(a), _array_memory_index(a, _array_linear_index_tail(a, i, j, I)))
 end
 
-function getindex(a::Array{T,N}, i::Int64, c::Colon) where {T,N}
+function getindex(a::Array{T,N}, i::Int, c::Colon) where {T,N}
     n = size(a, 2)
     result = similar(a, (n,))
     for j in 1:n
@@ -529,7 +540,7 @@ function getindex(a::Array{T,N}, i::Int64, c::Colon) where {T,N}
     return result
 end
 
-function getindex(a::Array{T,N}, c::Colon, j::Int64) where {T,N}
+function getindex(a::Array{T,N}, c::Colon, j::Int) where {T,N}
     m = size(a, 1)
     result = similar(a, (m,))
     for i in 1:m
@@ -538,7 +549,7 @@ function getindex(a::Array{T,N}, c::Colon, j::Int64) where {T,N}
     return result
 end
 
-function getindex(a::Array{T,N}, i::Int64, c1::Colon, c2::Colon) where {T,N}
+function getindex(a::Array{T,N}, i::Int, c1::Colon, c2::Colon) where {T,N}
     n = size(a, 2)
     p = size(a, 3)
     result = similar(a, (n, p))
@@ -550,7 +561,7 @@ function getindex(a::Array{T,N}, i::Int64, c1::Colon, c2::Colon) where {T,N}
     return result
 end
 
-function getindex(a::Array{T,N}, c1::Colon, j::Int64, c2::Colon) where {T,N}
+function getindex(a::Array{T,N}, c1::Colon, j::Int, c2::Colon) where {T,N}
     m = size(a, 1)
     p = size(a, 3)
     result = similar(a, (m, p))
@@ -562,7 +573,7 @@ function getindex(a::Array{T,N}, c1::Colon, j::Int64, c2::Colon) where {T,N}
     return result
 end
 
-function getindex(a::Array{T,N}, c1::Colon, c2::Colon, k::Int64) where {T,N}
+function getindex(a::Array{T,N}, c1::Colon, c2::Colon, k::Int) where {T,N}
     m = size(a, 1)
     n = size(a, 2)
     result = similar(a, (m, n))
@@ -614,7 +625,7 @@ function getindex(a::Array{T,N}, c::Colon) where {T,N}
     return result
 end
 
-function getindex(a::Array{T,N}, inds::Array{Int64}) where {T,N}
+function getindex(a::Array{T,N}, inds::Array{Int}) where {T,N}
     l = length(inds)
     result = similar(a, (l,))
     for k in 1:l
@@ -664,31 +675,31 @@ function ==(A::Array, B::Array)
     return true
 end
 
-function setindex!(a::Array{T,N}, v, i::Int64) where {T,N}
+function setindex!(a::Array{T,N}, v, i::Int) where {T,N}
     _array_check_linear_index(a, i)
     m = _array_memory(a)
-    m[_array_memory_index(a, i)] = convert(T, v)
+    _array_memory_set!(m, _array_memory_index(a, i), convert(T, v))
     return a
 end
 
-function setindex!(a::Array{T,N}, v, i::Int64, j::Int64) where {T,N}
+function setindex!(a::Array{T,N}, v, i::Int, j::Int) where {T,N}
     idx = _array_linear_index(a, i, j)
     m = _array_memory(a)
-    m[_array_memory_index(a, idx)] = convert(T, v)
+    _array_memory_set!(m, _array_memory_index(a, idx), convert(T, v))
     return a
 end
 
-function setindex!(a::Array{T,N}, v, i::Int64, j::Int64, I::Int64...) where {T,N}
+function setindex!(a::Array{T,N}, v, i::Int, j::Int, I::Int...) where {T,N}
     idx = _array_linear_index_tail(a, i, j, I)
     m = _array_memory(a)
-    m[_array_memory_index(a, idx)] = convert(T, v)
+    _array_memory_set!(m, _array_memory_index(a, idx), convert(T, v))
     return a
 end
 
 function setindex!(a::Array{T,N}, v) where {T,N}
     if ndims(a) == 0
         m = _array_memory(a)
-        m[_array_memory_index(a, 1)] = convert(T, v)
+        _array_memory_set!(m, _array_memory_index(a, 1), convert(T, v))
         return a
     end
     throw(ArgumentError("invalid zero-dimensional array index"))
@@ -736,8 +747,11 @@ function sum(arr; dims=0, init=nothing)
         elseif T == Float32
             return _sum_float32_vector(arr)
         else
-            n = length(arr)
+            n = Int(length(arr))
             if n == 0
+                if eltype(arr) == Union{}
+                    throw(ArgumentError("reducing over an empty collection is not allowed; consider supplying `init` to the reducer"))
+                end
                 return zero(eltype(arr))
             end
             result = arr[1]
@@ -822,8 +836,19 @@ function _sum_float32_vector(arr)
     return result
 end
 
-# sum(g::Generator): collect and sum.
-# Keep the keyword method for `sum(x for x in itr; init=v)` (Issue #7133).
+# VM-native helper for empty generator reductions. The Rust side inspects the
+# native Generator callable because `g.f` is not always representable as a
+# direct Pure Julia function value.
+function _generator_empty_sum_value(g::Generator)
+    throw(ArgumentError("reducing over an empty collection is not allowed; consider supplying `init` to the reducer"))
+end
+
+# sum(g::Generator): keep the collect-backed non-empty path because nested
+# filtered generators currently rely on collect to preserve mapped values. Empty
+# generators still need upstream's mapreduce-empty split: identity mapping can
+# use the additive identity, while non-identity mapped generators raise
+# ArgumentError (Issue 10618). Keep the keyword method for
+# `sum(x for x in itr; init=v)` (Issue 7133).
 function sum(g::Generator; init=nothing)
     if init !== nothing
         result = init
@@ -832,7 +857,11 @@ function sum(g::Generator; init=nothing)
         end
         return result
     end
-    return sum(collect(g))
+    values = collect(g)
+    if length(values) == 0
+        return _generator_empty_sum_value(g)
+    end
+    return sum(values)
 end
 
 # prod: compute the product of all elements
@@ -1509,6 +1538,16 @@ function Vector(r::AbstractRange)
     return collect(r)
 end
 
+# Vector(::AbstractVector) — copy an existing vector.
+# Mirrors upstream `Array{T,N}(x::AbstractArray) = copyto!(Array{T,N}(undef,
+# size(x)), x)` for the common no-eltype `Vector(v)` spelling. This method is
+# primarily reached through dynamic dispatch (`map(Vector, xs)`); direct
+# constructor syntax is intercepted in the compiler and routed through
+# `collect(v)` as the same copy operation. Issue #10085.
+function Vector(a::AbstractVector)
+    return collect(a)
+end
+
 # Vector{T}(::AbstractRange) — materialize and convert each element.
 # Kept for compatibility with dynamic-dispatch call sites (the compile
 # intercept at `compile_array_constructor` short-circuits before
@@ -1549,6 +1588,34 @@ function _convert_to_typed_vector(::Type{S}, a) where {S}
         i += 1
     end
     return result
+end
+
+# Vector{T}(::AbstractVector) — copy and convert each element.
+# Constructor spelling must allocate even when the source already has the
+# requested element type; `convert(Vector{T}, a)` below keeps Julia's identity
+# fast path for exact-type conversion. Issue #10405.
+function Vector{T}(a::AbstractVector) where {T}
+    return _convert_to_typed_vector(T, a)
+end
+
+# Array(::AbstractVector/AbstractRange) and Array{T}(...) are callable type
+# values in higher-order dispatch (`map(Array, xs)`, `map(Array{T}, xs)`), not
+# just syntax intercepted by the compiler. Mirror the 1-D upstream constructor
+# behavior here so those first-class calls allocate fresh vectors. Issue #10405.
+function Array(a::AbstractVector)
+    return collect(a)
+end
+
+function Array(r::AbstractRange)
+    return collect(r)
+end
+
+function Array{T}(a::AbstractVector) where {T}
+    return _convert_to_typed_vector(T, a)
+end
+
+function Array{T}(r::AbstractRange) where {T}
+    return _convert_to_typed_vector(T, r)
 end
 
 function convert(::Type{Vector{S}}, a::AbstractArray) where {S}
@@ -1808,7 +1875,6 @@ rotl90(mat::Matrix{Bool}) = _rotl90_impl(mat)
 rotl90(mat::Matrix{String}) = _rotl90_impl(mat)
 rotl90(mat::Matrix{Char}) = _rotl90_impl(mat)
 rotl90(mat::Matrix{Any}) = _rotl90_impl(mat)
-rotl90(mat::Vector{Any}) = _rotl90_impl(mat)
 rotl90(mat::Vector{Int64}) = _rotl90_impl(mat)
 rotl90(mat::Vector{Float64}) = _rotl90_impl(mat)
 rotl90(mat::Vector{Bool}) = _rotl90_impl(mat)
@@ -1831,7 +1897,6 @@ rotr90(mat::Matrix{Bool}) = _rotr90_impl(mat)
 rotr90(mat::Matrix{String}) = _rotr90_impl(mat)
 rotr90(mat::Matrix{Char}) = _rotr90_impl(mat)
 rotr90(mat::Matrix{Any}) = _rotr90_impl(mat)
-rotr90(mat::Vector{Any}) = _rotr90_impl(mat)
 rotr90(mat::Vector{Int64}) = _rotr90_impl(mat)
 rotr90(mat::Vector{Float64}) = _rotr90_impl(mat)
 rotr90(mat::Vector{Bool}) = _rotr90_impl(mat)
@@ -1854,7 +1919,6 @@ rot180(mat::Matrix{Bool}) = _rot180_impl(mat)
 rot180(mat::Matrix{String}) = _rot180_impl(mat)
 rot180(mat::Matrix{Char}) = _rot180_impl(mat)
 rot180(mat::Matrix{Any}) = _rot180_impl(mat)
-rot180(mat::Vector{Any}) = _rot180_impl(mat)
 rot180(mat::Vector{Int64}) = _rot180_impl(mat)
 rot180(mat::Vector{Float64}) = _rot180_impl(mat)
 rot180(mat::Vector{Bool}) = _rot180_impl(mat)
@@ -1863,8 +1927,7 @@ rot180(mat::Vector{Char}) = _rot180_impl(mat)
 rot180(mat::Array) = _rot180_impl(mat)
 rot180(mat) = _rot180_impl(mat)
 
-# copy: create a shallow copy of an array (type-preserving)
-function copy(arr)
+function _copy_array_like(arr)
     n = length(arr)
     result = similar(arr)
     for i in 1:n
@@ -1872,6 +1935,10 @@ function copy(arr)
     end
     return _array_bitarray_surface_like(arr, result)
 end
+
+# copy: create a shallow copy of an array (type-preserving)
+copy(arr::BitArray) = _copy_array_like(arr)
+copy(arr) = _copy_array_like(arr)
 
 # Note: mean is in Statistics, not Base. Use `using Statistics` to get mean.
 # See: subset_julia_vm/src/julia/stdlib/Statistics/src/Statistics.jl
@@ -2046,7 +2113,20 @@ function _block_vcat(args)
     nrows = 0
     for i in 1:nargs
         if _cat_blk_ncols(args[i]) != ncols
-            error("number of columns of each array must match (got $(_cat_blk_ncols(args[i])) and $(ncols))")
+            # Upstream raises `ArgumentError` for a ragged `hvcat`-style block
+            # (e.g. `[1 2; 3 4;; 5 6]`, whose `;;` line-wrap extends only the
+            # current row -- Issue #10519) via its own row/column-count
+            # validation (`argument count does not match specified shape`,
+            # `julia/base/abstractarray.jl` `hvcat`). This block-based
+            # concatenation path computes shape differently and cannot
+            # reproduce that exact message without a larger rewrite, but the
+            # exception TYPE must still match: `error()` raised a generic
+            # `ErrorException` here (Issue #10354's fixture-fallout
+            # measurement, `array/ncat_double_semicolon_line_wrap_10519.jl`;
+            # see docs/vm/EXCEPTION_PARITY.md).
+            throw(ArgumentError(
+                "number of columns of each array must match (got $(_cat_blk_ncols(args[i])) and $(ncols))",
+            ))
         end
         nrows = nrows + _cat_blk_nrows(args[i])
     end
@@ -2426,7 +2506,7 @@ end
 
 # Single-Int `rows` form: hvcat(ncols, args...) — one row block size repeated
 # until the arguments are exhausted (e.g. hvcat(2, 1, 2, 3, 4) == [1 2; 3 4]).
-function hvcat(ncols::Int64, args...)
+function hvcat(ncols::Int, args...)
     n = length(args)
     nrows = div(n, ncols)
     rowblocks = []
@@ -2443,6 +2523,282 @@ function hvcat(ncols::Int64, args...)
         return rowblocks[1]
     end
     return _block_vcat(rowblocks)
+end
+
+# =============================================================================
+# hvncat: N-dimensional block concatenation (Issue #10381)
+#
+# Mirrors upstream julia/base/abstractarray.jl `hvncat`. Three call forms:
+#   hvncat(dim::Int, xs...)                    — concatenate along `dim`
+#   hvncat(dims::NTuple{N,Int}, row_first, xs...)   — balanced literal form
+#   hvncat(shape::NTuple{N,Tuple}, row_first, xs...) — ragged literal form
+# The literal lowering emits the shape form for `;;`/`;;;`-separated
+# array-valued blocks; the other forms cover direct Base.hvncat callers.
+# Ports of the upstream algorithms with sjulia adaptations: no `Val`
+# dispatch, scratch vectors allocated locally, allocation through the shared
+# `_cat_promoted_eltype` / `_array_undef_from_dims` helpers.
+# =============================================================================
+
+_hvncat_size(x, d) = isa(x, AbstractArray) ? size(x, d) : 1
+_hvncat_ndims(x) = isa(x, AbstractArray) ? ndims(x) : 0
+_hvncat_length(x) = isa(x, AbstractArray) ? length(x) : 1
+
+function hvncat(dimsshape::Tuple, row_first::Bool, xs...)
+    length(dimsshape) > 0 ||
+        throw(ArgumentError("`dimsshape` argument must be non-empty"))
+    if isa(dimsshape[1], Tuple)
+        return _hvncat_shape(dimsshape, row_first, xs)
+    end
+    return _hvncat_dims(dimsshape, row_first, xs)
+end
+
+hvncat(dim::Int, xs...) = _hvncat_along_dim(dim, xs)
+
+# hvncat(dim, xs...): concatenate along a single dimension (upstream
+# `_typed_hvncat(T, Val(N), as...)`).
+function _hvncat_along_dim(N::Int, as)
+    length(as) > 0 ||
+        throw(ArgumentError("must have at least one element"))
+    N > 0 ||
+        throw(ArgumentError("concatenation dimension must be positive"))
+    nd = N
+    ndim_total = 0
+    for i in 1:length(as)
+        ndim_total += _hvncat_size(as[i], N)
+        nd = max(nd, _hvncat_ndims(as[i]))
+    end
+    for i in 1:length(as)
+        for d in 1:nd
+            d == N && continue
+            if _hvncat_size(as[1], d) != _hvncat_size(as[i], d)
+                throw(DimensionMismatch("mismatched size along axis $d in element $i"))
+            end
+        end
+    end
+    outdims = zeros(Int, nd)
+    for d in 1:nd
+        outdims[d] = (d == N) ? ndim_total : _hvncat_size(as[1], d)
+    end
+    A = _array_undef_from_dims(_cat_promoted_eltype(as), (outdims...,))
+    k = 1
+    for a in as
+        if isa(a, AbstractArray)
+            for x in a
+                A[k] = x
+                k += 1
+            end
+        else
+            A[k] = a
+            k += 1
+        end
+    end
+    return A
+end
+
+# Balanced form (upstream `_typed_hvncat_dims`): `dims[d]` is the number of
+# blocks along dimension `d`.
+function _hvncat_dims(dims::Tuple, row_first::Bool, as)
+    length(as) > 0 ||
+        throw(ArgumentError("must have at least one element"))
+    for d in dims
+        d > 0 || throw(ArgumentError("`dims` argument must contain positive integers"))
+    end
+    nd = length(dims)
+    for a in as
+        nd = max(nd, _hvncat_ndims(a))
+    end
+    # pad dims with trailing 1-blocks up to the element rank
+    dimsv = ones(Int, nd)
+    for d in 1:length(dims)
+        dimsv[d] = dims[d]
+    end
+
+    d1 = row_first ? 2 : 1
+    d2 = row_first ? 1 : 2
+
+    outdims = zeros(Int, nd)
+
+    # discover number of rows or columns
+    for i in 1:dimsv[d1]
+        outdims[d1] += _hvncat_size(as[i], d1)
+    end
+
+    currentdims = zeros(Int, nd)
+    blockcount = 0
+    elementcount = 0
+    for i in 1:length(as)
+        elementcount += _hvncat_length(as[i])
+        currentdims[d1] += _hvncat_size(as[i], d1)
+        if currentdims[d1] == outdims[d1]
+            currentdims[d1] = 0
+            d = d2
+            while d <= nd
+                currentdims[d] += _hvncat_size(as[i], d)
+                if outdims[d] == 0 # unfixed dimension
+                    blockcount += 1
+                    if blockcount == dimsv[d]
+                        outdims[d] = currentdims[d]
+                        currentdims[d] = 0
+                        blockcount = 0
+                    else
+                        break
+                    end
+                else # fixed dimension
+                    if currentdims[d] == outdims[d] # end of dimension
+                        currentdims[d] = 0
+                    elseif currentdims[d] < outdims[d] # dimension in progress
+                        break
+                    else # exceeded dimension
+                        throw(DimensionMismatch("argument $i has too many elements along axis $d"))
+                    end
+                end
+                d = (d == d2) ? 3 : d + 1
+                d == d1 && (d += 1)
+            end
+        elseif currentdims[d1] > outdims[d1] # exceeded dimension
+            throw(DimensionMismatch("argument $i has too many elements along axis $d1"))
+        end
+    end
+
+    outlen = prod(outdims)
+    elementcount == outlen ||
+        throw(DimensionMismatch("mismatched number of elements; expected $(outlen), got $(elementcount)"))
+
+    A = _array_undef_from_dims(_cat_promoted_eltype(as), (outdims...,))
+    _hvncat_fill!(A, zeros(Int, nd), zeros(Int, nd), d1, d2, as)
+    return A
+end
+
+# Ragged form (upstream `_typed_hvncat_shape`): `shape[d]` lists the element
+# count of each dimension-`d` block, cumulatively per level.
+function _hvncat_shape(shape::Tuple, row_first::Bool, as)
+    length(as) > 0 ||
+        throw(ArgumentError("must have at least one element"))
+    N = length(shape)
+    nd = N
+    for a in as
+        nd = max(nd, _hvncat_ndims(a))
+    end
+
+    for lvl in shape
+        length(lvl) > 0 ||
+            throw(ArgumentError("each level of `shape` argument must have at least one value"))
+        for v in lvl
+            v > 0 || throw(ArgumentError("`shape` argument must consist of positive integers"))
+        end
+    end
+    length(shape[N]) == 1 ||
+        throw(ArgumentError("last level of shape must contain only one integer"))
+    shape[N][1] == length(as) ||
+        throw(ArgumentError("number of elements does not match shape; expected $(shape[N][1]), got $(length(as))"))
+
+    d1 = row_first ? 2 : 1
+    d2 = row_first ? 1 : 2
+
+    outdims = fill(-1, nd)
+    currentdims = zeros(Int, nd)
+    blockcounts = zeros(Int, nd)
+    shapepos = ones(Int, nd)
+
+    elementcount = 0
+    for i in 1:length(as)
+        elementcount += _hvncat_length(as[i])
+        wasstartblock = false
+        for d in 1:N
+            ad = (d < 3 && row_first) ? (d == 1 ? 2 : 1) : d
+            dsize = _hvncat_size(as[i], ad)
+            blockcounts[d] += 1
+
+            if d == 1 || i == 1 || wasstartblock
+                currentdims[d] += dsize
+            elseif dsize != _hvncat_size(as[i - 1], ad)
+                throw(DimensionMismatch("argument $i has a mismatched number of elements along axis $ad; expected $(_hvncat_size(as[i - 1], ad)), got $dsize"))
+            end
+
+            wasstartblock = blockcounts[d] == 1 # remember for next dimension
+
+            isendblock = blockcounts[d] == shape[d][shapepos[d]]
+            if isendblock
+                if outdims[d] == -1
+                    outdims[d] = currentdims[d]
+                elseif outdims[d] != currentdims[d]
+                    throw(DimensionMismatch("argument $i has a mismatched number of elements along axis $ad; expected $(abs(outdims[d] - (currentdims[d] - dsize))), got $dsize"))
+                end
+                currentdims[d] = 0
+                blockcounts[d] = 0
+                shapepos[d] += 1
+                if d > 1 && blockcounts[d - 1] != 0
+                    throw(DimensionMismatch("shape in level $d is inconsistent; level counts must nest evenly into each other"))
+                end
+            end
+        end
+    end
+
+    outlen = prod(outdims)
+    elementcount == outlen ||
+        throw(ArgumentError("mismatched number of elements; expected $(outlen), got $(elementcount)"))
+
+    if row_first
+        tmp = outdims[1]
+        outdims[1] = outdims[2]
+        outdims[2] = tmp
+    end
+
+    A = _array_undef_from_dims(_cat_promoted_eltype(as), (outdims...,))
+    _hvncat_fill!(A, currentdims, blockcounts, d1, d2, as)
+    return A
+end
+
+# Copy the elements into the destination (upstream `hvncat_fill!`): the
+# offsets advance along d1, then d2, then dims 3..N.
+function _hvncat_fill!(A, offsets, inneroffsets, d1::Int, d2::Int, as)
+    nd = ndims(A)
+    outdims = size(A)
+    # iteration order over destination dimensions when advancing offsets
+    order = zeros(Int, nd)
+    order[1] = d1
+    if nd >= 2
+        order[2] = d2
+    end
+    for j in 3:nd
+        order[j] = j
+    end
+    for a in as
+        if isa(a, AbstractArray)
+            for x in a
+                Ai = _hvncat_calcindex(offsets, inneroffsets, outdims, nd)
+                A[Ai] = x
+                for j in 1:nd
+                    inneroffsets[j] += 1
+                    inneroffsets[j] < _hvncat_size(a, j) && break
+                    inneroffsets[j] = 0
+                end
+            end
+        else
+            Ai = _hvncat_calcindex(offsets, inneroffsets, outdims, nd)
+            A[Ai] = a
+        end
+
+        for jj in 1:nd
+            j = order[jj]
+            offsets[j] += _hvncat_size(a, j)
+            offsets[j] < outdims[j] && break
+            offsets[j] = 0
+        end
+    end
+    return A
+end
+
+function _hvncat_calcindex(offsets, inneroffsets, outdims, nd::Int)
+    Ai = inneroffsets[1] + offsets[1] + 1
+    for j in 2:nd
+        increment = inneroffsets[j] + offsets[j]
+        for k in 1:(j - 1)
+            increment *= outdims[k]
+        end
+        Ai += increment
+    end
+    return Ai
 end
 
 # vec: flatten array to 1D vector (type-preserving)
@@ -2470,7 +2826,7 @@ function stack(arrays)
     # bounds (Issue #3592).
     for j in 2:n
         if length(arrays[j]) != m
-            error("DimensionMismatch: stack expects uniform slices, got length(arrays[$j]) == $(length(arrays[j])) while first had $m")
+            throw(DimensionMismatch("stack expects uniform slices, got length(arrays[$j]) == $(length(arrays[j])) while first had $m"))
         end
     end
     first_eltype = eltype(first_arr)
@@ -2650,7 +3006,7 @@ end
 # copyto!(dest, dstart, src): copy all of src to dest starting at dest[dstart]
 # Based on Julia's base/abstractarray.jl:1126
 # Overlap-safe (Issue #3595): when dest === src and dstart > 1, iterate backward.
-function copyto!(dest::Array, dstart::Int64, src::Array)
+function copyto!(dest::Array, dstart::Int, src::Array)
     n = length(src)
     if dest === src && dstart > 1
         for i in n:-1:1
@@ -2667,7 +3023,7 @@ end
 # copyto!(dest, dstart, src, sstart): copy from src[sstart:end] to dest[dstart:end]
 # Based on Julia's base/abstractarray.jl:1130
 # Overlap-safe (Issue #3595): when dest === src and dstart > sstart, iterate backward.
-function copyto!(dest::Array, dstart::Int64, src::Array, sstart::Int64)
+function copyto!(dest::Array, dstart::Int, src::Array, sstart::Int)
     n = length(src) - sstart + 1
     if dest === src && dstart > sstart
         for i in n:-1:1
@@ -2685,7 +3041,7 @@ end
 # Based on Julia's base/abstractarray.jl:1136
 # Overlap-safe (Issue #3595): when dest === src and dstart > sstart, iterate backward
 # (forward iteration would overwrite source elements before they're read).
-function copyto!(dest::Array, dstart::Int64, src::Array, sstart::Int64, n::Int64)
+function copyto!(dest::Array, dstart::Int, src::Array, sstart::Int, n::Int)
     if n == 0
         return dest
     end
@@ -3117,7 +3473,7 @@ end
 
 # adjoint for StepRangeLen - converts to 1×N row vector
 function adjoint(r::StepRangeLen{T}) where T
-    n = r.len
+    n = length(r)
     result = _array_undef_from_dims(T, (1, n))
     for i in 1:n
         value = r[i]
@@ -3128,6 +3484,14 @@ end
 
 # adjoint for OneTo - converts to 1×N row vector
 function adjoint(r::OneTo)
+    return adjoint(collect(r))
+end
+
+# adjoint for the remaining range kinds — VM-native StepRange and the
+# TwicePrecision-backed float StepRangeLen ranges that `a:s:b` and
+# `range(start, stop; length)` produce (Issue #9419). Real elements, so
+# adjoint == transpose == 1×N row vector, like the methods above.
+function adjoint(r::AbstractRange)
     return adjoint(collect(r))
 end
 
@@ -3155,6 +3519,12 @@ function transpose(r::OneTo)
     return transpose(collect(r))
 end
 
+# transpose for the remaining range kinds (VM-native StepRange / float
+# StepRangeLen ranges; Issue #9419) - converts to 1×N row vector
+function transpose(r::AbstractRange)
+    return transpose(collect(r))
+end
+
 # =============================================================================
 # Array repetition functions
 # =============================================================================
@@ -3170,7 +3540,7 @@ end
 #   2  2
 #   1  1
 #   2  2
-function repeat(arr::Array, m::Int64, n::Int64)
+function repeat(arr::Array, m::Int, n::Int)
     # Check dimensionality using length(size(arr))
     # 1D: size(arr) = (n,), length = 1
     # 2D: size(arr) = (m, n), length = 2
@@ -3247,7 +3617,7 @@ end
 # Based on Julia's base/abstractarray.jl
 
 # checkbounds(Bool, A, i) - return true if index i is valid for array A
-function checkbounds(::Type{Bool}, A, i::Int64)
+function checkbounds(::Type{Bool}, A, i::Int)
     return 1 <= i && i <= length(A)
 end
 
@@ -3257,7 +3627,7 @@ function checkbounds(::Type{Bool}, A, i)
 end
 
 # checkbounds(A, i) - throw BoundsError if index i is not valid for array A
-function checkbounds(A, i::Int64)
+function checkbounds(A, i::Int)
     if !(1 <= i <= length(A))
         throw(BoundsError(A, i))
     end
@@ -3270,7 +3640,7 @@ function checkbounds(A, i)
 end
 
 # checkindex(Bool, inds, i) - check if index i is within range inds
-function checkindex(::Type{Bool}, inds, i::Int64)
+function checkindex(::Type{Bool}, inds, i::Int)
     # For UnitRange (1:n style), use firstindex/lastindex
     first_idx = inds[1]
     last_idx = inds[length(inds)]
@@ -3290,7 +3660,7 @@ end
 # In SubsetJuliaVM, all array elements for isbits types (Int64, Float64, Bool,
 # etc.) are always assigned, so isassigned simplifies to a bounds check.
 
-function isassigned(a, i::Int64)
+function isassigned(a, i::Int)
     return 1 <= i && i <= length(a)
 end
 
@@ -3306,13 +3676,13 @@ end
 # popat!(a, i) removes and returns the element at index i
 # popat!(a, i, default) returns default if index is out of bounds
 
-function popat!(a, i::Int64)
+function popat!(a, i::Int)
     x = a[i]
     deleteat!(a, i)
     return x
 end
 
-function popat!(a, i::Int64, default)
+function popat!(a, i::Int, default)
     n = length(a)
     if 1 <= i && i <= n
         x = a[i]
@@ -3359,21 +3729,21 @@ function fill(value, dims::Tuple)
     return result
 end
 
-function fill(value, len::Int64)
+function fill(value, len::Int)
     T = typeof(value)
     result = _array_undef_from_dims(T, (len,))
     fill!(result, value)
     return result
 end
 
-function fill(value, rows::Int64, cols::Int64)
+function fill(value, rows::Int, cols::Int)
     T = typeof(value)
     result = _array_undef_from_dims(T, (rows, cols))
     fill!(result, value)
     return result
 end
 
-function fill(value, d1::Int64, d2::Int64, d3::Int64)
+function fill(value, d1::Int, d2::Int, d3::Int)
     T = typeof(value)
     result = _array_undef_from_dims(T, (d1, d2, d3))
     fill!(result, value)
@@ -3392,7 +3762,7 @@ end
 
 function _array_undef_from_dims(typ::Type{Int64}, dims::Tuple)
     _array_check_undef_dims(dims)
-    return similar(Array{Int64}, dims)
+    return similar(Array{Int}, dims)
 end
 
 function _array_undef_from_dims(typ::Type{Int8}, dims::Tuple)
@@ -3408,6 +3778,11 @@ end
 function _array_undef_from_dims(typ::Type{Int32}, dims::Tuple)
     _array_check_undef_dims(dims)
     return similar(Array{Int32}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{Int128}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{Int128}, dims)
 end
 
 function _array_undef_from_dims(typ::Type{UInt8}, dims::Tuple)
@@ -3428,6 +3803,11 @@ end
 function _array_undef_from_dims(typ::Type{UInt64}, dims::Tuple)
     _array_check_undef_dims(dims)
     return similar(Array{UInt64}, dims)
+end
+
+function _array_undef_from_dims(typ::Type{UInt128}, dims::Tuple)
+    _array_check_undef_dims(dims)
+    return similar(Array{UInt128}, dims)
 end
 
 function _array_undef_from_dims(typ::Type{Bool}, dims::Tuple)
@@ -3521,15 +3901,7 @@ function zeros(dims::Tuple)
     return zeros(Float64, dims)
 end
 
-function zeros(d1::Int64, d2::Int64)
-    return zeros(Float64, (d1, d2))
-end
-
-function zeros(d1::Int64, d2::Int64, d3::Int64)
-    return zeros(Float64, (d1, d2, d3))
-end
-
-function zeros(dims::Int64...)
+function zeros(dims::Int...)
     return zeros(Float64, dims)
 end
 
@@ -3539,108 +3911,7 @@ function zeros(typ::Type{T}, dims::Tuple) where T
     return result
 end
 
-function zeros(typ::Type{T}, d1) where T
-    result = _array_undef_from_dims(T, (d1,))
-    fill!(result, zero(T))
-    return result
-end
-
-function zeros(typ::Type{T}, d1, d2) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, zero(T))
-    return result
-end
-
-function zeros(typ::Type{T}, d1, d2, d3) where T
-    result = _array_undef_from_dims(T, (d1, d2, d3))
-    fill!(result, zero(T))
-    return result
-end
-
-# Note: `zeros(::Type{Complex{Float64}}, dims...)` is handled by the generic
-# `zeros(::Type{T}, ...)` methods above — the body is identical
-# (`_array_undef_from_dims(T, dims)` + `fill!(result, zero(T))`), so the
-# Complex-specialized methods were redundant and removed (Issue #5156).
-
-function zeros(typ::Type{Int64}, d1)
-    result = _array_undef_from_dims(Int64, (d1,))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, dims::Tuple)
-    result = _array_undef_from_dims(Int64, dims)
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, d1, d2)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, d1::Int64, d2)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, d1, d2::Int64)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, d1, d2, d3)
-    result = _array_undef_from_dims(Int64, (d1, d2, d3))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, d1::Int64, d2::Int64)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, d1::Int64, d2::Int64, d3::Int64)
-    result = _array_undef_from_dims(Int64, (d1, d2, d3))
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{Int64}, dims::Int64...)
-    result = _array_undef_from_dims(Int64, dims)
-    fill!(result, zero(Int64))
-    return result
-end
-
-function zeros(typ::Type{T}, d1::Int64, d2::Int64) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, zero(T))
-    return result
-end
-
-function zeros(typ::Type{T}, d1::Int64, d2) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, zero(T))
-    return result
-end
-
-function zeros(typ::Type{T}, d1, d2::Int64) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, zero(T))
-    return result
-end
-
-function zeros(typ::Type{T}, d1::Int64, d2::Int64, d3::Int64) where T
-    result = _array_undef_from_dims(T, (d1, d2, d3))
-    fill!(result, zero(T))
-    return result
-end
-
-function zeros(typ::Type{T}, dims::Int64...) where T
+function zeros(typ::Type{T}, dims...) where T
     result = _array_undef_from_dims(T, dims)
     fill!(result, zero(T))
     return result
@@ -3650,15 +3921,7 @@ function ones(dims::Tuple)
     return ones(Float64, dims)
 end
 
-function ones(d1::Int64, d2::Int64)
-    return ones(Float64, (d1, d2))
-end
-
-function ones(d1::Int64, d2::Int64, d3::Int64)
-    return ones(Float64, (d1, d2, d3))
-end
-
-function ones(dims::Int64...)
+function ones(dims::Int...)
     return ones(Float64, dims)
 end
 
@@ -3668,145 +3931,7 @@ function ones(typ::Type{T}, dims::Tuple) where T
     return result
 end
 
-function ones(typ::Type{T}, d1) where T
-    result = _array_undef_from_dims(T, (d1,))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{T}, d1, d2) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{T}, d1, d2, d3) where T
-    result = _array_undef_from_dims(T, (d1, d2, d3))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, d1)
-    result = _array_undef_from_dims(Complex{Float64}, (d1,))
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, dims::Tuple)
-    result = _array_undef_from_dims(Complex{Float64}, dims)
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, d1::Int64)
-    result = _array_undef_from_dims(Complex{Float64}, (d1,))
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, d1, d2)
-    result = _array_undef_from_dims(Complex{Float64}, (d1, d2))
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, d1::Int64, d2::Int64)
-    result = _array_undef_from_dims(Complex{Float64}, (d1, d2))
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, d1, d2, d3)
-    result = _array_undef_from_dims(Complex{Float64}, (d1, d2, d3))
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Complex{Float64}}, d1::Int64, d2::Int64, d3::Int64)
-    result = _array_undef_from_dims(Complex{Float64}, (d1, d2, d3))
-    fill!(result, one(Complex{Float64}))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1)
-    result = _array_undef_from_dims(Int64, (d1,))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, dims::Tuple)
-    result = _array_undef_from_dims(Int64, dims)
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1, d2)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1::Int64, d2)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1, d2::Int64)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1, d2, d3)
-    result = _array_undef_from_dims(Int64, (d1, d2, d3))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1::Int64, d2::Int64)
-    result = _array_undef_from_dims(Int64, (d1, d2))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, d1::Int64, d2::Int64, d3::Int64)
-    result = _array_undef_from_dims(Int64, (d1, d2, d3))
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{Int64}, dims::Int64...)
-    result = _array_undef_from_dims(Int64, dims)
-    fill!(result, one(Int64))
-    return result
-end
-
-function ones(typ::Type{T}, d1::Int64, d2::Int64) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{T}, d1::Int64, d2) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{T}, d1, d2::Int64) where T
-    result = _array_undef_from_dims(T, (d1, d2))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{T}, d1::Int64, d2::Int64, d3::Int64) where T
-    result = _array_undef_from_dims(T, (d1, d2, d3))
-    fill!(result, one(T))
-    return result
-end
-
-function ones(typ::Type{T}, dims::Int64...) where T
+function ones(typ::Type{T}, dims...) where T
     result = _array_undef_from_dims(T, dims)
     fill!(result, one(T))
     return result
@@ -3822,7 +3947,7 @@ end
 # If n is larger, the collection is extended with uninitialized values
 # (zeros for numeric types, false for Bool).
 
-function resize!(a::Array, n::Int64)
+function resize!(a::Array, n::Int)
     current = length(a)
     if n < 0
         error("resize!: new length must be ≥ 0")
@@ -3984,7 +4109,7 @@ end
 # insert!(a, index, item) inserts item into a at the given index.
 # index is the index of item in the resulting array.
 
-function insert!(a::Array, index::Int64, item)
+function insert!(a::Array, index::Int, item)
     n = length(a)
     if index < 1 || index > n + 1
         error("insert!: index out of bounds")
@@ -4056,7 +4181,7 @@ end
 # deleteat!(a, i) removes the element at index i from a.
 # Returns the modified array.
 
-function deleteat!(a::Array, i::Int64)
+function deleteat!(a::Array, i::Int)
     n = length(a)
     if i < 1 || i > n
         error("deleteat!: index out of bounds")
@@ -4078,7 +4203,7 @@ end
 # `inds` is intentionally untyped: the runtime builtin-fallback matcher refuses
 # to match a native-array argument against `::AbstractVector` (the #4189 guard),
 # so a typed parameter would never be selected — `::Any` is, while the scalar
-# `deleteat!(a::Array, i::Int64)` stays more specific for a single index.
+# `deleteat!(a::Array, i::Int)` stays more specific for a single index.
 # Delete in descending order so earlier removals don't shift later indices.
 function deleteat!(a::Array, inds)
     idxs = Int64[]
@@ -4230,7 +4355,7 @@ end
 # splice!(a, r, ins) removes elements in range r, inserts ins, returns old elements.
 
 # splice!(a, i) - Remove and return element at index i
-function splice!(a::Array, i::Int64)
+function splice!(a::Array, i::Int)
     n = length(a)
     if i < 1 || i > n
         error("splice!: index out of bounds")
@@ -4250,7 +4375,7 @@ end
 
 # splice!(a, i, replacement) - Replace element at index i with replacement
 # Note: replacement can be a single value or an array of values
-function splice!(a::Array, i::Int64, replacement)
+function splice!(a::Array, i::Int, replacement)
     n = length(a)
     if i < 1 || i > n
         error("splice!: index out of bounds")
@@ -4533,14 +4658,14 @@ function _cat_result_like(A, B, dims::Tuple)
     return _array_undef_from_dims(promote_type(eltype(A), eltype(B)), dims)
 end
 
-function _cat_result_like(A, B, d1::Int64)
+function _cat_result_like(A, B, d1::Int)
     if eltype(A) == eltype(B)
         return similar(A, d1)
     end
     return _array_undef_from_dims(promote_type(eltype(A), eltype(B)), (d1,))
 end
 
-function _cat_result_like(A, B, d1::Int64, d2::Int64)
+function _cat_result_like(A, B, d1::Int, d2::Int)
     if eltype(A) == eltype(B)
         return similar(A, d1, d2)
     end
@@ -4637,7 +4762,7 @@ end
 # For 2D matrices:
 #   dims=1: apply f to each column (slices along rows)
 #   dims=2: apply f to each row (slices along columns)
-function _mapslices_column(A, m::Int64, j::Int64)
+function _mapslices_column(A, m::Int, j::Int)
     col = similar(A, m)
     for i in 1:m
         col[i] = A[i, j]
@@ -4645,7 +4770,7 @@ function _mapslices_column(A, m::Int64, j::Int64)
     return col
 end
 
-function _mapslices_row(A, n::Int64, i::Int64)
+function _mapslices_row(A, n::Int, i::Int)
     row = similar(A, n)
     for j in 1:n
         row[j] = A[i, j]
@@ -4770,7 +4895,7 @@ end
 # findnext(testf, A, start) - find next index >= start where testf(A[i]) is true
 # findprev(testf, A, start) - find prev index <= start where testf(A[i]) is true
 
-function findnext(testf::Function, A, start::Int64)
+function findnext(testf::Function, A, start::Int)
     n = length(A)
     i = start
     while i <= n
@@ -4782,7 +4907,7 @@ function findnext(testf::Function, A, start::Int64)
     return nothing
 end
 
-function findprev(testf::Function, A, start::Int64)
+function findprev(testf::Function, A, start::Int)
     i = start
     while i >= 1
         if testf(A[i])

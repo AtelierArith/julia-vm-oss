@@ -70,7 +70,7 @@ description = "Base.retry returns a wrapper function that retries after exceptio
 name = "backtrace_stubs"
 file = "backtrace_stubs.jl"
 expected = true
-description = "Stub implementations for backtrace, catch_backtrace, stacktrace, current_exceptions (Issue #448)"
+description = "backtrace(), catch_backtrace(), and stacktrace() expose non-empty VM stack frames instead of silent empty stubs (Issue #8993)"
 
 [[tests]]
 name = "try_block_return"
@@ -107,3 +107,129 @@ name = "exceptions_catchable_inexact_error_8212"
 file = "catchable_inexact_error_8212.jl"
 expected = true
 description = "A failed convert(T, x) (direct call, typed local, or `for i::T in itr`) raises an InexactError exception object, so catch binds typeof(e) == InexactError / isa(e, InexactError) instead of a bare String (Issue #8212)"
+
+[[tests]]
+name = "exceptions_typeof_showerror_parity_matrix_8665"
+file = "typeof_showerror_parity_matrix_8665.jl"
+expected = true
+description = "typeof(e)/showerror parity matrix for all catchable VmError variants: verifies typeof/isa/showerror parity with upstream Julia for DivideError, BoundsError (5 paths), InexactError, DomainError, MethodError, ErrorException, DimensionMismatch, ArgumentError, StringIndexError, FieldError, UndefVarError, StackOverflowError, KeyError, UndefRefError, OverflowError (Issue #8665, parent #8643; UndefRefError added for Issue #10067)"
+
+[[tests]]
+name = "exceptions_try_catch_type_inference_9131"
+file = "try_catch_type_inference_9131.jl"
+expected = true
+description = "try/catch type inference env-join fix: infer_block_branch and infer_stmt Stmt::Try handlers now use pre-try env as catch entry and merge try/catch exit envs, so the declared return type covers both arms and callers don't slot-type-mismatch crash (Issue #9131)"
+
+[[tests]]
+name = "exceptions_catchable_static_no_method_9409"
+file = "catchable_static_no_method_9409.jl"
+expected = true
+description = "Statically-proven no-method numeric calls ((2+3im)/'a', 'a'-1.5) raise a catchable runtime MethodError instead of aborting compilation, and the dynamic-dispatch miss through a function-valued argument (myop(/, 2+3im, 'a')) is routed through the VM exception machinery instead of escaping try/catch (Issue #9409)"
+
+[[tests]]
+name = "exceptions_try_catch_dispatch_methoderror_9709_9710"
+file = "try_catch_dispatch_methoderror_9709_9710.jl"
+expected = true
+description = "Keyword no-method calls and arity-mismatched calls inside try/catch raise catchable runtime MethodError instead of aborting compilation with Dispatch(NoMethodFound), while preserving argument and keyword side effects (Issues #9709/#9710)"
+
+[[tests]]
+name = "exceptions_try_tail_assign_implicit_return_10074"
+file = "try_tail_assign_implicit_return_10074.jl"
+expected = true
+description = "try/catch[/else/finally] in tail (implicit-return) position with a branch tail of plain assign, op-assign, global-assign, or a nested begin/end block now returns the assigned value instead of nothing/crashing. Fixes assign_block_tail_value (lowering/expr/mod.rs, shared by try/if-as-value, Issue #6223 lineage) and compile_block_value (compile/expr/mod.rs, empty-binding Expr::LetBlock codegen) to recognize a trailing Stmt::Assign/Stmt::AddAssign, mirroring the #8976/#10023 function-tail fix (Issue #10074)"
+
+[[tests]]
+name = "exceptions_try_catch_tail_value_semantics_10254"
+file = "try_catch_tail_value_semantics_10254.jl"
+expected = true
+description = "Design close-out (Issue #10254) locking in try/catch/finally tail-position value-propagation semantics end-to-end: assign-only tails at RVALUE/expression position (not just function-tail position), nested try/catch with assign-only tails, catch-var-binding + assign tail, try/finally without a catch clause with an assign tail, and typed post-use (arithmetic, typeof, string concat, ::T return annotation) of an assign-tail result. Complements try_catch_expression_4784/nested_try_catch_expression_4833/try_implicit_return_6223/try_catch_type_inference_9131/try_tail_assign_implicit_return_10074 (Issue #10074) rather than duplicating them"
+
+[[tests]]
+name = "exceptions_catchable_hof_builtin_error_10406"
+file = "catchable_hof_builtin_error_10406.jl"
+expected = true
+description = "A builtin/HOF per-element failure (sqrt(\"a\") directly, and per-element via map(sqrt, ...) / sum(sqrt, ...)) raises a catchable Julia exception a surrounding try/catch observes, instead of aborting the whole program with an uncatchable top-level Runtime error. Root cause: the VM run loop's terminal error arm returned bare-`?`-propagated errors straight out instead of routing catchable ones through the exception-handler machinery (now gated by is_catchable_vm_error so host/internal errors stay uncatchable). Asserts observability only; the caught type is a TypeError (sjulia numeric fast path) vs upstream's MethodError, a separately tracked parity refinement (Refs #10405/#10461) (Issue #10406)"
+
+[[tests]]
+name = "exceptions_numeric_fastpath_methoderror_10481"
+file = "numeric_fastpath_methoderror_10481.jl"
+expected = true
+description = "A builtin numeric fast path (SqrtF64/FloorF64/CeilF64, CallBuiltin(Sqrt|Round|Trunc), CallDynamicOrBuiltin rounding, and the runtime intrinsic fallback used by HOF/broadcast per-element calls) whose operand fails the numeric check raises MethodError like upstream's dispatch miss, not the internal conversion TypeError. Covers direct sqrt/floor/ceil/round on a String, dynamic in-function calls, map/sum per-element failures, and broadcast, plus guards that the remap is error-path only: sqrt(-1.0) still DomainError and the numeric results are unchanged. Exact-type refinement deferred from #10406 (Refs #10461/#10405) (Issue #10481)"
+
+[[tests]]
+name = "exceptions_exception_taxonomy_funnel_11146"
+file = "exception_taxonomy_funnel_11146.jl"
+expected = true
+description = "Exception CLASSES come from one funnel (VmError::exception_class, subset_julia_vm_bytecode/src/error.rs), not an ad-hoc choice at each raise site (Issue #10813 Phase 2a). Pins the upstream class for the constructs Phase 0/1a measured as divergent: convert-with-no-method and calling a non-callable value are MethodError (not TypeError); wrong-arity <: and a negative Memory size are ArgumentError; Memory OOB is BoundsError; a mid-character byte index is StringIndexError; a Diagonal shape mismatch is DimensionMismatch (all four of those used to be raised as a variant whose MESSAGE named a different class). Guards against over-correction: typeassert stays TypeError and Int(1.5) stays InexactError. Closes with the taxonomy's core invariant -- every catchable failure binds a real Exception, never a bare String. Verified against julia 1.12.6; uses explicit try/catch + isa because @test_throws still ignores its expected type on this base (Issue #10354) (Issue #11146)"
+
+[[tests]]
+name = "exceptions_default_constructor_static_convert_11147"
+file = "default_constructor_static_convert_11147.jl"
+expected = true
+description = "Direct default-constructor calls convert values to declared field types, preserve successful conversions, and raise catchable MethodError/InexactError values matching upstream when conversion fails; a nonparametric holder honors a user-defined Base.convert method (Issue #11147)"
+
+[[tests]]
+name = "exceptions_default_constructor_runtime_convert_11147"
+file = "default_constructor_runtime_convert_11147.jl"
+expected = true
+description = "Function-valued constructors, runtime type parameters, map constructor calls, and bare versus explicit parametric constructors preserve upstream field conversion and catchable MethodError/InexactError behavior, including user-defined Base.convert for both struct-typed and primitive fields reached from runtime Any values (Issue #11147)"
+
+[[tests]]
+name = "exceptions_catch_binder_signature_shadow_11321"
+file = "catch_binder_signature_shadow_11321.jl"
+expected = true
+description = "A `catch NAME` binder shadows an outer const/type alias spelled NAME for the extent of the clause, including inside a composite annotation (`Vector{T}`): the method definition now raises TypeError (the caught exception is not a Type) instead of silently freezing the annotation to the outer alias's target. A same-clause reassignment of the binder to a resolvable type before the definition is visible to it (dispatches on the new type within the clause). The shadow/rebinding does not leak past the clause's `end` — a definition after the try/catch still sees the outer alias (Issue #11321)"
+
+[[tests]]
+name = "exceptions_payload_fields_11374"
+file = "exceptions_payload_fields_11374.jl"
+expected = true
+description = "Caught exceptions expose upstream's payload fields: BoundsError carries the actual container and complete index tuple, MethodError carries the real callable and arguments for compile-time and numeric-fast-path misses, rendered messages stay unchanged, and a nested MethodError cannot overwrite the outer rethrow payload (Issues #11374/#11647)"
+
+[[tests]]
+name = "exceptions_finally_rethrow_swallow_11306"
+file = "finally_rethrow_swallow_11306.jl"
+expected = true
+description = "A finally block whose own body catches an explicit rethrow() with a nested try/catch must not swallow the exception whose unwind entered the finally: the enclosing catch still sees it. Covers the MWE, a nested catch that re-throws again, a double-nested finally, and an unrelated exception fully handled inside the finally. Root cause: the pending-finally rethrow marker was a scalar (rethrow_on_finally) any nested handler routing unconditionally clobbered; now a depth-aware stack (Vm::pending_finally_rethrows) truncated per Handler::finally_pending_len (Issue #11306)"
+
+[[tests]]
+name = "exceptions_domainerror_val_11399"
+file = "exceptions_domainerror_val_11399.jl"
+expected = true
+description = "A VM-raised sqrt DomainError exposes the exact f64/BigFloat .val through the keyed one-shot exception payload carrier, user-thrown DomainError constructors retain their explicit values, and a nested DomainError cannot overwrite the outer rethrow payload (Issues #11399/#11647)"
+
+[[tests]]
+name = "exceptions_typeerror_applytype_11399"
+file = "exceptions_typeerror_applytype_11399.jl"
+expected = true
+description = "x{T} where x is a value raises a TypeError with upstream func/expected/got fields through the keyed one-shot exception payload carrier; typeassert keeps its own fields, and a nested TypeError cannot overwrite the outer rethrow payload (Issues #11399/#11647)"
+
+[[tests]]
+name = "exceptions_conditional_branch_splat_call_visibility_11320"
+file = "conditional_branch_splat_call_visibility_11320.jl"
+expected = true
+description = "A method defined in an untaken top-level if branch must stay undefined at runtime: a positional-splat call to it now raises UndefVarError before evaluating the splat argument (side stays 0, matching upstream's callee-before-arguments order for a keyword-free call), and the sibling keyword-argument call form raises the same UndefVarError after its legitimately-upstream-ordered argument evaluation (side_kw becomes 1). Root cause was the eager top-level-definition activation drain treating any statement-scanned function as unconditionally reached by source position, plus the splat dynamic-call path building a callable token with no visibility check at all (Issue #11320; siblings #11286/#10461)"
+
+[[tests]]
+name = "exceptions_throw_type_value_preserve_11554"
+file = "throw_type_value_preserve_11554.jl"
+expected = true
+description = "throw(value) preserves the exact thrown value for ANY value, not just Exception subtypes: throw(Int32) binds the caught variable to the Int32 DataType itself (typeof == DataType), the caught value is usable to build a real downstream parametric type (Vector{T} === Vector{Int32}, isa true), and other non-Type values (Int, Float, Symbol, Tuple, Array) are preserved verbatim too — instead of every non-Struct/Any value being coerced into ErrorException(string(value)). Normal Exception throwing (throw(ErrorException(...)), error(msg)) is unchanged (Issue #11554)"
+
+[[tests]]
+name = "exceptions_getfield_boundserror_payload_11509"
+file = "exceptions_getfield_boundserror_payload_11509.jl"
+expected = true
+description = "Out-of-range getfield on Expr/Base.Generator raises BoundsError with the exact receiver and caller's 1-based index through the keyed one-shot exception payload carrier; nested field-index errors retain the outer rethrow receiver, and successful getfield cannot contaminate a later unrelated setfield! error (Issues #11509/#11647)"
+
+[[tests]]
+name = "exceptions_stringindexerror_payload_11572"
+file = "exceptions_stringindexerror_payload_11572.jl"
+expected = true
+description = "VM-raised StringIndexError preserves the exact offending String in `.string` for scalar and range indexing instead of the funnel's empty-string placeholder; scalar/vector/range routes share one structural UTF-8 validator and a table covers ASCII/multibyte first/interior/final/OOB indices, an in-bounds invalid code-unit supplied through an index vector is classified as StringIndexError rather than BoundsError, unit/stepped/descending range endpoints use Julia code-unit semantics without pre-materializing huge ranges, explicit step-one StepRanges remain elementwise even through captured/Any-typed indices, colon indexing returns the full String, byte-backed invalid-UTF-8 Strings use the same range/vector/colon route while preserving exact bytes, standalone malformed continuation bytes remain valid character starts, Base trimming/case/replace helpers and lastindex use character-start indices, nested catches cannot overwrite a retained rethrow payload, and true numeric out-of-bounds remains BoundsError for the separately tracked receiver payload gap (Issues #11572/#11615/#11616/#11618/#11621/#11624/#11627/#11628/#11629/#11630/#11632/#11638/#11640)"
+
+[[tests]]
+name = "exceptions_parseerror_detail_11572"
+file = "exceptions_parseerror_detail_11572.jl"
+expected = true
+description = "Meta.parse failures carry an upstream-shaped JuliaSyntax.ParseError detail instead of nothing: SourceFile preserves the one-expression source segment/code/byte_offset/filename/first_line/line_starts, Diagnostic converts zero-based half-open parser spans to one-based inclusive byte bounds across shifted, ASCII, whitespace-prefixed, and multibyte input, incomplete_tag is structural, appendably incomplete input returns Expr(:incomplete, error) while invalid syntax still throws, same-line semicolon groups become Expr(:toplevel), parse segments consume one newline, invalid start positions raise BoundsError, UTF-8-interior starts raise ParseError without a host panic, and nested catches cannot overwrite retained rethrow detail; exact Base.JuliaSyntax ownership remains tracked by Issue #11614 (Issues #11572/#11632/#11633/#11634/#11636/#11637/#11639/#11641)"

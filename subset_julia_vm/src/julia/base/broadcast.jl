@@ -2,6 +2,7 @@
 # broadcast.jl - Broadcasting infrastructure (Pure Julia)
 # =============================================================================
 # Based on Julia's base/broadcast.jl
+# upstream: julia/base/broadcast.jl @ 15346901f0039751c5488744f1f62de7d87510a8 (swept 2026-06-30)
 #
 # This module provides the Pure Julia broadcast types and functions:
 # - BroadcastStyle type hierarchy
@@ -992,10 +993,20 @@ function combine_eltypes(f, args)
         return UInt32
     elseif isa(result, UInt64)
         return UInt64
+    elseif isa(result, UInt128)
+        return UInt128
+    elseif isa(result, BigInt)
+        return BigInt
+    elseif isa(result, Float16)
+        # Issue #9301: a Float16-valued broadcast keeps its concrete eltype so the
+        # container narrows to Vector{Float16}, matching the Float32/Float64 arms.
+        return Float16
     elseif isa(result, Float32)
         return Float32
     elseif isa(result, Float64)
         return Float64
+    elseif isa(result, BigFloat)
+        return BigFloat
     elseif isa(result, Bool)
         return Bool
     elseif isa(result, String)
@@ -1005,6 +1016,8 @@ function combine_eltypes(f, args)
     elseif isa(result, Complex)
         # Complex results need proper complex-typed arrays (Issue #2688)
         return Complex{Float64}
+    elseif isa(result, NamedTuple)
+        return typeof(result)
     else
         return Any
     end
@@ -1044,8 +1057,9 @@ end
 function _same_broadcast_arithmetic_eltype(args)
     T = _same_broadcast_eltype(args)
     if T == Int8 || T == Int16 || T == Int32 || T == UInt8 ||
-       T == UInt16 || T == UInt32 || T == UInt64 || T == Float32 ||
-       T == Float64
+       T == UInt16 || T == UInt32 || T == UInt64 || T == UInt128 || T == Float16 ||
+       T == Float32 || T == Float64
+        # Issue #9301: Float16 .+/-/* Float16 stays Float16, like Float32/Float64.
         return T
     end
     return nothing
@@ -1053,7 +1067,8 @@ end
 
 function _same_broadcast_float_eltype(args)
     T = _same_broadcast_eltype(args)
-    if T == Float32 || T == Float64
+    if T == Float16 || T == Float32 || T == Float64
+        # Issue #9301: Float16 ./ Float16 stays Float16, like Float32/Float64.
         return T
     end
     return nothing
@@ -1150,6 +1165,10 @@ function _broadcasted_similar(bc::Broadcasted, ElType)
             return Array{Float64}(undef, d1, d2)
         elseif tname == "Float32"
             return Array{Float32}(undef, d1, d2)
+        elseif tname == "Float16"
+            # Issue #9301: Float16 broadcast result keeps its concrete eltype
+            # (Vector/Array{Float16}) instead of widening to Any, like F32/F64.
+            return Array{Float16}(undef, d1, d2)
         elseif tname == "Int8"
             return Array{Int8}(undef, d1, d2)
         elseif tname == "Int16"
@@ -1166,12 +1185,20 @@ function _broadcasted_similar(bc::Broadcasted, ElType)
             return Array{UInt32}(undef, d1, d2)
         elseif tname == "UInt64"
             return Array{UInt64}(undef, d1, d2)
+        elseif tname == "UInt128"
+            return Array{UInt128}(undef, d1, d2)
+        elseif tname == "BigInt"
+            return Array{BigInt}(undef, d1, d2)
         elseif tname == "String"
             return Array{String}(undef, d1, d2)
         elseif tname == "Char"
             return Array{Char}(undef, d1, d2)
+        elseif tname == "BigFloat"
+            return Array{BigFloat}(undef, d1, d2)
         elseif length(tname) >= 7 && tname[1:7] == "Complex"
             return Array{Complex{Float64}}(undef, d1, d2)
+        elseif startswith(tname, "@NamedTuple") || startswith(tname, "NamedTuple")
+            return _array_undef_from_dims(ElType, (d1, d2))
         else
             return Array{Any}(undef, d1, d2)
         end
@@ -1199,6 +1226,9 @@ function _broadcasted_similar(bc::Broadcasted, ElType)
         arr = Vector{Float64}(undef, n)
     elseif tname == "Float32"
         arr = Vector{Float32}(undef, n)
+    elseif tname == "Float16"
+        # Issue #9301: Float16 broadcast result keeps its concrete eltype.
+        arr = Vector{Float16}(undef, n)
     elseif tname == "Int8"
         arr = Vector{Int8}(undef, n)
     elseif tname == "Int16"
@@ -1215,12 +1245,20 @@ function _broadcasted_similar(bc::Broadcasted, ElType)
         arr = Vector{UInt32}(undef, n)
     elseif tname == "UInt64"
         arr = Vector{UInt64}(undef, n)
+    elseif tname == "UInt128"
+        arr = Vector{UInt128}(undef, n)
+    elseif tname == "BigInt"
+        arr = Vector{BigInt}(undef, n)
     elseif tname == "String"
         arr = Vector{String}(undef, n)
     elseif tname == "Char"
         arr = Vector{Char}(undef, n)
+    elseif tname == "BigFloat"
+        arr = Vector{BigFloat}(undef, n)
     elseif length(tname) >= 7 && tname[1:7] == "Complex"
         arr = Vector{Complex{Float64}}(undef, n)
+    elseif startswith(tname, "@NamedTuple") || startswith(tname, "NamedTuple")
+        arr = _array_undef_from_dims(ElType, (n,))
     else
         arr = Vector{Any}(undef, n)
     end
@@ -1399,6 +1437,83 @@ _broadcasted_args(bc) = bc.bc_args
 _make_broadcasted(f, args) = Broadcasted(f, args)
 _materialize_broadcasted(f, args) = copy(Broadcasted(f, args))
 
+function _broadcast_args_force_array_result(args)
+    for arg in args
+        if isa(arg, Array) || isa(arg, SubArray) || _is_broadcastable_range(arg)
+            return true
+        elseif isa(arg, Broadcasted) && _broadcast_args_force_array_result(arg.bc_args)
+            return true
+        end
+    end
+    return false
+end
+
+function _broadcast_args_have_tuple_result(args)
+    for arg in args
+        if isa(arg, Tuple)
+            return true
+        elseif isa(arg, Broadcasted) && _broadcast_args_have_tuple_result(arg.bc_args)
+            return true
+        end
+    end
+    return false
+end
+
+function _broadcast_returns_tuple(args)
+    return _broadcast_args_have_tuple_result(args) && !_broadcast_args_force_array_result(args)
+end
+
+function _broadcast_tuple_arg_kind(arg)
+    if isa(arg, Array) || isa(arg, SubArray) || _is_broadcastable_range(arg)
+        return 0
+    elseif isa(arg, Tuple)
+        return 1
+    elseif isa(arg, Broadcasted)
+        return _broadcast_tuple_args_kind(arg.bc_args)
+    else
+        return 2
+    end
+end
+
+function _broadcast_tuple_args_kind(args)
+    n = length(args)
+    kind = 2
+    for i in 1:n
+        arg_kind = _broadcast_tuple_arg_kind(args[i])
+        if arg_kind == 0
+            return 0
+        elseif arg_kind == 1
+            kind = 1
+        end
+    end
+    return kind
+end
+
+function _should_materialize_tuple_broadcast(bc::Broadcasted)
+    if _broadcast_tuple_args_kind(bc.bc_args) != 1
+        return false
+    end
+    ax = axes(bc)
+    return length(ax) == 1
+end
+
+function _copy_tuple_broadcast(bc::Broadcasted)
+    ax = axes(bc)
+    n = length(ax[1])
+    result = ()
+    for i in 1:n
+        result = tuple(result..., _broadcast_getindex(bc, i))
+    end
+    return result
+end
+
+function _try_copy_tuple_broadcast(bc::Broadcasted)
+    if _should_materialize_tuple_broadcast(bc)
+        return (true, _copy_tuple_broadcast(bc))
+    end
+    return (false, nothing)
+end
+
 function copy(bc::Broadcasted)
     # Static-array fast path (Issue #7460): a loaded StaticArrays-style package
     # can claim the broadcast and return a static result. Runs before the generic
@@ -1418,9 +1533,70 @@ function copy(bc::Broadcasted)
         args = _getindex(ibc.bc_args, 1)
         return _broadcast_apply(ibc.f, args)
     end
+    tuple_result = _try_copy_tuple_broadcast(ibc)
+    if tuple_result[1]
+        return tuple_result[2]
+    end
+    # Issue #10787: combine_eltypes samples ONE representative element, which
+    # is only authoritative when every array operand has a concrete eltype.
+    # With an Any/abstract/Union-eltype operand, per-element result types can
+    # differ (Any[1, 2.5]); trusting the sample coerced later elements into the
+    # first element's storage (2.5 + 2.5 silently became 5). Mirror upstream's
+    # copyto_nonleaf! widening: materialize into Any storage, then narrow the
+    # result to the promote_typejoin of the actual element types.
+    if _broadcast_args_have_nonconcrete_eltype(ibc.bc_args)
+        dest = similar(ibc, Any)
+        result = _narrow_widened_broadcast_result(copyto!(dest, ibc))
+        if _broadcast_returns_tuple(ibc.bc_args)
+            return Tuple(result)
+        end
+        return result
+    end
     ElType = combine_eltypes(ibc.f, ibc.bc_args)
     dest = similar(ibc, ElType)
-    return copyto!(dest, ibc)
+    result = copyto!(dest, ibc)
+    if _broadcast_returns_tuple(ibc.bc_args)
+        return Tuple(result)
+    end
+    return result
+end
+
+# True when an array-shaped broadcast operand has a non-concrete eltype, i.e.
+# its elements can carry different concrete runtime types and a single sampled
+# element cannot decide the result storage (Issue #10787).
+function _broadcast_args_have_nonconcrete_eltype(args)
+    for a in args
+        if isa(a, Array) || isa(a, SubArray)
+            if !isconcretetype(eltype(a))
+                return true
+            end
+        elseif isa(a, Broadcasted)
+            if _broadcast_args_have_nonconcrete_eltype(a.bc_args)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+# Narrow an Any-storage broadcast result to the promote_typejoin of its actual
+# element types (upstream's copyto_nonleaf!/promote_typejoin semantics):
+# Any[2, 5.0] becomes Real[2, 5.0], homogeneous results narrow to their
+# concrete Vector{T}. `collect(T, A)` preserves the array shape. An empty or
+# already-Any-joined result is returned unchanged (Issue #10787).
+function _narrow_widened_broadcast_result(dest)
+    n = length(dest)
+    if n == 0
+        return dest
+    end
+    T = typeof(dest[1])
+    for i in 2:n
+        T = promote_typejoin(T, typeof(dest[i]))
+    end
+    if T == Any
+        return dest
+    end
+    return collect(T, dest)
 end
 
 # Fast path for same-shape 1D binary array broadcasts.
@@ -1483,6 +1659,30 @@ function _copyto_fastpath_same_shape_binary!(dest::Array, bc::Broadcasted)
         elseif f_name == "/" || f_name == "function /"
             for i in 1:n
                 dest[i] = a[i] / b[i]
+            end
+            return true
+        end
+    end
+
+    # Same-shape Int64 arithmetic uses the same direct loop shape as the
+    # hand-written baseline. Division is intentionally excluded: Int / Int
+    # returns Float64 in Julia, so assignment into an Int destination must keep
+    # the generic conversion/error path.
+    if eltype(dest) == Int64 && eltype(a) == Int64 && eltype(b) == Int64
+        f_name = string(bc.f)
+        if f_name == "+" || f_name == "function +"
+            for i in 1:n
+                dest[i] = a[i] + b[i]
+            end
+            return true
+        elseif f_name == "-" || f_name == "function -"
+            for i in 1:n
+                dest[i] = a[i] - b[i]
+            end
+            return true
+        elseif f_name == "*" || f_name == "function *"
+            for i in 1:n
+                dest[i] = a[i] * b[i]
             end
             return true
         end
@@ -1621,6 +1821,94 @@ end
 
 # Fast path for 2D binary broadcasts.
 # This avoids preprocess + CartesianIndex conversion when destination is 2D.
+#
+# `_getindex_one_2d`/`_broadcast_getindex_2d` are fully general (they also
+# handle Range/Number/Extruded/nested-Broadcasted operands), but each call
+# re-derives the operand's shape via `size(...)` and re-runs an `isa` chain —
+# repeating that per output cell is the dominant cost for a large 2D "outer"
+# broadcast (e.g. `xs' .+ ys`, the Mandelbrot-grid construction pattern,
+# Issue #9155). For the common case where BOTH operands are already plain
+# `Array`s, `_fastpath_2d_array_shape` computes each operand's per-dimension
+# broadcast (row/col is size-1, so index stays pinned at 1) once, outside the
+# loop, so the hot loop below is pure index arithmetic + native arithmetic.
+function _fastpath_2d_array_shape(arg::Array)
+    s = size(arg)
+    nd = length(s)
+    pin_row = nd >= 1 && s[1] == 1
+    pin_col = nd < 2 || s[2] == 1
+    stride = nd >= 1 ? s[1] : 1
+    return (nd, pin_row, pin_col, stride)
+end
+
+function _fastpath_2d_array_linear(i, j, nd, pin_row, pin_col, stride)
+    ii = pin_row ? 1 : i
+    if nd < 2
+        return ii
+    end
+    jj = pin_col ? 1 : j
+    return ii + (jj - 1) * stride
+end
+
+function _fastloop_2d_array_add!(dest, a::Array, b::Array, rows, cols)
+    a_nd, a_pr, a_pc, a_stride = _fastpath_2d_array_shape(a)
+    b_nd, b_pr, b_pc, b_stride = _fastpath_2d_array_shape(b)
+    linear = 1
+    for j in 1:cols
+        for i in 1:rows
+            al = _fastpath_2d_array_linear(i, j, a_nd, a_pr, a_pc, a_stride)
+            bl = _fastpath_2d_array_linear(i, j, b_nd, b_pr, b_pc, b_stride)
+            dest[linear] = a[al] + b[bl]
+            linear = linear + 1
+        end
+    end
+    return dest
+end
+
+function _fastloop_2d_array_sub!(dest, a::Array, b::Array, rows, cols)
+    a_nd, a_pr, a_pc, a_stride = _fastpath_2d_array_shape(a)
+    b_nd, b_pr, b_pc, b_stride = _fastpath_2d_array_shape(b)
+    linear = 1
+    for j in 1:cols
+        for i in 1:rows
+            al = _fastpath_2d_array_linear(i, j, a_nd, a_pr, a_pc, a_stride)
+            bl = _fastpath_2d_array_linear(i, j, b_nd, b_pr, b_pc, b_stride)
+            dest[linear] = a[al] - b[bl]
+            linear = linear + 1
+        end
+    end
+    return dest
+end
+
+function _fastloop_2d_array_mul!(dest, a::Array, b::Array, rows, cols)
+    a_nd, a_pr, a_pc, a_stride = _fastpath_2d_array_shape(a)
+    b_nd, b_pr, b_pc, b_stride = _fastpath_2d_array_shape(b)
+    linear = 1
+    for j in 1:cols
+        for i in 1:rows
+            al = _fastpath_2d_array_linear(i, j, a_nd, a_pr, a_pc, a_stride)
+            bl = _fastpath_2d_array_linear(i, j, b_nd, b_pr, b_pc, b_stride)
+            dest[linear] = a[al] * b[bl]
+            linear = linear + 1
+        end
+    end
+    return dest
+end
+
+function _fastloop_2d_array_div!(dest, a::Array, b::Array, rows, cols)
+    a_nd, a_pr, a_pc, a_stride = _fastpath_2d_array_shape(a)
+    b_nd, b_pr, b_pc, b_stride = _fastpath_2d_array_shape(b)
+    linear = 1
+    for j in 1:cols
+        for i in 1:rows
+            al = _fastpath_2d_array_linear(i, j, a_nd, a_pr, a_pc, a_stride)
+            bl = _fastpath_2d_array_linear(i, j, b_nd, b_pr, b_pc, b_stride)
+            dest[linear] = a[al] / b[bl]
+            linear = linear + 1
+        end
+    end
+    return dest
+end
+
 function _copyto_fastpath_2d_binary!(dest::Array, bc::Broadcasted)
     s = size(dest)
     if length(s) != 2
@@ -1653,6 +1941,50 @@ function _copyto_fastpath_2d_binary!(dest::Array, bc::Broadcasted)
     end
 
     f = bc.f
+    # Fastest kernel: both operands are plain Arrays and the destination holds
+    # Float64/ComplexF64. This is the common case for 2D "outer" broadcasts
+    # (e.g. `xs' .+ ys`, the Mandelbrot-grid construction pattern, Issue
+    # #9155): `_getindex_one_2d` is fully general (it also understands
+    # Range/Number/Extruded/nested-Broadcasted operands) but re-derives each
+    # operand's shape via `size(...)` on every call, and that dominates wall
+    # time once the grid has tens of thousands of cells. `_fastloop_2d_array_*`
+    # hoists the shape/broadcast-dimension bookkeeping outside the loop
+    # (see `_fastpath_2d_array_shape`) so the hot loop is pure index and
+    # native arithmetic.
+    #
+    # A nested (unmaterialized) Broadcasted operand (e.g. the `im .* ys` in
+    # `xs' .+ im .* ys`) is materialized once here rather than re-evaluated
+    # per output cell: the generic path would otherwise call `_getindex_one_2d`
+    # -> `_broadcast_apply` for it `rows*cols` times even though its own shape
+    # only has `rows` (or `cols`) elements. Fusion still saves the destination
+    # allocation for the *outer* op; only genuinely repeated inner work is
+    # avoided.
+    dest_eltype = eltype(dest)
+    if dest_eltype == Float64 || dest_eltype == ComplexF64
+        if isa(a, Broadcasted)
+            a = copy(a)
+        end
+        if isa(b, Broadcasted)
+            b = copy(b)
+        end
+    end
+    if (dest_eltype == Float64 || dest_eltype == ComplexF64) && isa(a, Array) && isa(b, Array)
+        f_name = string(f)
+        if f_name == "+" || f_name == "function +"
+            _fastloop_2d_array_add!(dest, a, b, rows, cols)
+            return true
+        elseif f_name == "-" || f_name == "function -"
+            _fastloop_2d_array_sub!(dest, a, b, rows, cols)
+            return true
+        elseif f_name == "*" || f_name == "function *"
+            _fastloop_2d_array_mul!(dest, a, b, rows, cols)
+            return true
+        elseif f_name == "/" || f_name == "function /"
+            _fastloop_2d_array_div!(dest, a, b, rows, cols)
+            return true
+        end
+    end
+
     linear = 1
     for j in 1:cols
         for i in 1:rows
@@ -1742,9 +2074,103 @@ end
 # materialize converts a Broadcasted to an actual array.
 # materialize! fills an existing array from a Broadcasted.
 
+# Upstream range fusion for `x .* r` (julia/base/broadcast.jl:1168-1178,
+# Issue #9659): a Complex scalar times a TwicePrecision-backed Float64 range
+# scales ref/step in twice precision and indexes via the scaled lerp, so
+# element values differ (by 1ulp on a large fraction of points) from the
+# elementwise `x * r[i]` the generic path computes — 683,400 of the 2,312,000
+# Mandelbrot-grid imag parts, a 195-count escape checksum divergence.
+#
+# Upstream applies this at `broadcasted()` (tree construction), BEFORE fusion,
+# so `xs' .+ im .* ys` sees the scaled range as a plain argument. sjulia's
+# lowering constructs `Broadcasted` nodes directly, so the equivalent point is
+# a bottom-up rewrite of the lazy tree at materialization: any inner
+# `Complex .* range` product is replaced by its (eagerly materialized,
+# upstream-bit-identical) scaled vector. `_try_complex_scale_tp_range_f64`
+# returns `nothing` unless the range is TwicePrecision-backed Float64, keeping
+# real scalars / integer ranges / arrays on the generic path (those already
+# match elementwise).
+_materialize_range_fusions(x) = x
+
+function _materialize_range_fusions(bc::Broadcasted)
+    args = bc.bc_args
+    n = length(args)
+    if n == 2
+        a = _materialize_range_fusions(args[1])
+        b = _materialize_range_fusions(args[2])
+        if bc.f === (*)
+            if isa(a, Complex) && isa(b, AbstractRange)
+                scaled = _try_complex_scale_tp_range_f64(Float64(real(a)), Float64(imag(a)), b)
+                scaled === nothing || return scaled
+            elseif isa(b, Complex) && isa(a, AbstractRange)
+                scaled = _try_complex_scale_tp_range_f64(Float64(real(b)), Float64(imag(b)), a)
+                scaled === nothing || return scaled
+            end
+        end
+        if a === args[1] && b === args[2]
+            return bc
+        end
+        return Broadcasted(bc.style, bc.f, (a, b), bc.axes_val)
+    elseif n == 1
+        a = _materialize_range_fusions(args[1])
+        if a === args[1]
+            return bc
+        end
+        return Broadcasted(bc.style, bc.f, (a,), bc.axes_val)
+    elseif n == 3
+        a = _materialize_range_fusions(args[1])
+        b = _materialize_range_fusions(args[2])
+        c = _materialize_range_fusions(args[3])
+        if a === args[1] && b === args[2] && c === args[3]
+            return bc
+        end
+        return Broadcasted(bc.style, bc.f, (a, b, c), bc.axes_val)
+    elseif n == 4
+        a = _materialize_range_fusions(args[1])
+        b = _materialize_range_fusions(args[2])
+        c = _materialize_range_fusions(args[3])
+        d = _materialize_range_fusions(args[4])
+        if a === args[1] && b === args[2] && c === args[3] && d === args[4]
+            return bc
+        end
+        return Broadcasted(bc.style, bc.f, (a, b, c, d), bc.axes_val)
+    end
+    return bc
+end
+
 # materialize: lazy Broadcasted → Array
 function materialize(bc::Broadcasted)
-    return copy(instantiate(bc))
+    fused = _materialize_range_fusions(bc)
+    if !isa(fused, Broadcasted)
+        return fused
+    end
+    # Bulk typed-kernel broadcast (Issues #9693/#8797): `f.(A, scalars...)`
+    # whose dispatched method predecodes to a frame-less typed scalar function
+    # block runs as one Rust loop over the array storage — no per-element
+    # dispatch, boxing, or frame. `nothing` = not applicable (nested
+    # Broadcasted args, non-block-eligible f, non-concrete arrays, …); the
+    # generic path below is the semantic reference.
+    n = length(fused.bc_args)
+    if n == 1
+        fast = _try_broadcast_typed_kernel(fused.f, fused.bc_args[1])
+        fast === nothing || return fast
+    elseif n == 2
+        # Upstream-exact elementwise +/-/* over numeric/complex arrays
+        # (Issue #8797): one dispatch + one Rust loop.
+        fastb = _try_broadcast_binary_arith(fused.f, fused.bc_args[1], fused.bc_args[2])
+        fastb === nothing || return fastb
+        fast = _try_broadcast_typed_kernel(fused.f, fused.bc_args[1], fused.bc_args[2])
+        fast === nothing || return fast
+    elseif n == 3
+        fast = _try_broadcast_typed_kernel(
+            fused.f, fused.bc_args[1], fused.bc_args[2], fused.bc_args[3])
+        fast === nothing || return fast
+    elseif n == 4
+        fast = _try_broadcast_typed_kernel(
+            fused.f, fused.bc_args[1], fused.bc_args[2], fused.bc_args[3], fused.bc_args[4])
+        fast === nothing || return fast
+    end
+    return copy(instantiate(fused))
 end
 
 # materialize for non-Broadcasted: pass through

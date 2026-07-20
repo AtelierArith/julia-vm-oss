@@ -1,0 +1,51 @@
+[package]
+name = "subset_julia_vm_bytecode"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+authors = ["SubsetJuliaVM Team"]
+description = "Serialized bytecode identifiers and program representation staging crate for SubsetJuliaVM"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AtelierArith/SubsetJuliaVM"
+keywords = ["julia", "bytecode", "vm"]
+categories = ["compilers"]
+
+[dependencies]
+astro-float = "0.9"
+num-bigint = "0.4"
+half = { version = "2.4", default-features = false, features = ["serde"] }
+num-traits = "0.2"
+fancy-regex = "0.18"
+# `rc` is required for Arc<Function> in SpecializableFunction (Issue #9104);
+# declare it here so the crate compiles standalone, not only via workspace
+# feature unification.
+serde = { version = "1.0", features = ["derive", "rc"] }
+sha2 = "0.10"
+strum = { version = "0.27", features = ["derive"] }
+subset_julia_vm_ir = { path = "../subset_julia_vm_ir" }
+subset_julia_vm_types = { path = "../subset_julia_vm_types" }
+
+[dev-dependencies]
+bincode = "1"
+
+[lib]
+crate-type = ["rlib"]
+
+[lints.rust]
+missing_debug_implementations = "warn"
+
+# Mirror the main crate's clippy allow-list so that definitions that moved
+# here from `subset_julia_vm` (vm/instr.rs, operand payloads, metadata; Issue
+# #8656) don't trip lints that were already accepted at their original home.
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+only_used_in_recursion = "allow"
+large_enum_variant = "allow"
+wrong_self_convention = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+items_after_test_module = "allow"
+cast_sign_loss = "warn"

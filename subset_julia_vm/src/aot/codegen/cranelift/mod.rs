@@ -485,20 +485,18 @@ fn append_cranelift_dwarf_sections(
         .write(&mut sections)
         .map_err(|e| CraneliftError::Module(format!("failed to write DWARF debug info: {e}")))?;
 
-    sections
-        .for_each(|section_id, data| -> Result<(), CraneliftError> {
-            let bytes = data.slice();
-            if !bytes.is_empty() {
-                let object_section = product.object.add_section(
-                    Vec::new(),
-                    section_id.name().as_bytes().to_vec(),
-                    object::SectionKind::Debug,
-                );
-                product.object.append_section_data(object_section, bytes, 1);
-            }
-            Ok(())
-        })
-        .map_err(|err| err)
+    sections.for_each(|section_id, data| -> Result<(), CraneliftError> {
+        let bytes = data.slice();
+        if !bytes.is_empty() {
+            let object_section = product.object.add_section(
+                Vec::new(),
+                section_id.name().as_bytes().to_vec(),
+                object::SectionKind::Debug,
+            );
+            product.object.append_section_data(object_section, bytes, 1);
+        }
+        Ok(())
+    })
 }
 
 fn cranelift_debug_line_entries(module: &IrModule) -> Vec<(String, u32)> {
@@ -2645,12 +2643,11 @@ mod tests {
 
     #[test]
     fn cranelift_unsupported_scalar_types_are_enumerated_issue_6949() {
-        for ty in [StaticType::Missing] {
-            let err = static_type_to_cranelift(&ty).unwrap_err();
-            assert!(matches!(err, CraneliftError::TypeConversion(_)));
-            assert!(err.to_string().contains("Unsupported type"));
-            assert!(err.to_string().contains(&format!("{:?}", ty)));
-        }
+        let ty = StaticType::Missing;
+        let err = static_type_to_cranelift(&ty).unwrap_err();
+        assert!(matches!(err, CraneliftError::TypeConversion(_)));
+        assert!(err.to_string().contains("Unsupported type"));
+        assert!(err.to_string().contains(&format!("{:?}", ty)));
     }
 
     #[test]

@@ -360,9 +360,9 @@ impl<'a> IrConverter<'a> {
         match expr {
             Expr::Literal(lit, _) => self.engine.literal_type(lit),
             Expr::Var(name, _) => locals
-                .get(name)
+                .get(name.as_str())
                 .cloned()
-                .or_else(|| self.engine.env.get(name).cloned())
+                .or_else(|| self.engine.env.get(name.as_str()).cloned())
                 .unwrap_or_else(|| self.engine.lookup_global_or_const(name)),
             Expr::BinaryOp {
                 op, left, right, ..
@@ -423,7 +423,10 @@ impl<'a> IrConverter<'a> {
                 fields
                     .iter()
                     .map(|(name, expr)| {
-                        (name.clone(), self.infer_expr_type_with_locals(expr, locals))
+                        (
+                            name.to_string(),
+                            self.infer_expr_type_with_locals(expr, locals),
+                        )
                     })
                     .collect(),
             ),
@@ -615,12 +618,12 @@ impl<'a> IrConverter<'a> {
     fn convert_expr_with_locals(&self, expr: &Expr, locals: &TypeEnv) -> AotResult<AotExpr> {
         match expr {
             Expr::Var(name, _) => {
-                if let Some(value) = self.engine.enum_member_values.get(name) {
+                if let Some(value) = self.engine.enum_member_values.get(name.as_str()) {
                     return Ok(AotExpr::LitI32(*value));
                 }
-                if let Some(ty) = locals.get(name) {
+                if let Some(ty) = locals.get(name.as_str()) {
                     return Ok(AotExpr::Var {
-                        name: name.clone(),
+                        name: name.to_string(),
                         ty: ty.clone(),
                     });
                 }
@@ -683,7 +686,18 @@ impl<'a> IrConverter<'a> {
                 if aot_args.len() >= 2 {
                     if let Some(aot_op) = self.map_operator_to_binop(function) {
                         let mut iter = aot_args.into_iter();
-                        let mut result = iter.next().expect("operator call has an argument");
+                        let mut result = match iter.next() {
+                            Some(first) => first,
+                            None => {
+                                // INTERNAL: `aot_args.len() >= 2` was just
+                                // checked above, so `iter.next()` cannot be
+                                // `None` here (Issue #10907).
+                                return Err(AotError::InternalError(
+                                    "operator call: aot_args.len() >= 2 was checked but iterator was empty"
+                                        .to_string(),
+                                ));
+                            }
+                        };
                         for arg in iter {
                             let left_ty = result.get_type();
                             let right_ty = arg.get_type();
@@ -714,7 +728,7 @@ impl<'a> IrConverter<'a> {
                 }
                 if let Some(_struct_info) = self.typed.get_struct(function) {
                     return Ok(AotExpr::StructNew {
-                        name: function.clone(),
+                        name: function.to_string(),
                         fields: aot_args,
                     });
                 }
@@ -723,14 +737,14 @@ impl<'a> IrConverter<'a> {
                     let known_return_ty = self.get_function_return_type(function, &arg_types);
                     let inferred_return_ty = self.engine.call_result_type(function, &arg_types);
                     Ok(AotExpr::CallStatic {
-                        function: function.clone(),
+                        function: function.to_string(),
                         args: aot_args,
                         return_ty: known_return_ty.unwrap_or(inferred_return_ty),
                         inline_policy: AotInlinePolicy::Auto,
                     })
                 } else {
                     Ok(AotExpr::CallDynamic {
-                        function: function.clone(),
+                        function: function.to_string(),
                         args: aot_args,
                     })
                 }
@@ -791,7 +805,10 @@ impl<'a> IrConverter<'a> {
                 fields: fields
                     .iter()
                     .map(|(name, expr)| {
-                        Ok((name.clone(), self.convert_expr_with_locals(expr, locals)?))
+                        Ok((
+                            name.to_string(),
+                            self.convert_expr_with_locals(expr, locals)?,
+                        ))
                     })
                     .collect::<AotResult<_>>()?,
             }),
@@ -850,7 +867,7 @@ impl<'a> IrConverter<'a> {
     fn convert_comprehension(
         &self,
         body: &Expr,
-        iterations: &[(String, Expr)],
+        iterations: &[(crate::ir::core::InternedStr, Expr)],
         filter: Option<&Expr>,
     ) -> AotResult<AotExpr> {
         let mut locals = TypeEnv::new();
@@ -858,8 +875,8 @@ impl<'a> IrConverter<'a> {
         for (var, iter) in iterations {
             let aot_iter = self.convert_expr_with_locals(iter, &locals)?;
             let elem_ty = self.engine.element_type(&aot_iter.get_type());
-            locals.insert(var.clone(), elem_ty);
-            aot_iterations.push((var.clone(), aot_iter));
+            locals.insert(var.to_string(), elem_ty);
+            aot_iterations.push((var.to_string(), aot_iter));
         }
 
         let aot_filter = filter
@@ -869,10 +886,17 @@ impl<'a> IrConverter<'a> {
         let elem_ty = aot_body.get_type();
 
         if aot_iterations.len() == 1 {
-            let (var, iter) = aot_iterations
-                .into_iter()
-                .next()
-                .expect("single comprehension iteration exists");
+            let (var, iter) = match aot_iterations.into_iter().next() {
+                Some(single) => single,
+                None => {
+                    // INTERNAL: `aot_iterations.len() == 1` was just checked
+                    // above, so `.next()` cannot be `None` here (Issue #10907).
+                    return Err(AotError::InternalError(
+                        "comprehension: aot_iterations.len() == 1 was checked but iterator was empty"
+                            .to_string(),
+                    ));
+                }
+            };
             Ok(AotExpr::Comprehension {
                 body: Box::new(aot_body),
                 var,
@@ -963,6 +987,30 @@ impl<'a> IrConverter<'a> {
         expr
     }
 
+    fn broadcast_operator_impl_name(op: &str, lhs_ty: &StaticType, rhs_ty: &StaticType) -> String {
+        fn suffix(ty: &StaticType) -> String {
+            match ty {
+                StaticType::Struct { name, .. }
+                    if name == "Complex"
+                        || matches!(
+                            StaticType::complex_param_type_from_name(name),
+                            Some(StaticType::F64)
+                        ) =>
+                {
+                    "complex".to_string()
+                }
+                _ => ty.mangle_suffix(),
+            }
+        }
+
+        format!(
+            "{}_{}_{}",
+            AotFunction::sanitize_function_name(op),
+            suffix(lhs_ty),
+            suffix(rhs_ty)
+        )
+    }
+
     /// Try converting `materialize(Broadcasted(...))` / `Broadcasted(...)` to static helper calls.
     fn try_convert_broadcast_call(
         &self,
@@ -995,8 +1043,8 @@ impl<'a> IrConverter<'a> {
         }
 
         let fn_name = match &args[0] {
-            Expr::FunctionRef { name, .. } => name.clone(),
-            Expr::Var(name, _) => name.clone(),
+            Expr::FunctionRef { name, .. } => name.to_string(),
+            Expr::Var(name, _) => name.to_string(),
             Expr::Literal(Literal::Str(s), _) => s.clone(),
             _ => return Ok(None),
         };
@@ -1066,12 +1114,7 @@ impl<'a> IrConverter<'a> {
             let result_elem =
                 self.engine
                     .binop_result_type_static(&AotBinOp::Mul, &lhs_ty, &rhs_elem_ty);
-            let mul_impl = format!(
-                "{}_{}_{}",
-                AotFunction::sanitize_function_name("*"),
-                lhs_ty.mangle_suffix(),
-                rhs_elem_ty.mangle_suffix()
-            );
+            let mul_impl = Self::broadcast_operator_impl_name("*", &lhs_ty, &rhs_elem_ty);
             return Ok(Some(AotExpr::CallStatic {
                 function: "__aot_broadcast_mul_scalar_vec".to_string(),
                 args: vec![
@@ -1097,12 +1140,7 @@ impl<'a> IrConverter<'a> {
             let result_elem =
                 self.engine
                     .binop_result_type_static(&AotBinOp::Add, &lhs_elem_ty, &rhs_elem_ty);
-            let add_impl = format!(
-                "{}_{}_{}",
-                AotFunction::sanitize_function_name("+"),
-                lhs_elem_ty.mangle_suffix(),
-                rhs_elem_ty.mangle_suffix()
-            );
+            let add_impl = Self::broadcast_operator_impl_name("+", &lhs_elem_ty, &rhs_elem_ty);
             return Ok(Some(AotExpr::CallStatic {
                 function: "__aot_broadcast_add_row_vec".to_string(),
                 args: vec![
@@ -1136,12 +1174,7 @@ impl<'a> IrConverter<'a> {
             let result_elem =
                 self.engine
                     .binop_result_type_static(&binop, &lhs_elem_ty, &rhs_elem_ty);
-            let fn_impl = format!(
-                "{}_{}_{}",
-                AotFunction::sanitize_function_name(&fn_name),
-                lhs_elem_ty.mangle_suffix(),
-                rhs_elem_ty.mangle_suffix()
-            );
+            let fn_impl = Self::broadcast_operator_impl_name(&fn_name, &lhs_elem_ty, &rhs_elem_ty);
             return Ok(Some(AotExpr::CallStatic {
                 function: "__aot_broadcast_outer_product".to_string(),
                 args: vec![
@@ -1224,8 +1257,8 @@ impl<'a> IrConverter<'a> {
         free: &mut HashSet<String>,
     ) {
         match expr {
-            Expr::Var(name, _) if !bound.contains(name) => {
-                free.insert(name.clone());
+            Expr::Var(name, _) if !bound.contains(name.as_str()) => {
+                free.insert(name.to_string());
             }
             Expr::BinaryOp { left, right, .. } => {
                 self.collect_free_variables_impl(left, bound, free);
@@ -1359,7 +1392,7 @@ impl<'a> IrConverter<'a> {
         };
 
         Some(AotExpr::StructNew {
-            name: "Complex".to_string(),
+            name: "Complex{Float64}".to_string(),
             fields: vec![AotExpr::LitF64(re), AotExpr::LitF64(im)],
         })
     }
@@ -1483,10 +1516,10 @@ impl<'a> IrConverter<'a> {
             Expr::Literal(lit, _) => self.convert_literal(lit),
 
             Expr::Var(name, _) => {
-                if let Some(value) = self.engine.enum_member_values.get(name) {
+                if let Some(value) = self.engine.enum_member_values.get(name.as_str()) {
                     return Ok(AotExpr::LitI32(*value));
                 }
-                if !self.engine.env.contains_key(name) {
+                if !self.engine.env.contains_key(name.as_str()) {
                     if let Some(constant) = Self::global_float_constant_expr(name) {
                         return Ok(constant);
                     }
@@ -1494,11 +1527,11 @@ impl<'a> IrConverter<'a> {
                 let ty = self
                     .engine
                     .env
-                    .get(name)
+                    .get(name.as_str())
                     .cloned()
                     .unwrap_or_else(|| self.engine.lookup_global_or_const(name));
                 Ok(AotExpr::Var {
-                    name: name.clone(),
+                    name: name.to_string(),
                     ty,
                 })
             }
@@ -1559,6 +1592,32 @@ impl<'a> IrConverter<'a> {
                     if let Some(Stmt::Expr { expr, .. }) = body.stmts.first() {
                         return self.convert_expr(expr);
                     }
+                }
+                // #7014 relaxation for the "nested function definitions + single
+                // trailing expression" shape (Issue #9179). The #9103 generator-body
+                // lift wraps a non-trivial generator body in a bindings-free let
+                // block of the form
+                //
+                //     let
+                //         function __gen_body_N(var); return <body>; end
+                //         (__gen_body_N(var) for var in iter)
+                //     end
+                //
+                // (see `lower_generator` / `lift_generator_body_as_nested`). When this
+                // sits in expression position (a `collect(...)` / `sum(...)` argument),
+                // reverse the lift by inlining the trivial call to the nested function
+                // into the trailing expression, then convert the result. Inlining keeps
+                // the body in the generator's own scope — matching the VM path and the
+                // pre-#9103 codegen — instead of hoisting it to a standalone function
+                // that AoT inference cannot specialize by the loop-variable type.
+                //
+                // The AoT pipeline normally reverses these lifts as a whole-program
+                // pre-pass before inference (see `lift_reversal`), so this arm is a
+                // backstop for any expression-position lift a caller did not normalize.
+                if let Some(rewritten) =
+                    crate::aot::analyze::lift_reversal::reverse_lifted_letblock(bindings, body)
+                {
+                    return self.convert_expr(&rewritten);
                 }
                 Err(AotError::UnsupportedInstruction(
                     UnsupportedInstructionDiagnostic::new(
@@ -1697,7 +1756,7 @@ impl<'a> IrConverter<'a> {
                 // — so it lines up with the trailing positional parameters
                 // emitted by `convert_function` (Issue #7042). Otherwise keep the
                 // legacy "kwargs appended in call order" behavior.
-                let call_args: Vec<&Expr> = match self.functions.get(function).copied() {
+                let call_args: Vec<&Expr> = match self.functions.get(function.as_str()).copied() {
                     Some(callee) if !callee.kwparams.is_empty() => {
                         let mut full: Vec<&Expr> = args.iter().collect();
                         for kwp in &callee.kwparams {
@@ -1812,7 +1871,7 @@ impl<'a> IrConverter<'a> {
                     });
 
                     return Ok(AotExpr::StructNew {
-                        name: function.clone(),
+                        name: function.to_string(),
                         fields,
                     });
                 }
@@ -1977,7 +2036,7 @@ impl<'a> IrConverter<'a> {
                 // Check if it's a struct constructor
                 if let Some(_struct_info) = self.typed.get_struct(function) {
                     return Ok(AotExpr::StructNew {
-                        name: function.clone(),
+                        name: function.to_string(),
                         fields: aot_args,
                     });
                 }
@@ -2006,14 +2065,14 @@ impl<'a> IrConverter<'a> {
                     }
                     let return_ty = known_return_ty.unwrap_or(inferred_return_ty);
                     Ok(AotExpr::CallStatic {
-                        function: function.clone(),
+                        function: function.to_string(),
                         args: aot_args,
                         return_ty,
                         inline_policy: AotInlinePolicy::Auto,
                     })
                 } else {
                     Ok(AotExpr::CallDynamic {
-                        function: function.clone(),
+                        function: function.to_string(),
                         args: aot_args,
                     })
                 }
@@ -2073,7 +2132,7 @@ impl<'a> IrConverter<'a> {
             Expr::NamedTupleLiteral { fields, .. } => {
                 let aot_fields: Vec<_> = fields
                     .iter()
-                    .map(|(name, expr)| Ok((name.clone(), self.convert_expr(expr)?)))
+                    .map(|(name, expr)| Ok((name.to_string(), self.convert_expr(expr)?)))
                     .collect::<AotResult<_>>()?;
 
                 Ok(AotExpr::NamedTupleLit { fields: aot_fields })
@@ -2105,7 +2164,7 @@ impl<'a> IrConverter<'a> {
                 ..
             } => self.convert_comprehension(
                 body,
-                &[(var.clone(), iter.as_ref().clone())],
+                &[(*var, iter.as_ref().clone())],
                 filter.as_deref(),
             ),
 
@@ -2239,7 +2298,7 @@ impl<'a> IrConverter<'a> {
 
                 Ok(AotExpr::FieldAccess {
                     object: Box::new(aot_object),
-                    field: field.clone(),
+                    field: field.to_string(),
                     field_ty,
                 })
             }
@@ -2275,7 +2334,7 @@ impl<'a> IrConverter<'a> {
                 } else {
                     // Preserve non-lambda function refs as value expressions.
                     let ty = self.engine.infer_expr_type(&Expr::FunctionRef {
-                        name: name.clone(),
+                        name: *name,
                         span: *span,
                     });
                     Ok(AotExpr::Var {

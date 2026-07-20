@@ -2,6 +2,17 @@
 # Issue #334: sprint should respect IOContext properties like :compact
 
 using Test
+import Base: show
+
+struct SprintContextProbe10008 end
+
+function show(io::IOContext, x::SprintContextProbe10008)
+    print(io, get(io, :compact, false) ? "compact" : "wide")
+end
+
+function show(io::IO, x::SprintContextProbe10008)
+    print(io, "wide")
+end
 
 @testset "sprint with context" begin
     # sprint with :compact => true should reduce decimal places for floats
@@ -26,6 +37,15 @@ using Test
 
     s6 = sprint(show, -Inf; context=:compact => true)
     @test s6 == "-Inf"
+
+    @test sprint(show, SprintContextProbe10008()) == "wide"
+    @test sprint(show, SprintContextProbe10008(); context=:compact => true) == "compact"
+    @test sprint(show, SprintContextProbe10008(); context=(:compact => true,)) == "compact"
+    @test sprint(print, SprintContextProbe10008(); context=:compact => true) == "compact"
+
+    # Issue #10065: `print` uses the same keyword context route as `show`.
+    @test sprint(print, "abc"; context=:compact => true) == "abc"
+    @test sprint(print, "x=", 10; context=:compact => true) == "x=10"
 end
 
 true

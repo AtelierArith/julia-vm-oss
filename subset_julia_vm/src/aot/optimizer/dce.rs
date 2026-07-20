@@ -210,7 +210,7 @@ impl AotDeadCodeEliminator {
                     Self::collect_expr_vars(target, &mut live_vars);
                     Self::collect_expr_vars(value, &mut live_vars);
                 }
-                AotStmt::Expr(expr) | AotStmt::Return(Some(expr)) => {
+                AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) | AotStmt::Return(Some(expr)) => {
                     Self::collect_expr_vars(expr, &mut live_vars);
                 }
                 AotStmt::Return(None) | AotStmt::Break | AotStmt::Continue => {}
@@ -274,7 +274,7 @@ impl AotDeadCodeEliminator {
                     Self::collect_expr_vars(target, vars);
                     Self::collect_expr_vars(value, vars);
                 }
-                AotStmt::Expr(expr) | AotStmt::Return(Some(expr)) => {
+                AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) | AotStmt::Return(Some(expr)) => {
                     Self::collect_expr_vars(expr, vars);
                 }
                 AotStmt::Return(None) | AotStmt::Break | AotStmt::Continue => {}

@@ -13,6 +13,12 @@ expected = true
 description = "convert(T, x) range-checks narrow int / float->int and throws InexactError (Issue #5192)"
 
 [[tests]]
+name = "conversion_convert_union_targets_9842"
+file = "convert_union_targets_9842.jl"
+expected = true
+description = "convert(::Type{Union{...}}, x) returns identity values already in the Union, including numeric-only Unions that would otherwise hit the generic numeric constructor path, and converts through represented member targets (Issues #9842 / #11781)"
+
+[[tests]]
 name = "conversion_promote_basic"
 file = "promote_basic.jl"
 expected = true
@@ -137,6 +143,12 @@ name = "conversion_bool_constructor_7971"
 file = "bool_constructor_7971.jl"
 expected = true
 description = "Issue #7971: Bool(x) numeric constructor is callable (was 'Unknown function: Bool'), routing through the range-checked convert(Bool,x): 0/1 from signed/unsigned/float/Bool sources, InexactError otherwise; usable first-class via map; Bool-as-type unaffected"
+
+[[tests]]
+name = "conversion_fixed_width_constructors_pure_julia_8777"
+file = "fixed_width_constructors_pure_julia_8777.jl"
+expected = true
+description = "Issue #8777: fixed-width numeric public constructors Int8/Int16/Int32/Int128, UInt8/UInt16/UInt32/UInt64/UInt128, and Float16/Float32 are Pure Julia wrappers over underscored VM conversion boundaries; direct calls, callable-value calls, range errors, and !== continue to match upstream"
 
 [[tests]]
 name = "conversion_type_annotation_noop_convert_8147"

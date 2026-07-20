@@ -8,12 +8,13 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::sync::Once;
-use subset_julia_vm::compile::compile_with_cache;
+use subset_julia_vm::compile::host_support::compile_with_cache;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
 use subset_julia_vm::vm::profiler;
 use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::CompiledProgram;
 
 struct CounterCase {
     name: &'static str,
@@ -77,7 +78,7 @@ foldl(+, b; init=0)
 
 static REPORT_ONCE: Once = Once::new();
 
-fn compile_case(source: &str) -> subset_julia_vm::vm::CompiledProgram {
+fn compile_case(source: &str) -> CompiledProgram {
     let mut parser = Parser::new().unwrap();
     let outcome = parser.parse(source).unwrap();
     let mut lowering = Lowering::new(source);
@@ -90,9 +91,7 @@ fn run_with_counters(source: &str) -> profiler::SpecializationCounters {
     run_compiled_with_counters(compiled)
 }
 
-fn run_compiled_with_counters(
-    compiled: subset_julia_vm::vm::CompiledProgram,
-) -> profiler::SpecializationCounters {
+fn run_compiled_with_counters(compiled: CompiledProgram) -> profiler::SpecializationCounters {
     profiler::clear();
     profiler::enable();
     let rng = StableRng::new(0);

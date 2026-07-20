@@ -20,7 +20,7 @@ end
 
     # Test upper bound constraints (T<:Real)
     @test process_real(10) == 11
-    @test process_real(3.14) == 4.14
+    @test process_real(3.14) ≈ 4.14
 end
 
 true

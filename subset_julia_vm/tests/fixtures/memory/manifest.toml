@@ -1,6 +1,12 @@
 # Test manifest for memory category
 
 [[tests]]
+name = "memory_direct_lattice_boundary_9034"
+file = "memory_direct_lattice_boundary_9034.jl"
+expected = true
+description = "Direct Memory{T} construction/indexing remains runtime-supported while compile-time inference stays at the documented Any lattice boundary (Issue #9034)"
+
+[[tests]]
 name = "pure_julia_array_over_memory_6627"
 file = "pure_julia_array_over_memory_6627.jl"
 expected = true
@@ -185,3 +191,9 @@ name = "memory_compact_show_repr_6697"
 file = "compact_show_repr_6697.jl"
 expected = true
 description = "Memory{T} compact print/string/repr/2-arg show renders as [a, b, c] / T[] (with typeinfo prefix for Bool/Any), matching upstream show(io, ::GenericMemory), instead of the verbose form or empty Memory{T}() (Issue #6697)"
+
+[[tests]]
+name = "memory_single_arg_methoderror_10324"
+file = "memory_single_arg_methoderror_10324.jl"
+expected = true
+description = "Single-argument Memory{T}(n::Int) / Memory{T}(undef) raise MethodError (only Memory{T}() and Memory{T}(undef, n) are valid upstream constructors); previously the sized single-arg form was an sjulia extension (Issue #10324 item 3)"

@@ -128,6 +128,18 @@ impl SourceMap {
         Self { line_starts }
     }
 
+    /// A minimal stand-in `SourceMap` for throwaway lexers whose token spans
+    /// are never read (only the token *kind* matters to the caller) — e.g.
+    /// bounded lookahead scans. `line_col`/`span` on a lexer built from this
+    /// still return well-formed (but line/column-inaccurate) values; skipping
+    /// the real `O(source length)` newline scan here is what makes repeated
+    /// short-range lookahead cheap (Issue #10128).
+    pub(crate) fn stub() -> Self {
+        Self {
+            line_starts: vec![0],
+        }
+    }
+
     /// Get line and column for a byte offset
     pub fn line_col(&self, offset: usize) -> (usize, usize) {
         // Binary search for the line

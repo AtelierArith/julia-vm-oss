@@ -9,12 +9,9 @@
 # today it silently corrupted non-numeric data and produced a wrong
 # typeof.
 #
-# Fix: change the fallback to `ArrayElementType::Any` so an
-# Any-typed body produces a `Vector{Any}` carrying the source values
-# without coercion. Upstream Julia often infers tighter (e.g.
-# `Vector{Int64}` for `[convert(Any, x) for x in [1, 2, 3]]`), but
-# `Vector{Any}` is the safe, lossless default and matches what
-# upstream emits when inference cannot do better.
+# Fix: unknown body types first stopped falling back to Float64. The
+# runtime typejoin path later made non-empty Any-typed bodies match the
+# same narrowing behavior as upstream Julia and `collect(generator)`.
 
 using Test
 
@@ -25,14 +22,13 @@ using Test
     @test v[2] === 2
     @test v[3] === 3
     @test v == [1, 2, 3]
-    # Eltype must NOT silently widen to Float64.
-    @test eltype(v) !== Float64
+    @test typeof(v) === Vector{Int64}
 end
 
 @testset "convert(Any, x) body: String source not coerced (Issue #4822)" begin
     v = [convert(Any, x) for x in ["a", "b"]]
     @test v == ["a", "b"]
-    @test eltype(v) !== Float64
+    @test typeof(v) === Vector{String}
 end
 
 @testset "non-Any comprehension still F64 when body is Float (Issue #4822)" begin

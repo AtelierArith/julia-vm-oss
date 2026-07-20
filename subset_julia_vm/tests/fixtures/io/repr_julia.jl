@@ -27,7 +27,7 @@ using Test
 
     # Ranges
     @test repr(1:5) == "1:5"
-    @test repr(1:2:10) == "1:2:10"
+    @test repr(1:2:10) == "1:2:9"
 
     # Complex numbers
     @test repr(1 + 2im) == "1 + 2im"

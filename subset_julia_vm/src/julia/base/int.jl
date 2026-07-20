@@ -1,12 +1,29 @@
 # =============================================================================
-# int.jl - Integer Arithmetic (Int64 specialized)
+# int.jl - Integer Arithmetic
 # =============================================================================
 # Based on Julia's base/int.jl
-# These specialized methods ensure Int64 operations return Int64.
+# Fixed-width integer dispatch follows upstream's BitSigned / BitUnsigned union
+# aliases instead of enumerating every concrete width at each method site.
 
 # =============================================================================
-# Number-theoretic Functions (Int64 specialized)
+# Fixed-width integer aliases (based on Julia's base/int.jl)
 # =============================================================================
+
+const BitSigned = Union{Int8, Int16, Int32, Int64, Int128}
+const BitUnsigned = Union{UInt8, UInt16, UInt32, UInt64, UInt128}
+const BitInteger = Union{BitSigned, BitUnsigned}
+
+# Fixed-width public constructors are pure Julia wrappers over the VM's
+# underscored conversion boundaries (Issue #8777).
+Int8(x) = _to_int8(x)
+Int16(x) = _to_int16(x)
+Int32(x) = _to_int32(x)
+Int128(x) = _to_int128(x)
+UInt8(x) = _to_uint8(x)
+UInt16(x) = _to_uint16(x)
+UInt32(x) = _to_uint32(x)
+UInt64(x) = _to_uint64(x)
+UInt128(x) = _to_uint128(x)
 
 # Unary negation for Int64 - returns Int64 (not Float64)
 # This ensures -x returns Int64 when x is Int64
@@ -117,60 +134,39 @@ function gcd(a::Int8, b::Int8)
     return Int8(gcd(Int64(a), Int64(b)))
 end
 
-# Integer division for Int64 - returns Int64 (not Float64)
-# This ensures div(num, g) inside Rational constructor returns Int64
-# IMPORTANT: Cannot use ÷ here because it's lowered to div() causing infinite recursion
-# Uses sdiv_int intrinsic directly (matches Julia's checked_sdiv_int)
-function div(x::Int64, y::Int64)
-    # sdiv_int is the low-level intrinsic - does not call div()
-    return sdiv_int(x, y)
+# Generic same-type GCD for the remaining integer types (Bool, the Unsigned
+# family, Int128/UInt128). The concrete signed methods above are more specific
+# and still win for Int8..Int64/BigInt; this method only fires for integer
+# types that have no dedicated method. Euclidean algorithm over the operand's
+# own arithmetic preserves the element type, matching upstream (Issue #9315).
+# Without this, `gcd(0x06, 0x04)` — and, via the Rational constructor,
+# `true // true` / `0x01 // 0x03` — hit a MethodError / promote-fallback
+# recursion instead of reducing.
+function gcd(a::T, b::T) where {T<:Integer}
+    a = abs(a)
+    b = abs(b)
+    while b != zero(T)
+        t = b
+        b = a % b
+        a = t
+    end
+    return a
 end
 
-# Integer division for smaller integer types (promote to Int64)
-function div(x::Int32, y::Int32)
-    return Int32(sdiv_int(Int64(x), Int64(y)))
+# Same-type fixed-width integer division mirrors upstream's BitSigned /
+# BitUnsigned methods instead of a concrete overload per width. `sdiv_int` is
+# the low-level intrinsic and never calls `div`; it may return a host-wide value
+# for narrow operands, so cast back to T to preserve the operand width (Issues
+# #3694 / #3696 / #3701 / #9381). The explicit typemin / -1 guard preserves
+# upstream checked_sdiv_int's DivideError instead of surfacing an InexactError
+# from the narrowing conversion (Issue #9429).
+function div(x::T, y::T) where {T<:BitSigned}
+    (y == T(-1) && x == typemin(T)) && throw(DivideError())
+    return T(sdiv_int(x, y))
 end
 
-function div(x::Int16, y::Int16)
-    return Int16(sdiv_int(Int64(x), Int64(y)))
-end
-
-function div(x::Int8, y::Int8)
-    return Int8(sdiv_int(Int64(x), Int64(y)))
-end
-
-# Issue #3694: Int128 ÷ Int128 must stay Int128 (the generic floor(x/y)
-# fallback returns Float64 because x/y already widens to Float64).
-# sdiv_int has been extended to preserve I128 operands.
-function div(x::Int128, y::Int128)
-    return sdiv_int(x, y)
-end
-
-# Issue #3696: same for UInt128 — sdiv_int dispatches on operand types
-# and uses unsigned division for U128 operands.
-function div(x::UInt128, y::UInt128)
-    return sdiv_int(x, y)
-end
-
-# Issue #3701: UIntN ÷ UIntN must stay UIntN. Without these the generic
-# `div(x, y) = floor(x / y)` widens through Float64.
-# UInt8/UInt16/UInt32 always fit in Int64 — same cast-through-I64 trick
-# the signed narrow types use. UInt64 needs the native U64 arm of
-# sdiv_int so values above i64::MAX divide correctly.
-function div(x::UInt8, y::UInt8)
-    return UInt8(sdiv_int(Int64(x), Int64(y)))
-end
-
-function div(x::UInt16, y::UInt16)
-    return UInt16(sdiv_int(Int64(x), Int64(y)))
-end
-
-function div(x::UInt32, y::UInt32)
-    return UInt32(sdiv_int(Int64(x), Int64(y)))
-end
-
-function div(x::UInt64, y::UInt64)
-    return sdiv_int(x, y)
+function div(x::T, y::T) where {T<:BitUnsigned}
+    return T(sdiv_int(x, y))
 end
 
 # Mixed integer division follows upstream's two paths:
@@ -196,65 +192,163 @@ end
 
 function div(x::Integer, y::Integer)
     if typeof(x) === typeof(y)
+        T = typeof(x)
+        if x isa BitSigned
+            (y == T(-1) && x == typemin(T)) && throw(DivideError())
+            return T(sdiv_int(x, y))
+        end
+        if x isa BitUnsigned
+            return T(sdiv_int(x, y))
+        end
         return floor(x / y)
     end
     px, py = promote(x, y)
     return div(px, py)
 end
 
-# Issue #6038: same-width signed integer rem/mod must preserve the operand
+# Issue #6038 / #9381: same-width fixed-width rem/mod must preserve the operand
 # width. The generic math.jl fallback routes through `%` and can widen narrow
 # integer results to Int64.
-function rem(x::Int64, y::Int64)
-    return srem_int(x, y)
+function rem(x::T, y::T) where {T<:BitSigned}
+    return T(srem_int(x, y))
 end
 
-function rem(x::Int32, y::Int32)
-    return Int32(srem_int(Int64(x), Int64(y)))
+function rem(x::T, y::T) where {T<:BitUnsigned}
+    return T(srem_int(x, y))
 end
 
-function rem(x::Int16, y::Int16)
-    return Int16(srem_int(Int64(x), Int64(y)))
-end
-
-function rem(x::Int8, y::Int8)
-    return Int8(srem_int(Int64(x), Int64(y)))
-end
-
-function mod(x::Int64, y::Int64)
-    y == -1 && return Int64(0)
+function mod(x::T, y::T) where {T<:BitSigned}
+    y == T(-1) && return T(0)
     r = rem(x, y)
-    if r != 0 && (r < 0) != (y < 0)
+    if r != T(0) && (r < T(0)) != (y < T(0))
         return r + y
     end
     return r
 end
 
-function mod(x::Int32, y::Int32)
-    y == Int32(-1) && return Int32(0)
-    r = rem(x, y)
-    if r != Int32(0) && (r < Int32(0)) != (y < Int32(0))
-        return r + y
-    end
-    return r
+function mod(x::T, y::T) where {T<:BitUnsigned}
+    return rem(x, y)
 end
 
-function mod(x::Int16, y::Int16)
-    y == Int16(-1) && return Int16(0)
+function fld(x::T, y::T) where {T<:BitSigned}
+    q = div(x, y)
     r = rem(x, y)
-    if r != Int16(0) && (r < Int16(0)) != (y < Int16(0))
-        return r + y
-    end
-    return r
+    return (r != T(0) && (x < T(0)) != (y < T(0))) ? q - one(T) : q
 end
 
-function mod(x::Int8, y::Int8)
-    y == Int8(-1) && return Int8(0)
+function fld(x::T, y::T) where {T<:BitUnsigned}
+    return div(x, y)
+end
+
+function cld(x::T, y::T) where {T<:BitSigned}
+    q = div(x, y)
     r = rem(x, y)
-    if r != Int8(0) && (r < Int8(0)) != (y < Int8(0))
-        return r + y
+    return (r != T(0) && (x > T(0)) == (y > T(0))) ? q + one(T) : q
+end
+
+function cld(x::T, y::T) where {T<:BitUnsigned}
+    q = div(x, y)
+    r = rem(x, y)
+    return r != T(0) ? q + one(T) : q
+end
+
+# =============================================================================
+# Mixed Signed×Unsigned rem/mod/fld/cld (Issues #9336 / #9337)
+# Upstream julia/base/int.jl gives div/fld/cld/rem/mod dedicated per-operator
+# signedness rules instead of naive promotion (which would try
+# `convert(Unsigned, negative)` and throw InexactError):
+#   - div/fld/cld/rem follow the DIVIDEND's signedness
+#   - mod follows the DIVISOR's signedness
+# The promoted *width* is preserved; only the signedness follows the rule.
+# BigInt (which is <:Signed) has no fixed-width unsigned form, so it falls back
+# to the promote path exactly like the existing div(Signed, Unsigned) methods.
+# =============================================================================
+function rem(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return rem(px, py)
     end
-    return r
+    return flipsign(signed(rem(unsigned(abs(x)), y)), x)
+end
+
+function rem(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return rem(px, py)
+    end
+    return rem(x, unsigned(abs(y)))
+end
+
+function mod(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return mod(px, py)
+    end
+    # `rem(x, y)` is signed with the promoted width; `unsigned` gives the same
+    # width. When it is negative, add the (unsigned) divisor widened to that same
+    # width so the `+` is a same-type modular add (upstream folds this via
+    # `remval + (remval<0)*y`).
+    remval = rem(x, y)
+    u = unsigned(remval)
+    return remval < zero(remval) ? u + convert(typeof(u), y) : u
+end
+
+function mod(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return mod(px, py)
+    end
+    # `rem(x, y)` is unsigned with the dividend's width; reinterpret to signed
+    # (same width) then, when the divisor is negative and the remainder nonzero,
+    # add the (signed) divisor widened to that same width so the `+` is a
+    # same-type add.
+    remval = signed(rem(x, y))
+    return (!iszero(remval) && y < zero(y)) ? remval + convert(typeof(remval), y) : remval
+end
+
+# fld/cld reuse the sign-ruled div/rem: floor rounds one below trunc when the
+# true quotient is negative with a nonzero remainder; ceil rounds one above
+# trunc when the true quotient is positive with a nonzero remainder. A negative
+# quotient occurs exactly when the signed operand is negative (the other operand
+# is unsigned, hence nonnegative).
+function fld(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return fld(px, py)
+    end
+    q = div(x, y)
+    r = rem(x, y)
+    return (r != zero(r) && x < zero(x)) ? q - one(q) : q
+end
+
+function fld(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return fld(px, py)
+    end
+    q = div(x, y)
+    r = rem(x, y)
+    return (r != zero(r) && y < zero(y)) ? q - one(q) : q
+end
+
+function cld(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return cld(px, py)
+    end
+    q = div(x, y)
+    r = rem(x, y)
+    return (r != zero(r) && x > zero(x)) ? q + one(q) : q
+end
+
+function cld(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return cld(px, py)
+    end
+    q = div(x, y)
+    r = rem(x, y)
+    return (r != zero(r) && y > zero(y)) ? q + one(q) : q
 end
 
 # =============================================================================
@@ -405,6 +499,21 @@ function Base.:(/)(x::Int64, y::Int64)
     div_float(Float64(x), Float64(y))
 end
 
+# True division of two integers always goes through Float64 — never integer
+# promotion (Issue #9442). Mirrors upstream `(/)(x::BitInteger, y::BitInteger) =
+# float(x) / float(y)` (julia/base/int.jl). Without this, a mixed
+# signed/unsigned pair such as `Int16(-1) / UInt16(5)` falls to the generic
+# `/(x::Number, y::Number) = /(promote(x, y)...)` fallback, which promotes both
+# operands to the common *integer* type (UInt16) and converts `-1 -> UInt16`,
+# throwing `InexactError` instead of returning `-0.2`. Both `float(x)` and
+# `float(y)` widen every fixed-width integer (and `Bool`) to `Float64` first, so
+# the sign is preserved. This remains on `Integer` rather than `BitInteger`
+# because the current subset also routes Bool true-division through this path.
+# BigInt arithmetic still uses the VM runtime and more-specific BigInt methods.
+function Base.:(/)(x::Integer, y::Integer)
+    float(x) / float(y)
+end
+
 # Comparisons
 function Base.:(==)(x::Int64, y::Int64)
     eq_int(x, y)
@@ -431,9 +540,81 @@ function Base.:(>=)(x::Int64, y::Int64)
 end
 
 # =============================================================================
+# Mixed Signed×Unsigned comparisons (Issue #9336)
+# Upstream julia/base/int.jl compares by a sign check plus a same-width unsigned
+# compare, never promoting the pair. Naive promotion would try
+# `convert(Unsigned, negative)` and throw InexactError; these methods return the
+# correct Bool instead. BigInt (<:Signed) has no fixed-width unsigned form, so it
+# falls back to the promote path.
+# =============================================================================
+function Base.:(==)(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return px == py
+    end
+    return (x >= zero(x)) & (unsigned(x) == y)
+end
+
+function Base.:(==)(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return px == py
+    end
+    return (y >= zero(y)) & (x == unsigned(y))
+end
+
+function Base.:(<)(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return px < py
+    end
+    return (x < zero(x)) | (unsigned(x) < y)
+end
+
+function Base.:(<)(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return px < py
+    end
+    return (y >= zero(y)) & (x < unsigned(y))
+end
+
+function Base.:(<=)(x::Signed, y::Unsigned)
+    if x isa BigInt
+        px, py = promote(x, y)
+        return px <= py
+    end
+    return (x < zero(x)) | (unsigned(x) <= y)
+end
+
+function Base.:(<=)(x::Unsigned, y::Signed)
+    if y isa BigInt
+        px, py = promote(x, y)
+        return px <= py
+    end
+    return (y >= zero(y)) & (x <= unsigned(y))
+end
+
+# >, >=, != derive from <, <=, == (upstream operators.jl: >(x,y)=y<x etc.).
+Base.:(>)(x::Signed, y::Unsigned) = y < x
+Base.:(>)(x::Unsigned, y::Signed) = y < x
+Base.:(>=)(x::Signed, y::Unsigned) = y <= x
+Base.:(>=)(x::Unsigned, y::Signed) = y <= x
+Base.:(!=)(x::Signed, y::Unsigned) = !(x == y)
+Base.:(!=)(x::Unsigned, y::Signed) = !(x == y)
+
+# =============================================================================
 # Bitwise Operators (using intrinsics)
 # =============================================================================
 # Based on Julia's base/int.jl:393, 418-419, 573-576
+
+# ÷ as a first-class function binding (Issue #10695): upstream aliases
+# `const ÷ = div` (base/operators.jl). Direct `x ÷ y` code lowers straight
+# to div, but macro-expanded forms (`@show 7 ÷ 2`) and value uses (`f = ÷`)
+# re-dispatch the OPERATOR NAME, which had no methods. `const ÷ = div` does
+# not lower (operator assignment target), so mirror the alias as a
+# forwarding method; div's own method table handles all operand types.
+Base.:(÷)(x, y) = div(x, y)
 
 # Bitwise AND
 function Base.:(&)(x::Int64, y::Int64)
@@ -531,6 +712,20 @@ end
 # Logical right shift: a >>> b (fills with zeros)
 function Base.:(>>>)(x::Int64, y::Int64)
     lshr_int(x, y)
+end
+
+function Base.:(<<)(x::BigInt, y::Int64)
+    if y < 0
+        return x >> -y
+    end
+    return x * (BigInt(2) ^ y)
+end
+
+function Base.:(>>)(x::BigInt, y::Int64)
+    if y < 0
+        return x << -y
+    end
+    return fld(x, BigInt(2) ^ y)
 end
 
 # =============================================================================
@@ -655,23 +850,8 @@ leading_ones(x::Integer)  = leading_zeros(~x)
 trailing_ones(x::Integer) = trailing_zeros(~x)
 
 # `bitrotate(x, k)` rotates the bits of a fixed-width integer left by `k`
-# (right if `k < 0`), wrapping modulo the bit width — upstream:
-#   bitrotate(x::T, k) where {T<:BitInteger} =
-#       (x << ((sizeof(T)<<3 - 1) & k)) | (x >>> ((sizeof(T)<<3 - 1) & -k))
-# The subset has no `BitInteger` union usable in dispatch, so the shared body
-# lives in `_bitrotate` and each concrete width gets a thin dispatch stub.
-# BigInt is intentionally left without a method (matches upstream MethodError).
-# This also fixes the previous Int64-only Rust handler, which coerced narrower
-# integers to Int64 and lost both the element type and the bit-width wrap.
+# (right if `k < 0`), wrapping modulo the bit width. BigInt is intentionally
+# left without a method (matches upstream MethodError).
 _bitrotate(x::T, k) where {T} =
     (x << ((sizeof(T) << 3 - 1) & k)) | (x >>> ((sizeof(T) << 3 - 1) & -k))
-bitrotate(x::Int8,    k::Integer) = _bitrotate(x, k)
-bitrotate(x::Int16,   k::Integer) = _bitrotate(x, k)
-bitrotate(x::Int32,   k::Integer) = _bitrotate(x, k)
-bitrotate(x::Int64,   k::Integer) = _bitrotate(x, k)
-bitrotate(x::Int128,  k::Integer) = _bitrotate(x, k)
-bitrotate(x::UInt8,   k::Integer) = _bitrotate(x, k)
-bitrotate(x::UInt16,  k::Integer) = _bitrotate(x, k)
-bitrotate(x::UInt32,  k::Integer) = _bitrotate(x, k)
-bitrotate(x::UInt64,  k::Integer) = _bitrotate(x, k)
-bitrotate(x::UInt128, k::Integer) = _bitrotate(x, k)
+bitrotate(x::T, k::Integer) where {T<:BitInteger} = _bitrotate(x, k)

@@ -27,14 +27,16 @@ using Test
 end
 
 @testset "Pure Julia Array wrapper projects rank from _size" begin
-    mem = Memory{Int64}(4)
+    # Upstream spellings: Memory{T}(undef, n) and Base.wrap (unexported).
+    # Memory{T}(n) / bare wrap are sjulia extensions (Issues #10324 / #10237).
+    mem = Memory{Int64}(undef, 4)
     for i in 1:4
         mem[i] = i
     end
 
-    w1 = wrap(Array, mem, 4)
-    w2 = wrap(Array, mem, (2, 2))
-    w3 = wrap(Array, mem, (2, 1, 2))
+    w1 = Base.wrap(Array, mem, 4)
+    w2 = Base.wrap(Array, mem, (2, 2))
+    w3 = Base.wrap(Array, mem, (2, 1, 2))
 
     @test typeof(w1) == Vector{Int64}
     @test w1 isa Array{Int64, 1}

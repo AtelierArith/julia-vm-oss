@@ -1,6 +1,8 @@
 // Prevent accidental debug output in library code (Issue #2888).
 // CLI binaries (bin/) may use eprintln!() for user-facing error messages.
 #![deny(clippy::print_stderr)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
 
 //! subset_julia_vm_parser
 //!
@@ -15,11 +17,15 @@
 //! use subset_julia_vm_parser::{parse, NodeKind};
 //!
 //! let source = "42";
-//! let cst = parse(source).expect("parse failed");
+//! let result = parse(source);
 //!
-//! assert_eq!(cst.kind, NodeKind::SourceFile);
+//! assert!(result.is_ok());
+//! if let Ok(cst) = result {
+//!     assert_eq!(cst.kind, NodeKind::SourceFile);
+//! }
 //! ```
 
+pub mod corpus;
 pub mod cst;
 pub mod error;
 pub mod lexer;
@@ -33,7 +39,7 @@ pub use cst::{CstBuilder, CstNode, CstWalker};
 pub use error::{ParseError, ParseErrors, ParseResult};
 pub use lexer::{Lexer, SpannedToken};
 pub use node_kind::NodeKind;
-pub use parser::Parser;
+pub use parser::{strip_var_quotes, Parser};
 pub use span::{SourceMap, Span};
 pub use token::{Associativity, Precedence, Token};
 
@@ -50,15 +56,29 @@ pub use cst::testing;
 /// ```
 /// use subset_julia_vm_parser::{parse, NodeKind};
 ///
-/// let cst = parse("42").unwrap();
-/// assert_eq!(cst.kind, NodeKind::SourceFile);
+/// let result = parse("42");
+/// assert!(result.is_ok());
+/// if let Ok(cst) = result {
+///     assert_eq!(cst.kind, NodeKind::SourceFile);
+/// }
 /// ```
 pub fn parse(source: &str) -> ParseResult<CstNode> {
     let (cst, errors) = parser::parse(source);
     if errors.is_empty() {
         Ok(cst)
     } else {
-        Err(errors.into_iter().next().unwrap())
+        // `errors.is_empty()` was just checked above, so this iterator is
+        // guaranteed to yield at least one error. Proof-backed by the
+        // preceding check rather than the type system; treat a violation of
+        // that invariant as a checked internal error instead of panicking
+        // (Issue #10904).
+        match errors.into_iter().next() {
+            Some(first) => Err(first),
+            None => Err(ParseError::invalid_syntax(
+                "internal parser error: ParseErrors::is_empty() was false but iteration yielded no errors",
+                Span::default(),
+            )),
+        }
     }
 }
 
@@ -82,6 +102,7 @@ pub fn version() -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

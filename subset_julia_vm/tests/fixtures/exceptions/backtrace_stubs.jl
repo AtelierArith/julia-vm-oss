@@ -1,36 +1,50 @@
-# Test backtrace stub functions
-# Issue #448: Error handling (エラー処理)
-#
-# These functions return empty arrays as stubs since full backtrace
-# support requires VM-level stack inspection.
+# Test backtrace APIs expose VM stack frames
+# Issue #8993: backtrace(), catch_backtrace(), and stacktrace() must not be
+# silent empty stubs.
 
 using Test
 
-@testset "Backtrace stubs" begin
-    # Test backtrace() returns an array
-    bt = backtrace()
-    @test isa(bt, Array)
-    @test length(bt) == 0  # Stub returns empty array
+function exceptions_backtrace_leaf_8993()
+    error("bt8993")
+end
 
-    # Test catch_backtrace() returns an array
-    cbt = catch_backtrace()
-    @test isa(cbt, Array)
-    @test length(cbt) == 0
+function exceptions_backtrace_mid_8993()
+    exceptions_backtrace_leaf_8993()
+end
 
-    # Test stacktrace() returns an array
-    st = stacktrace()
-    @test isa(st, Array)
-    @test length(st) == 0
+function exceptions_backtrace_capture_8993()
+    try
+        exceptions_backtrace_mid_8993()
+    catch e
+        bt = catch_backtrace()
+        st = stacktrace(bt)
+        current = stacktrace()
+        first_frame = length(st) > 0 ? string(st[1]) : ""
+        all_frames = join(string.(st), "\n")
+        return (length(bt), length(st), length(current), first_frame, all_frames)
+    end
+end
 
-    # Test current_exceptions() returns an array
+function exceptions_current_backtrace_8993()
+    return (length(backtrace()), length(stacktrace()))
+end
+
+@testset "Backtrace APIs expose stack frames (Issue #8993)" begin
+    bt_len, st_len, current_len, first_frame, all_frames = exceptions_backtrace_capture_8993()
+    @test bt_len > 0
+    @test st_len > 0
+    @test current_len > 0
+    @test occursin("exceptions_backtrace", first_frame) ||
+          occursin("exceptions_backtrace", all_frames)
+
+    current_bt_len, current_stack_len = exceptions_current_backtrace_8993()
+    @test current_bt_len > 0
+    @test current_stack_len > 0
+
+    # current_exceptions remains a minimal empty-array implementation until
+    # exception-stack object parity is tackled separately.
     excs = current_exceptions()
-    @test isa(excs, Array)
     @test length(excs) == 0
-
-    # Test stacktrace with argument
-    st2 = stacktrace(Int64[])
-    @test isa(st2, Array)
-    @test length(st2) == 0
 end
 
 true

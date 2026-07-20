@@ -5,7 +5,7 @@
 # This test uses the ORIGINAL Julia syntax (no workarounds) to prevent regression.
 #
 # Features tested:
-# 1. String interpolation: $var! (not $(var)!)
+# 1. String interpolation: $var identifier boundary (upstream `!` rule, Issue #10322)
 # 2. Default function arguments: function f(x, y=10)
 # 3. begin/end compound expressions in assignment context
 # 4. Mutable struct field compound assignment (+=, -=, etc.)
@@ -41,13 +41,18 @@ end
 
 @testset "Prevention: Native Julia syntax (Issue #1794)" begin
 
-    @testset "Feature 1: String interpolation \$var! boundary" begin
-        # Previously: "Hello, $(name)!" was required (workaround)
-        # Now: "Hello, $name!" works natively — $name stops before !
+    @testset "Feature 1: String interpolation \$var boundary" begin
+        # Upstream lexer rule (Issues #10322 / #10237): `!` IS part of the
+        # interpolated identifier ("$name!" reads variable `name!`), so a
+        # literal bang after an interpolation needs the "$(name)!" form.
+        # Non-identifier characters like `.` `,` `(` `)` still terminate
+        # the identifier.
         name = "Julia"
+        @test "Hello, $(name)!" == "Hello, Julia!"
+        name! = "Julia!"
         @test "Hello, $name!" == "Hello, Julia!"
         @test "$name!" == "Julia!"
-        @test "Say $name!" == "Say Julia!"
+        @test "Say $name, hi" == "Say Julia, hi"
 
         x = 42
         @test "value=$x." == "value=42."

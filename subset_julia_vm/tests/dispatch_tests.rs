@@ -1,11 +1,12 @@
 //! Tests for multiple dispatch functionality.
 
-use subset_julia_vm::compile::compile_core_program;
+use subset_julia_vm::compile::host_support::compile_core_program;
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::rng::StableRng;
 use subset_julia_vm::types::JuliaType;
-use subset_julia_vm::vm::{Value, Vm};
+use subset_julia_vm::vm::Vm;
+use subset_julia_vm_bytecode::Value;
 
 /// Helper to parse, lower, compile, and run a program using the new pipeline.
 fn run_core_program(src: &str, seed: u64) -> Result<Value, String> {
@@ -251,10 +252,7 @@ fn test_value_runtime_type() {
     assert_eq!(Value::I64(42).runtime_type(), JuliaType::Int64);
     let pi_approx = 314.0 / 100.0;
     assert_eq!(Value::F64(pi_approx).runtime_type(), JuliaType::Float64);
-    assert_eq!(
-        Value::Str("hello".to_string()).runtime_type(),
-        JuliaType::String
-    );
+    assert_eq!(Value::str_new("hello").runtime_type(), JuliaType::String);
     // Complex is now a Pure Julia struct - type_id 0 is used as placeholder in tests
     assert_eq!(
         Value::new_complex(0, 1.0, 2.0).runtime_type(),

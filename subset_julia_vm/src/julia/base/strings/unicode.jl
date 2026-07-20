@@ -10,14 +10,14 @@
 
 function uppercase(c::Char)
     if 'a' <= c <= 'z'
-        return Char(Int(c) - 32)
+        return _int_to_char(Int(c) - 32)
     end
     return c
 end
 
 function lowercase(c::Char)
     if 'A' <= c <= 'Z'
-        return Char(Int(c) + 32)
+        return _int_to_char(Int(c) + 32)
     end
     return c
 end
@@ -49,7 +49,7 @@ end
 # titlecase(c::Char) - for ASCII, same as uppercase
 function titlecase(c::Char)
     if 'a' <= c <= 'z'
-        return Char(Int(c) - 32)
+        return _int_to_char(Int(c) - 32)
     end
     return c
 end

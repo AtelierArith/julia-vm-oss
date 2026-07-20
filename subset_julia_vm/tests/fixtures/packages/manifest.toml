@@ -188,10 +188,22 @@ expected = true
 description = "Plots: surface(x,y,z) and surface(x,y,zf) construct :surface Series (Issues #5271/#5986)"
 
 [[tests]]
+name = "packages_plots_surface_linearalgebra_loadorder_9254"
+file = "plots_surface_linearalgebra_loadorder_9254.jl"
+expected = true
+description = "Plots #9254: surface(x,y,zf::Function) stays a :surface Series when `using LinearAlgebra` follows `using Plots` (preload-cache splice must not shift frozen indices)"
+
+[[tests]]
 name = "packages_plots_heatmap_6360"
 file = "plots_heatmap_6360.jl"
 expected = true
 description = "Plots: heatmap(z), heatmap(x,y,z), and heatmap! construct :heatmap Series (Issue #6360)"
+
+[[tests]]
+name = "packages_plots_contour_9940"
+file = "plots_contour_9940.jl"
+expected = true
+description = "Plots: contour(z), contour(x,y,z), function-valued contour z, levels, and contour! construct :contour Series rendered as Plotly contour traces (Issue #9940)"
 
 [[tests]]
 name = "packages_plots_bar_6358"
@@ -228,6 +240,12 @@ name = "packages_plots_push_xy_point_7271"
 file = "plots_push_xy_point_7271.jl"
 expected = true
 description = "Plots: push!(plt, x, y) / push!(plt, x, y, z) append a single point to the first (mutable) series (Issue #7271)"
+
+[[tests]]
+name = "packages_plots_push_resync_current_9203"
+file = "plots_push_resync_current_9203.jl"
+expected = true
+description = "Plots: push!(plt) fast path keeps current() reflecting in-place series extends by reference; non-current plot re-publishes (Issue #9203)"
 
 [[tests]]
 name = "packages_plots_animate_every_7272"
@@ -600,3 +618,33 @@ name = "packages_quadgk_inplace_batch_8289"
 file = "quadgk_inplace_batch_8289.jl"
 expected = true
 description = "QuadGK in-place vector integration and direct BatchIntegrand dispatch with kwargs through partial parametric wrapper selection (Issues #8289, #8407)"
+
+[[tests]]
+name = "packages_combinatorics_combinations_8508"
+file = "combinatorics_combinations_8508.jl"
+expected = true
+description = "Combinatorics: combinations length, collect, direct iterate, and enumerate used by HCubature's Genz-Malik rule (Issue #8508)"
+
+[[tests]]
+name = "packages_data_structures_binary_max_heap_8509"
+file = "data_structures_binary_max_heap_8509.jl"
+expected = true
+description = "DataStructures: BinaryMaxHeap empty constructor plus push/pop max-heap order used by HCubature buffers (Issue #8509)"
+
+[[tests]]
+name = "packages_hcubature_smoke_8506"
+file = "hcubature_smoke_8506.jl"
+expected = true
+description = "HCubature: bundled package smoke for hquadrature, 0-D/1-D/2-D hcubature, initdiv, buffer reuse, and transformed 2-D full-space normal density (Issues #8506, #8511)"
+
+[[tests]]
+name = "packages_hcubature_ndim_8524"
+file = "hcubature_ndim_8524.jl"
+expected = true
+description = "HCubature: generic n-dimensional cubature — 3-D/4-D/5-D integrals, vector/integer endpoints, initdiv, buffer reuse, and Genz-Malik eval counts for 3-D/7-D (Issue #8524)"
+
+[[tests]]
+name = "packages_hcubature_nonfloat_endpoints_8541"
+file = "hcubature_nonfloat_endpoints_8541.jl"
+expected = true
+description = "HCubature/QuadGK: Float32 cached rules, 1-D hquadrature with Float32 and integer endpoints, plus BigFloat n-D cubature endpoints stay type-correct (Issue #8541)"

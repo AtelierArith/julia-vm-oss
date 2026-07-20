@@ -1,20 +1,121 @@
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
 use std::borrow::Cow;
 
 use crate::ir::core::{Expr, Literal, Stmt};
 use crate::span::Span;
-use crate::vm::value::{array_wrapper_shape_and_offset, MemoryValue};
-use crate::vm::{ArrayElementType, ArrayValue, StructInstance, Value};
+use crate::vm::repl_support;
+use subset_julia_vm_bytecode::value::{
+    array_wrapper_shape_and_offset, is_native_array_value, native_array_value_ref, ArrayData,
+    ArrayElementType, ArrayValue, MemoryValue, StructInstance,
+};
+use subset_julia_vm_bytecode::{owner_module_path, Value};
+
+/// Cheap, budget-bounded estimate of how many scalar leaf literals
+/// `struct_instance_to_literal(instance)` would materialize, resolving nested heap
+/// `StructRef`s. Scalar arrays/memory are read as O(1) length lookups (their
+/// elements are never walked); only struct/ref containers are recursed. So this
+/// stays cheap even when the reconstructed literal *would* be enormous. The walk
+/// stops as soon as the running total reaches `budget` (the return value is then
+/// `>= budget`, not exact).
+///
+/// The REPL uses this to steer large heap-backed globals away from AST-literal
+/// reconstruction. A push!-based `@animate` animation snapshots the *cumulative*
+/// path in every frame, so its frames hold O(frames^2) points; rebuilding that as
+/// an `Expr` literal — and re-cloning it on every subsequent eval — transiently
+/// allocated multiple GB and OOM-aborted the iOS REPL (Issue #9229). Such globals
+/// are value-carried across evals instead (the struct heap is transplanted anyway).
+pub(crate) fn struct_literal_leaf_estimate(
+    instance: &StructInstance,
+    heap: &[StructInstance],
+    budget: usize,
+) -> usize {
+    let mut n = 0usize;
+    for v in &instance.values {
+        if n >= budget {
+            break;
+        }
+        n = n.saturating_add(value_literal_leaf_estimate(v, heap, budget));
+    }
+    n
+}
+
+/// Budget-bounded leaf estimate for any persisted-global `Value`. Mirrors
+/// [`value_to_init_expr_inner`]'s traversal order — arrays (including `Array{…}` /
+/// `Vector{…}` wrapper structs, resolved via [`value_as_array`]) first, then
+/// tuples/named-tuples/structs — so the estimate tracks what the reconstruction
+/// would actually build. Scalar-typed arrays contribute their length without
+/// materializing elements; only struct/ref/heterogeneous containers recurse. The
+/// walk stops once the running total reaches `budget`.
+pub(crate) fn value_literal_leaf_estimate(
+    value: &Value,
+    heap: &[StructInstance],
+    budget: usize,
+) -> usize {
+    // Arrays and array-wrapper structs (`Vector{Series}`, `Array{Any,1}`, …).
+    if let Some(arr) = value_as_array(value, heap) {
+        return array_leaf_estimate(&arr, heap, budget);
+    }
+    match value {
+        Value::Struct(s) => struct_literal_leaf_estimate(s, heap, budget),
+        Value::StructRef(idx) => heap
+            .get(*idx)
+            .map(|s| struct_literal_leaf_estimate(s, heap, budget))
+            .unwrap_or(1),
+        Value::Tuple(t) => {
+            let mut n = 0usize;
+            for e in &t.elements {
+                if n >= budget {
+                    break;
+                }
+                n = n.saturating_add(value_literal_leaf_estimate(e, heap, budget));
+            }
+            n
+        }
+        Value::NamedTuple(nt) => {
+            let mut n = 0usize;
+            for v in &nt.values {
+                if n >= budget {
+                    break;
+                }
+                n = n.saturating_add(value_literal_leaf_estimate(v, heap, budget));
+            }
+            n
+        }
+        _ => 1,
+    }
+}
+
+/// Estimate leaves for a resolved array. Scalar storage counts its length directly;
+/// struct-ref / heterogeneous storage recurses into elements (their cardinality is
+/// small — e.g. animation frames or series lists — while the bulk scalar point data
+/// lives in the typed leaf arrays counted by length).
+fn array_leaf_estimate(arr: &ArrayValue, heap: &[StructInstance], budget: usize) -> usize {
+    match &arr.data {
+        ArrayData::StructRefs(_) | ArrayData::Any(_) => {
+            let mut n = 0usize;
+            for e in arr.to_value_vec() {
+                if n >= budget {
+                    break;
+                }
+                n = n.saturating_add(value_literal_leaf_estimate(&e, heap, budget));
+            }
+            n
+        }
+        _ => arr.len().max(1),
+    }
+}
 
 /// Convert a Value to a Literal for IR injection.
 pub(crate) fn value_to_literal(value: &Value) -> Option<Literal> {
-    if let Some(arr) = crate::vm::value::native_array_value_ref(value) {
+    if let Some(arr) = native_array_value_ref(value) {
         let arr = arr.borrow();
         return array_value_to_literal(&arr);
     }
     match value {
         Value::I64(v) => Some(Literal::Int(*v)),
         Value::F64(v) => Some(Literal::Float(*v)),
-        Value::Str(v) => Some(Literal::Str(v.clone())),
+        Value::Str(v) => Some(Literal::Str(v.to_string())),
         Value::Memory(mem) => {
             let mem = mem.borrow();
             memory_value_to_literal(&mem)
@@ -99,7 +200,23 @@ pub(crate) fn value_to_init_expr(
     span: Span,
 ) -> Option<Expr> {
     // Top-level entry: an empty array defers to a module initializer (Issue #5296).
-    value_to_init_expr_inner(value, heap, span, false)
+    value_to_init_expr_inner(value, heap, span, false, None)
+}
+
+/// Reconstruct a persisted binding inside `module_path`, retaining the qualified
+/// owner of nested structs declared elsewhere while using the local constructor
+/// spelling for structs owned by the restoration module. A value restored inside
+/// a submodule may have been created by a parent or sibling module; shortening
+/// that constructor would incorrectly resolve it in the restoration scope. The
+/// same-module spelling remains bare so its inner-constructor table is resolved
+/// as a module-owned binding (Issues #5296, #9723).
+pub(crate) fn value_to_module_init_expr(
+    value: &Value,
+    heap: &[StructInstance],
+    span: Span,
+    module_path: &str,
+) -> Option<Expr> {
+    value_to_init_expr_inner(value, heap, span, false, Some(module_path))
 }
 
 /// `nested` is `true` when reconstructing a value that lives *inside* another
@@ -114,6 +231,7 @@ fn value_to_init_expr_inner(
     heap: &[StructInstance],
     span: Span,
     nested: bool,
+    restoration_module_path: Option<&str>,
 ) -> Option<Expr> {
     // Primitives, numeric/bool arrays, Memory, symbols, nothing, and bare structs
     // whose fields are all literal-able round-trip through value_to_literal.
@@ -121,10 +239,11 @@ fn value_to_init_expr_inner(
         return Some(Expr::Literal(lit, span));
     }
 
-    // A function/closure value held inside a persisted value (e.g. an ODEProblem's
-    // `f` field, `g = sin`) reconstructs as a `FunctionRef` by name; the function
-    // itself is preserved in `REPLSession::functions` and re-injected. Without this
-    // a struct carrying a function field had no init expr and was dropped.
+    // A function or capture-free closure value held inside a persisted value
+    // (e.g. an ODEProblem's `f` field, `g = sin`) reconstructs as a `FunctionRef`
+    // by name; the function itself is preserved in `REPLSession::functions` and
+    // re-injected. Captured closures return `None` below so REPLSession value-carries
+    // their environment instead of rebuilding an incomplete FunctionRef.
     if let Some(expr) = callable_value_to_expr(value, span) {
         return Some(expr);
     }
@@ -148,7 +267,7 @@ fn value_to_init_expr_inner(
         }
         let exprs = elements
             .iter()
-            .map(|e| value_to_init_expr_inner(e, heap, span, true))
+            .map(|e| value_to_init_expr_inner(e, heap, span, true, restoration_module_path))
             .collect::<Option<Vec<_>>>()?;
         return Some(Expr::ArrayLiteral {
             elements: exprs,
@@ -165,7 +284,7 @@ fn value_to_init_expr_inner(
         let elements = t
             .elements
             .iter()
-            .map(|e| value_to_init_expr_inner(e, heap, span, true))
+            .map(|e| value_to_init_expr_inner(e, heap, span, true, restoration_module_path))
             .collect::<Option<Vec<_>>>()?;
         return Some(Expr::TupleLiteral { elements, span });
     }
@@ -181,7 +300,7 @@ fn value_to_init_expr_inner(
             .to_tuple_value()
             .elements
             .iter()
-            .map(|e| value_to_init_expr_inner(e, heap, span, true))
+            .map(|e| value_to_init_expr_inner(e, heap, span, true, restoration_module_path))
             .collect::<Option<Vec<_>>>()?;
         let arity = args.len();
         let function = if sa.is_vector() {
@@ -190,7 +309,7 @@ fn value_to_init_expr_inner(
             format!("SMatrix{{{},{}}}", sa.rows, sa.cols)
         };
         return Some(Expr::Call {
-            function,
+            function: function.into(),
             args,
             kwargs: Vec::new(),
             splat_mask: vec![false; arity],
@@ -205,8 +324,8 @@ fn value_to_init_expr_inner(
             .iter()
             .zip(nt.values.iter())
             .map(|(name, field_value)| {
-                value_to_init_expr_inner(field_value, heap, span, true)
-                    .map(|expr| (name.clone(), expr))
+                value_to_init_expr_inner(field_value, heap, span, true, restoration_module_path)
+                    .map(|expr| (name.clone().into(), expr))
             })
             .collect::<Option<Vec<_>>>()?;
         return Some(Expr::NamedTupleLiteral { fields, span });
@@ -236,15 +355,22 @@ fn value_to_init_expr_inner(
     }
 
     if let Some(instance) = as_struct(value, heap) {
-        let short_name = short_constructible_type_name(&instance.struct_name);
+        let constructor_name = match restoration_module_path {
+            Some(module_path)
+                if owner_module_path(instance.struct_name.as_ref()) != module_path =>
+            {
+                Cow::Borrowed(instance.struct_name.as_ref())
+            }
+            _ => short_constructible_type_name(&instance.struct_name),
+        };
         let args = instance
             .values
             .iter()
-            .map(|v| value_to_init_expr_inner(v, heap, span, true))
+            .map(|v| value_to_init_expr_inner(v, heap, span, true, restoration_module_path))
             .collect::<Option<Vec<_>>>()?;
         let arity = args.len();
         return Some(Expr::Call {
-            function: short_name.into_owned(),
+            function: constructor_name.into_owned().into(),
             args,
             kwargs: Vec::new(),
             splat_mask: vec![false; arity],
@@ -266,9 +392,10 @@ fn value_to_init_expr_inner(
 /// `UndefVarError` — which is exactly what breaks `@gif`/`push!(ps, …)` in the
 /// REPL (Issue #7151). The element type is parsed from the array's `struct_name`
 /// (`Array{Any, 1}` → `Any`, `Array{Int64, 1}` → `Int64`) so `eltype`/`push!`
-/// keep matching upstream. Only 1-D (vector) empties are handled; higher-rank
-/// empties return `None` (no worse than today) since `TypedEmptyArray` builds a
-/// `Vector`.
+/// keep matching upstream. Heap-backed array wrappers are resolved through
+/// `heap` before parsing the name (Issue #10581). Only 1-D (vector) empties are
+/// handled; higher-rank empties return `None` (no worse than today) since
+/// `TypedEmptyArray` builds a `Vector`.
 pub(crate) fn empty_array_init_expr(
     value: &Value,
     heap: &[StructInstance],
@@ -278,19 +405,27 @@ pub(crate) fn empty_array_init_expr(
     if arr.element_count() != 0 || arr.shape.len() > 1 {
         return None;
     }
-    let element_type = array_value_element_type_name(value);
-    Some(Expr::TypedEmptyArray { element_type, span })
+    let element_type = array_value_element_type_name(value, heap, &arr);
+    Some(Expr::TypedEmptyArray {
+        element_type: element_type.into(),
+        span,
+    })
 }
 
 /// Best-effort Julia element-type name for an array `value`, parsed from its
-/// `struct_name` (`Array{T, N}` / `Vector{T}`). Falls back to `Any`.
-fn array_value_element_type_name(value: &Value) -> String {
-    if let Value::Struct(s) = value {
+/// `struct_name` (`Array{T, N}` / `Vector{T}`). Falls back to the resolved
+/// array carrier's element tag when the value has no wrapper struct.
+fn array_value_element_type_name(
+    value: &Value,
+    heap: &[StructInstance],
+    array: &ArrayValue,
+) -> String {
+    if let Some(s) = as_struct(value, heap) {
         if let Some(name) = array_struct_element_type_name(&s.struct_name) {
             return name;
         }
     }
-    "Any".to_string()
+    array.element_type().julia_type_name()
 }
 
 /// Extract the first (element) type parameter from an array wrapper type name,
@@ -331,18 +466,12 @@ fn as_struct<'a>(value: &'a Value, heap: &'a [StructInstance]) -> Option<&'a Str
 /// scalars and non-wrapper structs (e.g. `Series`), which `linalg_value_to_array_value`
 /// rejects with an `Err` rather than panicking.
 fn value_as_array(value: &Value, heap: &[StructInstance]) -> Option<ArrayValue> {
-    let looks_arrayish = crate::vm::value::is_native_array_value(value)
-        || matches!(value, Value::StructRef(_) | Value::Struct(_));
+    let looks_arrayish =
+        is_native_array_value(value) || matches!(value, Value::StructRef(_) | Value::Struct(_));
     if !looks_arrayish {
         return None;
     }
-    crate::vm::builtins_linalg::linalg_value_to_array_value(
-        value.clone(),
-        heap,
-        "repl_persist",
-        None,
-    )
-    .ok()
+    repl_support::linalg_value_to_array_value(value.clone(), heap, "repl_persist", None).ok()
 }
 
 fn array_value_to_literal(arr: &ArrayValue) -> Option<Literal> {
@@ -427,7 +556,7 @@ fn memory_value_to_literal(mem: &MemoryValue) -> Option<Literal> {
 pub(crate) fn callable_value_to_expr(value: &Value, span: Span) -> Option<Expr> {
     match value {
         Value::Function(fv) => Some(Expr::FunctionRef {
-            name: fv.name.clone(),
+            name: fv.name.clone().into(),
             span,
         }),
         Value::ComposedFunction(cf) => {
@@ -435,7 +564,7 @@ pub(crate) fn callable_value_to_expr(value: &Value, span: Span) -> Option<Expr> 
             let outer_expr = callable_value_to_expr(&cf.outer, span)?;
             let inner_expr = callable_value_to_expr(&cf.inner, span)?;
             Some(Expr::Call {
-                function: "compose".to_string(),
+                function: "compose".to_string().into(),
                 args: vec![outer_expr, inner_expr],
                 kwargs: Vec::new(),
                 splat_mask: vec![],
@@ -443,14 +572,16 @@ pub(crate) fn callable_value_to_expr(value: &Value, span: Span) -> Option<Expr> 
                 span,
             })
         }
-        // Closures are injected as FunctionRefs; the underlying function is preserved in
-        // REPLSession::functions and merged into the next program (Issue #3283).
-        // Captured variables are already stored as separate REPL globals and will be
-        // re-injected, causing the VM to re-create the closure automatically.
-        Value::Closure(cv) => Some(Expr::FunctionRef {
-            name: cv.name.clone(),
+        // Capture-free closures can be reconstructed by function identity alone.
+        // Captured closures cannot: their environment may contain factory locals
+        // that are not REPL globals. Returning `None` lets REPLSession value-carry
+        // the real closure through seed_globals instead of injecting a broken
+        // FunctionRef prelude (Issue #9436).
+        Value::Closure(cv) if cv.captures.is_empty() => Some(Expr::FunctionRef {
+            name: cv.name.clone().into(),
             span,
         }),
+        Value::Closure(_) => None,
         _ => None,
     }
 }
@@ -477,9 +608,9 @@ pub(crate) fn struct_instance_to_literal(
         // Value::Struct arm — Issue #5163), Array (with element type preservation),
         // Memory, and all primitive types. Any type that value_to_literal() cannot
         // convert causes the whole struct to fail persistence.
-        match value_to_literal(value) {
-            Some(lit) => field_literals.push(lit),
-            None => return None,
+        {
+            let lit = value_to_literal(value)?;
+            field_literals.push(lit)
         }
     }
     Some(Literal::Struct(struct_name.to_string(), field_literals))
@@ -512,7 +643,7 @@ fn array_wrapper_struct_to_literal(instance: &StructInstance) -> Option<Literal>
     let len: usize = shape.iter().product();
 
     let mut values = Vec::with_capacity(len);
-    let element_type = if let Some(arr_ref) = crate::vm::value::native_array_value_ref(storage) {
+    let element_type = if let Some(arr_ref) = native_array_value_ref(storage) {
         let arr = arr_ref.borrow();
         for linear in 0..len {
             values.push(arr.get_linear(offset - 1 + linear).ok()?);
@@ -571,114 +702,406 @@ fn values_to_array_literal(
     }
 }
 
-/// Extract variable names that are assigned in a list of statements.
-pub(crate) fn extract_assigned_variables(stmts: &[Stmt]) -> Vec<String> {
-    let mut vars = Vec::new();
+/// Conservatively find only assignments that overlap a caller-provided hazard
+/// set. This is compile preparation for the temporary struct full-rebuild path,
+/// never authority for committing REPL state (Issue #9784).
+pub(crate) fn potential_rebindings_of(
+    stmts: &[Stmt],
+    candidates: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
+    let mut found = std::collections::HashSet::new();
+    collect_potential_rebindings(stmts, candidates, &mut found);
+    found
+}
+
+fn collect_potential_rebindings(
+    stmts: &[Stmt],
+    candidates: &std::collections::HashSet<String>,
+    found: &mut std::collections::HashSet<String>,
+) {
     for stmt in stmts {
         match stmt {
-            Stmt::Assign { var, value, .. } => {
-                vars.push(var.clone());
-                // Also check the value expression for nested assignments (e.g., local result = x = 42)
-                vars.extend(extract_assigned_from_expr(value));
+            Stmt::Assign { var, value, .. } | Stmt::AddAssign { var, value, .. } => {
+                if candidates.contains(var) {
+                    found.insert(var.clone());
+                }
+                collect_potential_rebindings_expr(value, candidates, found);
             }
-            Stmt::Block(block) => {
-                vars.extend(extract_assigned_variables(&block.stmts));
+            Stmt::DestructuringAssign { targets, value, .. } => {
+                found.extend(
+                    targets
+                        .iter()
+                        .filter(|target| candidates.contains(*target))
+                        .cloned(),
+                );
+                collect_potential_rebindings_expr(value, candidates, found);
+            }
+            Stmt::Block(block)
+            | Stmt::Timed { body: block, .. }
+            | Stmt::TestSet { body: block, .. } => {
+                collect_potential_rebindings(&block.stmts, candidates, found);
             }
             Stmt::If {
+                condition,
                 then_branch,
                 else_branch,
                 ..
             } => {
-                vars.extend(extract_assigned_variables(&then_branch.stmts));
-                if let Some(else_b) = else_branch {
-                    vars.extend(extract_assigned_variables(&else_b.stmts));
+                collect_potential_rebindings_expr(condition, candidates, found);
+                collect_potential_rebindings(&then_branch.stmts, candidates, found);
+                if let Some(block) = else_branch {
+                    collect_potential_rebindings(&block.stmts, candidates, found);
                 }
             }
-            Stmt::While { body, .. } => {
-                vars.extend(extract_assigned_variables(&body.stmts));
+            Stmt::While {
+                condition, body, ..
+            } => {
+                collect_potential_rebindings_expr(condition, candidates, found);
+                collect_potential_rebindings(&body.stmts, candidates, found);
             }
-            Stmt::For { body, .. } => {
-                vars.extend(extract_assigned_variables(&body.stmts));
+            Stmt::For {
+                var,
+                start,
+                end,
+                step,
+                body,
+                ..
+            } => {
+                if candidates.contains(var) {
+                    found.insert(var.clone());
+                }
+                collect_potential_rebindings_expr(start, candidates, found);
+                collect_potential_rebindings_expr(end, candidates, found);
+                if let Some(step) = step {
+                    collect_potential_rebindings_expr(step, candidates, found);
+                }
+                collect_potential_rebindings(&body.stmts, candidates, found);
+            }
+            Stmt::ForEach {
+                var,
+                iterable,
+                body,
+                ..
+            } => {
+                if candidates.contains(var) {
+                    found.insert(var.clone());
+                }
+                collect_potential_rebindings_expr(iterable, candidates, found);
+                collect_potential_rebindings(&body.stmts, candidates, found);
+            }
+            Stmt::ForEachTuple {
+                vars,
+                iterable,
+                body,
+                ..
+            } => {
+                found.extend(vars.iter().filter(|var| candidates.contains(*var)).cloned());
+                collect_potential_rebindings_expr(iterable, candidates, found);
+                collect_potential_rebindings(&body.stmts, candidates, found);
             }
             Stmt::Try {
                 try_block,
                 catch_block,
+                else_block,
                 finally_block,
                 ..
             } => {
-                vars.extend(extract_assigned_variables(&try_block.stmts));
-                if let Some(catch_b) = catch_block {
-                    vars.extend(extract_assigned_variables(&catch_b.stmts));
+                collect_potential_rebindings(&try_block.stmts, candidates, found);
+                for block in [catch_block, else_block, finally_block]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_potential_rebindings(&block.stmts, candidates, found);
                 }
-                if let Some(finally_b) = finally_block {
-                    vars.extend(extract_assigned_variables(&finally_b.stmts));
+            }
+            Stmt::Expr { expr, .. }
+            | Stmt::Return {
+                value: Some(expr), ..
+            }
+            | Stmt::Test {
+                condition: expr, ..
+            } => collect_potential_rebindings_expr(expr, candidates, found),
+            Stmt::TestThrows { expr, .. } => {
+                collect_potential_rebindings_expr(expr, candidates, found)
+            }
+            Stmt::IndexAssign { indices, value, .. } => {
+                for index in indices {
+                    collect_potential_rebindings_expr(index, candidates, found);
                 }
+                collect_potential_rebindings_expr(value, candidates, found);
             }
-            Stmt::Timed { body, .. } => {
-                vars.extend(extract_assigned_variables(&body.stmts));
+            Stmt::FieldAssign { value, .. } => {
+                collect_potential_rebindings_expr(value, candidates, found)
             }
-            // Handle Expr statements that may contain AssignExpr
-            Stmt::Expr { expr, .. } => {
-                vars.extend(extract_assigned_from_expr(expr));
+            Stmt::DictAssign { key, value, .. } => {
+                collect_potential_rebindings_expr(key, candidates, found);
+                collect_potential_rebindings_expr(value, candidates, found);
             }
-            _ => {}
+            Stmt::FunctionDef { func, .. } | Stmt::EvalFunctionDef { func, .. } => {
+                collect_potential_rebindings(&func.body.stmts, candidates, found)
+            }
+            Stmt::Return { value: None, .. }
+            | Stmt::Break { .. }
+            | Stmt::Continue { .. }
+            | Stmt::Meta { .. }
+            | Stmt::Using { .. }
+            | Stmt::Export { .. }
+            | Stmt::Label { .. }
+            | Stmt::Goto { .. }
+            | Stmt::EnumDef { .. }
+            | Stmt::RuntimeNominalDef { .. }
+            | Stmt::Global { .. }
+            // A declaration has no initializer and therefore cannot rebind a
+            // candidate value; its provenance is irrelevant to this
+            // compile-preparation-only assignment scan (Issue #11317).
+            | Stmt::LocalDecl { .. } => {}
         }
     }
-    vars
 }
 
-/// Extract variable names from AssignExpr inside an expression.
-/// This handles expressions like `x = 42` or `local result = x = 42` where x = 42 is an AssignExpr.
-fn extract_assigned_from_expr(expr: &Expr) -> Vec<String> {
-    let mut vars = Vec::new();
-
+fn collect_potential_rebindings_expr(
+    expr: &Expr,
+    candidates: &std::collections::HashSet<String>,
+    found: &mut std::collections::HashSet<String>,
+) {
     match expr {
         Expr::AssignExpr { var, value, .. } => {
-            // This is an assignment expression - the variable is being assigned
-            vars.push(var.clone());
-            // Also check the value for nested assignments
-            vars.extend(extract_assigned_from_expr(value));
+            if candidates.contains(var.as_str()) {
+                found.insert(var.to_string());
+            }
+            collect_potential_rebindings_expr(value, candidates, found);
         }
         Expr::BinaryOp { left, right, .. } => {
-            vars.extend(extract_assigned_from_expr(left));
-            vars.extend(extract_assigned_from_expr(right));
+            collect_potential_rebindings_expr(left, candidates, found);
+            collect_potential_rebindings_expr(right, candidates, found);
         }
         Expr::UnaryOp { operand, .. } => {
-            vars.extend(extract_assigned_from_expr(operand));
+            collect_potential_rebindings_expr(operand, candidates, found)
         }
-        Expr::Call { args, kwargs, .. } => {
+        Expr::Call { args, kwargs, .. } | Expr::ModuleCall { args, kwargs, .. } => {
             for arg in args {
-                vars.extend(extract_assigned_from_expr(arg));
+                collect_potential_rebindings_expr(arg, candidates, found);
             }
-            for (_, kwarg_val) in kwargs {
-                vars.extend(extract_assigned_from_expr(kwarg_val));
+            for (_, value) in kwargs {
+                collect_potential_rebindings_expr(value, candidates, found);
             }
         }
-        Expr::Builtin { args, .. } => {
+        Expr::Builtin { args, .. } | Expr::New { args, .. } => {
             for arg in args {
-                vars.extend(extract_assigned_from_expr(arg));
+                collect_potential_rebindings_expr(arg, candidates, found);
             }
         }
-        Expr::TupleLiteral { elements, .. } => {
-            for e in elements {
-                vars.extend(extract_assigned_from_expr(e));
+        Expr::LetBlock { bindings, body, .. } => {
+            for (_, value) in bindings {
+                collect_potential_rebindings_expr(value, candidates, found);
+            }
+            collect_potential_rebindings(&body.stmts, candidates, found);
+        }
+        Expr::TupleLiteral { elements, .. }
+        | Expr::ArrayLiteral { elements, .. }
+        | Expr::StringConcat {
+            parts: elements, ..
+        } => {
+            for element in elements {
+                collect_potential_rebindings_expr(element, candidates, found);
             }
         }
-        Expr::LetBlock { body, .. } => {
-            // Extract assigned variables from the body statements of a LetBlock
-            // This is important for macro expansions that produce LetBlock expressions
-            vars.extend(extract_assigned_variables(&body.stmts));
+        Expr::NamedTupleLiteral { fields, .. } => {
+            for (_, value) in fields {
+                collect_potential_rebindings_expr(value, candidates, found);
+            }
         }
-        _ => {}
+        Expr::Pair { key, value, .. } => {
+            collect_potential_rebindings_expr(key, candidates, found);
+            collect_potential_rebindings_expr(value, candidates, found);
+        }
+        Expr::DictLiteral { pairs, .. } => {
+            for (key, value) in pairs {
+                collect_potential_rebindings_expr(key, candidates, found);
+                collect_potential_rebindings_expr(value, candidates, found);
+            }
+        }
+        Expr::Index { array, indices, .. } => {
+            collect_potential_rebindings_expr(array, candidates, found);
+            for index in indices {
+                collect_potential_rebindings_expr(index, candidates, found);
+            }
+        }
+        Expr::Range {
+            start, step, stop, ..
+        } => {
+            collect_potential_rebindings_expr(start, candidates, found);
+            if let Some(step) = step {
+                collect_potential_rebindings_expr(step, candidates, found);
+            }
+            collect_potential_rebindings_expr(stop, candidates, found);
+        }
+        Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_potential_rebindings_expr(condition, candidates, found);
+            collect_potential_rebindings_expr(then_expr, candidates, found);
+            collect_potential_rebindings_expr(else_expr, candidates, found);
+        }
+        Expr::ReturnExpr {
+            value: Some(value), ..
+        } => collect_potential_rebindings_expr(value, candidates, found),
+        Expr::Comprehension {
+            body, iter, filter, ..
+        }
+        | Expr::Generator {
+            body, iter, filter, ..
+        } => {
+            collect_potential_rebindings_expr(body, candidates, found);
+            collect_potential_rebindings_expr(iter, candidates, found);
+            if let Some(filter) = filter {
+                collect_potential_rebindings_expr(filter, candidates, found);
+            }
+        }
+        Expr::MultiComprehension {
+            body,
+            iterations,
+            filter,
+            ..
+        } => {
+            collect_potential_rebindings_expr(body, candidates, found);
+            for (_, iteration) in iterations {
+                collect_potential_rebindings_expr(iteration, candidates, found);
+            }
+            if let Some(filter) = filter {
+                collect_potential_rebindings_expr(filter, candidates, found);
+            }
+        }
+        Expr::FieldAccess { object, .. }
+        | Expr::QuoteLiteral {
+            constructor: object,
+            ..
+        }
+        | Expr::Convert {
+            operand: object, ..
+        } => collect_potential_rebindings_expr(object, candidates, found),
+        Expr::DynamicTypeConstruct {
+            base_expr,
+            type_args,
+            ..
+        } => {
+            if let Some(base) = base_expr {
+                collect_potential_rebindings_expr(base, candidates, found);
+            }
+            for type_arg in type_args {
+                collect_potential_rebindings_expr(type_arg, candidates, found);
+            }
+        }
+        Expr::Literal(..)
+        | Expr::Var(..)
+        | Expr::TypedEmptyArray { .. }
+        | Expr::SliceAll { .. }
+        | Expr::FunctionRef { .. }
+        | Expr::ReturnExpr { value: None, .. }
+        | Expr::BreakExpr { .. }
+        | Expr::ContinueExpr { .. } => {}
     }
-    vars
 }
-
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::ir::core::Literal;
-    use crate::vm::Value;
+    use crate::ir::core::{Block, Literal};
+    use subset_julia_vm_bytecode::Value;
+
+    fn test_span() -> Span {
+        Span::new(0, 0, 0, 0, 0, 0)
+    }
+
+    #[test]
+    fn potential_rebindings_return_only_requested_struct_seed_hazards_9784() {
+        let span = test_span();
+        let stmts = vec![
+            Stmt::Assign {
+                var: "direct".to_string(),
+                value: Expr::AssignExpr {
+                    var: "nested".to_string().into(),
+                    value: Box::new(Expr::Literal(Literal::Int(42), span)),
+                    span,
+                },
+                span,
+            },
+            Stmt::Expr {
+                expr: Expr::LetBlock {
+                    bindings: Vec::new(),
+                    body: Block {
+                        stmts: vec![Stmt::Assign {
+                            var: "inside".to_string(),
+                            value: Expr::Literal(Literal::Int(99), span),
+                            span,
+                        }],
+                        span,
+                    },
+                    span,
+                },
+                span,
+            },
+            Stmt::If {
+                condition: Expr::AssignExpr {
+                    var: "condition".to_string().into(),
+                    value: Box::new(Expr::Literal(Literal::Bool(true), span)),
+                    span,
+                },
+                then_branch: Block {
+                    stmts: Vec::new(),
+                    span,
+                },
+                else_branch: None,
+                span,
+            },
+            Stmt::Expr {
+                expr: Expr::Comprehension {
+                    body: Box::new(Expr::AssignExpr {
+                        var: "comprehension_body".to_string().into(),
+                        value: Box::new(Expr::Literal(Literal::Int(1), span)),
+                        span,
+                    }),
+                    var: "item".to_string().into(),
+                    iter: Box::new(Expr::AssignExpr {
+                        var: "comprehension_iter".to_string().into(),
+                        value: Box::new(Expr::ArrayLiteral {
+                            elements: vec![Expr::Literal(Literal::Int(1), span)],
+                            shape: vec![1],
+                            span,
+                        }),
+                        span,
+                    }),
+                    filter: Some(Box::new(Expr::AssignExpr {
+                        var: "comprehension_filter".to_string().into(),
+                        value: Box::new(Expr::Literal(Literal::Bool(true), span)),
+                        span,
+                    })),
+                    span,
+                },
+                span,
+            },
+        ];
+        let candidates = [
+            "nested",
+            "inside",
+            "condition",
+            "comprehension_body",
+            "comprehension_iter",
+            "comprehension_filter",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        assert_eq!(
+            potential_rebindings_of(&stmts, &candidates),
+            candidates,
+            "direct is deliberately absent from the caller's hazard set"
+        );
+    }
 
     // Issue #5163: a bare `Value::Struct` Complex must convert faithfully via the
     // generic struct path — preserving the real `struct_name` and field literal
@@ -687,7 +1110,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_bare_complex_f64_struct_is_faithful() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         // Complex{Float64}(3.0, -4.0) as a bare struct value
         let value = Value::Struct(StructInstance::with_name(
             0,
@@ -713,7 +1136,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_bare_complex_int_struct_preserves_int_fields() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         // Complex{Int64}(5, 6) — fields must stay Literal::Int, NOT widen to Float
         let value = Value::Struct(StructInstance::with_name(
             0,
@@ -742,7 +1165,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_bare_complex_f32_struct_preserves_float32_fields() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         // Complex{Float32}(1.5f0, 2.5f0) — fields must stay Literal::Float32
         let value = Value::Struct(StructInstance::with_name(
             0,
@@ -771,7 +1194,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_bare_non_complex_struct_round_trips() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         // A bare non-Complex struct must also convert via the generic arm
         // (regression guard for the NamedTuple-field / Expr-arg paths that
         // pass whole structs through value_to_literal — Issue #5163 risk note).
@@ -893,7 +1316,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_reads_reshaped_array_logically() {
-        use crate::vm::{new_array_ref, ArrayValue};
+        use subset_julia_vm_bytecode::value::{new_array_ref, ArrayValue};
 
         let source = new_array_ref(ArrayValue::memory_first_from_i64(
             vec![1, 2, 3, 4],
@@ -914,7 +1337,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_memory_reads_storage_without_array_wrapper() {
-        use crate::vm::value::{new_memory_ref, MemoryValue};
+        use subset_julia_vm_bytecode::value::{new_memory_ref, MemoryValue};
 
         let mut memory = MemoryValue::undef_typed(&ArrayElementType::I64, 3);
         memory.set(1, Value::I64(10)).unwrap();
@@ -934,7 +1357,7 @@ mod tests {
     // Issue #3299: Regex persistence
     #[test]
     fn test_value_to_literal_regex_simple() {
-        use crate::vm::value::RegexValue;
+        use subset_julia_vm_bytecode::value::RegexValue;
         let rv = RegexValue::new("hello", "").unwrap();
         let result = value_to_literal(&Value::Regex(Box::new(rv)));
         assert!(
@@ -946,7 +1369,7 @@ mod tests {
 
     #[test]
     fn test_value_to_literal_regex_with_flags() {
-        use crate::vm::value::RegexValue;
+        use subset_julia_vm_bytecode::value::RegexValue;
         let rv = RegexValue::new("world", "i").unwrap();
         let result = value_to_literal(&Value::Regex(Box::new(rv)));
         assert!(
@@ -1004,7 +1427,7 @@ mod tests {
     // add it to the non_injectable list below with a // TODO comment.
     #[test]
     fn test_all_other_vars_injectable_types_return_some() {
-        use crate::vm::value::RegexValue;
+        use subset_julia_vm_bytecode::value::RegexValue;
 
         // Each entry: (human-readable name, Value to test)
         // These types are stored in other_vars AND have a Literal representation.
@@ -1063,7 +1486,7 @@ mod tests {
 
     #[test]
     fn test_struct_instance_bool_field() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         let instance = StructInstance::new(0, vec![Value::Bool(true)]);
         let result = struct_instance_to_literal(&instance, "MyStruct");
         assert!(
@@ -1076,7 +1499,7 @@ mod tests {
 
     #[test]
     fn test_struct_instance_i32_field() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         let instance = StructInstance::new(0, vec![Value::I32(42)]);
         let result = struct_instance_to_literal(&instance, "MyStruct");
         assert!(
@@ -1088,7 +1511,7 @@ mod tests {
 
     #[test]
     fn test_struct_instance_char_field() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         let instance = StructInstance::new(0, vec![Value::Char('z')]);
         let result = struct_instance_to_literal(&instance, "MyStruct");
         assert!(
@@ -1100,7 +1523,7 @@ mod tests {
 
     #[test]
     fn test_struct_instance_enum_field() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         let instance = StructInstance::new(
             0,
             vec![Value::Enum {
@@ -1122,7 +1545,7 @@ mod tests {
 
     #[test]
     fn test_struct_instance_f32_field() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         let instance = StructInstance::new(0, vec![Value::F32(1.5_f32)]);
         let result = struct_instance_to_literal(&instance, "MyStruct");
         assert!(
@@ -1135,7 +1558,7 @@ mod tests {
 
     #[test]
     fn test_struct_instance_mixed_fields() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         // Struct with I64, Bool, Char, Enum fields — all must be preserved (Issue #3310)
         let instance = StructInstance::new(
             0,
@@ -1165,7 +1588,7 @@ mod tests {
     // it automatically works as a struct field (due to the delegation design from #3314).
     #[test]
     fn test_struct_instance_auto_sync_with_value_to_literal() {
-        use crate::vm::StructInstance;
+        use subset_julia_vm_bytecode::value::StructInstance;
         // Every type injectable via value_to_literal() must also work as struct field
         // due to the delegation design from Issue #3314. This test verifies the contract.
         let injectable_values: &[(&str, Value)] = &[
@@ -1185,7 +1608,7 @@ mod tests {
             ("F32", Value::F32(1.0)),
             ("F64", Value::F64(1.0)),
             ("Char", Value::Char('x')),
-            ("Str", Value::Str("hi".to_string())),
+            ("Str", Value::str_new("hi".to_string())),
             ("Nothing", Value::Nothing),
             ("Missing", Value::Missing),
             (
@@ -1288,10 +1711,300 @@ mod tests {
         // Str → Str
         assert!(
             matches!(
-                value_to_literal(&Value::Str("hi".to_string())),
+                value_to_literal(&Value::str_new("hi".to_string())),
                 Some(Literal::Str(_))
             ),
             "Str must produce Literal::Str (Issue #3320)"
         );
+    }
+
+    // ── Issue #9707 (prevention for #9436): callable globals are classified by
+    // capture safety ──────────────────────────────────────────────────────────
+    //
+    // `callable_value_to_expr` is the ONLY name-only reconstruction hook for
+    // callable REPL globals (used by `inject_globals` directly and recursively
+    // by `value_to_init_expr_inner` for callables nested in arrays/structs).
+    // A callable whose runtime environment cannot be faithfully represented as
+    // source — a captured closure such as `add5 = makeadder(5)` — MUST return
+    // `None` here so `REPLSession` value-carries the real closure through
+    // `seed_globals`. Rebuilding it as a name-only `FunctionRef` emitted a
+    // broken init statement that poisoned every later eval (`1 + 1`,
+    // `using Printf`) — Issue #9436. Checklist:
+    // docs/vm/CHECKLISTS.md §"REPL Persistence of Callable Globals".
+
+    /// Persistence classification for a `Value` seen by `callable_value_to_expr`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum CallableCaptureSafety {
+        /// Fully described by function identity: safe to rebuild as a
+        /// name-only source expression (`FunctionRef` / `compose(...)`).
+        NameOnlySafe,
+        /// Callable, but its captured environment cannot be reconstructed from
+        /// source. The converter MUST return `None` (value-carry via
+        /// `seed_globals`), never a partial init expression.
+        ValueCarry,
+        /// Not a callable value: `callable_value_to_expr` returns `None` and
+        /// the value persists through the other converters or `seed_globals`.
+        NonCallable,
+    }
+
+    /// Exhaustive capture-safety classification over ALL `Value` variants.
+    ///
+    /// Deliberately NO `_` wildcard arm: adding a new `Value` variant fails to
+    /// compile here, forcing the author to decide whether the variant is
+    /// callable-like and, if so, whether name-only reconstruction is
+    /// capture-safe (Issue #9707). When classifying a new callable-like
+    /// variant, update `callable_value_to_expr` and the checklist entry in
+    /// docs/vm/CHECKLISTS.md §"REPL Persistence of Callable Globals" in the
+    /// same change, and keep this function in agreement with the converter
+    /// (asserted by
+    /// `test_callable_value_to_expr_agrees_with_capture_safety_classification_9707`).
+    fn classify_callable_capture_safety(value: &Value) -> CallableCaptureSafety {
+        use CallableCaptureSafety::*;
+        match value {
+            // Callable-like variants — the subject of this classification.
+            Value::Function(_) => NameOnlySafe,
+            Value::Closure(cv) if cv.captures.is_empty() => NameOnlySafe,
+            Value::Closure(_) => ValueCarry,
+            Value::ComposedFunction(cf) => match (
+                classify_callable_capture_safety(&cf.outer),
+                classify_callable_capture_safety(&cf.inner),
+            ) {
+                (NameOnlySafe, NameOnlySafe) => NameOnlySafe,
+                // One capture-carrying component makes the whole composition
+                // non-reconstructible from source.
+                _ => ValueCarry,
+            },
+
+            // Non-callable variants (exhaustive; see doc comment above —
+            // a new variant must be added to exactly one of these arms).
+            Value::I8(_)
+            | Value::I16(_)
+            | Value::I32(_)
+            | Value::I64(_)
+            | Value::I128(_)
+            | Value::BigInt(_)
+            | Value::U8(_)
+            | Value::U16(_)
+            | Value::U32(_)
+            | Value::U64(_)
+            | Value::U128(_)
+            | Value::Bool(_)
+            | Value::F16(_)
+            | Value::F32(_)
+            | Value::F64(_)
+            | Value::BigFloat(_)
+            | Value::Str(_)
+            | Value::StrBytes(_)
+            | Value::Char(_)
+            | Value::CharMalformed(_)
+            | Value::Nothing
+            | Value::Missing
+            | Value::Undef
+            | Value::ExprArgs(_)
+            | Value::Memory(_)
+            | Value::MemoryRef(_)
+            | Value::Range(_)
+            | Value::SliceAll
+            | Value::Struct(_)
+            | Value::StructRef(_)
+            | Value::Rng(_)
+            | Value::Tuple(_)
+            | Value::SimpleVector(_)
+            | Value::NamedTuple(_)
+            | Value::Pairs(_)
+            | Value::Ref(_)
+            | Value::WeakRef(_)
+            | Value::Generator(_)
+            | Value::DataType(_)
+            | Value::RuntimeTypeVar(_)
+            | Value::RuntimeTypeName(_)
+            | Value::Module(_)
+            | Value::IO(_)
+            | Value::Symbol(_)
+            | Value::Expr(_)
+            | Value::QuoteNode(_)
+            | Value::LineNumberNode(_)
+            | Value::GlobalRef(_)
+            | Value::Binding(_)
+            | Value::Regex(_)
+            | Value::RegexMatch(_)
+            | Value::Enum { .. }
+            | Value::StaticArray(_)
+            | Value::StaticArrayInline(_) => NonCallable,
+        }
+    }
+
+    /// The #9436 shape: `add5 = makeadder(5)` — the closure environment holds
+    /// the factory-local `n`, which is NOT a REPL global.
+    fn captured_closure_9707() -> Value {
+        use subset_julia_vm_bytecode::value::ClosureValue;
+        Value::Closure(ClosureValue::new(
+            "makeadder#anon",
+            vec![("n".to_string(), Value::I64(5))],
+        ))
+    }
+
+    #[test]
+    fn test_callable_value_to_expr_captured_closure_returns_none_9707() {
+        use subset_julia_vm_bytecode::value::{ComposedFunctionValue, FunctionValue};
+        let span = test_span();
+
+        // Name-only rebuild would lose the captured environment, so the
+        // converter must refuse: None → REPLSession value-carries the closure
+        // through seed_globals (Issue #9436).
+        assert!(
+            callable_value_to_expr(&captured_closure_9707(), span).is_none(),
+            "captured closure must NOT be rebuilt as a name-only FunctionRef (Issue #9436/#9707)"
+        );
+
+        // The same environment loss hidden inside a composition chain: one
+        // captured component must poison the whole compose(...) reconstruction,
+        // whether it is the inner or the outer component.
+        let with_captured_inner = Value::ComposedFunction(ComposedFunctionValue::new(
+            Value::Function(FunctionValue::new("sin")),
+            captured_closure_9707(),
+        ));
+        assert!(
+            callable_value_to_expr(&with_captured_inner, span).is_none(),
+            "compose with captured inner must not emit a partial init expr (Issue #9707)"
+        );
+        let with_captured_outer = Value::ComposedFunction(ComposedFunctionValue::new(
+            captured_closure_9707(),
+            Value::Function(FunctionValue::new("sin")),
+        ));
+        assert!(
+            callable_value_to_expr(&with_captured_outer, span).is_none(),
+            "compose with captured outer must not emit a partial init expr (Issue #9707)"
+        );
+    }
+
+    #[test]
+    fn test_callable_value_to_expr_capture_free_forms_return_name_only_expr_9707() {
+        use subset_julia_vm_bytecode::value::{ClosureValue, ComposedFunctionValue, FunctionValue};
+        let span = test_span();
+
+        // Plain function value (`g = sin`) → name-only FunctionRef.
+        let result = callable_value_to_expr(&Value::Function(FunctionValue::new("sin")), span);
+        assert!(
+            matches!(result, Some(Expr::FunctionRef { ref name, .. }) if name == "sin"),
+            "plain function value must rebuild as name-only FunctionRef, got {result:?}"
+        );
+
+        // Capture-free closure (an anonymous function that only shadows its
+        // params) is fully described by function identity → FunctionRef.
+        let capture_free = Value::Closure(ClosureValue::new("main#anon1", vec![]));
+        let result = callable_value_to_expr(&capture_free, span);
+        assert!(
+            matches!(result, Some(Expr::FunctionRef { ref name, .. }) if name == "main#anon1"),
+            "capture-free closure must rebuild as name-only FunctionRef, got {result:?}"
+        );
+
+        // Composition of name-only-safe components → compose(outer, inner).
+        let composed = Value::ComposedFunction(ComposedFunctionValue::new(
+            Value::Function(FunctionValue::new("sin")),
+            Value::Closure(ClosureValue::new("main#anon1", vec![])),
+        ));
+        let result = callable_value_to_expr(&composed, span);
+        let Some(Expr::Call {
+            ref function,
+            ref args,
+            ..
+        }) = result
+        else {
+            panic!("capture-free composition must rebuild as compose(...) call, got {result:?}");
+        };
+        assert_eq!(function, "compose");
+        assert!(
+            matches!(&args[0], Expr::FunctionRef { name, .. } if name == "sin"),
+            "compose outer must be FunctionRef(sin), got {:?}",
+            args[0]
+        );
+        assert!(
+            matches!(&args[1], Expr::FunctionRef { name, .. } if name == "main#anon1"),
+            "compose inner must be FunctionRef(main#anon1), got {:?}",
+            args[1]
+        );
+    }
+
+    #[test]
+    fn test_callable_value_to_expr_agrees_with_capture_safety_classification_9707() {
+        use subset_julia_vm_bytecode::value::{
+            ClosureValue, ComposedFunctionValue, FunctionValue, SymbolValue, TupleValue,
+        };
+        let span = test_span();
+
+        let capture_free_closure = || Value::Closure(ClosureValue::new("main#anon1", vec![]));
+        let plain_function = || Value::Function(FunctionValue::new("sin"));
+
+        // Representative values covering every callable-like variant (and both
+        // capture states of Closure / composition), plus non-callable spot
+        // checks. Exhaustiveness over Value variants is enforced at compile
+        // time by `classify_callable_capture_safety` (no `_` arm).
+        let cases: Vec<(&str, Value)> = vec![
+            ("plain function", plain_function()),
+            ("capture-free closure", capture_free_closure()),
+            ("captured closure (makeadder(5))", captured_closure_9707()),
+            (
+                "composition of capture-free components",
+                Value::ComposedFunction(ComposedFunctionValue::new(
+                    plain_function(),
+                    capture_free_closure(),
+                )),
+            ),
+            (
+                "composition with captured inner",
+                Value::ComposedFunction(ComposedFunctionValue::new(
+                    plain_function(),
+                    captured_closure_9707(),
+                )),
+            ),
+            (
+                "composition with captured outer",
+                Value::ComposedFunction(ComposedFunctionValue::new(
+                    captured_closure_9707(),
+                    plain_function(),
+                )),
+            ),
+            (
+                "deep composition with captured leaf",
+                Value::ComposedFunction(ComposedFunctionValue::new(
+                    plain_function(),
+                    Value::ComposedFunction(ComposedFunctionValue::new(
+                        capture_free_closure(),
+                        captured_closure_9707(),
+                    )),
+                )),
+            ),
+            ("non-callable I64", Value::I64(1)),
+            ("non-callable Str", Value::str_new("hi".to_string())),
+            ("non-callable Nothing", Value::Nothing),
+            ("non-callable Symbol", Value::Symbol(SymbolValue::new("x"))),
+            (
+                "non-callable Tuple",
+                Value::Tuple(TupleValue::new(vec![Value::I64(1)])),
+            ),
+        ];
+
+        for (label, value) in &cases {
+            let expected = classify_callable_capture_safety(value);
+            let result = callable_value_to_expr(value, span);
+            match expected {
+                CallableCaptureSafety::NameOnlySafe => assert!(
+                    result.is_some(),
+                    "{label}: name-only-safe callable must rebuild as a source expr (Issue #9707)"
+                ),
+                CallableCaptureSafety::ValueCarry => assert!(
+                    result.is_none(),
+                    "{label}: capture-carrying callable must return None and value-carry \
+                     through seed_globals — a name-only init expr poisons the session \
+                     (Issue #9436/#9707), got {result:?}"
+                ),
+                CallableCaptureSafety::NonCallable => assert!(
+                    result.is_none(),
+                    "{label}: non-callable value must not produce a callable init expr, \
+                     got {result:?}"
+                ),
+            }
+        }
     }
 }

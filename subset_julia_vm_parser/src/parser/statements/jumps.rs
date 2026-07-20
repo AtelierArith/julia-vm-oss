@@ -1,5 +1,8 @@
 //! Jump statement parsers (return, break, continue)
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::cst::CstNode;
 use crate::error::ParseResult;
 use crate::node_kind::NodeKind;
@@ -19,14 +22,23 @@ impl<'a> Parser<'a> {
         let mut children = Vec::new();
 
         // Optional return value
+        // Issue #8759: `return` with no value inside `(expr; return)` — the `)` closes
+        // the parenthesized block and must terminate the `return` statement without an
+        // expression.  Also guard `]` / `}` for symmetry.
         if !self.check(&Token::Newline)
             && !self.check(&Token::Semicolon)
+            && !self.check(&Token::RParen)
+            && !self.check(&Token::RBracket)
+            && !self.check(&Token::RBrace)
             && !self.is_at_end()
             && !self.check(&Token::KwEnd)
             && !self.check(&Token::KwElse)
             && !self.check(&Token::KwElseif)
             && !self.check(&Token::KwCatch)
             && !self.check(&Token::KwFinally)
+            && !self.check(&Token::RParen)
+            && !self.check(&Token::RBracket)
+            && !self.check(&Token::RBrace)
         {
             let first = self.parse_expression()?;
 
@@ -41,6 +53,9 @@ impl<'a> Parser<'a> {
                         self.advance();
                     }
                     if self.check(&Token::Semicolon)
+                        || self.check(&Token::RParen)
+                        || self.check(&Token::RBracket)
+                        || self.check(&Token::RBrace)
                         || self.is_at_end()
                         || self.check(&Token::KwEnd)
                         || self.check(&Token::KwElse)
@@ -76,19 +91,64 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Parse break statement
-    pub(crate) fn parse_break_statement(&mut self) -> ParseResult<CstNode> {
-        let token = self.expect(Token::KwBreak)?;
-        Ok(CstNode::leaf(NodeKind::BreakStatement, token.span, "break"))
+    fn jump_argument_terminates(&self) -> bool {
+        self.check(&Token::Newline)
+            || self.check(&Token::Semicolon)
+            || self.check(&Token::Comma)
+            || self.check(&Token::RParen)
+            || self.check(&Token::RBracket)
+            || self.check(&Token::RBrace)
+            || self.check(&Token::Colon)
+            || self.check(&Token::KwEnd)
+            || self.check(&Token::KwElse)
+            || self.check(&Token::KwElseif)
+            || self.check(&Token::KwCatch)
+            || self.check(&Token::KwFinally)
+            || self.is_at_end()
     }
 
-    /// Parse continue statement
+    /// Parse break statement: `break`, `break label`, or `break label value`.
+    pub(crate) fn parse_break_statement(&mut self) -> ParseResult<CstNode> {
+        let token = self.expect(Token::KwBreak)?;
+        let mut children = Vec::new();
+
+        if self.check(&Token::Identifier) {
+            children.push(self.parse_identifier()?);
+
+            if !self.jump_argument_terminates() {
+                children.push(self.parse_expression()?);
+            }
+        }
+
+        if children.is_empty() {
+            Ok(CstNode::leaf(NodeKind::BreakStatement, token.span))
+        } else {
+            let end = children
+                .last()
+                .map(|child| child.span.end)
+                .unwrap_or(token.span.end);
+            let span = self.source_map.span(token.span.start, end);
+            Ok(CstNode::with_children(
+                NodeKind::BreakStatement,
+                span,
+                children,
+            ))
+        }
+    }
+
+    /// Parse continue statement: `continue` or `continue label`.
     pub(crate) fn parse_continue_statement(&mut self) -> ParseResult<CstNode> {
         let token = self.expect(Token::KwContinue)?;
-        Ok(CstNode::leaf(
-            NodeKind::ContinueStatement,
-            token.span,
-            "continue",
-        ))
+        if self.check(&Token::Identifier) {
+            let label = self.parse_identifier()?;
+            let span = self.source_map.span(token.span.start, label.span.end);
+            Ok(CstNode::with_children(
+                NodeKind::ContinueStatement,
+                span,
+                vec![label],
+            ))
+        } else {
+            Ok(CstNode::leaf(NodeKind::ContinueStatement, token.span))
+        }
     }
 }

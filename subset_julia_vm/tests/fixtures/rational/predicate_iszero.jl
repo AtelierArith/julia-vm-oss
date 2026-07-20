@@ -13,6 +13,8 @@ using Test
         result = result + 10.0
     end
     @test (result) == 1.0
+    @test iszero(big(0) // big(1))
+    @test !iszero(big(1) // big(1))
 end
 
 true  # Test passed

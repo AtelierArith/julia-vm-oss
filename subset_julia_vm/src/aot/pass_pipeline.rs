@@ -257,7 +257,9 @@ fn verify_stmt(
             verify_expr(stage, function, target)?;
             verify_expr(stage, function, value)
         }
-        AotStmt::Return(Some(expr)) | AotStmt::Expr(expr) => verify_expr(stage, function, expr),
+        AotStmt::Return(Some(expr)) | AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
+            verify_expr(stage, function, expr)
+        }
         AotStmt::If {
             condition,
             then_branch,

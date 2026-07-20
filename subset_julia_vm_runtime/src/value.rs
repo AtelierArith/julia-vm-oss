@@ -19,6 +19,22 @@ pub enum Value {
     I64(i64),
     /// 32-bit signed integer
     I32(i32),
+    /// 16-bit signed integer (Issue #10131)
+    I16(i16),
+    /// 8-bit signed integer (Issue #10131)
+    I8(i8),
+    /// 128-bit signed integer (Issue #10131)
+    I128(i128),
+    /// 64-bit unsigned integer (Issue #10131)
+    U64(u64),
+    /// 32-bit unsigned integer (Issue #10131)
+    U32(u32),
+    /// 16-bit unsigned integer (Issue #10131)
+    U16(u16),
+    /// 8-bit unsigned integer (Issue #10131)
+    U8(u8),
+    /// 128-bit unsigned integer (Issue #10131)
+    U128(u128),
     /// 64-bit floating point
     F64(f64),
     /// 32-bit floating point
@@ -64,6 +80,14 @@ impl Value {
         match self {
             Value::I64(_) => "Int64",
             Value::I32(_) => "Int32",
+            Value::I16(_) => "Int16",
+            Value::I8(_) => "Int8",
+            Value::I128(_) => "Int128",
+            Value::U64(_) => "UInt64",
+            Value::U32(_) => "UInt32",
+            Value::U16(_) => "UInt16",
+            Value::U8(_) => "UInt8",
+            Value::U128(_) => "UInt128",
             Value::F64(_) => "Float64",
             Value::F32(_) => "Float32",
             Value::Bool(_) => "Bool",
@@ -113,6 +137,14 @@ impl Value {
             Value::I64(v) => Some(*v as f64),
             Value::I32(v) => Some(*v as f64),
             Value::F32(v) => Some(*v as f64),
+            Value::I16(v) => Some(f64::from(*v)),
+            Value::I8(v) => Some(f64::from(*v)),
+            Value::I128(v) => Some(*v as f64),
+            Value::U64(v) => Some(*v as f64),
+            Value::U32(v) => Some(f64::from(*v)),
+            Value::U16(v) => Some(f64::from(*v)),
+            Value::U8(v) => Some(f64::from(*v)),
+            Value::U128(v) => Some(*v as f64),
             _ => None,
         }
     }
@@ -151,20 +183,51 @@ impl Value {
 
     /// Check if this is a numeric type
     pub fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            Value::I64(_) | Value::I32(_) | Value::F64(_) | Value::F32(_)
-        )
+        self.is_integer() || self.is_float()
     }
 
     /// Check if this is an integer type
     pub fn is_integer(&self) -> bool {
-        matches!(self, Value::I64(_) | Value::I32(_))
+        matches!(
+            self,
+            Value::I64(_)
+                | Value::I32(_)
+                | Value::I16(_)
+                | Value::I8(_)
+                | Value::I128(_)
+                | Value::U64(_)
+                | Value::U32(_)
+                | Value::U16(_)
+                | Value::U8(_)
+                | Value::U128(_)
+        )
     }
 
     /// Check if this is a float type
     pub fn is_float(&self) -> bool {
         matches!(self, Value::F64(_) | Value::F32(_))
+    }
+
+    /// Return the 1-based element used by flat destructuring of a dynamic value.
+    ///
+    /// AoT code keeps runtime container representation behind this boundary so
+    /// the compiler does not need to match runtime `Value` variants directly.
+    pub fn destructure_index(&self, index: i64) -> Value {
+        if index < 1 {
+            crate::error::aot_throw(format!("BoundsError({self:?}, ({index},))"));
+        }
+        let offset = (index - 1) as usize;
+        let element = match self {
+            Value::Tuple(values) => values.get(offset).cloned(),
+            Value::Array(values) => values.borrow().get(offset).cloned(),
+            _ => crate::error::aot_throw(format!(
+                "MethodError: no method matching iterate(::{})",
+                self.type_name()
+            )),
+        };
+        element.unwrap_or_else(|| {
+            crate::error::aot_throw(format!("BoundsError({self:?}, ({index},))"))
+        })
     }
 }
 
@@ -179,6 +242,54 @@ impl From<i64> for Value {
 impl From<i32> for Value {
     fn from(v: i32) -> Self {
         Value::I32(v)
+    }
+}
+
+impl From<i16> for Value {
+    fn from(v: i16) -> Self {
+        Value::I16(v)
+    }
+}
+
+impl From<i8> for Value {
+    fn from(v: i8) -> Self {
+        Value::I8(v)
+    }
+}
+
+impl From<i128> for Value {
+    fn from(v: i128) -> Self {
+        Value::I128(v)
+    }
+}
+
+impl From<u64> for Value {
+    fn from(v: u64) -> Self {
+        Value::U64(v)
+    }
+}
+
+impl From<u32> for Value {
+    fn from(v: u32) -> Self {
+        Value::U32(v)
+    }
+}
+
+impl From<u16> for Value {
+    fn from(v: u16) -> Self {
+        Value::U16(v)
+    }
+}
+
+impl From<u8> for Value {
+    fn from(v: u8) -> Self {
+        Value::U8(v)
+    }
+}
+
+impl From<u128> for Value {
+    fn from(v: u128) -> Self {
+        Value::U128(v)
     }
 }
 
@@ -238,6 +349,14 @@ impl fmt::Display for Value {
         match self {
             Value::I64(v) => write!(f, "{}", v),
             Value::I32(v) => write!(f, "{}", v),
+            Value::I16(v) => write!(f, "{}", v),
+            Value::I8(v) => write!(f, "{}", v),
+            Value::I128(v) => write!(f, "{}", v),
+            Value::U64(v) => write!(f, "{}", v),
+            Value::U32(v) => write!(f, "{}", v),
+            Value::U16(v) => write!(f, "{}", v),
+            Value::U8(v) => write!(f, "{}", v),
+            Value::U128(v) => write!(f, "{}", v),
             Value::F64(v) => {
                 if v.fract() == 0.0 && v.abs() < 1e15 {
                     write!(f, "{}.0", v)
@@ -245,7 +364,16 @@ impl fmt::Display for Value {
                     write!(f, "{}", v)
                 }
             }
-            Value::F32(v) => write!(f, "{}f0", v),
+            // Print-form like upstream `print(::Float32)`: "2.5", "1.0" —
+            // no `f0` suffix (Display feeds the generated `println!` calls,
+            // Issue #10131).
+            Value::F32(v) => {
+                if v.fract() == 0.0 && v.abs() < 1e15 {
+                    write!(f, "{}.0", v)
+                } else {
+                    write!(f, "{}", v)
+                }
+            }
             Value::Bool(v) => write!(f, "{}", v),
             Value::Char(v) => write!(f, "'{}'", v),
             Value::Nothing => write!(f, "nothing"),
@@ -315,6 +443,14 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::I64(a), Value::I64(b)) => a == b,
             (Value::I32(a), Value::I32(b)) => a == b,
+            (Value::I16(a), Value::I16(b)) => a == b,
+            (Value::I8(a), Value::I8(b)) => a == b,
+            (Value::I128(a), Value::I128(b)) => a == b,
+            (Value::U64(a), Value::U64(b)) => a == b,
+            (Value::U32(a), Value::U32(b)) => a == b,
+            (Value::U16(a), Value::U16(b)) => a == b,
+            (Value::U8(a), Value::U8(b)) => a == b,
+            (Value::U128(a), Value::U128(b)) => a == b,
             (Value::F64(a), Value::F64(b)) => a == b,
             (Value::F32(a), Value::F32(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
@@ -361,6 +497,21 @@ mod tests {
         assert_eq!(Value::Bool(true).type_name(), "Bool");
         assert_eq!(Value::Nothing.type_name(), "Nothing");
         assert_eq!(Value::DataType("Int64".to_string()).type_name(), "DataType");
+    }
+
+    #[test]
+    fn dynamic_value_destructuring_indexes_tuple_and_array_10464() {
+        let tuple = Value::Tuple(vec![Value::I64(1), Value::I64(2)]);
+        let array = Value::from(vec![Value::I64(3), Value::I64(4)]);
+
+        assert_eq!(tuple.destructure_index(2), Value::I64(2));
+        assert_eq!(array.destructure_index(1), Value::I64(3));
+    }
+
+    #[test]
+    #[should_panic(expected = "BoundsError")]
+    fn dynamic_value_destructuring_checks_bounds_10464() {
+        Value::Tuple(vec![Value::I64(1)]).destructure_index(2);
     }
 
     #[test]

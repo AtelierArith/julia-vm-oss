@@ -56,7 +56,7 @@ description = "Printf/sprintf formatting with %d, %s, %f, %x, %X, %o, %c, %% spe
 name = "stdlib_test_module"
 file = "test_module.jl"
 expected = true
-description = "Test module macros: @test, @testset, @test_throws, @test_broken (Issue #2864)"
+description = "Test module macros: @test, @testset, @test_throws, @test_broken. @test_throws records directly from try/catch arms so catch-scope restoration cannot mask DivideError (Issues #2864, #9023)"
 
 [[tests]]
 name = "stdlib_printf_pure_julia_6746"
@@ -87,3 +87,69 @@ name = "stdlib_random_mersenne_twister_ctor_7306"
 file = "random_mersenne_twister_ctor_7306.jl"
 expected = true
 description = "MersenneTwister(seed) construction: constructible (bare and Random.-qualified), rand/randn return finite values, same seed -> same sequence (reproducible across two constructions), distinct seeds differ, rand(m,n)/randn(m,n) vectors, isa AbstractRNG, typeof name, threads through untyped/::MersenneTwister/::AbstractRNG params. Backed by a deterministic MT19937-64 engine; stream is NOT bit-identical to upstream julia's dSFMT MersenneTwister (Issue #7306)"
+
+[[tests]]
+name = "stdlib_random_rng_independent_instances_9270"
+file = "random_rng_independent_instances_9270.jl"
+expected = true
+description = "Two same-seed RNG values bound to separate variables must be INDEPENDENT: interleaved rand(m1)/rand(m2) draws repeat pairwise for MersenneTwister and Xoshiro, randn is likewise independent, plain assignment (m2 = m1) aliases one mutable engine so draws diverge, and first draws of two constructions match. Regression for the CSE bug that value-numbered a second MersenneTwister(seed)/Xoshiro(seed) constructor into a reuse of the first engine (Issue #9270; same class as zeros/ones aliasing, Issue #7176)"
+
+[[tests]]
+name = "stdlib_mersenne_twister_stream_8998"
+file = "mersenne_twister_stream_8998.jl"
+expected = true
+description = "Pins the current sjulia MT19937-64 stream values for seeds 42 and 1234. These values intentionally differ from upstream Julia's dSFMT output; this fixture detects accidental changes to the RNG backend. When dSFMT is implemented, replace the expected values with upstream values (Issue #8998)."
+
+[[tests]]
+name = "stdlib_rand_typed_scalar_9265"
+file = "rand_typed_scalar_9265.jl"
+expected = true
+description = "Scalar typed rand([rng], ::Type{T}) for concrete bits-numeric / Bool types returns a scalar of type T (integers full-range, floats in [0,1)), for literal types (rand(rng, UInt32)) and runtime type values (loop over a tuple of types), with an explicit RNG and the global RNG, deterministically per seed. Regression for Issue #9265 (rand(rng, UInt32) previously errored, rand(rng, Int) / rand(Int) silently returned Float/0-d array). Assertions are type/behavioral (parity-safe: also true under upstream julia); exact stream values stay deferred (Issue #8998)."
+
+[[tests]]
+name = "stdlib_rand_generator_captured_rng_9285"
+file = "rand_generator_captured_rng_9285.jl"
+expected = true
+description = "rand(rng, T) / rand(rng, dims...) / randn(rng, dims...) inside a generator or comprehension body, where the RNG is a captured variable of static type Any, returns scalars of type T (or N-dimensional Float64 arrays) instead of mis-lowering the captured RNG to an array dimension (Runtime error: DynamicToI64: expected numeric, got Rng(...)). Regression for Issue #9285: rand/randn(a, dims...) of any arity with a statically-Any first arg now branches at runtime (RandMaybeRng) between an explicit RNG and a leading dimension. Covers the 3-arg matrix, the higher-rank (2,2,2) array, and the randn vector/matrix forms in addition to the original 2-arg case. Also guards no-regression for plain rand(n), the captured-dimension rand(m, n) / randn(m, n) matrices, and the direct statically-typed rand(rng, Float16) fast path. Assertions are per-element type/range/finiteness predicates (parity-safe, also true under upstream julia); MersenneTwister stream stays deferred (Issue #8998), and the eltype/broadcast forms of the original MWE are avoided because they hit unrelated gaps (Issue #9301 Float16 collect widening, Issue #9300 chained broadcast comparison)."
+
+[[tests]]
+name = "stdlib_rand_typed_array_9328"
+file = "rand_typed_array_9328.jl"
+expected = true
+description = "rand([rng], ::Type{T}, dims...) for a concrete scalar type T returns an array with the faithful element type: rand(rng, Int, 2, 2) is a Matrix{Int64}, rand(rng, Float32, 3) a Vector{Float32}, rand(Int, 2) a Vector{Int64}, plus Int8/Int32/UInt8/UInt64/Int128/UInt128/Bool/Float64 across explicit-RNG, global-RNG, and captured-RNG (comprehension / RandMaybeRng) paths. Regression for Issue #9328: the typed-array wiring dropped the eltype — rand(rng, Int, ...) produced a Float64-backed array and every other type raised a runtime DynamicToI64 error. Assertions are type/behavioral (typeof/eltype, integer-ness, float [0,1) range, determinism per seed) and parity-safe (also true under upstream julia 1.12); exact stream values stay deferred (Issue #8998). Float16 arrays assert element-level Float16-ness only, since sjulia has no native Float16 array storage yet (degrades to Vector{Any})."
+
+[[tests]]
+name = "stdlib_random_rand_bang_9329"
+file = "random_rand_bang_9329.jl"
+expected = true
+description = "Random.rand! / Random.randn! fill existing arrays in place and return the same array, preserving Float64 vector/matrix shape, Int element type for rand!, Float32 element type for randn!, deterministic explicit-RNG fills, and upstream's non-Float randn! behavior (empty no-op, non-empty MethodError before writes). Also covers typed scalar randn(rng, Float32) / randn(Float32) so Float32 is not misread as a dimension (Issues #9329 and #9553)."
+
+[[tests]]
+name = "stdlib_test_errored_expr_10093"
+file = "test_errored_expr_10093.jl"
+expected = true
+description = "Green-half regression coverage for the @test try/catch wrapping (Issue #10093): exceptions raised and caught INSIDE the @test expression are invisible to the new wrapper (test records its Bool result), @test_throws keeps owning the must-throw behavior, and assignments/side effects inside a @test expression (count += 1 in a loop) still update the enclosing testset-local binding — i.e. the try scope introduced by the expansion does not re-scope the expression, matching upstream Test.@test (get_test_result wraps the escaped expression in try/catch the same way). The red half — a @test whose expression throws being recorded as an errored (not failed) outcome, printing the summary, and exiting non-zero via the sticky any_test_failed flag — cannot be a fixture (the harness @testset gate rejects fixtures that record failures, Issue #9360) and lives in tests/testset_exit_code_8191_tests.rs. Also regression-covers Issue #10242: the Test macros' quote-internal catch variable (formerly `catch e`) must not leak into the enclosing @testset scope and shadow an imported Base.MathConstants.e — the third testset re-reads `e` after @test/@test_throws expansions that contain catch clauses."
+
+[[tests]]
+name = "stdlib_test_catch_hygiene_10242"
+file = "test_catch_hygiene_10242.jl"
+expected = true
+description = "Dedicated regression fixture for Issue #10242 / macro-hygiene epic #10253: a stdlib Test macro's quote-internal `catch` variable is now hygiene-renamed (gensym'd) by the static stdlib-macro quote expansion's collect_introduced_vars pass (subset_julia_vm_lowering/src/lowering/expr/quote/handlers.rs, ExprHead::Try arm), so it can never shadow a same-named user/global variable. Covers both read orderings: reading the imported Base.MathConstants.e BEFORE any @test_throws in the testset has run its catch clause (the Issue #8852-class stale-shadowed-global-type symptom, since the pre-fix bug hoisted an un-renamed `catch e` local into the whole enclosing scope) and AFTER an exception has actually been caught, across two independent @test_throws invocations in the same testset (each gets its own gensym'd catch variable). Test.jl's @test/@test_throws/@test_broken macros were reverted from the `__test_*`-prefixed workaround names back to natural upstream-style names (result/threw/e) now that the root hygiene gap is fixed; see docs/vm/WORKAROUNDS.md W-67 (Resolved)."
+
+[[tests]]
+name = "stdlib_test_throws_type_check_10354"
+file = "test_throws_type_check_10354.jl"
+expected = true
+description = "Green-half regression coverage for @test_throws checking the expected exception (Issue #10354), matching upstream do_test_throws form-by-form: Type (isa, including an abstract expected type matching a concrete subtype), exception-value (type + every field equal), String (message substring), Regex (message match), Array-of-strings (every element must match), and Function (called on the message, must return true). The RED half (each form given a deliberately WRONG expectation, proving a Fail is now recorded instead of a silent Pass) cannot be a fixture -- the harness @testset gate rejects fixtures that record failures (Issue #9360) -- and lives in tests/testset_exit_code_8191_tests.rs (test_throws_checks_expected_exception_10354, test_throws_fail_message_names_expected_and_thrown_10354)."
+
+[[tests]]
+name = "stdlib_test_isa_unified_harness_10273"
+file = "test_isa_unified_harness_10273.jl"
+expected = true
+description = "Green-half coverage for the unified @test-family recording harness (Issue #10273): `@test x isa T` / `@test isa(x, T)` is now lowered through the same try/catch recording IR as `macro test` instead of the old Stmt::Test → Instr::Test fast path (which evaluated the condition outside any handler, so a throwing isa-test escaped the enclosing @testset). This fixture pins that passing isa-tests — call form, infix form, negation, an internally-caught exception, and isa inside a loop — still record cleanly through _test_record!. The red half (a throwing isa-test recorded as errored + exit 1) is covered by test_harness_entry_point_coverage_10273 in tests/testset_exit_code_8191_tests.rs, since the harness @testset gate (Issue #9360) rejects any fixture that records a failure."
+
+[[tests]]
+name = "stdlib_test_skip_broken_10350"
+file = "test_skip_broken_10350.jl"
+expected = true
+description = "Test.@test_skip records Broken WITHOUT evaluating the expression (a would-throw call is never invoked), never fails the run, and composes with @test_broken in the same testset (Issue #10350; implemented by the unified @test-family recorder of Issue #10273)"

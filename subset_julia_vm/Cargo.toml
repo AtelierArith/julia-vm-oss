@@ -1,7 +1,8 @@
 [package]
 name = "subset_julia_vm"
-version = "0.9.5"
+version = "0.10.3"
 edition = "2021"
+rust-version.workspace = true
 license = "MIT OR Apache-2.0"
 
 [lib]
@@ -9,12 +10,17 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-wasm = ["dep:js-sys"]
+wasm = ["dep:js-sys", "subset_julia_vm_vm/wasm"]
 # `profiling` arms the per-instruction VM profiler (Issue #5090). When OFF (the
 # default for library/iOS/wasm builds), `profiler::record`/`record_event` compile
 # down to nothing, so the hot interpreter dispatch loop pays zero overhead. The
 # `repl` binary opts in so its `SJULIA_VM_PROFILE` env switch keeps working.
-profiling = []
+profiling = ["subset_julia_vm_compile/profiling", "subset_julia_vm_vm/profiling"]
+# `vm-handler-table` compiles the Issue #8562 handler-function-pointer
+# dispatch experiment (armed per-Vm by `SJULIA_HANDLER_TABLE=1` or
+# `set_handler_table_forced`). Never a default: default builds must keep the
+# shipped `match` dispatch loop byte-for-byte unchanged.
+vm-handler-table = ["subset_julia_vm_vm/vm-handler-table"]
 repl = ["dep:rustyline", "profiling"]
 aot = ["dep:subset_julia_vm_runtime", "dep:thiserror"]
 cranelift = ["aot", "dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cranelift-module", "dep:cranelift-jit", "dep:cranelift-object", "dep:gimli", "dep:object", "dep:target-lexicon"]
@@ -22,7 +28,13 @@ cranelift = ["aot", "dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cran
 [dependencies]
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+subset_julia_vm_ir = { path = "../subset_julia_vm_ir" }
+subset_julia_vm_lowering = { path = "../subset_julia_vm_lowering" }
+subset_julia_vm_compile = { path = "../subset_julia_vm_compile" }
+subset_julia_vm_vm = { path = "../subset_julia_vm_vm" }
+subset_julia_vm_bytecode = { path = "../subset_julia_vm_bytecode" }
 subset_julia_vm_parser = { path = "../subset_julia_vm_parser" }
+subset_julia_vm_types = { path = "../subset_julia_vm_types" }
 sha2 = "0.10"
 once_cell = "1.19"
 toml = "0.9"
@@ -42,9 +54,18 @@ target-lexicon = { version = "0.12", optional = true }
 num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"
+# Issue #9197 slice 2: inline-buffer arg-id sequence for the exact-match L1
+# call-site dispatch cache key (small ≤4-arg keys stay off the heap).
+smallvec = "1"
 regex = "1.10"
 half = { version = "2.4", default-features = false, features = ["serde"] }
 bincode = "1"
+# Issue #10118: Base cache section wire format (compile/precompile.rs). ~3-5x
+# faster decode than bincode's varint mode with a smaller payload, and no
+# migration risk beyond a codec swap (still plain serde Serialize/Deserialize
+# -- unlike rkyv, no #[derive(Archive)] across the IR/bytecode type graph).
+postcard = { version = "1", features = ["use-std"] }
+strum = { version = "0.27", features = ["derive"] }
 astro-float = "0.9"
 nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 
@@ -76,16 +97,20 @@ name = "aot"
 path = "src/bin/aot.rs"
 required-features = ["aot"]
 
-[[test]]
-name = "sjulia_cli_stdin_tests"
-required-features = ["repl"]
+[[bin]]
+name = "handler_table_bench_8562"
+path = "src/bin/handler_table_bench_8562.rs"
+required-features = ["vm-handler-table"]
 
 [[test]]
-name = "sjulia_cli_stderr_tests"
-required-features = ["repl"]
+name = "handler_table_parity_8562_tests"
+required-features = ["vm-handler-table"]
 
+# Consolidated CLI tests (Issue #9671 Phase 1): the former sjulia_cli_{stdin,
+# stderr,dump_bytecode,cache_status,vm_bytecode} and sjulia_cli_soft_scope_9283
+# binaries now live as inline `mod`s in sjulia_cli_tests.rs.
 [[test]]
-name = "sjulia_cli_dump_bytecode_tests"
+name = "sjulia_cli_tests"
 required-features = ["repl"]
 
 [[test]]
@@ -93,7 +118,7 @@ name = "sjulia_precompile_determinism_tests"
 required-features = ["repl"]
 
 [[test]]
-name = "sjulia_cli_vm_bytecode_tests"
+name = "repl_session_fixture_tests"
 required-features = ["repl"]
 
 [[bench]]
@@ -106,6 +131,12 @@ harness = false
 
 [[bench]]
 name = "compile_profiling"
+harness = false
+
+# Issue #9199 S5 exit-criterion instrument: per-eval compile time vs session
+# length under Legacy vs Persistent. Its own `main`, not Criterion.
+[[bench]]
+name = "repl_input_delta_9199"
 harness = false
 
 [[bench]]
@@ -121,6 +152,14 @@ name = "vm_mandelbrot_benchmark"
 harness = false
 
 [[bench]]
+name = "vm_complex_arith_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_complex_dynamic_9198_benchmark"
+harness = false
+
+[[bench]]
 name = "vm_field_update_benchmark"
 harness = false
 
@@ -133,7 +172,19 @@ name = "vm_swap_accumulate_benchmark"
 harness = false
 
 [[bench]]
+name = "vm_generator_consume_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_generator_representation_9200_benchmark"
+harness = false
+
+[[bench]]
 name = "vm_dict_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_string_benchmark"
 harness = false
 
 [[bench]]
@@ -156,8 +207,22 @@ harness = false
 name = "vm_broadcast_mixed_float_int_benchmark"
 harness = false
 
+# Issue #9489: same-shape in-place broadcast fast-path perf guard (moved from
+# wall-clock ratio fixtures per Issue #3210)
+[[bench]]
+name = "vm_broadcast_fastpath_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_2d_outer_broadcast_benchmark"
+harness = false
+
 [[bench]]
 name = "vm_aizawa_plot_push_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_struct_array_field_read_benchmark"
 harness = false
 
 [[bench]]
@@ -166,6 +231,18 @@ harness = false
 
 [[bench]]
 name = "vm_staticarrays_matvec_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_perf_pending_numeric_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_perf_pending_dynamic_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_perf_pending_collections_benchmark"
 harness = false
 
 [[bench]]
@@ -182,6 +259,36 @@ required-features = ["profiling"]
 name = "aot_optimizer_benchmark"
 harness = false
 required-features = ["aot"]
+
+[[bench]]
+name = "f64_function_benchmark"
+harness = false
+
+[[bench]]
+name = "f64_mandelbrot_function_inline_benchmark"
+harness = false
+
+[[bench]]
+name = "register_vm_gate_benchmark"
+harness = false
+
+[[bench]]
+name = "ssa_pipeline_gate_benchmark"
+harness = false
+
+# Issue #8650/#8676: I128/U128 boxing decision — gain/loss benchmarks
+[[bench]]
+name = "vm_int128_arith_benchmark"
+harness = false
+
+[[bench]]
+name = "vm_value_move_push_pop_benchmark"
+harness = false
+
+# Issue #9097: cache hard-cap full-clear vs partial eviction decision
+[[bench]]
+name = "cache_eviction_benchmark"
+harness = false
 
 [lints.clippy]
 unwrap_used = "allow"

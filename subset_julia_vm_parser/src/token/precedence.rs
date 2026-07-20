@@ -130,11 +130,21 @@ impl Token {
             | Token::DotCaretEq
             | Token::DotPercentEq
             | Token::DotSlashSlashEq
+            | Token::DotLtLtEq
+            | Token::DotGtGtEq
+            | Token::DotGtGtGtEq
             | Token::DotAmpEq
             | Token::DotPipeEq
             | Token::MinusSignEq
             | Token::DivisionSignEq
-            | Token::XorEq => (Assign, Right),
+            | Token::XorEq
+            | Token::DotDivisionSignEq
+            | Token::DotXorEq
+            // Issue #8759: Unicode assignment operators — ≔ (U+2254), ⩴ (U+2A74), ≕ (U+2255).
+            // These have assignment-level precedence, right-associative, same as `=`.
+            | Token::ColonEquals
+            | Token::DoubleColonEquals
+            | Token::EqualsColon => (Assign, Right),
 
             // Pair
             Token::FatArrow => (Pair, Right),
@@ -148,14 +158,16 @@ impl Token {
             | Token::LeftRightArrow
             | Token::LeftArrow2
             | Token::RightArrow2
-            | Token::LeftRightArrow2 => (Arrow, Right),
+            | Token::LeftRightArrow2
+            | Token::DotRightArrow2
+            | Token::DotLeftRightArrow2
+            // Issue #11083: upstream's `prec-arrow` table (julia-parser.scm), right-assoc
+            | Token::UnicodeOpArrow
+            | Token::DotUnicodeOpArrow => (Arrow, Right),
 
             // Lazy boolean (and broadcast variants, Issue #2545)
             Token::OrOr | Token::DotOrOr => (LazyOr, Left),
             Token::AndAnd | Token::DotAndAnd => (LazyAnd, Left),
-
-            // Where clause (type constraints)
-            Token::KwWhere => (Where, Left),
 
             // Comparison
             Token::Lt
@@ -189,22 +201,34 @@ impl Token {
             | Token::Superset
             | Token::NotSuperset
             | Token::StrictSuperset
+            | Token::LessSimilar
             | Token::KwIn
             | Token::KwIsa
+            | Token::UnicodeOpComparison
             // Broadcast comparison
+            | Token::DotSubtype
+            | Token::DotSupertype
             | Token::DotLt
             | Token::DotGt
             | Token::DotLtEq
             | Token::DotGtEq
             | Token::DotEqEq
-            | Token::DotNotEq => (Comparison, Left),
+            | Token::DotEqEqEq
+            | Token::DotNotEq
+            | Token::DotNotEqEq
+            | Token::DotNot
+            | Token::DotTilde
+            | Token::DotUnicodeOpComparison
+            | Token::DotOtherUnicodeOperator => (Comparison, Left),
 
             // Pipe
             Token::PipeLeft => (PipeLeft, Right),
             Token::PipeRight => (PipeRight, Left),
 
             // Colon/Range
-            Token::Colon | Token::DotDot | Token::HorizontalEllipsis => (Colon, Left),
+            Token::Colon | Token::DotDot | Token::HorizontalEllipsis | Token::UnicodeOpColon => {
+                (Colon, Left)
+            }
 
             // Plus
             Token::Plus
@@ -219,7 +243,10 @@ impl Token {
             | Token::CircleMinus
             | Token::Union
             | Token::LogicalOr
-            | Token::SquareUnion => (Plus, Left),
+            | Token::SquareUnion
+            // Issue #11083: upstream's `prec-plus` table (julia-parser.scm)
+            | Token::UnicodeOpPlus
+            | Token::DotUnicodeOpPlus => (Plus, Left),
 
             // Times
             Token::Star
@@ -242,16 +269,27 @@ impl Token {
             | Token::CircleDivide
             | Token::CircleDot
             | Token::SquareIntersection
-            | Token::Xor => (Times, Left),
+            | Token::Xor
+            // Issue #11083: upstream's `prec-times` table (julia-parser.scm)
+            | Token::UnicodeOpTimes
+            | Token::DotUnicodeOpTimes => (Times, Left),
 
             // Rational
             Token::SlashSlash => (Rational, Left),
 
             // Bitshift
-            Token::LtLt | Token::GtGt | Token::GtGtGt => (Bitshift, Left),
+            Token::LtLt | Token::GtGt | Token::GtGtGt | Token::DotLtLt | Token::DotGtGt | Token::DotGtGtGt => {
+                (Bitshift, Left)
+            }
 
             // Power
-            Token::Caret | Token::DotCaret | Token::UpArrow | Token::DownArrow => (Power, Right),
+            // Issue #11083: `UnicodeOpPower` = upstream's `prec-power` table
+            Token::Caret
+            | Token::DotCaret
+            | Token::UpArrow
+            | Token::DownArrow
+            | Token::UnicodeOpPower
+            | Token::DotUnicodeOpPower => (Power, Right),
 
             _ => return None,
         })
@@ -270,6 +308,7 @@ impl Token {
             | Token::FourthRoot
             | Token::Subtype
             | Token::Supertype
+            | Token::Amp
             | Token::Dollar => Some(Precedence::Prefix), // $ for interpolation/unquote
             _ => None,
         }

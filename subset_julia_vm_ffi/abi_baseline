@@ -1,0 +1,5 @@
+# ABI version baseline for check_ffi_abi_version.sh (Issue #9001).
+# Do NOT edit HASH or ABI_VERSION manually.
+# Run: bash scripts/check_ffi_abi_version.sh --update   (after bumping SUBSET_VM_ABI_VERSION)
+ABI_VERSION=3
+HASH=0521c2ebb16d74185275559b6ed71207182469b03d6b439be587b8f7a83ae781

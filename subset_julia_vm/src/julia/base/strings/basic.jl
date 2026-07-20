@@ -28,6 +28,68 @@ function Base.:*(s::Union{AbstractChar, AbstractString}, t::Union{AbstractChar, 
     return string(s, t...)
 end
 
+# Public string construction wrappers.
+#
+# Upstream implements `string(xs...)` through print-to-IOBuffer and defines
+# `codeunits` as a lightweight wrapper over `ncodeunits`/`codeunit`. Keep the
+# same public shape here; the lowest storage/formatting boundaries remain VM
+# primitives.
+string() = ""
+string(s::AbstractString) = s
+
+function string(x)
+    io = IOBuffer()
+    print(io, x)
+    return String(take!(io))
+end
+
+function string(x, y, zs...)
+    io = IOBuffer()
+    print(io, x)
+    print(io, y)
+    for z in zs
+        print(io, z)
+    end
+    return String(take!(io))
+end
+
+String(s::String) = s
+String(s::Symbol) = string(s)
+String(v::Vector{UInt8}) = _string_from_chars(v)
+String(v::Vector{Char}) = _string_from_chars(v)
+String(m::Memory{UInt8}) = _string_from_chars(collect(m))
+String(m::Memory{Char}) = _string_from_chars(collect(m))
+String(m::Memory) = _string_from_chars(collect(m))
+String(v::Array) = _string_from_chars(v)
+
+struct CodeUnits{T,S} <: AbstractVector
+    s::S
+end
+
+codeunits(s::String) = CodeUnits{UInt8,String}(s)
+length(c::CodeUnits) = ncodeunits(c.s)
+size(c::CodeUnits) = (length(c),)
+eltype(::Type{CodeUnits{T,S}}) where {T,S} = T
+eltype(c::CodeUnits{T,S}) where {T,S} = T
+getindex(c::CodeUnits, i::Int) = codeunit(c.s, i)
+
+function iterate(c::CodeUnits)
+    if length(c) == 0
+        return nothing
+    end
+    return (c[1], 2)
+end
+
+function iterate(c::CodeUnits, i)
+    if i > length(c)
+        return nothing
+    end
+    return (c[i], i + 1)
+end
+
+String(c::CodeUnits{UInt8,String}) = c.s
+String(c::CodeUnits) = _string_from_chars(collect(c))
+
 # isdigit: check if character code is a digit
 # ASCII: '0' = 48, '9' = 57
 function isdigit(c)
@@ -202,23 +264,83 @@ function isprint(c)
     return c >= 32 && c < 127
 end
 
-# ispunct: check if character is punctuation
-# Punctuation: 33-47, 58-64, 91-96, 123-126
+# ispunct: check if character is punctuation (Issue #10321)
+# =============================================================================
+# Upstream: `ispunct(c)` is true iff `c`'s Unicode general category begins with
+# 'P' — Pc/Pd/Ps/Pe/Pi/Pf/Po (`UTF8PROC_CATEGORY_PC <= category_code(c) <=
+# UTF8PROC_CATEGORY_PO`, julia/base/strings/unicode.jl). This is NOT the C-locale
+# ASCII table: the ASCII symbol chars `$ + < = > ^ ` | ~` are Unicode Sc/Sm/Sk
+# and must return false, while non-ASCII punctuation (`¡ ¿ « » § ¶ · – — …` …)
+# must return true. sjulia has no utf8proc binding, so we embed the P* codepoint
+# ranges as a sorted, non-overlapping table generated from upstream julia's own
+# utf8proc (the gold standard) and binary-search it, mirroring `isnumeric`.
+#
+# Codepoints are written in decimal (not hex) to avoid Issue #7953
+# (`Int[0x30, ...]` fails to convert UInt hex elements to Int in sjulia).
+#
+# To regenerate after a Unicode version bump, run under the reference julia:
+#   function gen()
+#       r = Tuple{Int,Int}[]; s = -1; p = -1
+#       for cp in 0x0:0x10FFFF
+#           (0xD800 <= cp <= 0xDFFF) && continue
+#           if ispunct(Char(cp))
+#               s == -1 ? (s = cp; p = cp) : (cp == p+1 ? (p = cp) : (push!(r,(s,p)); s = cp; p = cp))
+#           end
+#       end
+#       s != -1 && push!(r,(s,p)); return r
+#   end
+const _ISPUNCT_RANGE_LO = Int[33, 37, 44, 58, 63, 91, 95, 123, 125, 161, 167, 171,
+    182, 187, 191, 894, 903, 1370, 1417, 1470, 1472, 1475, 1478, 1523,
+    1545, 1548, 1563, 1565, 1642, 1748, 1792, 2039, 2096, 2142, 2404, 2416,
+    2557, 2678, 2800, 3191, 3204, 3572, 3663, 3674, 3844, 3860, 3898, 3973,
+    4048, 4057, 4170, 4347, 4960, 5120, 5742, 5787, 5867, 5941, 6100, 6104,
+    6144, 6468, 6686, 6816, 6824, 6990, 7002, 7037, 7164, 7227, 7294, 7360,
+    7379, 8208, 8240, 8261, 8275, 8317, 8333, 8968, 9001, 10088, 10181, 10214,
+    10627, 10712, 10748, 11513, 11518, 11632, 11776, 11824, 11858, 12289, 12296, 12308,
+    12336, 12349, 12448, 12539, 42238, 42509, 42611, 42622, 42738, 43124, 43214, 43256,
+    43260, 43310, 43359, 43457, 43486, 43612, 43742, 43760, 44011, 64830, 65040, 65072,
+    65108, 65123, 65128, 65130, 65281, 65285, 65292, 65306, 65311, 65339, 65343, 65371,
+    65373, 65375, 65792, 66463, 66512, 66927, 67671, 67871, 67903, 68176, 68223, 68336,
+    68409, 68505, 68974, 69293, 69461, 69510, 69703, 69819, 69822, 69952, 70004, 70085,
+    70093, 70107, 70109, 70200, 70313, 70612, 70615, 70731, 70746, 70749, 70854, 71105,
+    71233, 71264, 71353, 71484, 71739, 72004, 72162, 72255, 72346, 72350, 72448, 72673,
+    72769, 72816, 73463, 73539, 73727, 74864, 77809, 92782, 92917, 92983, 92996, 93549,
+    93847, 94178, 113823, 121479, 124415, 125278]
+
+const _ISPUNCT_RANGE_HI = Int[35, 42, 47, 59, 64, 93, 95, 123, 125, 161, 167, 171,
+    183, 187, 191, 894, 903, 1375, 1418, 1470, 1472, 1475, 1478, 1524,
+    1546, 1549, 1563, 1567, 1645, 1748, 1805, 2041, 2110, 2142, 2405, 2416,
+    2557, 2678, 2800, 3191, 3204, 3572, 3663, 3675, 3858, 3860, 3901, 3973,
+    4052, 4058, 4175, 4347, 4968, 5120, 5742, 5788, 5869, 5942, 6102, 6106,
+    6154, 6469, 6687, 6822, 6829, 6991, 7008, 7039, 7167, 7231, 7295, 7367,
+    7379, 8231, 8259, 8273, 8286, 8318, 8334, 8971, 9002, 10101, 10182, 10223,
+    10648, 10715, 10749, 11516, 11519, 11632, 11822, 11855, 11869, 12291, 12305, 12319,
+    12336, 12349, 12448, 12539, 42239, 42511, 42611, 42622, 42743, 43127, 43215, 43258,
+    43260, 43311, 43359, 43469, 43487, 43615, 43743, 43761, 44011, 64831, 65049, 65106,
+    65121, 65123, 65128, 65131, 65283, 65290, 65295, 65307, 65312, 65341, 65343, 65371,
+    65373, 65381, 65794, 66463, 66512, 66927, 67671, 67871, 67903, 68184, 68223, 68342,
+    68415, 68508, 68974, 69293, 69465, 69513, 69709, 69820, 69825, 69955, 70005, 70088,
+    70093, 70107, 70111, 70205, 70313, 70613, 70616, 70735, 70747, 70749, 70854, 71127,
+    71235, 71276, 71353, 71486, 71739, 72006, 72162, 72262, 72348, 72354, 72457, 72673,
+    72773, 72817, 73464, 73551, 73727, 74868, 77810, 92783, 92917, 92987, 92996, 93551,
+    93850, 94178, 113823, 121483, 124415, 125279]
+
 function ispunct(c)
-    c = Int(c)
-    if c >= 33 && c <= 47
-        return true  # ! " # $ % & ' ( ) * + , - . /
+    cp = Int(c)
+    # Binary search for the last range whose low bound is <= cp.
+    lo = 1
+    hi = length(_ISPUNCT_RANGE_LO)
+    idx = 0
+    while lo <= hi
+        mid = (lo + hi) >>> 1
+        if _ISPUNCT_RANGE_LO[mid] <= cp
+            idx = mid
+            lo = mid + 1
+        else
+            hi = mid - 1
+        end
     end
-    if c >= 58 && c <= 64
-        return true  # : ; < = > ? @
-    end
-    if c >= 91 && c <= 96
-        return true  # [ \ ] ^ _ `
-    end
-    if c >= 123 && c <= 126
-        return true  # { | } ~
-    end
-    return false
+    return idx >= 1 && cp <= _ISPUNCT_RANGE_HI[idx]
 end
 
 # isxdigit: check if character is a hexadecimal digit (0-9, A-F, a-f)
@@ -248,6 +370,29 @@ function codepoint(c::Char)
     # codepoint in the subset; UInt32(c) is unsupported so go via Int64. (#6747)
     return UInt32(Int64(c))
 end
+
+Char(x::Integer) = _int_to_char(x)
+Int(c::Char) = _char_to_int(c)
+
+# Non-Int64 integer constructors from a Char/AbstractChar (Issue #11406).
+# Upstream `julia/base/char.jl`:
+#   (::Type{T})(x::AbstractChar) where {T<:Union{Number,AbstractChar}} = T(codepoint(x))
+# `T(codepoint(x))` is a Number->Number conversion, so upstream's own
+# range-check (InexactError for out-of-range codepoints, e.g. UInt8('あ'))
+# falls out of the existing numeric constructors without any extra logic
+# here. Int64(::Char) already has a Rust boundary special case (`_char_to_int`
+# via `Int`), so it is intentionally left alone; every other fixed-width
+# integer constructor was missing this method entirely and fell through to a
+# generic `convert` MethodError.
+Int8(c::AbstractChar) = Int8(codepoint(c))
+Int16(c::AbstractChar) = Int16(codepoint(c))
+Int32(c::AbstractChar) = Int32(codepoint(c))
+Int128(c::AbstractChar) = Int128(codepoint(c))
+UInt8(c::AbstractChar) = UInt8(codepoint(c))
+UInt16(c::AbstractChar) = UInt16(codepoint(c))
+UInt32(c::AbstractChar) = UInt32(codepoint(c))
+UInt64(c::AbstractChar) = UInt64(codepoint(c))
+UInt128(c::AbstractChar) = UInt128(codepoint(c))
 
 # =============================================================================
 # Text width functions
@@ -393,14 +538,11 @@ function last(s::String)
     return s[lastindex(s)]
 end
 
-# String indexing is byte-based, so `lastindex(s::String)` must return the
-# last valid byte index (== `ncodeunits(s)`), not the character count
-# (`length(s)`). The generic `lastindex(arr) = length(arr)` was producing
-# the wrong value for non-ASCII strings, causing `s[i:end]` to truncate by
-# however many extra UTF-8 continuation bytes the string contained.
-# (Issue #3662)
+# String indexing is byte-based, but the final valid index is the character
+# start at or before `ncodeunits(s)`, not necessarily the byte length itself.
+# This mirrors upstream `lastindex(::AbstractString)` (Issues #3662/#11624).
 function lastindex(s::String)
-    return ncodeunits(s)
+    return thisind(s, ncodeunits(s))
 end
 
 # Based on Julia's base/strings/basic.jl
@@ -484,6 +626,19 @@ function _is_continuation_byte(b::UInt8)
     return b >= 0x80 && b < 0xc0
 end
 
+function _utf8_sequence_width(b::UInt8)
+    if b < 0xc0
+        return 1
+    elseif b < 0xe0
+        return 2
+    elseif b < 0xf0
+        return 3
+    elseif b < 0xf8
+        return 4
+    end
+    return 1
+end
+
 # thisind(s, i) - start of character containing byte index i
 function thisind(s::String, i::Int64)
     if i == 0
@@ -496,8 +651,16 @@ function thisind(s::String, i::Int64)
     if i < 1 || i > n
         throw(BoundsError(s, i))
     end
-    while i > 1 && _is_continuation_byte(codeunit(s, i))
-        i -= 1
+    if !_is_continuation_byte(codeunit(s, i))
+        return i
+    end
+    j = i
+    while j > 1 && i - j < 3 && _is_continuation_byte(codeunit(s, j))
+        j -= 1
+    end
+    width = _utf8_sequence_width(codeunit(s, j))
+    if width > 1 && i - j < width
+        return j
     end
     return i
 end
@@ -511,11 +674,10 @@ function nextind(s::String, i::Int64)
     if i < 0 || i > n
         throw(BoundsError(s, i))
     end
-    if i == n
-        return n + 1
-    end
+    start = thisind(s, i)
+    stop = start + _utf8_sequence_width(codeunit(s, start))
     i += 1
-    while i <= n && _is_continuation_byte(codeunit(s, i))
+    while i <= n && i < stop && _is_continuation_byte(codeunit(s, i))
         i += 1
     end
     return i
@@ -533,18 +695,7 @@ function prevind(s::String, i::Int64)
     if i > n + 1
         throw(BoundsError(s, i))
     end
-    if i == n + 1
-        i = n
-    else
-        i -= 1
-    end
-    while i > 0 && _is_continuation_byte(codeunit(s, i))
-        i -= 1
-    end
-    if i < 0
-        return 0
-    end
-    return i
+    return thisind(s, i - 1)
 end
 
 # reverseind(s, i) - index in s corresponding to index i in reverse(s)
@@ -555,14 +706,14 @@ reverseind(s::String, i::Int64) = thisind(s, ncodeunits(s) - i + 1)
 # Equivalent to Julia's `isvalid(::String, ::Integer)` (Issue #3726).
 # Mirrors official Julia semantics:
 #   - i < 1 or i > ncodeunits(s) → false
-#   - i is a UTF-8 continuation byte (0x80..=0xBF) → false
-#   - otherwise → true
+#   - a continuation byte consumed by a preceding character → false
+#   - a standalone malformed continuation byte starts its own character → true
 function isvalid(s::String, i::Int64)
     n = ncodeunits(s)
     if i < 1 || i > n
         return false
     end
-    return !_is_continuation_byte(codeunit(s, i))
+    return thisind(s, i) == i
 end
 
 # Generic Integer overload — covers UInt and other integer widths so callers
@@ -570,4 +721,29 @@ end
 # falling back to the (now removed) Rust builtin.
 function isvalid(s::String, i::Integer)
     return isvalid(s, Int64(i))
+end
+
+# One-arg isvalid (Issue #8995): whole-value validity. A String is valid iff
+# its bytes are valid UTF-8 (invalid bytes live in the StrBytes carrier); a
+# Char is valid iff it is a Unicode scalar (malformed Chars come from
+# iterating/indexing invalid byte sequences). `_isvalid_value` is the VM
+# intrinsic behind both.
+isvalid(s::String) = _isvalid_value(s)
+isvalid(c::Char) = _isvalid_value(c)
+
+# =============================================================================
+# String bounds checking over ranges (Issue #10958)
+# =============================================================================
+# Upstream julia/base/strings/basic.jl:209-218. The range form returns nothing
+# in bounds and throws a catchable BoundsError otherwise — the shape the
+# upstream SubString{T}(s, i, j) inner constructor relies on.
+checkbounds(::Type{Bool}, s::AbstractString, i::Integer) = 1 <= i <= ncodeunits(s)
+function checkbounds(::Type{Bool}, s::AbstractString, r::AbstractRange{<:Integer})
+    return isempty(r) || (1 <= minimum(r) && maximum(r) <= ncodeunits(s))
+end
+function checkbounds(s::AbstractString, I)
+    if checkbounds(Bool, s, I)
+        return nothing
+    end
+    throw(BoundsError(s, I))
 end

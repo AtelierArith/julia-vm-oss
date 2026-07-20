@@ -8,7 +8,7 @@
 # Julia invariant `length(x) == 1 ⟺ x[1] is valid` for scalar `x`
 # from the `Number ∪ AbstractChar` hierarchy.
 #
-# Fix: in `subset_julia_vm/src/vm/builtins_collections.rs`'s `Length`
+# Fix: in `subset_julia_vm_vm/src/vm/builtins_collections.rs`'s `Length`
 # arm, add `Value::Char(_)`, `Value::BigInt(_)`, and
 # `Value::BigFloat(_)` to the list of scalar carriers that resolve
 # to `length == 1`. Matches the same `Number ∪ AbstractChar`

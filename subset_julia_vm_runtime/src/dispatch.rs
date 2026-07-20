@@ -93,6 +93,10 @@ pub fn dynamic_binop(op: BinOp, lhs: &Value, rhs: &Value) -> RuntimeResult<Value
 
 /// Dynamic addition
 fn dynamic_add(lhs: &Value, rhs: &Value) -> RuntimeResult<Value> {
+    if let Some(value) = dynamic_complex_add(lhs, rhs) {
+        return Ok(value);
+    }
+
     match (lhs, rhs) {
         (Value::I64(a), Value::I64(b)) => Ok(Value::I64(a + b)),
         (Value::I32(a), Value::I32(b)) => Ok(Value::I32(a + b)),
@@ -113,6 +117,10 @@ fn dynamic_add(lhs: &Value, rhs: &Value) -> RuntimeResult<Value> {
 
 /// Dynamic subtraction
 fn dynamic_sub(lhs: &Value, rhs: &Value) -> RuntimeResult<Value> {
+    if let Some(value) = dynamic_complex_sub(lhs, rhs) {
+        return Ok(value);
+    }
+
     match (lhs, rhs) {
         (Value::I64(a), Value::I64(b)) => Ok(Value::I64(a - b)),
         (Value::I32(a), Value::I32(b)) => Ok(Value::I32(a - b)),
@@ -132,6 +140,10 @@ fn dynamic_sub(lhs: &Value, rhs: &Value) -> RuntimeResult<Value> {
 
 /// Dynamic multiplication
 fn dynamic_mul(lhs: &Value, rhs: &Value) -> RuntimeResult<Value> {
+    if let Some(value) = dynamic_complex_mul(lhs, rhs) {
+        return Ok(value);
+    }
+
     match (lhs, rhs) {
         (Value::I64(a), Value::I64(b)) => Ok(Value::I64(a * b)),
         (Value::I32(a), Value::I32(b)) => Ok(Value::I32(a * b)),
@@ -150,6 +162,41 @@ fn dynamic_mul(lhs: &Value, rhs: &Value) -> RuntimeResult<Value> {
             rhs.type_name()
         ))),
     }
+}
+
+fn complex_parts(value: &Value) -> Option<(f64, f64)> {
+    let Value::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Complex" && !type_name.starts_with("Complex{") {
+        return None;
+    }
+    let [re, im] = fields.as_slice() else {
+        return None;
+    };
+    Some((re.as_f64()?, im.as_f64()?))
+}
+
+fn complex_value(re: f64, im: f64) -> Value {
+    Value::Struct {
+        type_name: "Complex".to_string(),
+        fields: vec![Value::F64(re), Value::F64(im)],
+    }
+}
+
+fn dynamic_complex_add(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let ((ar, ai), (br, bi)) = (complex_parts(lhs)?, complex_parts(rhs)?);
+    Some(complex_value(ar + br, ai + bi))
+}
+
+fn dynamic_complex_sub(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let ((ar, ai), (br, bi)) = (complex_parts(lhs)?, complex_parts(rhs)?);
+    Some(complex_value(ar - br, ai - bi))
+}
+
+fn dynamic_complex_mul(lhs: &Value, rhs: &Value) -> Option<Value> {
+    let ((ar, ai), (br, bi)) = (complex_parts(lhs)?, complex_parts(rhs)?);
+    Some(complex_value(ar * br - ai * bi, ar * bi + ai * br))
 }
 
 /// Dynamic division
@@ -471,5 +518,33 @@ mod tests {
         let result =
             dynamic_binop(BinOp::Mul, &Value::Str("ab".to_string()), &Value::I64(3)).unwrap();
         assert_eq!(result, Value::Str("ababab".to_string()));
+    }
+
+    #[test]
+    fn test_dynamic_complex_add_and_mul_issue_8790() {
+        fn assert_complex(value: Value, expected_re: f64, expected_im: f64) {
+            let Value::Struct { type_name, fields } = value else {
+                panic!("expected Complex struct value");
+            };
+            assert_eq!(type_name, "Complex");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].as_f64(), Some(expected_re));
+            assert_eq!(fields[1].as_f64(), Some(expected_im));
+        }
+
+        let lhs = Value::Struct {
+            type_name: "Complex".to_string(),
+            fields: vec![Value::F64(1.0), Value::F64(2.0)],
+        };
+        let rhs = Value::Struct {
+            type_name: "Complex".to_string(),
+            fields: vec![Value::F64(3.0), Value::F64(4.0)],
+        };
+
+        let sum = dynamic_binop(BinOp::Add, &lhs, &rhs).unwrap();
+        assert_complex(sum, 4.0, 6.0);
+
+        let product = dynamic_binop(BinOp::Mul, &lhs, &rhs).unwrap();
+        assert_complex(product, -5.0, 10.0);
     }
 }

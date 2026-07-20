@@ -29,4 +29,14 @@ using Test
           UInt128(0xffffffffffffffffffffffffffffffff) == UInt128(1)
 end
 
+@testset "UInt128 rem/div with UInt128 divisor (Issue #9770)" begin
+    n = typemax(UInt128)
+    divisor = UInt128(16)
+
+    @test typeof(rem(n, divisor)) == UInt128
+    @test rem(n, divisor) == UInt128(15)
+    @test typeof(div(n, divisor)) == UInt128
+    @test div(n, divisor) == UInt128(0x0fffffffffffffffffffffffffffffff)
+end
+
 true

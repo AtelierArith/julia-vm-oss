@@ -73,6 +73,12 @@ expected = true
 description = "hypot - hypotenuse length (Issue #1861)"
 
 [[tests]]
+name = "math_hypot_varargs"
+file = "hypot_varargs.jl"
+expected = true
+description = "varargs hypot(x...) and 1-arg hypot: pairwise-safe reduction over the maximum-magnitude pivot, overflow/underflow safety, Inf/NaN semantics, complex args (Issue #9410)"
+
+[[tests]]
 name = "math_copysign_minmax"
 file = "copysign_minmax.jl"
 expected = true
@@ -263,3 +269,15 @@ name = "math_exp_real_upstream_shape_7455"
 file = "exp_real_upstream_shape_7455.jl"
 expected = true
 description = "exp(::Real) follows the upstream-shaped Pure Julia behavior for Float64 subnormal boundary/bit patterns and Real forwarding: Float32 preserves width, Int64/Rational forward through Float64, and Bool dispatch works like upstream (Issues #7455/#7484)."
+
+[[tests]]
+name = "math_clamp_atan_promote_9346"
+file = "clamp_atan_promote_9346.jl"
+expected = true
+description = "clamp(x, lo, hi) widens via promote_type(X,L,H) (clamp(1,0.5,2.5)===1.0) and two-arg atan(y::Real,x::Real) floats+promotes so atan(1,2.0)/atan(1,2) return Float64 instead of MethodError (Issue #9346)."
+
+[[tests]]
+name = "math_mod_signed_zero_9414"
+file = "math_mod_signed_zero_9414.jl"
+expected = true
+description = "float mod with a zero remainder carries the divisor's sign like upstream copysign(r, y): mod(5.0,-2.5) == -0.0 for Float64/Float32/Float16 and mixed Int×Float, +0.0 for positive divisors, NaN propagation unchanged (Issue #9414)."

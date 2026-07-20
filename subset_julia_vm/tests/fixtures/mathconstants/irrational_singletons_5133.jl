@@ -18,6 +18,10 @@ Base.@irrational tau5133 6.2831853071795864769 BigFloat("6.283185307179586476925
     @test pi isa Irrational{:π}
     @test ℯ isa Irrational{:ℯ}
     @test pi == π
+    @test pi == Base.pi
+    @test Base.MathConstants.pi == pi
+    @test Base.MathConstants.π == pi
+    @test !(pi != Base.pi)
     @test !(pi == Float64(pi))
     @test pi != Float64(pi)
 

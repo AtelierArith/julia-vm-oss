@@ -405,6 +405,17 @@ pub const POSITIVE_FACTORIZATIONS_PROJECT_TOML: &str =
 pub const POSITIVE_FACTORIZATIONS_JL: &str =
     include_str!("../../../packages/PositiveFactorizations/src/PositiveFactorizations.jl");
 
+// ── Combinatorics (HCubature dependency) ─────────────────────────────────────
+
+pub const COMBINATORICS_PROJECT_TOML: &str =
+    include_str!("../../../packages/Combinatorics/Project.toml");
+
+pub const COMBINATORICS_JL: &str =
+    include_str!("../../../packages/Combinatorics/src/Combinatorics.jl");
+
+pub const COMBINATORICS_COMBINATIONS_JL: &str =
+    include_str!("../../../packages/Combinatorics/src/combinations.jl");
+
 // ── DataStructures (QuadGK dependency) ───────────────────────────────────────
 
 pub const DATA_STRUCTURES_PROJECT_TOML: &str =
@@ -435,6 +446,18 @@ pub const QUAD_GK_WEIGHTED_GAUSS_JL: &str =
     include_str!("../../../packages/QuadGK/src/weightedgauss.jl");
 
 pub const QUAD_GK_BATCH_JL: &str = include_str!("../../../packages/QuadGK/src/batch.jl");
+
+// ── HCubature ────────────────────────────────────────────────────────────────
+
+pub const HCUBATURE_PROJECT_TOML: &str = include_str!("../../../packages/HCubature/Project.toml");
+
+pub const HCUBATURE_JL: &str = include_str!("../../../packages/HCubature/src/HCubature.jl");
+
+pub const HCUBATURE_GENZ_MALIK_JL: &str =
+    include_str!("../../../packages/HCubature/src/genz-malik.jl");
+
+pub const HCUBATURE_GAUSS_KRONROD_JL: &str =
+    include_str!("../../../packages/HCubature/src/gauss-kronrod.jl");
 
 // ── Optim ─────────────────────────────────────────────────────────────────────
 
@@ -632,6 +655,10 @@ pub fn get_bundled_package(name: &str) -> Option<BundledPackage> {
             project_toml: POSITIVE_FACTORIZATIONS_PROJECT_TOML,
             source: POSITIVE_FACTORIZATIONS_JL,
         }),
+        "Combinatorics" => Some(BundledPackage {
+            project_toml: COMBINATORICS_PROJECT_TOML,
+            source: COMBINATORICS_JL,
+        }),
         "DataStructures" => Some(BundledPackage {
             project_toml: DATA_STRUCTURES_PROJECT_TOML,
             source: DATA_STRUCTURES_JL,
@@ -639,6 +666,10 @@ pub fn get_bundled_package(name: &str) -> Option<BundledPackage> {
         "QuadGK" => Some(BundledPackage {
             project_toml: QUAD_GK_PROJECT_TOML,
             source: QUAD_GK_JL,
+        }),
+        "HCubature" => Some(BundledPackage {
+            project_toml: HCUBATURE_PROJECT_TOML,
+            source: HCUBATURE_JL,
         }),
         "Optim" => Some(BundledPackage {
             project_toml: OPTIM_PROJECT_TOML,
@@ -798,6 +829,9 @@ pub fn get_package_file(virtual_path: &str) -> Option<&'static str> {
             Some(OPTIM_BFGS_JL)
         }
         "embedded_packages/LineSearches/src/hagerzhang.jl" => Some(LINE_SEARCHES_HAGERZHANG_JL),
+        "embedded_packages/Combinatorics/src/combinations.jl" => {
+            Some(COMBINATORICS_COMBINATIONS_JL)
+        }
         "embedded_packages/DataStructures/src/heaps/arrays_as_heaps.jl" => {
             Some(DATA_STRUCTURES_ARRAYS_AS_HEAPS_JL)
         }
@@ -807,6 +841,8 @@ pub fn get_package_file(virtual_path: &str) -> Option<&'static str> {
         "embedded_packages/QuadGK/src/api.jl" => Some(QUAD_GK_API_JL),
         "embedded_packages/QuadGK/src/weightedgauss.jl" => Some(QUAD_GK_WEIGHTED_GAUSS_JL),
         "embedded_packages/QuadGK/src/batch.jl" => Some(QUAD_GK_BATCH_JL),
+        "embedded_packages/HCubature/src/genz-malik.jl" => Some(HCUBATURE_GENZ_MALIK_JL),
+        "embedded_packages/HCubature/src/gauss-kronrod.jl" => Some(HCUBATURE_GAUSS_KRONROD_JL),
         "embedded_packages/Optim/src/multivariate/optimize/interface.jl" => {
             Some(OPTIM_MULTIVARIATE_INTERFACE_JL)
         }
@@ -883,8 +919,10 @@ pub fn bundled_package_names() -> Vec<&'static str> {
         "EnumX",
         "FillArrays",
         "PositiveFactorizations",
+        "Combinatorics",
         "DataStructures",
         "QuadGK",
+        "HCubature",
         "Optim",
         "Quaternions",
         "Rotations",
@@ -1351,6 +1389,20 @@ mod tests {
     }
 
     #[test]
+    fn test_combinatorics_package_exists() {
+        let pkg = get_bundled_package("Combinatorics").expect("Combinatorics is bundled");
+        assert!(pkg.project_toml.contains("name = \"Combinatorics\""));
+        assert!(pkg.source.contains("module Combinatorics"));
+        assert!(pkg.source.contains("include(\"combinations.jl\")"));
+        assert!(bundled_package_names().contains(&"Combinatorics"));
+        assert!(
+            get_package_include("embedded_packages/Combinatorics/src/combinations.jl")
+                .unwrap()
+                .contains("function combinations")
+        );
+    }
+
+    #[test]
     fn test_data_structures_package_exists() {
         let pkg = get_bundled_package("DataStructures").expect("DataStructures is bundled");
         assert!(pkg.project_toml.contains("name = \"DataStructures\""));
@@ -1380,6 +1432,28 @@ mod tests {
             get_package_include("embedded_packages/QuadGK/src/evalrule.jl")
                 .unwrap()
                 .contains("struct Segment")
+        );
+    }
+
+    #[test]
+    fn test_hcubature_package_exists() {
+        let pkg = get_bundled_package("HCubature").expect("HCubature is bundled");
+        assert!(pkg.project_toml.contains("name = \"HCubature\""));
+        assert!(pkg.project_toml.contains("Combinatorics"));
+        assert!(pkg.project_toml.contains("QuadGK"));
+        assert!(pkg.source.contains("module HCubature"));
+        assert!(pkg.source.contains("include(\"genz-malik.jl\")"));
+        assert!(pkg.source.contains("include(\"gauss-kronrod.jl\")"));
+        assert!(bundled_package_names().contains(&"HCubature"));
+        assert!(
+            get_package_include("embedded_packages/HCubature/src/genz-malik.jl")
+                .unwrap()
+                .contains("GenzMalik")
+        );
+        assert!(
+            get_package_include("embedded_packages/HCubature/src/gauss-kronrod.jl")
+                .unwrap()
+                .contains("GaussKronrod")
         );
     }
 

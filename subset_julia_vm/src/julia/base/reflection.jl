@@ -426,6 +426,22 @@ function _typejoin_range(params, first_idx)
     return joined
 end
 
+# Substitute an earlier position's resolved value into a later dependent bound
+# by TypeVar object identity. Owner-scoped wrapper projection guarantees that
+# `B.ub === A` and `C.ub === B`, so unrelated wrappers that reuse the same
+# binder names cannot participate in this match (Issues #10252/#10261).
+function _typejoin_subst_dependent_bound(bound, vars, resolved)
+    if bound === Any || bound === Union{}
+        return bound
+    end
+    for k in 1:length(resolved)
+        if bound === vars[k]
+            return resolved[k]
+        end
+    end
+    return bound
+end
+
 """
     typejoin(A::Type, B::Type) -> Type
 
@@ -450,6 +466,27 @@ function typejoin(a::Type, b::Type)
     # `promote_typejoin(Int, Nothing) === Union{Nothing, Int64}` hold (Issue #5113).
     a === Union{} && return b
     b === Union{} && return a
+
+    a <: b && return b
+    b <: a && return a
+
+    # A `UnionAll` operand (e.g. a partial join fed back into `typejoin` by a
+    # `reduce`/`mapreduce`-style accumulation, Issue #10091 codex review) must
+    # be unwrapped BEFORE the DataType-assuming paths below (Tuple/Array/
+    # same-typename parametric join all index `.parameters`, which is not
+    # meaningful on a raw `UnionAll`). Mirrors upstream's own ordering
+    # (`julia/base/promotion.jl:40-43`): recurse into the body and rewrap the
+    # same bound variable around the result.
+    a isa UnionAll && return UnionAll(a.var, typejoin(a.body, b))
+    b isa UnionAll && return UnionAll(b.var, typejoin(a, b.body))
+
+    # A `Union` operand has no `.parameters`/typename to index (Issue #10606:
+    # those reflection fields now raise `FieldError(Union, ...)`), so it must be
+    # collapsed BEFORE the DataType-assuming paths below. Mirror upstream's
+    # ordering (`julia/base/promotion.jl`): recurse on the join of the two
+    # branch fields `a`/`b`, which are the only fields a `Union` value exposes.
+    a isa Union && return typejoin(typejoin(a.a, a.b), b)
+    b isa Union && return typejoin(a, typejoin(b.a, b.b))
 
     # Two Tuple types: join elementwise over their parameters and rebuild a
     # Tuple type from the joined element types (Issue #5112). Unequal fixed
@@ -486,7 +523,7 @@ function typejoin(a::Type, b::Type)
             b_rank = bp[2]
             if a_rank === b_rank
                 a_el === b_el && return a
-                return Core.apply_type(a)
+                return a.name.wrapper
             end
             a_el === b_el && return Core.apply_type(Array, a_el)
             return Array
@@ -494,35 +531,128 @@ function typejoin(a::Type, b::Type)
     end
 
     # Same-name parametric types (e.g. `Box{Int}` and `Box{Float64}`): join
-    # their type parameters elementwise. If every joined parameter matches both
-    # inputs the instantiation is preserved; otherwise the parameters differ and
-    # we widen to the base type, matching `typejoin(Box{Int}, Box{Float64})`
-    # collapsing to `Box` (Issue #5112).
+    # their type parameters elementwise. Positions that agree (identical
+    # value, or a Type pair whose typejoin equals both) keep their concrete
+    # value; positions that differ widen to a fresh `where`-bound TypeVar
+    # (reusing the wrapper's own declared variable for that slot, bound
+    # included) and get rewrapped with `UnionAll`, mirroring upstream's
+    # `while !(b === Any)` / `vars` accumulation loop
+    # (`julia/base/promotion.jl:100-140`). Only the DIFFERING positions widen;
+    # every agreeing parameter is preserved, so
+    # `typejoin(Box{Int,Int}, Box{Int,String}) == Box{Int}` instead of
+    # collapsing straight to the bare `Box` wrapper (Issue #10091, epic
+    # #10049). This works uniformly for Type-kind AND value-kind parameters
+    # (e.g. an array-rank-like `N::Int`): a differing value position also
+    # becomes a TypeVar, matching upstream's handling of non-type params.
     if typename(a) === typename(b)
         ap = a.parameters
         bp = b.parameters
-        if length(ap) == length(bp) && length(ap) > 0
+        n = length(ap)
+        if n == length(bp) && n > 0
+            agrees = Bool[]
             joined = Any[]
-            same = true
-            for i in 1:length(ap)
-                if ap[i] isa Type && bp[i] isa Type
-                    ji = typejoin(ap[i], bp[i])
-                elseif ap[i] === bp[i]
-                    ji = ap[i]
+            all_same = true
+            for i in 1:n
+                ai = ap[i]
+                bi = bp[i]
+                if ai isa Type && bi isa Type
+                    ji = typejoin(ai, bi)
+                    if ji === ai && ji === bi
+                        push!(agrees, true)
+                        push!(joined, ji)
+                    else
+                        push!(agrees, false)
+                        push!(joined, ji)
+                        all_same = false
+                    end
+                elseif ai === bi
+                    push!(agrees, true)
+                    push!(joined, ai)
                 else
-                    same = false
-                    continue
+                    push!(agrees, false)
+                    push!(joined, ai)
+                    all_same = false
                 end
-                if !(ji === ap[i] && ji === bp[i])
-                    same = false
-                end
-                push!(joined, ji)
             end
-            if same
+            if all_same
                 return a
             end
-            # Parameters diverged: widen to the bare base type (the wrapper).
-            return Core.apply_type(a)
+            # At least one position differs: rebuild a partial UnionAll that
+            # keeps every agreeing parameter and widens only the differing
+            # ones. Walk the fully-generic wrapper's nested UnionAll chain to
+            # recover each position's own ORIGINAL (pristine, unsubstituted)
+            # TypeVar, mirroring upstream's `while !(b === Any)` / `vars`
+            # accumulation loop (`julia/base/promotion.jl:100-140`).
+            wrapper = a.name.wrapper
+            any_agree = false
+            for i in 1:n
+                if agrees[i]
+                    any_agree = true
+                    break
+                end
+            end
+            # With no concrete position to preserve, the smallest family-level
+            # result is the bare wrapper itself. Returning it directly also
+            # preserves the canonical abstract wrapper value (Issue #10554).
+            if !any_agree && isabstracttype(a)
+                return wrapper
+            end
+            vars = Any[]
+            cur = wrapper
+            ok = true
+            for i in 1:n
+                if !(cur isa UnionAll)
+                    ok = false
+                    break
+                end
+                push!(vars, cur.var)
+                cur = cur.body
+            end
+            if !ok
+                # Structurally fewer free vars than parameters: fall back to
+                # the fully bare wrapper (previous behavior).
+                return wrapper
+            end
+            # Sequentially resolve each position, position by position
+            # (mirroring upstream's `aprimary = aprimary{ai}` in-place
+            # substitution, `julia/base/promotion.jl:121-131`): an agreeing
+            # position resolves to its concrete joined value; a differing
+            # position resolves to a FRESHLY rebuilt TypeVar whose declared
+            # bound has every EARLIER position's resolution substituted in
+            # via exact TypeVar identity in `_typejoin_subst_dependent_bound`.
+            # This is what makes a DEPENDENT-BOUND struct (e.g.
+            # `struct Dep2{A, B<:A}`) widen `B` to `B<:Number` (not the
+            # stale, escaped `B<:A`) once `A` resolves to `Number` (Issue
+            # #10091 follow-up: the defect found in
+            # `typejoin(Dep2{Number,Int64}, Dep2{Number,Float64})`, which
+            # upstream returns as `Dep2{Number, B} where B<:Number`).
+            resolved = Any[]
+            subst = Any[]
+            newvars = Any[]
+            for i in 1:n
+                if agrees[i]
+                    push!(subst, joined[i])
+                    push!(resolved, joined[i])
+                else
+                    v = vars[i]
+                    new_lb = _typejoin_subst_dependent_bound(v.lb, vars, resolved)
+                    new_ub = _typejoin_subst_dependent_bound(v.ub, vars, resolved)
+                    nv = (new_lb === v.lb && new_ub === v.ub) ? v : TypeVar(v.name, new_lb, new_ub)
+                    push!(subst, nv)
+                    push!(newvars, nv)
+                    push!(resolved, nv)
+                end
+            end
+            result = Core.apply_type(wrapper, subst...)
+            for i in length(newvars):-1:1
+                result = UnionAll(newvars[i], result)
+            end
+            # Keep the whole-result subtype check as a fail-closed guard for
+            # future composite dependent-bound shapes.
+            if a <: result && b <: result
+                return result
+            end
+            return wrapper
         end
     end
 
@@ -568,13 +698,18 @@ end
 """
     nameof(t::Type) -> Symbol
     nameof(f::Function) -> Symbol
+    nameof(m::Module) -> Symbol
 
-Get the name of a type or function as a Symbol.
+Get the name of a type, function, or module as a Symbol.
 
 For a (potentially `UnionAll`-wrapped) type, returns the canonical `TypeName`
 symbol without type parameters. Base display aliases collapse onto the shared
 underlying `TypeName`, so `nameof(Vector)`, `nameof(Vector{Int})` and
 `nameof(Matrix)` all return `:Array` — matching upstream Julia (Issue #5106).
+
+For a module, returns the module's own unqualified binding name — e.g.
+`nameof(S) === :S` for `module P; module S end; end`, not the qualified
+`:"P.S"` path (Issue #11171).
 
 # Examples
 ```julia
@@ -588,6 +723,7 @@ nameof(Int64)         # :Int64
 nameof(Vector{Int64}) # :Array
 nameof(Dict)          # :Dict
 nameof(sin)           # :sin
+nameof(Base)          # :Base
 ```
 """
 function nameof(t::Type)
@@ -596,6 +732,10 @@ end
 
 function nameof(f::Function)
     _function_name(f)
+end
+
+function nameof(m::Module)
+    _module_name(m)
 end
 
 # Reflection data structure for method introspection
@@ -827,6 +967,12 @@ end
 # `julia/Compiler/src/effects.jl` `EFFECTS_TOTAL`).
 _effects_total() = Effects(0x00, 0x00, true, true, true, 0x00, 0x00, 0x00, true)
 
+_effects_from_tuple(t) = Effects(t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9])
+function _effects_with_nothrow(e::Effects, nothrow::Bool)
+    Effects(e.consistent, e.effect_free, nothrow, e.terminates, e.notaskstate,
+            e.inaccessiblememonly, e.noub, e.nonoverlayed, e.nortcall)
+end
+
 # Representative `Effects` records used by the per-signature classification table
 # below (Issues #4972, #4957, #4991). Each record reproduces the exact field
 # layout upstream Julia 1.12 infers for the matched signature; UInt8 bitfields
@@ -1031,6 +1177,22 @@ _is_signed_machine_int(t) = _helper_is_type(t) && t <: Signed && t !== BigInt
 # Fixed-width integers (signed or unsigned): `lcm`'s product can overflow and
 # its `÷ gcd` step can divide by zero. Excludes `BigInt` and `Bool` (Issue #6272).
 _is_machine_int(t) = _helper_is_type(t) && t <: Integer && t !== BigInt && t !== Bool
+_is_unsigned_machine_int(t) = _helper_is_type(t) && t <: Unsigned && t !== Bool
+
+function _helper_all_real_args(ts)
+    isempty(ts) && return false
+    for t in ts
+        (_helper_is_type(t) && t <: Real) || return false
+    end
+    true
+end
+
+function _helper_has_float_arg(ts)
+    for t in ts
+        _helper_is_type(t) && t <: AbstractFloat && return true
+    end
+    false
+end
 
 # Effects for the representative string / parse / search / tuple / range helpers.
 # Returns `nothing` unless name + signature matches a classified representative.
@@ -1164,6 +1326,30 @@ function _classify_effects(name::Symbol, types)
     elseif name === :Float64
         return _effects_total()
     end
+    ts = _signature_param_types(types)
+    if (name === :sin || name === :cos || name === :sqrt ||
+        name === :log || name === :log1p) &&
+       length(ts) == 1 && ts[1] === Float64
+        return _effects_total_throws()
+    elseif name === :divrem && length(ts) == 2 && ts[1] === Int64 && ts[2] === Int64
+        return _effects_total_throws()
+    elseif (name === :div || name === :rem || name === :mod || name === :fld ||
+            name === :cld) && length(ts) == 2 && _helper_all_integer_args(ts)
+        return _effects_total_throws()
+    elseif (name === :div || name === :rem || name === :mod || name === :fld ||
+            name === :cld) && length(ts) == 2 && _helper_all_real_args(ts) &&
+           _helper_has_float_arg(ts)
+        return _effects_total()
+    elseif name === :gcd && length(ts) == 2 &&
+           _is_signed_machine_int(ts[1]) && _is_signed_machine_int(ts[2])
+        return _effects_total_throws()
+    elseif name === :gcd && length(ts) == 2 &&
+           _is_unsigned_machine_int(ts[1]) && _is_unsigned_machine_int(ts[2])
+        return _effects_total()
+    elseif name === :lcm && length(ts) == 2 &&
+           _is_machine_int(ts[1]) && _is_machine_int(ts[2])
+        return _effects_total_throws()
+    end
     # Public string / parse / search / tuple / range helpers (Issues
     # #4968/#4969/#4971/#4974) are classified by name + signature; returns
     # `nothing` for non-matching overloads so they fall through unchanged.
@@ -1295,11 +1481,18 @@ function _classified_exception_type(f, types)
         # mixed int/float overloads keep falling through to the proven-total
         # representative, matching upstream (Issue #4274).
         return DivideError
+    elseif (name === :div || name === :rem || name === :mod || name === :fld ||
+            name === :cld) && length(ts) == 2 && _helper_all_real_args(ts) &&
+           _helper_has_float_arg(ts)
+        return Union{}
     elseif name === :gcd && length(ts) == 2 &&
            _is_signed_machine_int(ts[1]) && _is_signed_machine_int(ts[2])
         # `gcd` over fixed-width signed integers can overflow at `abs(typemin)`;
         # unsigned and `BigInt` args never do, matching upstream (Issue #6272).
         return OverflowError
+    elseif name === :gcd && length(ts) == 2 &&
+           _is_unsigned_machine_int(ts[1]) && _is_unsigned_machine_int(ts[2])
+        return Union{}
     elseif name === :lcm && length(ts) == 2 &&
            _is_machine_int(ts[1]) && _is_machine_int(ts[2])
         # `lcm` over any fixed-width integer can overflow in the product, and the
@@ -1342,6 +1535,17 @@ function infer_effects(f, types)
     # proven-total representative matches upstream for simple pure user and
     # arithmetic methods (#4274).
     ms = methods(f, types)
+    # Body-derived composition (Issue #8441): when a matched user method has
+    # visible effects (I/O, mutation, allocation, or throwing callees), report
+    # that summary instead of assuming every reflected user method is total.
+    composed_effects = _compose_effects(f, types)
+    if composed_effects !== nothing
+        effects = _effects_from_tuple(composed_effects)
+        if _classified_exception_type(f, types) !== nothing || _compose_exception_type(f, types) !== nothing
+            return _effects_with_nothrow(effects, false)
+        end
+        return effects
+    end
     if _classified_exception_type(f, types) !== nothing
         return _effects_total_throws()
     end
@@ -1548,7 +1752,7 @@ function hasproperty(x, s::Symbol)
     # Match upstream: route through `propertynames` so a custom `propertynames`
     # overload is honored (Issue #5101). `propertynames(x)` defaults to
     # `fieldnames(typeof(x))`.
-    s in propertynames(x)
+    s in invokelatest(getfield(Main, :propertynames), x)
 end
 
 """
@@ -1583,8 +1787,45 @@ function isdefined(m::Module, s::Symbol)
     return _isdefined_module_binding(m, s)
 end
 
+function isdefined(m::Module, i::Integer)
+    throw(TypeError(:isdefined, "", Symbol, i))
+end
+
 function isdefined(x, s::Symbol)
+    # Core.Binding (Issue #10067): `:globalref`/`:flags` are always set, but
+    # `:value`/`:partitions`/`:backedges` exist in upstream's fieldnames
+    # without necessarily being assigned — `hasfield` alone (which only
+    # checks the field NAME, not whether it is set) would wrongly report
+    # `true` for all five. `Core.Binding` cannot yet be used as a dispatch
+    # type annotation (a native VM value, like `Module`/`GlobalRef`), so this
+    # mirrors the `isdefined(m::Module, ...)` special case above with an
+    # `isa` guard instead of a dedicated method.
+    if x isa Core.Binding
+        return _isdefined_binding_field(x, s)
+    end
     hasfield(typeof(x), s)
+end
+
+function isdefined(x, i::Integer)
+    # Upstream's `isdefined` builtin (jl_f_isdefined) accepts only a Symbol
+    # or a machine `Int` index: every other Integer width — Int8/Int16/Int32/
+    # Int128, all UInt widths, Bool, BigInt — raises
+    # `TypeError: in isdefined, expected Symbol, got a value of type T`,
+    # and out-of-range `Int` indices return `false` (Issue #10240).
+    i isa Int || throw(TypeError(:isdefined, "", Symbol, i))
+    # Core.Binding (Issue #10067): see the `isdefined(x, s::Symbol)` note
+    # above — `1 <= i <= nfields(x)` only checks the index is in range, not
+    # whether that field is actually set.
+    if x isa Core.Binding
+        return _isdefined_binding_field(x, i)
+    end
+    1 <= i <= nfields(x)
+end
+
+# Upstream's `isdefined` builtin raises TypeError (not MethodError) for ANY
+# non-Symbol, non-Int field key — Float64, String, … (Issue #10240).
+function isdefined(x, i)
+    throw(TypeError(:isdefined, "", Symbol, i))
 end
 
 """

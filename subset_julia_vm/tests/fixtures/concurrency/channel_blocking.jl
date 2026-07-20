@@ -1,105 +1,231 @@
 using Test
 
-# Tests for cooperative blocking put!/take!/fetch via pending_puts queue (Issue #3451)
+# VM-level task continuation and Channel blocking parity (Issues #10349 / #10144).
+# Every case runs unchanged under upstream Julia: no main-task overflow without
+# a consumer, and no sjulia-only pending overflow queue.
 
-@testset "put! on full buffered channel does not throw" begin
-    ch = Channel(1)
-    put!(ch, 1)
-    @test isfull(ch)
-    put!(ch, 2)  # buffer full — goes to pending_puts, must not throw
-    @test isfull(ch)    # buffer still reports full
-    @test isready(ch)   # value is available via pending queue
-    @test !isempty(ch)
+@testset "buffered put! suspends at capacity and resumes after take!" begin
+    c = Channel(1)
+    events = Int[]
+    t = @async begin
+        put!(c, 1)
+        put!(c, 2)
+        push!(events, 99)
+    end
+    yield()
+    @test isready(c)
+    @test !istaskdone(t)
+    push!(events, take!(c))
+    push!(events, 0)
+    push!(events, take!(c))
+    wait(t)
+    @test events == [1, 0, 99, 2]
 end
 
-@testset "take! drains pending puts in FIFO order" begin
-    ch = Channel(1)
-    put!(ch, 1)
-    put!(ch, 2)  # pending
-    put!(ch, 3)  # pending
-    @test take!(ch) == 1
-    @test take!(ch) == 2
-    @test take!(ch) == 3
-    @test isempty(ch)
-end
-
-@testset "multiple pending puts maintain FIFO order" begin
-    ch = Channel(2)
-    put!(ch, 10)
-    put!(ch, 20)
-    put!(ch, 30)  # pending
-    put!(ch, 40)  # pending
-    @test take!(ch) == 10
-    @test take!(ch) == 20
-    @test take!(ch) == 30
-    @test take!(ch) == 40
-    @test isempty(ch)
-end
-
-@testset "isempty false when pending puts exist" begin
-    ch = Channel(1)
-    put!(ch, 1)
-    put!(ch, 2)  # pending
-    @test !isempty(ch)
-    take!(ch)
-    @test !isempty(ch)  # 2 was drained from pending to buffer
-    take!(ch)
-    @test isempty(ch)
-end
-
-@testset "isready true when pending puts exist" begin
-    ch = Channel(1)
-    put!(ch, 1)
-    put!(ch, 2)  # pending
-    @test isready(ch)
-    take!(ch)
-    @test isready(ch)  # 2 drained to buffer
-    take!(ch)
-    @test !isready(ch)
-end
-
-@testset "@async producer with more items than capacity" begin
-    ch = Channel(2)
+@testset "buffered producer maintains FIFO across repeated suspension" begin
+    c = Channel(2)
     t = @async begin
         for i in 1:5
-            put!(ch, i)
+            put!(c, i)
         end
     end
-    @test istaskdone(t)
-    results = Int[]
+    values = Int[]
     for _ in 1:5
-        push!(results, take!(ch))
+        push!(values, take!(c))
     end
-    @test results == [1, 2, 3, 4, 5]
+    wait(t)
+    @test values == [1, 2, 3, 4, 5]
+    @test isempty(c)
+    @test istaskdone(t)
 end
 
-@testset "unbuffered channel: second put goes to pending" begin
-    ch = Channel(0)
-    put!(ch, 42)
-    put!(ch, 99)  # second put goes to pending
-    @test take!(ch) == 42
-    @test take!(ch) == 99
-    @test isempty(ch)
+@testset "multiple blocked puts preserve producer order" begin
+    c = Channel(1)
+    t = @async begin
+        put!(c, 10)
+        put!(c, 20)
+        put!(c, 30)
+        put!(c, 40)
+    end
+    @test [take!(c) for _ in 1:4] == [10, 20, 30, 40]
+    wait(t)
 end
 
-@testset "empty! clears pending puts too" begin
-    ch = Channel(1)
-    put!(ch, 1)
-    put!(ch, 2)  # pending
-    empty!(ch)
-    @test isempty(ch)
-    @test length(ch) == 0
-    @test !isready(ch)
+@testset "empty!/isready observe only available buffered values" begin
+    c = Channel(1)
+    t = @async begin
+        put!(c, 1)
+        put!(c, 2)
+    end
+    yield()
+    @test isready(c)
+    empty!(c)
+    wait(t)
+    @test isready(c)
+    @test take!(c) == 2
+    @test !isready(c)
 end
 
-@testset "close does not lose pending items" begin
-    ch = Channel(1)
-    put!(ch, 1)
-    put!(ch, 2)  # pending
-    close(ch)
-    @test !isopen(ch)
-    @test take!(ch) == 1  # from buffer
-    @test take!(ch) == 2  # drained from pending after take
+@testset "unbuffered Channel is a producer/consumer rendezvous" begin
+    c = Channel(0)
+    events = String[]
+    t = @async begin
+        push!(events, "before")
+        put!(c, 42)
+        push!(events, "after")
+    end
+    yield()
+    @test events == ["before"]
+    push!(events, "main")
+    @test take!(c) == 42
+    wait(t)
+    @test events == ["before", "main", "after"]
+end
+
+@testset "multiple unbuffered producers hand off one rendezvous at a time" begin
+    c = Channel(0)
+    events = Int[]
+    first = @async begin
+        put!(c, 10)
+        push!(events, 1)
+    end
+    second = @async begin
+        put!(c, 20)
+        push!(events, 2)
+    end
+
+    yield()
+    @test take!(c) == 10
+    yield()
+    @test events == [1]
+    @test take!(c) == 20
+    yield()
+    @test events == [1, 2]
+    wait(first)
+    wait(second)
+end
+
+@testset "empty take! parks until a scheduled producer supplies a value" begin
+    c = Channel(1)
+    t = @async begin
+        yield()
+        put!(c, 7)
+    end
+    @test take!(c) == 7
+    wait(t)
+end
+
+@testset "close preserves already-buffered values" begin
+    c = Channel(2)
+    put!(c, 1)
+    put!(c, 2)
+    close(c)
+    @test !isopen(c)
+    @test take!(c) == 1
+    @test take!(c) == 2
+end
+
+@testset "yield suspends at the yield point" begin
+    events = String[]
+    t = @async begin
+        push!(events, "task1")
+        yield()
+        push!(events, "task2")
+    end
+    yield()
+    push!(events, "main")
+    wait(t)
+    @test events == ["task1", "main", "task2"]
+end
+
+@testset "wait parks one task while another task runs" begin
+    events = String[]
+    child = @async begin
+        push!(events, "child1")
+        yield()
+        push!(events, "child2")
+        17
+    end
+    waiter = @async begin
+        push!(events, "waiter1")
+        wait(child)
+        push!(events, "waiter2")
+    end
+    wait(waiter)
+    @test fetch(child) == 17
+    @test events == ["child1", "waiter1", "child2", "waiter2"]
+end
+
+@testset "Condition wait/notify resumes parked continuations" begin
+    condition = Condition()
+    events = Any[]
+    t = @async begin
+        push!(events, "waiting")
+        value = wait(condition)
+        push!(events, value)
+    end
+    yield()
+    @test notify(condition, 7) == 1
+    wait(t)
+    @test events == Any["waiting", 7]
+end
+
+@testset "sleep is a cooperative timer yield point" begin
+    events = String[]
+    t = @async begin
+        sleep(0.01)
+        push!(events, "task")
+    end
+    yield()
+    push!(events, "main")
+    wait(t)
+    @test events == ["main", "task"]
+end
+
+@testset "Channel do-block producer runs on a live task" begin
+    c = Channel(1) do ch
+        put!(ch, 5)
+        put!(ch, 6)
+    end
+    @test take!(c) == 5
+    @test take!(c) == 6
+end
+
+@testset "waitany and waitall drive real task sets" begin
+    first = @async begin
+        yield()
+        1
+    end
+    second = @async 2
+    done, remaining = waitany([first, second])
+    @test !isempty(done)
+    all_done, all_remaining = waitall([first, second])
+    @test length(all_done) == 2
+    @test isempty(all_remaining)
+end
+
+mutable struct SuspendedTaskBox10349
+    value::Int
+end
+
+@testset "errormonitor observes a failure that happens after registration" begin
+    monitored = @async error("monitored task failure")
+    @test errormonitor(monitored) === monitored
+    yield()
+    @test istaskfailed(monitored)
+end
+
+@testset "suspended task frames remain GC roots" begin
+    answer = Ref(0)
+    t = @async begin
+        box = SuspendedTaskBox10349(41)
+        yield()
+        answer[] = box.value + 1
+    end
+    yield()
+    GC.gc()
+    wait(t)
+    @test answer[] == 42
 end
 
 true

@@ -65,3 +65,35 @@ name = "floatfuncs_rounding_pure_julia_6742"
 file = "rounding_pure_julia_6742.jl"
 expected = true
 description = "floor/ceil/round/trunc are pure Julia (base/floatfuncs.jl) over the CPU intrinsics floor_llvm/ceil_llvm/trunc_llvm/rint_llvm (Issue #6742, #6726 slice 1/3). round uses round-half-to-even (default RoundNearest). Covers: plain ties-to-even (round(2.5)==2.0, fixing the old dynamic-dispatch f64::round half-away bug), Float32 preservation, integer identity (floor(5)===5), typed forms (round(Int8,3.5)===Int8(4), type preserved), digits/sigdigits/base keywords now pure Julia (round(3.7,digits=2,base=2)==3.75 honors base; the Rust *Digits builtins are no longer reached), and all RoundingMode variants (TiesUp/TiesAway/FromZero/Up/Down/ToZero) in base/rounding.jl. Values verified against julia 1.12. (Rational rounding return-type tracked separately by #6775.)"
+
+[[tests]]
+name = "floatfuncs_signbit_narrow_floats_9529"
+file = "signbit_narrow_floats_9529.jl"
+expected = true
+description = "signbit(Float32)/signbit(Float16) are bit-level (reinterpret to Int32/Int16 then integer signbit), mirroring upstream floatfuncs.jl; the generic sign-comparison signbit(x) cannot see -0.0f0 / Float16(-0.0)'s sign bit (Issue #9529)"
+
+# --- merged from `float_ops` category (Issue #9671 Phase 2) ---
+[[tests]]
+name = "float_ops_basic"
+file = "float_basic.jl"
+expected = true
+description = "Float64 arithmetic, comparisons, abs, and signbit"
+
+[[tests]]
+name = "float_ops_special_values"
+file = "float_ops_special_values.jl"
+expected = true
+description = "Float special values: Inf, NaN, rounding, conversion (Issue #3123)"
+
+[[tests]]
+name = "float_ops_special_cases_9344"
+file = "float_special_cases_9344.jl"
+expected = true
+description = "isless float total order, Float32 literal_pow, negative-base non-integer exponent DomainError (Issue #9344)"
+
+# --- merged from the near-synonym `float64` category (Issue #11053) ---
+[[tests]]
+name = "floatfuncs_f64_function_inline"
+file = "f64_function_inline.jl"
+expected = true
+description = "F64 user function inlined into typed loops with equality compare branches"

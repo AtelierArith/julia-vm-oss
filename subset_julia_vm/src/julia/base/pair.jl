@@ -48,6 +48,32 @@ end
 convert(::Type{Pair}, p::Pair) = p
 convert(::Type{Pair{K,V}}, p::Pair) where {K,V} = p
 
+length(p::Pair) = 2
+eltype(p::Pair) = typejoin(typeof(p.first), typeof(p.second))
+eltype(::Type{Pair}) = Any
+eltype(::Type{Pair{K,V}}) where {K,V} = typejoin(K, V)
+IteratorSize(::Type{<:Pair}) = HasLength()
+IteratorEltype(::Type{<:Pair}) = HasEltype()
+
+function iterate(p::Pair)
+    return (p.first, 2)
+end
+
+function iterate(p::Pair, state)
+    if state == 2
+        return (p.second, 3)
+    end
+    return nothing
+end
+
+function collect(p::Pair)
+    T = eltype(p)
+    result = Vector{T}(undef, 2)
+    result[1] = p.first
+    result[2] = p.second
+    return result
+end
+
 # Numeric indexing: p[1] == p.first, p[2] == p.second (mirrors Julia's Pair iteration)
 function getindex(p::Pair, i::Int64)
     if i == 1

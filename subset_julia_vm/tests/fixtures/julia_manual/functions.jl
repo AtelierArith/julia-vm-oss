@@ -72,7 +72,7 @@ end
 end
 
 @testset "Keyword arguments" begin
-    @test circle_area() == pi
+    @test circle_area() == Float64(pi)
     @test circle_area(radius=2.0) == 4.0 * pi
 end
 

@@ -257,7 +257,7 @@ fn collect_stmt_obligations(
                 collect_expr_obligations(function, target, env, plan);
                 collect_expr_obligations(function, value, env, plan);
             }
-            AotStmt::Expr(expr) | AotStmt::Return(Some(expr)) => {
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) | AotStmt::Return(Some(expr)) => {
                 collect_expr_obligations(function, expr, env, plan);
             }
             AotStmt::If {
@@ -476,6 +476,7 @@ fn builtin_name(builtin: AotBuiltinOp) -> &'static str {
         AotBuiltinOp::Trunc => "trunc",
         AotBuiltinOp::Min => "min",
         AotBuiltinOp::Max => "max",
+        AotBuiltinOp::IsLess => "isless",
         AotBuiltinOp::Clamp => "clamp",
         AotBuiltinOp::Sign => "sign",
         AotBuiltinOp::Signbit => "signbit",

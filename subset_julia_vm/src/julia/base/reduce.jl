@@ -275,9 +275,8 @@ end
 
 # any: check if any element is true (non-HOF version)
 function any(arr)
-    n = length(arr)
-    for i in 1:n
-        if arr[i]
+    for x in arr
+        if x
             return true
         end
     end
@@ -286,9 +285,8 @@ end
 
 # all: check if all elements are true (non-HOF version)
 function all(arr)
-    n = length(arr)
-    for i in 1:n
-        if !arr[i]
+    for x in arr
+        if !x
             return false
         end
     end
@@ -351,6 +349,27 @@ function count(f::Function, t::Tuple)
     return n
 end
 
+# count(f, itr): iterator-generic fallback for non-indexable collections such as
+# Dict values/keys and Set (Issue #8816). More-specific Array/Tuple methods above
+# retain their existing behavior.
+function count(f::Function, itr)
+    n = 0
+    for x in itr
+        if f(x)
+            n = n + 1
+        end
+    end
+    return n
+end
+
+# count(itr): count `true` elements of a boolean iterator, e.g.
+# `count(x % 2 == 0 for x in 1:4)` (Issue #9103). Mirrors upstream
+# `count(itr; init=0) = count(identity, itr; init)` (julia/base/reduce.jl).
+# The Array method above retains its existing fast path.
+function count(itr)
+    return count(identity, itr)
+end
+
 # findall(f, arr): vector of 1-based indices where `f(arr[i])` is true.
 function findall(f::Function, arr::Array)
     result = Int64[]
@@ -368,13 +387,154 @@ end
 function sum(f::Function, arr::Array)
     n = length(arr)
     if n == 0
-        error("ArgumentError: reducing over an empty collection is not allowed")
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
     end
     acc = f(arr[1])
     for i in 2:n
         acc = acc + f(arr[i])
     end
     return acc
+end
+
+function sum(f::Function, arr::AbstractArray)
+    n = length(arr)
+    if n == 0
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
+    end
+    acc = f(arr[1])
+    for i in 2:n
+        acc = acc + f(arr[i])
+    end
+    return acc
+end
+
+function sum(f::Function, t::Tuple)
+    n = length(t)
+    if n == 0
+        throw(ArgumentError("reducing over an empty collection is not allowed"))
+    end
+    acc = f(t[1])
+    for i in 2:n
+        acc = acc + f(t[i])
+    end
+    return acc
+end
+
+function _sum_iterable(itr, init)
+    if init !== nothing
+        result = init
+        for x in itr
+            result = result + x
+        end
+        return result
+    end
+
+    result = zero(eltype(itr))
+    for x in itr
+        result = result + x
+    end
+    return result
+end
+
+function _prod_empty_iterable_value(itr)
+    T = eltype(itr)
+    if T == Bool
+        return true
+    elseif T == Int8 || T == Int16 || T == Int32 || T == Int64
+        return Int64(1)
+    elseif T == UInt8 || T == UInt16 || T == UInt32 || T == UInt64
+        return UInt64(1)
+    elseif T == Float32
+        return Float32(1)
+    elseif T == Float64
+        return Float64(1)
+    elseif T == String
+        return ""
+    end
+    return 1
+end
+
+function _prod_iterable(itr, init)
+    if init !== nothing
+        result = init
+        for x in itr
+            result = result * x
+        end
+        return result
+    end
+
+    y = iterate(itr)
+    if y === nothing
+        return _prod_empty_iterable_value(itr)
+    end
+
+    result = y[1]
+    state = y[2]
+    y = iterate(itr, state)
+    while y !== nothing
+        result = result * y[1]
+        state = y[2]
+        y = iterate(itr, state)
+    end
+    return result
+end
+
+function _minimum_iterable(itr, init)
+    if init !== nothing
+        result = init
+    else
+        y = iterate(itr)
+        if y === nothing
+            error("minimum: empty collection")
+        end
+        result = y[1]
+        state = y[2]
+        y = iterate(itr, state)
+        while y !== nothing
+            if y[1] < result
+                result = y[1]
+            end
+            state = y[2]
+            y = iterate(itr, state)
+        end
+        return result
+    end
+
+    for x in itr
+        if x < result
+            result = x
+        end
+    end
+    return result
+end
+
+function _maximum_iterable(itr, init)
+    if init !== nothing
+        result = init
+    else
+        y = iterate(itr)
+        if y === nothing
+            error("maximum: empty collection")
+        end
+        result = y[1]
+        state = y[2]
+        y = iterate(itr, state)
+        while y !== nothing
+            if y[1] > result
+                result = y[1]
+            end
+            state = y[2]
+            y = iterate(itr, state)
+        end
+        return result
+    end
+
+    for x in itr
+        if x > result
+            result = x
+        end
+    end
+    return result
 end
 
 function _any_unary_predicate(f, A)

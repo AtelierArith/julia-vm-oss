@@ -19,10 +19,10 @@ println("result.args[3]: ", result.args[3])
 # The head should be :call
 @assert result.head == :call
 
-# The args should be [:*, 2, 5]
-@assert result.args[1] == :*
+# The args should represent `2 * 5`; upstream Julia may qualify `*` as Main.:*.
 @assert result.args[2] == 2
 @assert result.args[3] == 5
+@assert eval(result) == 10
 
 println("@macroexpand test passed!")
 
@@ -32,9 +32,9 @@ println("result1: ", result1)
 
 # Should have the same structure as @macroexpand for simple macros
 @assert result1.head == :call
-@assert result1.args[1] == :*
 @assert result1.args[2] == 2
 @assert result1.args[3] == 10
+@assert eval(result1) == 20
 
 println("@macroexpand1 test passed!")
 

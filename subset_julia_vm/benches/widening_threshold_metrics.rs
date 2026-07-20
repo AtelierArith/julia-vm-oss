@@ -57,6 +57,8 @@ fn retained_members(ty: &LatticeType) -> usize {
         LatticeType::Concrete(_) => 1,
         LatticeType::Union(types) => types.len(),
         LatticeType::Const(_) | LatticeType::Conditional { .. } | LatticeType::Top => 1,
+        // A PartialStruct is a single concrete struct member (Issue #8544).
+        LatticeType::PartialStruct { .. } => 1,
     }
 }
 

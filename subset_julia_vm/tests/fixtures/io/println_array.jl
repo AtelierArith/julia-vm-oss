@@ -1,30 +1,27 @@
-# Test println displays arrays with element type
-# Tests that println uses the formatted representation with eltype
+# Test println displays arrays
 
 using Test
 
-@testset "println displays arrays with element type" begin
+@testset "println displays arrays" begin
     # Test 1: sprint captures println output for vector
     v = [1, 2, 3]
     output_v = sprint(println, v)
-    @test occursin("Vector{Int64}", output_v)
-    @test occursin("3-element", output_v)
+    @test output_v == "[1, 2, 3]\n"
 
     # Test 2: sprint captures println output for matrix
     m = [1 2; 3 4]
     output_m = sprint(println, m)
-    @test occursin("Matrix{Int64}", output_m)
-    @test occursin("2×2", output_m)
+    @test output_m == "[1 2; 3 4]\n"
 
     # Test 3: Float64 vector
     vf = [1.0, 2.0, 3.0]
     output_vf = sprint(println, vf)
-    @test occursin("Vector{Float64}", output_vf)
+    @test output_vf == "[1.0, 2.0, 3.0]\n"
 
     # Test 4: Float64 matrix
     mf = [1.0 2.0; 3.0 4.0]
     output_mf = sprint(println, mf)
-    @test occursin("Matrix{Float64}", output_mf)
+    @test output_mf == "[1.0 2.0; 3.0 4.0]\n"
 end
 
 true

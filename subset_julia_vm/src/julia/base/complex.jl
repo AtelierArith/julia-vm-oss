@@ -23,66 +23,7 @@ const ComplexF32 = Complex{Float32}
 # Constructors
 # =============================================================================
 
-# Two-argument constructors (explicit types)
-function Complex(x::Int64, y::Int64)
-    return Complex{Int64}(x, y)
-end
-
-function Complex(x::Float64, y::Float64)
-    return Complex{Float64}(x, y)
-end
-
-function Complex(x::Int64, y::Float64)
-    return Complex{Float64}(Float64(x), y)
-end
-
-function Complex(x::Float64, y::Int64)
-    return Complex{Float64}(x, Float64(y))
-end
-
-function Complex(x::Bool, y::Bool)
-    return Complex{Bool}(x, y)
-end
-
-# Single argument constructors (use Complex function, not Complex{T})
-function Complex(x::Int64)
-    return Complex{Int64}(x, Int64(0))
-end
-
-function Complex(x::Float64)
-    return Complex{Float64}(x, 0.0)
-end
-
-function Complex(x::Bool)
-    return Complex{Bool}(x, false)
-end
-
-# Float32 constructors
-function Complex(x::Float32, y::Float32)
-    return Complex{Float32}(x, y)
-end
-
-function Complex(x::Float32)
-    return Complex{Float32}(x, Float32(0.0))
-end
-
-function Complex(x::Int64, y::Float32)
-    return Complex{Float32}(Float32(x), y)
-end
-
-function Complex(x::Float32, y::Int64)
-    return Complex{Float32}(x, Float32(y))
-end
-
-function Complex(x::Float64, y::Float32)
-    return Complex{Float64}(x, Float64(y))
-end
-
-function Complex(x::Float32, y::Float64)
-    return Complex{Float64}(Float64(x), y)
-end
-
-# Generic 2-argument constructor: promote types when they differ.
+# Generic 2-argument constructor: promote types before constructing.
 #
 # Upstream Julia writes `Complex(x::Real, y::Real) = Complex(promote(x,y)...)`,
 # relying on the default outer constructor `Complex(re::T, im::T) where {T<:Real}`
@@ -93,7 +34,7 @@ end
 # element type without an explicit concrete overload (Int32, Int16, Rational,
 # ...). Promote first, then construct the parametric inner constructor directly
 # so the element type T is preserved for every `T<:Real` without re-dispatch
-# (Issue #5131).
+# (Issue #5131 / #9381).
 function Complex(x::Real, y::Real)
     xp, yp = promote(x, y)
     return Complex{typeof(xp)}(xp, yp)
@@ -103,8 +44,8 @@ end
 # not covered by an explicit concrete overload above (Int32, Int16, Rational,
 # ...). Imaginary part is the additive zero of the same element type, matching
 # `Complex(x::Real) = Complex(x, zero(x))` upstream (Issue #5131).
-function Complex(x::Real)
-    return Complex{typeof(x)}(x, zero(x))
+function Complex(x::T) where {T<:Real}
+    return Complex{T}(x, zero(x))
 end
 
 # Generic parametric 1-argument constructor
@@ -115,6 +56,10 @@ end
 # Complex→Complex conversion constructor
 function Complex{T}(z::Complex) where {T<:Real}
     Complex{T}(convert(T, real(z)), convert(T, imag(z)))
+end
+
+function float(::Type{Complex{T}}) where {T<:Real}
+    return Complex{float(T)}
 end
 
 # Legacy function-style constructors
@@ -142,6 +87,14 @@ function complex(r::Float32)::Complex{Float32}
     return Complex{Float32}(r, Float32(0.0))
 end
 
+function complex(::Type{T}) where {T<:Real}
+    return Complex{T}
+end
+
+function complex(::Type{Complex{T}}) where {T<:Real}
+    return Complex{T}
+end
+
 # =============================================================================
 # The imaginary unit constant
 # In official Julia: const im = Complex{Bool}(false, true)
@@ -166,6 +119,10 @@ end
 # Generic accessor using parametric type - matches any Complex{T} where T<:Real
 function real(z::Complex{T}) where T<:Real
     return z.re
+end
+
+function real(::Type{Complex{T}}) where {T<:Real}
+    return T
 end
 
 function imag(z::Complex{T}) where T<:Real
@@ -229,6 +186,12 @@ function Base.:-(z::Complex{T}) where {T<:Real}
     return Complex{T}(-z.re, -z.im)
 end
 
+# Match upstream's Complex × Real overload. Narrowing number.jl's fallback to
+# Real must not remove valid Complex sign flips (Issue #11525).
+function flipsign(x::Complex{T}, y::Real) where {T<:Real}
+    return signbit(y) ? -x : x
+end
+
 # Complex conjugate: conj(z)
 function conj(z::Complex{T}) where {T<:Real}
     return Complex(z.re, -z.im)
@@ -274,9 +237,14 @@ function abs2(z::Complex{Float32})
     return z.re * z.re + z.im * z.im
 end
 
-# Magnitude: abs(z) = |z| = sqrt(re^2 + im^2)
+# Magnitude: abs(z) = |z| = hypot(re, im).
+# Mirrors upstream `abs(z::Complex) = hypot(real(z), imag(z))`
+# (julia/base/complex.jl). Using `hypot` (instead of a forced
+# `Float64(...)` widen) preserves the component float width, so
+# `abs(::Complex{Float32})` returns `Float32` and `abs(::Complex{Float16})`
+# returns `Float16`, matching Julia (Issue #9342).
 function abs(z::Complex{T}) where {T<:Real}
-    return sqrt(Float64(z.re * z.re + z.im * z.im))
+    return hypot(z.re, z.im)
 end
 
 # =============================================================================
@@ -285,32 +253,60 @@ end
 # via promotion through the Complex constructor.
 # =============================================================================
 
-# Complex + Complex (generic, handles mixed-type via promotion in constructor)
-Base.:+(z::Complex, w::Complex) = Complex(real(z) + real(w), imag(z) + imag(w))
-Base.:-(z::Complex, w::Complex) = Complex(real(z) - real(w), imag(z) - imag(w))
-Base.:*(z::Complex, w::Complex) = Complex(real(z)*real(w) - imag(z)*imag(w),
-                                          real(z)*imag(w) + imag(z)*real(w))
+# Complex + Complex (generic, handles mixed-type via the computed part type)
+function Base.:+(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}
+    r = real(z) + real(w)
+    i = imag(z) + imag(w)
+    return Complex{typeof(r)}(r, i)
+end
 
-Base.:+(z::Complex{Float64}, w::Complex{Float64}) = Complex{Float64}(z.re + w.re, z.im + w.im)
-Base.:-(z::Complex{Float64}, w::Complex{Float64}) = Complex{Float64}(z.re - w.re, z.im - w.im)
-Base.:*(z::Complex{Float64}, w::Complex{Float64}) = Complex{Float64}(z.re*w.re - z.im*w.im,
-                                                                     z.re*w.im + z.im*w.re)
+function Base.:-(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}
+    r = real(z) - real(w)
+    i = imag(z) - imag(w)
+    return Complex{typeof(r)}(r, i)
+end
 
-Base.:+(z::Complex{Float32}, w::Complex{Float32}) = Complex{Float32}(z.re + w.re, z.im + w.im)
-Base.:-(z::Complex{Float32}, w::Complex{Float32}) = Complex{Float32}(z.re - w.re, z.im - w.im)
-Base.:*(z::Complex{Float32}, w::Complex{Float32}) = Complex{Float32}(z.re*w.re - z.im*w.im,
-                                                                     z.re*w.im + z.im*w.re)
+function Base.:*(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}
+    r = real(z) * real(w) - imag(z) * imag(w)
+    i = real(z) * imag(w) + imag(z) * real(w)
+    return Complex{typeof(r)}(r, i)
+end
 
 # Complex + Real (generic)
-Base.:+(x::Real, z::Complex) = Complex(x + real(z), imag(z))
-Base.:+(z::Complex, x::Real) = Complex(real(z) + x, imag(z))
-Base.:-(x::Real, z::Complex) = Complex(x - real(z), -imag(z))
-Base.:-(z::Complex, x::Real) = Complex(real(z) - x, imag(z))
-Base.:*(x::Real, z::Complex) = Complex(x * real(z), x * imag(z))
-Base.:*(z::Complex, x::Real) = Complex(real(z) * x, imag(z) * x)
+function Base.:+(x::Real, z::Complex{T}) where {T<:Real}
+    r = x + real(z)
+    return Complex(r, imag(z))
+end
+
+function Base.:+(z::Complex{T}, x::Real) where {T<:Real}
+    r = real(z) + x
+    return Complex(r, imag(z))
+end
+
+function Base.:-(x::Real, z::Complex{T}) where {T<:Real}
+    r = x - real(z)
+    return Complex(r, -imag(z))
+end
+
+function Base.:-(z::Complex{T}, x::Real) where {T<:Real}
+    r = real(z) - x
+    return Complex(r, imag(z))
+end
+
+function Base.:*(x::Real, z::Complex{T}) where {T<:Real}
+    r = x * real(z)
+    i = x * imag(z)
+    return Complex{typeof(r)}(r, i)
+end
+
+function Base.:*(z::Complex{T}, x::Real) where {T<:Real}
+    r = real(z) * x
+    i = imag(z) * x
+    return Complex{typeof(r)}(r, i)
+end
 
 # Division - generic (always returns Float64 for numerical stability)
-function Base.:/(z::Complex, w::Complex)
+function Base.:/(z::Complex{T}, w::Complex{S}) where {T<:Real, S<:Real}
     a = Float64(real(z))
     b = Float64(imag(z))
     c = Float64(real(w))
@@ -331,11 +327,11 @@ function Base.:/(z::Complex{Float32}, w::Complex{Float32})
                             (z.im * w.re - z.re * w.im) / denom)
 end
 
-function Base.:/(z::Complex, x::Real)
+function Base.:/(z::Complex{T}, x::Real) where {T<:Real}
     Complex(real(z) / x, imag(z) / x)
 end
 
-function Base.:/(x::Real, z::Complex)
+function Base.:/(x::Real, z::Complex{T}) where {T<:Real}
     fx = Float64(x)
     c = Float64(real(z))
     d = Float64(imag(z))
@@ -588,6 +584,23 @@ function log(z::Complex{Float64})
     return Complex{Float64}(log(abs(z)), angle(z))
 end
 
+# sqrt of a Complex with non-float components: promote to `Complex{Float64}` and
+# dispatch to the analytic Float64 method below. Mirrors upstream, whose single
+# `sqrt(z::Complex)` begins with `z = float(z)` (julia/base/complex.jl); here the
+# concrete `Complex{Float64}` method carries the algorithm, so the integer /
+# rational cases only need the float promotion. The promotion is written as an
+# explicit `Complex{Float64}(...)` constructor (rather than `sqrt(float(z))`) so
+# the inner `sqrt` statically routes to the concrete Complex method; the bound is
+# restricted to `Integer` / `Rational` so it cannot loop on already-float Complex
+# values (Issue #9342).
+function sqrt(z::Complex{T}) where {T<:Integer}
+    return sqrt(Complex{Float64}(z.re, z.im))
+end
+
+function sqrt(z::Complex{T}) where {T<:Rational}
+    return sqrt(Complex{Float64}(z.re, z.im))
+end
+
 # sqrt: complex square root
 # sqrt(z) = sqrt(|z|) * (cos(θ/2) + i*sin(θ/2)) where θ = arg(z)
 function sqrt(z::Complex{Float64})
@@ -800,6 +813,136 @@ end
 # tan(z) = sin(z) / cos(z)
 function tan(z::Complex{Float64})
     return sin(z) / cos(z)
+end
+
+# =============================================================================
+# Inverse trigonometric / inverse hyperbolic functions for Complex (Issue #8813)
+# =============================================================================
+# Ports of upstream julia/base/complex.jl asin/acos/atan/asinh/acosh/atanh. The
+# forward functions (sin/cos/tan/sinh/cosh/tanh/exp/log/sqrt) already existed;
+# only these inverse methods were missing, so Complex arguments raised
+# MethodError. Specialized to Complex{Float64} to match the surrounding file
+# convention (the real components are Float64 and all helpers here are Float64).
+# `oftype(x, pi)` etc. from upstream are written directly as Float64 literals.
+
+function asin(z::Complex{Float64})
+    zr = z.re
+    zi = z.im
+    if isinf(zr) && isinf(zi)
+        return Complex{Float64}(copysign(Float64(pi) / 4, zr), zi)
+    elseif isnan(zi) && isinf(zr)
+        return Complex{Float64}(zi, Inf)
+    end
+    ξ = zr == 0.0 ? zr :
+        !isfinite(zr) ? Float64(pi) / 2 * sign(zr) :
+        atan(zr, real(sqrt(1 - z) * sqrt(1 + z)))
+    η = asinh(copysign(imag(sqrt(conj(1 - z)) * sqrt(1 + z)), imag(z)))
+    return Complex{Float64}(ξ, η)
+end
+
+function acos(z::Complex{Float64})
+    zr = z.re
+    zi = z.im
+    if isnan(zr)
+        if isinf(zi)
+            return Complex{Float64}(zr, -zi)
+        else
+            return Complex{Float64}(zr, zr)
+        end
+    elseif isnan(zi)
+        if isinf(zr)
+            return Complex{Float64}(zi, abs(zr))
+        elseif zr == 0.0
+            return Complex{Float64}(Float64(pi) / 2, zi)
+        else
+            return Complex{Float64}(zi, zi)
+        end
+    elseif zr == 0.0 && zi == 0.0
+        return Complex{Float64}(Float64(pi) / 2, -zi)
+    elseif zr == Inf && zi === 0.0
+        return Complex{Float64}(zi, -zr)
+    elseif zr == -Inf && zi === -0.0
+        return Complex{Float64}(Float64(pi), -zr)
+    end
+    ξ = 2 * atan(real(sqrt(1 - z)), real(sqrt(1 + z)))
+    η = asinh(imag(sqrt(conj(1 + z)) * sqrt(1 - z)))
+    if isinf(zr) && isinf(zi)
+        ξ -= Float64(pi) / 4 * sign(zr)
+    end
+    return Complex{Float64}(ξ, η)
+end
+
+function atan(z::Complex{Float64})
+    w = atanh(Complex{Float64}(-imag(z), real(z)))
+    return Complex{Float64}(imag(w), -real(w))
+end
+
+function asinh(z::Complex{Float64})
+    w = asin(Complex{Float64}(-imag(z), real(z)))
+    return Complex{Float64}(imag(w), -real(w))
+end
+
+function acosh(z::Complex{Float64})
+    zr = z.re
+    zi = z.im
+    if isnan(zr) || isnan(zi)
+        if isinf(zr) || isinf(zi)
+            return Complex{Float64}(Inf, NaN)
+        else
+            return Complex{Float64}(NaN, NaN)
+        end
+    elseif zr == -Inf && zi === -0.0
+        return Complex{Float64}(Inf, -Float64(pi))
+    end
+    ξ = asinh(real(sqrt(conj(z - 1)) * sqrt(z + 1)))
+    η = 2 * atan(imag(sqrt(z - 1)), real(sqrt(z + 1)))
+    if isinf(zr) && isinf(zi)
+        η -= Float64(pi) / 4 * sign(zi) * sign(zr)
+    end
+    return Complex{Float64}(ξ, η)
+end
+
+function atanh(z::Complex{Float64})
+    x = z.re
+    y = z.im
+    ax = abs(x)
+    ay = abs(y)
+    θ = sqrt(floatmax(Float64)) / 4
+    if ax > θ || ay > θ  # Prevent overflow
+        if isnan(y)
+            if isinf(x)
+                return Complex{Float64}(copysign(0.0, x), y)
+            else
+                return Complex{Float64}(real(inv(z)), y)
+            end
+        end
+        if isinf(y)
+            return Complex{Float64}(copysign(0.0, x), copysign(Float64(pi) / 2, y))
+        end
+        return Complex{Float64}(real(inv(z)), copysign(Float64(pi) / 2, y))
+    end
+    β = copysign(1.0, x)
+    z = z * β
+    x = z.re
+    y = z.im
+    if x == 1.0
+        if y == 0.0
+            ξ = Inf
+            η = y
+        else
+            ξ = log(sqrt(sqrt(muladd(y, y, 4.0))) / sqrt(ay))
+            η = copysign(Float64(pi) / 2 + atan(ay / 2), y) / 2
+        end
+    else  # Normal case
+        ysq = ay^2
+        if x == 0.0
+            ξ = x
+        else
+            ξ = log1p(4 * x / (muladd(1 - x, 1 - x, ysq))) / 4
+        end
+        η = angle(Complex{Float64}((1 - x) * (1 + x) - ysq, 2 * y)) / 2
+    end
+    return β * Complex{Float64}(ξ, η)
 end
 
 # =============================================================================

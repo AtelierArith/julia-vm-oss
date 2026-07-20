@@ -29,3 +29,9 @@ name = "do_block_in_function_body_5227"
 file = "in_function_body_5227.jl"
 expected = true
 description = "do-block trailing closure inside a function body for map/foreach/get!/filter, nested user function, capture, and a top-level regression (Issue #5227)"
+
+[[tests]]
+name = "do_block_destructuring_args_8874"
+file = "destructuring_args_8874.jl"
+expected = true
+description = "Do-block tuple destructuring arguments (`do (a, b)`) lower as one tuple parameter with a destructuring prologue (Issue #8874)"

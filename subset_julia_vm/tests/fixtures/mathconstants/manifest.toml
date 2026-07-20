@@ -28,10 +28,22 @@ description = "Mathematical constant precision and relationships (golden ratio, 
 name = "mathconstants_irrational_singletons_5133"
 file = "irrational_singletons_5133.jl"
 expected = true
-description = "Irrational{sym} singleton constants and Float64/Float32/BigFloat conversion (Issue #5133)"
+description = "Irrational{sym} singleton constants, qualified/unqualified pi equality, and Float64/Float32/BigFloat conversion (Issues #5133/#9670)"
 
 [[tests]]
 name = "mathconstants_irrational_display_5656"
 file = "irrational_display_5656.jl"
 expected = true
 description = "Irrational singletons π/ℯ display as their symbol name across print/string/show/repr/interpolation, not Irrational{:π}() (Issue #5656)"
+
+[[tests]]
+name = "mathconstants_irrational_promotion_9341"
+file = "irrational_promotion_9341.jl"
+expected = true
+description = "Irrational promotion parity: promote_type follows the partner's float width, BigInt->BigFloat, pi+im keeps imaginary part, sin(pi)=0.0 (Issue #9341)"
+
+[[tests]]
+name = "mathconstants_irrational_mixed_methods_9412_9384"
+file = "irrational_mixed_methods_9412_9384.jl"
+expected = true
+description = "Mixed Irrational methods: Irrational×Rational ordering terminates without the #5966 promote-fallback recursion (Issue #9412); BigInt×Irrational min/max/promote/minmax widen to BigFloat, not Float64 (Issue #9384)"

@@ -6,9 +6,12 @@
 
 using Test
 
-# Helper that uses intrinsic directly (the workaround pattern)
+# Helper that uses intrinsic directly (the workaround pattern).
+# Use the fully-qualified `Core.Intrinsics.sdiv_int`; the bare `sdiv_int`
+# is only reachable in sjulia (upstream keeps it under Core.Intrinsics)
+# (Issues #10324 / #10237).
 function _safe_div(x::Int64, y::Int64)
-    return sdiv_int(x, y)
+    return Core.Intrinsics.sdiv_int(x, y)
 end
 
 @testset "Parametric function dispatch (Issue #2388)" begin

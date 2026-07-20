@@ -65,8 +65,10 @@ fn test_analyze_struct_type_expr_uses_static_projection_issue_5916() {
     let engine = TypeInferenceEngine::new();
     let span = test_span();
     let struct_def = StructDef {
+        global_new_helpers: Vec::new(),
         name: "AotTypeExprProbe5916".to_string(),
         is_mutable: false,
+        is_base_origin: false,
         type_params: vec![],
         parent_type: None,
         fields: vec![
@@ -171,9 +173,12 @@ fn test_join_types() {
         StaticType::Any
     );
 
-    // Non-numeric types create a union
-    let joined = engine.join_types(&StaticType::Str, &StaticType::Bool);
-    assert!(matches!(joined, StaticType::Union { .. }));
+    // Julia's nominal typejoin(String, Bool) is Any. The shared CoreType
+    // lattice owns that decision; AoT projects the result dynamically.
+    assert_eq!(
+        engine.join_types(&StaticType::Str, &StaticType::Bool),
+        StaticType::Any
+    );
 }
 
 #[test]
@@ -289,7 +294,13 @@ fn test_numeric_promote_preserves_struct_with_numeric() {
         type_id: 0,
         name: "Complex".to_string(),
     };
-    assert_eq!(engine.numeric_promote(&complex, &StaticType::F64), complex);
+    assert_eq!(
+        engine.numeric_promote(&complex, &StaticType::F64),
+        StaticType::Struct {
+            type_id: 0,
+            name: "Complex{Float64}".to_string(),
+        }
+    );
 }
 
 #[test]
@@ -350,6 +361,38 @@ fn float32_type_preservation_issue_6941() {
     assert_eq!(
         engine.binop_result_type_static(&AotBinOp::Add, &StaticType::F32, &StaticType::I64),
         StaticType::F32
+    );
+}
+
+#[test]
+fn test_bare_complex_numeric_promotion_preserves_concrete_param_issue_8795() {
+    let engine = TypeInferenceEngine::new();
+    let complex = StaticType::Struct {
+        type_id: 0,
+        name: "Complex".to_string(),
+    };
+    let complexf64 = StaticType::Struct {
+        type_id: 0,
+        name: "Complex{Float64}".to_string(),
+    };
+
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Mul, &StaticType::F64, &complex),
+        complexf64
+    );
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Add, &complex, &StaticType::F64),
+        StaticType::Struct {
+            type_id: 0,
+            name: "Complex{Float64}".to_string(),
+        }
+    );
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Add, &complexf64, &complex),
+        StaticType::Struct {
+            type_id: 0,
+            name: "Complex{Float64}".to_string(),
+        }
     );
 }
 
@@ -431,7 +474,7 @@ fn test_infer_expr_comparison() {
 
     let expr = Expr::BinaryOp {
         op: BinaryOp::Gt,
-        left: Box::new(Expr::Var("x".to_string(), test_span())),
+        left: Box::new(Expr::Var("x".to_string().into(), test_span())),
         right: Box::new(Expr::Literal(Literal::Int(0), test_span())),
         span: test_span(),
     };
@@ -494,7 +537,7 @@ fn test_infer_expr_ternary() {
     engine.env.insert("cond".to_string(), StaticType::Bool);
 
     let expr = Expr::Ternary {
-        condition: Box::new(Expr::Var("cond".to_string(), test_span())),
+        condition: Box::new(Expr::Var("cond".to_string().into(), test_span())),
         then_expr: Box::new(Expr::Literal(Literal::Int(1), test_span())),
         else_expr: Box::new(Expr::Literal(Literal::Float(2.0), test_span())),
         span: test_span(),
@@ -515,7 +558,7 @@ fn test_infer_expr_unary_neg() {
 
     let expr = Expr::UnaryOp {
         op: UnaryOp::Neg,
-        operand: Box::new(Expr::Var("x".to_string(), test_span())),
+        operand: Box::new(Expr::Var("x".to_string().into(), test_span())),
         span: test_span(),
     };
     assert_eq!(engine.infer_expr_type(&expr), StaticType::I64);
@@ -529,7 +572,7 @@ fn test_infer_expr_unary_not() {
 
     let expr = Expr::UnaryOp {
         op: UnaryOp::Not,
-        operand: Box::new(Expr::Var("x".to_string(), test_span())),
+        operand: Box::new(Expr::Var("x".to_string().into(), test_span())),
         span: test_span(),
     };
     assert_eq!(engine.infer_expr_type(&expr), StaticType::Bool);
@@ -588,7 +631,7 @@ fn test_infer_expr_index() {
     );
 
     let expr = Expr::Index {
-        array: Box::new(Expr::Var("arr".to_string(), test_span())),
+        array: Box::new(Expr::Var("arr".to_string().into(), test_span())),
         indices: vec![Expr::Literal(Literal::Int(1), test_span())],
         span: test_span(),
     };
@@ -600,7 +643,7 @@ fn test_infer_expr_call_builtin() {
     // Test: sqrt(4.0) → F64
     let engine = TypeInferenceEngine::new();
     let expr = Expr::Call {
-        function: "sqrt".to_string(),
+        function: "sqrt".to_string().into(),
         args: vec![Expr::Literal(Literal::Float(4.0), test_span())],
         kwargs: vec![],
         splat_mask: vec![],
@@ -614,7 +657,7 @@ fn test_infer_expr_call_builtin() {
 fn typeof_infers_datatype_issue_6973() {
     let engine = TypeInferenceEngine::new();
     let expr = Expr::Call {
-        function: "typeof".to_string(),
+        function: "typeof".to_string().into(),
         args: vec![Expr::Literal(Literal::Int(1), test_span())],
         kwargs: vec![],
         splat_mask: vec![],
@@ -629,9 +672,9 @@ fn zeros_ones_type_argument_sets_element_type_issue_7069() {
     let engine = TypeInferenceEngine::new();
 
     let zeros_expr = Expr::Call {
-        function: "zeros".to_string(),
+        function: "zeros".to_string().into(),
         args: vec![
-            Expr::Var("Int64".to_string(), test_span()),
+            Expr::Var("Int64".to_string().into(), test_span()),
             Expr::Literal(Literal::Int(3), test_span()),
         ],
         kwargs: vec![],
@@ -648,9 +691,9 @@ fn zeros_ones_type_argument_sets_element_type_issue_7069() {
     );
 
     let ones_expr = Expr::Call {
-        function: "ones".to_string(),
+        function: "ones".to_string().into(),
         args: vec![
-            Expr::Var("Bool".to_string(), test_span()),
+            Expr::Var("Bool".to_string().into(), test_span()),
             Expr::Literal(Literal::Int(2), test_span()),
             Expr::Literal(Literal::Int(3), test_span()),
         ],
@@ -672,13 +715,13 @@ fn zeros_ones_type_argument_sets_element_type_issue_7069() {
 fn test_infer_expr_call_with_kwargs_dispatches_by_all_args() {
     let engine = TypeInferenceEngine::new();
     let expr = Expr::Call {
-        function: "range".to_string(),
+        function: "range".to_string().into(),
         args: vec![
             Expr::Literal(Literal::Float(-2.0), test_span()),
             Expr::Literal(Literal::Float(1.0), test_span()),
         ],
         kwargs: vec![(
-            "length".to_string(),
+            "length".to_string().into(),
             Expr::Literal(Literal::Int(50), test_span()),
         )],
         splat_mask: vec![false, false],
@@ -704,7 +747,7 @@ fn test_infer_expr_convert_any() {
     // This is important because lowering wraps return values in convert(Any, value)
     let engine = TypeInferenceEngine::new();
     let inner_expr = Expr::Call {
-        function: "sqrt".to_string(),
+        function: "sqrt".to_string().into(),
         args: vec![Expr::Literal(Literal::Float(4.0), test_span())],
         kwargs: vec![],
         splat_mask: vec![],
@@ -712,8 +755,8 @@ fn test_infer_expr_convert_any() {
         span: test_span(),
     };
     let expr = Expr::Call {
-        function: "convert".to_string(),
-        args: vec![Expr::Var("Any".to_string(), test_span()), inner_expr],
+        function: "convert".to_string().into(),
+        args: vec![Expr::Var("Any".to_string().into(), test_span()), inner_expr],
         kwargs: vec![],
         splat_mask: vec![false, false],
         kwargs_splat_mask: vec![],
@@ -780,7 +823,7 @@ fn test_infer_iterator_element_type_array() {
         },
     );
 
-    let expr = Expr::Var("arr".to_string(), test_span());
+    let expr = Expr::Var("arr".to_string().into(), test_span());
     assert_eq!(engine.infer_iterator_element_type(&expr), StaticType::I64);
 }
 
@@ -801,7 +844,7 @@ fn test_infer_iterator_element_type_string() {
     let mut engine = TypeInferenceEngine::new();
     engine.env.insert("s".to_string(), StaticType::Str);
 
-    let expr = Expr::Var("s".to_string(), test_span());
+    let expr = Expr::Var("s".to_string().into(), test_span());
     assert_eq!(engine.infer_iterator_element_type(&expr), StaticType::Char);
 }
 
@@ -856,21 +899,15 @@ fn test_unify_types() {
         StaticType::F64
     );
 
-    // Non-numeric structural joins go through CoreType, so equal-length tuples
-    // join element-wise instead of falling back to a union of whole tuple types.
+    // Non-numeric structural joins go through CoreType. Julia computes
+    // Tuple{Real, Any}; StaticType has no abstract carriers, so those members
+    // widen to Any without losing the enclosing tuple shape (Issue #10865).
     assert_eq!(
         engine.unify_types(
             &StaticType::Tuple(vec![StaticType::I64, StaticType::Str]),
             &StaticType::Tuple(vec![StaticType::F64, StaticType::Char])
         ),
-        StaticType::Tuple(vec![
-            StaticType::Union {
-                variants: vec![StaticType::I64, StaticType::F64]
-            },
-            StaticType::Union {
-                variants: vec![StaticType::Str, StaticType::Char]
-            },
-        ])
+        StaticType::Tuple(vec![StaticType::Any, StaticType::Any])
     );
 
     // Any is absorbing: unify(Any, T) = Any (Issue #3461)
@@ -888,10 +925,13 @@ fn test_unify_types() {
 fn test_numeric_promote_bool() {
     let engine = TypeInferenceEngine::new();
 
-    // Bool promotes to Int64 in arithmetic
+    // `numeric_promote` is the pure promotion of the operand *types*: Julia's
+    // `promote(true, true) === (true, true)` keeps `Bool` (Issue #9351). The
+    // op-specific `true + true === 2::Int64` rule lives in `binop_result_type`,
+    // exercised by `test_binop_result_type_with_bool`.
     assert_eq!(
         engine.numeric_promote(&StaticType::Bool, &StaticType::Bool),
-        StaticType::I64
+        StaticType::Bool
     );
     assert_eq!(
         engine.numeric_promote(&StaticType::Bool, &StaticType::I64),
@@ -917,10 +957,11 @@ fn test_numeric_promote_bool() {
 fn test_numeric_promote_unsigned() {
     let engine = TypeInferenceEngine::new();
 
-    // Unsigned integers promote correctly
+    // Same-type narrow unsigned integers preserve their type, matching upstream
+    // Julia (`UInt8(1) + UInt8(2) === UInt8(3)`) and the VM runtime (Issue #9351).
     assert_eq!(
         engine.numeric_promote(&StaticType::U8, &StaticType::U8),
-        StaticType::I64 // Small integers promote to I64 for safety
+        StaticType::U8
     );
     assert_eq!(
         engine.numeric_promote(&StaticType::U64, &StaticType::I64),
@@ -1019,6 +1060,78 @@ fn test_binop_result_type_with_bool() {
     );
 }
 
+/// Issue #9351: the AoT inference engine must preserve upstream narrow-int
+/// result kinds (no force-widen of `Bool`/`≤UInt32` to `Int64`), converging
+/// onto the same `promote_type` path used by the VM runtime and compiler.
+/// Ground truth verified against upstream `julia` 1.12 and the sjulia VM:
+///   Int8+Int8→Int8, Int8+Int16→Int16, Int8+UInt8→UInt8,
+///   true+true→Int64, true-true→Int64, true*true→Bool.
+#[test]
+fn test_aot_narrow_int_promotion_parity_issue_9351() {
+    let engine = TypeInferenceEngine::new();
+    use crate::ir::core::BinaryOp;
+
+    // Same-type and mixed narrow integers keep the promoted narrow kind.
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::I8, &StaticType::I8),
+        StaticType::I8
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Mul, &StaticType::I8, &StaticType::I8),
+        StaticType::I8
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::I8, &StaticType::I16),
+        StaticType::I16
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Sub, &StaticType::I16, &StaticType::I8),
+        StaticType::I16
+    );
+    // Same width: unsigned wins (Julia `Int8 + UInt8 === UInt8`).
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::I8, &StaticType::U8),
+        StaticType::U8
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::U16, &StaticType::U16),
+        StaticType::U16
+    );
+    // Bool mixed with a narrow int promotes to that narrow int's type.
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::Bool, &StaticType::I8),
+        StaticType::I8
+    );
+
+    // Bool `+`/`-` widen to Int64, but `*` stays Bool (`*` is `&`).
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Add, &StaticType::Bool, &StaticType::Bool),
+        StaticType::I64
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Sub, &StaticType::Bool, &StaticType::Bool),
+        StaticType::I64
+    );
+    assert_eq!(
+        engine.binop_result_type(&BinaryOp::Mul, &StaticType::Bool, &StaticType::Bool),
+        StaticType::Bool
+    );
+
+    // The AotBinOp variant used during multi-arg operator unfolding must agree.
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Add, &StaticType::I8, &StaticType::I8),
+        StaticType::I8
+    );
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Add, &StaticType::Bool, &StaticType::Bool),
+        StaticType::I64
+    );
+    assert_eq!(
+        engine.binop_result_type_static(&AotBinOp::Mul, &StaticType::Bool, &StaticType::Bool),
+        StaticType::Bool
+    );
+}
+
 #[test]
 fn test_integer_type_with_float() {
     let engine = TypeInferenceEngine::new();
@@ -1057,11 +1170,11 @@ fn test_infer_return_type_implicit_with_local_vars() {
 
     // sqrt(6.0 / prob)
     let sqrt_expr = Expr::Call {
-        function: "sqrt".to_string(),
+        function: "sqrt".to_string().into(),
         args: vec![Expr::BinaryOp {
             op: crate::ir::core::BinaryOp::Div,
             left: Box::new(Expr::Literal(Literal::Float(6.0), test_span())),
-            right: Box::new(Expr::Var("prob".to_string(), test_span())),
+            right: Box::new(Expr::Var("prob".to_string().into(), test_span())),
             span: test_span(),
         }],
         kwargs: vec![],
@@ -1072,8 +1185,8 @@ fn test_infer_return_type_implicit_with_local_vars() {
 
     // convert(Any, sqrt(...))
     let convert_expr = Expr::Call {
-        function: "convert".to_string(),
-        args: vec![Expr::Var("Any".to_string(), test_span()), sqrt_expr],
+        function: "convert".to_string().into(),
+        args: vec![Expr::Var("Any".to_string().into(), test_span()), sqrt_expr],
         kwargs: vec![],
         splat_mask: vec![false, false],
         kwargs_splat_mask: vec![],
@@ -1101,7 +1214,7 @@ fn empty_program(functions: Vec<Function>, main: Block) -> Program {
         primitive_types: vec![],
         type_aliases: vec![],
         structs: vec![],
-        functions,
+        functions: functions.into_iter().map(std::sync::Arc::new).collect(),
         base_function_count: 0,
         modules: vec![],
         usings: vec![],
@@ -1113,6 +1226,7 @@ fn empty_program(functions: Vec<Function>, main: Block) -> Program {
 
 fn union_return_function_issue_6939() -> Function {
     Function {
+        new_struct_name: None,
         name: "choose".to_string(),
         params: vec![TypedParam::new(
             "flag".to_string(),
@@ -1124,7 +1238,7 @@ fn union_return_function_issue_6939() -> Function {
         return_type: None,
         body: Block {
             stmts: vec![Stmt::If {
-                condition: Expr::Var("flag".to_string(), test_span()),
+                condition: Expr::Var("flag".to_string().into(), test_span()),
                 then_branch: Block {
                     stmts: vec![Stmt::Return {
                         value: Some(Expr::Literal(Literal::Int(1), test_span())),
@@ -1183,7 +1297,7 @@ fn union_return_static_call_has_no_dynamic_fallback_issue_6939() {
         Block {
             stmts: vec![Stmt::Expr {
                 expr: Expr::Call {
-                    function: "choose".to_string(),
+                    function: "choose".to_string().into(),
                     args: vec![Expr::Literal(Literal::Bool(true), test_span())],
                     kwargs: vec![],
                     splat_mask: vec![false],
@@ -1223,6 +1337,7 @@ fn union_return_static_call_has_no_dynamic_fallback_issue_6939() {
 #[test]
 fn abstract_return_static_call_has_no_dynamic_fallback_issue_6939() {
     let func = Function {
+        new_struct_name: None,
         name: "abstract_real".to_string(),
         params: vec![],
         kwparams: vec![],
@@ -1247,7 +1362,7 @@ fn abstract_return_static_call_has_no_dynamic_fallback_issue_6939() {
             Block {
                 stmts: vec![Stmt::Expr {
                     expr: Expr::Call {
-                        function: "abstract_real".to_string(),
+                        function: "abstract_real".to_string().into(),
                         args: vec![],
                         kwargs: vec![],
                         splat_mask: vec![],
@@ -1272,7 +1387,7 @@ fn abstract_return_static_call_has_no_dynamic_fallback_issue_6939() {
         Block {
             stmts: vec![Stmt::Expr {
                 expr: Expr::Call {
-                    function: "abstract_real".to_string(),
+                    function: "abstract_real".to_string().into(),
                     args: vec![],
                     kwargs: vec![],
                     splat_mask: vec![],
@@ -1310,7 +1425,7 @@ fn test_typed_empty_array_int64() {
     // Test: Int64[] → Array { element: I64, ndims: 1 }
     let engine = TypeInferenceEngine::new();
     let expr = Expr::TypedEmptyArray {
-        element_type: "Int64".to_string(),
+        element_type: "Int64".to_string().into(),
         span: test_span(),
     };
     let ty = engine.infer_expr_type(&expr);
@@ -1330,7 +1445,7 @@ fn test_typed_empty_array_float64() {
     // Test: Float64[] → Array { element: F64, ndims: 1 }
     let engine = TypeInferenceEngine::new();
     let expr = Expr::TypedEmptyArray {
-        element_type: "Float64".to_string(),
+        element_type: "Float64".to_string().into(),
         span: test_span(),
     };
     let ty = engine.infer_expr_type(&expr);
@@ -1350,7 +1465,7 @@ fn test_typed_empty_array_bool() {
     // Test: Bool[] → Array { element: Bool, ndims: 1 }
     let engine = TypeInferenceEngine::new();
     let expr = Expr::TypedEmptyArray {
-        element_type: "Bool".to_string(),
+        element_type: "Bool".to_string().into(),
         span: test_span(),
     };
     let ty = engine.infer_expr_type(&expr);
@@ -1370,7 +1485,7 @@ fn test_typed_empty_array_string() {
     // Test: String[] → Array { element: Str, ndims: 1 }
     let engine = TypeInferenceEngine::new();
     let expr = Expr::TypedEmptyArray {
-        element_type: "String".to_string(),
+        element_type: "String".to_string().into(),
         span: test_span(),
     };
     let ty = engine.infer_expr_type(&expr);
@@ -1390,7 +1505,7 @@ fn test_typed_empty_array_int_alias() {
     // Test: Int[] → Array { element: I64, ndims: 1 } (Int is alias for Int64)
     let engine = TypeInferenceEngine::new();
     let expr = Expr::TypedEmptyArray {
-        element_type: "Int".to_string(),
+        element_type: "Int".to_string().into(),
         span: test_span(),
     };
     let ty = engine.infer_expr_type(&expr);
@@ -1424,6 +1539,7 @@ fn test_call_site_array_specialization_single_type() {
 
     // Create a function with untyped parameter
     let func = Function {
+        new_struct_name: None,
         name: "array_sum".to_string(),
         params: vec![crate::ir::core::TypedParam {
             name: "arr".to_string(),
@@ -1465,6 +1581,7 @@ fn explicit_any_parameter_is_not_call_site_specialized_issue_7071() {
         .enqueue(CodeInstanceKey::new("fallback", vec![StaticType::I64]));
 
     let func = Function {
+        new_struct_name: None,
         name: "fallback".to_string(),
         params: vec![crate::ir::core::TypedParam {
             name: "x".to_string(),
@@ -1513,6 +1630,7 @@ fn test_call_site_array_specialization_multiple_numeric_types() {
 
     // Create a function with untyped parameter
     let func = Function {
+        new_struct_name: None,
         name: "process_array".to_string(),
         params: vec![crate::ir::core::TypedParam {
             name: "arr".to_string(),
@@ -1612,10 +1730,10 @@ fn convert_call_inference_uses_type_name_not_constructor_function_issue_7495() {
     let span = crate::span::Span::new(0, 0, 1, 1, 1, 1);
 
     let convert_int = Expr::Call {
-        function: "convert".to_string(),
+        function: "convert".to_string().into(),
         args: vec![
-            Expr::Var("Int64".to_string(), span),
-            Expr::Var("x".to_string(), span),
+            Expr::Var("Int64".to_string().into(), span),
+            Expr::Var("x".to_string().into(), span),
         ],
         kwargs: vec![],
         splat_mask: vec![false, false],
@@ -1625,10 +1743,10 @@ fn convert_call_inference_uses_type_name_not_constructor_function_issue_7495() {
     assert_eq!(engine.infer_expr_type(&convert_int), StaticType::I64);
 
     let convert_any = Expr::Call {
-        function: "convert".to_string(),
+        function: "convert".to_string().into(),
         args: vec![
-            Expr::Var("Any".to_string(), span),
-            Expr::Var("x".to_string(), span),
+            Expr::Var("Any".to_string().into(), span),
+            Expr::Var("x".to_string().into(), span),
         ],
         kwargs: vec![],
         splat_mask: vec![false, false],
@@ -1645,9 +1763,9 @@ fn operator_call_inference_types_collatz_condition_issue_7504() {
     let span = crate::span::Span::new(0, 0, 1, 1, 1, 1);
 
     let modulo = Expr::Call {
-        function: "%".to_string(),
+        function: "%".to_string().into(),
         args: vec![
-            Expr::Var("n".to_string(), span),
+            Expr::Var("n".to_string().into(), span),
             Expr::Literal(Literal::Int(2), span),
         ],
         kwargs: vec![],
@@ -1658,7 +1776,7 @@ fn operator_call_inference_types_collatz_condition_issue_7504() {
     assert_eq!(engine.infer_expr_type(&modulo), StaticType::I64);
 
     let condition = Expr::Call {
-        function: "==".to_string(),
+        function: "==".to_string().into(),
         args: vec![modulo, Expr::Literal(Literal::Int(0), span)],
         kwargs: vec![],
         splat_mask: vec![false, false],
@@ -1668,9 +1786,9 @@ fn operator_call_inference_types_collatz_condition_issue_7504() {
     assert_eq!(engine.infer_expr_type(&condition), StaticType::Bool);
 
     let int_div = Expr::Call {
-        function: "div".to_string(),
+        function: "div".to_string().into(),
         args: vec![
-            Expr::Var("n".to_string(), span),
+            Expr::Var("n".to_string().into(), span),
             Expr::Literal(Literal::Int(2), span),
         ],
         kwargs: vec![],
@@ -1711,6 +1829,8 @@ end
 
     let mut parser = crate::parser::Parser::new().expect("parser");
     let outcome = parser.parse(src).expect("parse");
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    crate::macro_runtime::install();
     let mut lowering = crate::lowering::Lowering::new(src);
     let program = lowering.lower(outcome).expect("lower");
     let mut engine = TypeInferenceEngine::new();
@@ -1726,7 +1846,7 @@ end
         sig.param_types[0],
         StaticType::Struct {
             type_id: 0,
-            name: "Complex".to_string()
+            name: "Complex{Float64}".to_string()
         },
         "call sites: {:?}",
         engine
@@ -1751,6 +1871,8 @@ caller(41)
 
     let mut parser = crate::parser::Parser::new().expect("parser");
     let outcome = parser.parse(src).expect("parse");
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    crate::macro_runtime::install();
     let mut lowering = crate::lowering::Lowering::new(src);
     let program = lowering.lower(outcome).expect("lower");
 
@@ -1870,6 +1992,8 @@ end
 "#;
     let mut parser = crate::parser::Parser::new().expect("parser");
     let outcome = parser.parse(src).expect("parse");
+    // Macro expansion seam (Issue #8656): idempotent install of the VM-backed expander.
+    crate::macro_runtime::install();
     let mut lowering = crate::lowering::Lowering::new(src);
     let program = lowering.lower(outcome).expect("lower");
     let mut engine = TypeInferenceEngine::new();

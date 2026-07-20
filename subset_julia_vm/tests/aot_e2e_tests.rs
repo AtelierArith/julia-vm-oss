@@ -8,26 +8,32 @@
 use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
-use subset_julia_vm::aot::analyze::program_to_aot_ir;
+use subset_julia_vm::aot::analyze::{program_to_aot_ir, reverse_generator_lifts_in_program};
 use subset_julia_vm::aot::call_graph::CallGraph;
 use subset_julia_vm::aot::codegen::aot_codegen::AotCodeGenerator;
 use subset_julia_vm::aot::codegen::{CAbiExport, CodegenConfig};
 use subset_julia_vm::aot::inference::TypeInferenceEngine;
 use subset_julia_vm::aot::optimizer::optimize_aot_program_full;
 use subset_julia_vm::aot::types::StaticType;
+use subset_julia_vm::aot::{compile_program, CompileConfig};
 use subset_julia_vm::base;
-use subset_julia_vm::ir::core::{Block, Expr, Program, Stmt};
+use subset_julia_vm::ir::core::{Block, Expr, LocalDeclKind, Program, Stmt};
 use subset_julia_vm::lowering::Lowering;
 use subset_julia_vm::parser::Parser;
 use subset_julia_vm::span::Span;
 
-/// Helper function to compile Julia source to Rust code
-fn compile_to_rust(source: &str) -> Result<String, String> {
-    // Parse source
+fn lower_for_aot(source: &str) -> Result<Program, String> {
     let mut parser = Parser::new().map_err(|e| format!("Parser error: {:?}", e))?;
     let outcome = parser
         .parse(source)
         .map_err(|e| format!("Parse error: {:?}", e))?;
+
+    // Macro expansion seam (Issue #9178): idempotent install of the VM-backed
+    // expander and Base/stdlib macro registry, mirroring the CLI `build_program`
+    // path (subset_julia_vm/src/bin/aot.rs). Without this, Base-prelude macros
+    // (`@time`, `@elapsed`, …) do not resolve during lowering and the user source
+    // fails with `unknown macro @time`.
+    subset_julia_vm::macro_runtime::install();
 
     // Lower to Core IR
     let mut lowering = Lowering::new(source);
@@ -35,6 +41,16 @@ fn compile_to_rust(source: &str) -> Result<String, String> {
         .lower(outcome)
         .map_err(|e| format!("Lowering error: {:?}", e))?;
     localize_main_block(&mut program);
+
+    // Reverse the #9103 generator-body lift before inference (Issue #9179),
+    // mirroring the CLI `prepare_aot_program` pipeline.
+    reverse_generator_lifts_in_program(&mut program);
+    Ok(program)
+}
+
+/// Helper function to compile Julia source to Rust code
+fn compile_to_rust(source: &str) -> Result<String, String> {
+    let program = lower_for_aot(source)?;
 
     // Type inference
     let mut type_engine = TypeInferenceEngine::new();
@@ -63,11 +79,17 @@ fn compile_to_rust_with_c_abi_exports(
         .parse(source)
         .map_err(|e| format!("Parse error: {:?}", e))?;
 
+    // Macro expansion seam (Issue #9178): see `compile_to_rust`.
+    subset_julia_vm::macro_runtime::install();
+
     let mut lowering = Lowering::new(source);
     let mut program = lowering
         .lower(outcome)
         .map_err(|e| format!("Lowering error: {:?}", e))?;
     localize_main_block(&mut program);
+
+    // Reverse the #9103 generator-body lift before inference (Issue #9179).
+    reverse_generator_lifts_in_program(&mut program);
 
     let mut type_engine = TypeInferenceEngine::new();
     let typed_program = type_engine
@@ -91,6 +113,12 @@ fn compile_to_rust_with_c_abi_exports(
 fn compile_to_rust_with_base_optimized(source: &str) -> Result<String, String> {
     let mut parser = Parser::new().map_err(|e| format!("Parser error: {:?}", e))?;
 
+    // Macro expansion seam (Issue #9178): idempotent install of the VM-backed
+    // expander and Base/stdlib macro registry, mirroring the CLI `build_program`
+    // path so Base-prelude macros (`@time`, `@elapsed`, …) resolve while lowering
+    // the user source.
+    subset_julia_vm::macro_runtime::install();
+
     let prelude_src = base::get_aot_prelude();
     let prelude_outcome = parser
         .parse(&prelude_src)
@@ -112,7 +140,11 @@ fn compile_to_rust_with_base_optimized(source: &str) -> Result<String, String> {
     merge_prelude_program(&mut program, prelude_program);
 
     let call_graph = CallGraph::from_program(&program);
-    let program = call_graph.filter_program(&program);
+    let mut program = call_graph.filter_program(&program);
+
+    // Reverse the #9103 generator-body lift before inference (Issue #9179),
+    // mirroring the CLI `prepare_aot_program` pipeline.
+    reverse_generator_lifts_in_program(&mut program);
 
     let mut type_engine = TypeInferenceEngine::new();
     let typed_program = type_engine
@@ -129,11 +161,46 @@ fn compile_to_rust_with_base_optimized(source: &str) -> Result<String, String> {
         .map_err(|e| format!("Codegen error: {:?}", e))
 }
 
-/// Like [`assert_generated_rust_checks_with_warnings_denied`] but without
-/// `-D warnings`, so it fails on hard compile *errors* only (not lint
-/// warnings). Use to isolate a codegen bug that produces ill-formed Rust from
-/// unrelated lint warts in the same generated program.
-fn assert_generated_rust_compiles(rust_code: &str, crate_name: &str) {
+/// Helper matching the public `juliars` compiler pipeline after parsing and
+/// prelude merge. Use this for regressions where the canonical AoT pass sequence
+/// matters, not just raw AoT IR conversion/codegen.
+fn compile_to_rust_with_base_canonical(source: &str) -> Result<String, String> {
+    let mut parser = Parser::new().map_err(|e| format!("Parser error: {:?}", e))?;
+
+    subset_julia_vm::macro_runtime::install();
+
+    let prelude_src = base::get_prelude();
+    let prelude_outcome = parser
+        .parse(&prelude_src)
+        .map_err(|e| format!("Prelude parse error: {:?}", e))?;
+    let mut prelude_lowering = Lowering::new(&prelude_src);
+    let prelude_program = prelude_lowering
+        .lower(prelude_outcome)
+        .map_err(|e| format!("Prelude lowering error: {:?}", e))?;
+
+    let outcome = parser
+        .parse(source)
+        .map_err(|e| format!("Parse error: {:?}", e))?;
+    let mut lowering = Lowering::new(source);
+    let mut program = lowering
+        .lower(outcome)
+        .map_err(|e| format!("Lowering error: {:?}", e))?;
+    localize_main_block(&mut program);
+    merge_prelude_program(&mut program, prelude_program);
+
+    let call_graph = CallGraph::from_program(&program);
+    let program = call_graph.filter_program(&program);
+
+    compile_program(program, &CompileConfig::default())
+        .map(|result| result.output.rust_code)
+        .map_err(|e| format!("Canonical AoT compile error: {:?}", e))
+}
+
+fn check_generated_rust(
+    rust_code: &str,
+    crate_name: &str,
+    deny_warnings: bool,
+) -> std::process::Output {
     let dir = tempfile::tempdir().expect("create generated Rust temp dir");
     let src_dir = dir.path().join("src");
     fs::create_dir_all(&src_dir).expect("create generated Rust src dir");
@@ -158,13 +225,26 @@ subset_julia_vm_runtime = {{ path = "{}" }}
     fs::write(&manifest_path, manifest).expect("write generated Cargo.toml");
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = Command::new(cargo)
+    let mut command = Command::new(cargo);
+    command
         .arg("check")
         .arg("--manifest-path")
         .arg(&manifest_path)
-        .env("CARGO_TARGET_DIR", dir.path().join("target"))
+        .env("CARGO_TARGET_DIR", dir.path().join("target"));
+    if deny_warnings {
+        command.env("RUSTFLAGS", "-Dwarnings");
+    }
+    command
         .output()
-        .expect("run cargo check for generated Rust");
+        .expect("run cargo check for generated Rust")
+}
+
+/// Like [`assert_generated_rust_checks_with_warnings_denied`] but without
+/// `-D warnings`, so it fails on hard compile *errors* only (not lint
+/// warnings). Use to isolate a codegen bug that produces ill-formed Rust from
+/// unrelated lint warts in the same generated program.
+fn assert_generated_rust_compiles(rust_code: &str, crate_name: &str) {
+    let output = check_generated_rust(rust_code, crate_name, false);
 
     assert!(
         output.status.success(),
@@ -176,38 +256,7 @@ subset_julia_vm_runtime = {{ path = "{}" }}
 }
 
 fn assert_generated_rust_checks_with_warnings_denied(rust_code: &str, crate_name: &str) {
-    let dir = tempfile::tempdir().expect("create generated Rust temp dir");
-    let src_dir = dir.path().join("src");
-    fs::create_dir_all(&src_dir).expect("create generated Rust src dir");
-    fs::write(src_dir.join("main.rs"), rust_code).expect("write generated main.rs");
-
-    let runtime_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("workspace root")
-        .join("subset_julia_vm_runtime");
-    let manifest = format!(
-        r#"[package]
-name = "{crate_name}"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-subset_julia_vm_runtime = {{ path = "{}" }}
-"#,
-        runtime_path.display()
-    );
-    let manifest_path = dir.path().join("Cargo.toml");
-    fs::write(&manifest_path, manifest).expect("write generated Cargo.toml");
-
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = Command::new(cargo)
-        .arg("check")
-        .arg("--manifest-path")
-        .arg(&manifest_path)
-        .env("CARGO_TARGET_DIR", dir.path().join("target"))
-        .env("RUSTFLAGS", "-Dwarnings")
-        .output()
-        .expect("run cargo check for generated Rust");
+    let output = check_generated_rust(rust_code, crate_name, true);
 
     assert!(
         output.status.success(),
@@ -233,6 +282,142 @@ fn localize_main_block(program: &mut Program) {
         },
         span,
     });
+}
+
+#[test]
+fn test_aot_binding_provenance_matrix_11317() {
+    #[derive(Clone, Copy)]
+    struct DeclExpectation {
+        name_prefix: &'static str,
+        kind: LocalDeclKind,
+    }
+
+    struct ProvenanceCase {
+        name: &'static str,
+        source: &'static str,
+        expected_stdout: Option<&'static str>,
+        expected_slot: Option<&'static str>,
+        decl: DeclExpectation,
+    }
+
+    fn collect_expr_decls<'a>(expr: &'a Expr, decls: &mut Vec<(&'a str, LocalDeclKind)>) {
+        if let Expr::LetBlock { body, .. } = expr {
+            collect_block_decls(body, decls);
+        }
+    }
+
+    fn collect_block_decls<'a>(block: &'a Block, decls: &mut Vec<(&'a str, LocalDeclKind)>) {
+        for stmt in &block.stmts {
+            match stmt {
+                Stmt::LocalDecl { var, kind, .. } => decls.push((var, *kind)),
+                Stmt::Block(body)
+                | Stmt::For { body, .. }
+                | Stmt::ForEach { body, .. }
+                | Stmt::ForEachTuple { body, .. }
+                | Stmt::While { body, .. }
+                | Stmt::Timed { body, .. }
+                | Stmt::TestSet { body, .. } => collect_block_decls(body, decls),
+                Stmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    collect_block_decls(then_branch, decls);
+                    if let Some(branch) = else_branch {
+                        collect_block_decls(branch, decls);
+                    }
+                }
+                Stmt::Try {
+                    try_block,
+                    catch_block,
+                    else_block,
+                    finally_block,
+                    ..
+                } => {
+                    collect_block_decls(try_block, decls);
+                    for branch in [catch_block, else_block, finally_block]
+                        .into_iter()
+                        .flatten()
+                    {
+                        collect_block_decls(branch, decls);
+                    }
+                }
+                Stmt::Assign { value, .. }
+                | Stmt::AddAssign { value, .. }
+                | Stmt::Expr { expr: value, .. } => collect_expr_decls(value, decls),
+                Stmt::Return {
+                    value: Some(value), ..
+                } => collect_expr_decls(value, decls),
+                _ => {}
+            }
+        }
+    }
+
+    let cases = [
+        ProvenanceCase {
+            name: "aot_binding_provenance_typed_11317",
+            source: "function typed_11317()\n    total = 0\n    for i in 1:3\n        local step = i\n        total += step\n    end\n    println(total)\nend\ntyped_11317()",
+            expected_stdout: Some("6"),
+            expected_slot: Some("let mut step: i64"),
+            decl: DeclExpectation {
+                name_prefix: "step",
+                kind: LocalDeclKind::Explicit,
+            },
+        },
+        ProvenanceCase {
+            name: "aot_binding_provenance_compiler_enclosing_11317",
+            source: "function enclosing_11317(flag::Bool)\n    value = begin\n        if flag\n            8\n        else\n            9\n        end\n    end\n    println(value)\nend\nenclosing_11317(true)",
+            // The provenance consumer is the Core IR -> AoT IR conversion below.
+            // Downstream codegen for this valid Any -> Int64 let-result shape is
+            // tracked separately by Issue #11352.
+            expected_stdout: None,
+            expected_slot: None,
+            decl: DeclExpectation {
+                name_prefix: "__sjvm_if_result_",
+                kind: LocalDeclKind::CompilerEnclosing,
+            },
+        },
+    ];
+
+    for case in cases {
+        let program = lower_for_aot(case.source)
+            .unwrap_or_else(|error| panic!("{} failed to lower: {error}", case.name));
+        let mut decls = Vec::new();
+        for function in &program.functions {
+            collect_block_decls(&function.body, &mut decls);
+        }
+        assert!(
+            decls.iter().any(|(name, kind)| {
+                name.starts_with(case.decl.name_prefix) && *kind == case.decl.kind
+            }),
+            "{} missing {:?} declaration with prefix `{}`: {decls:?}",
+            case.name,
+            case.decl.kind,
+            case.decl.name_prefix
+        );
+
+        let mut type_engine = TypeInferenceEngine::new();
+        let typed_program = type_engine
+            .analyze_program(&program)
+            .unwrap_or_else(|error| panic!("{} failed inference: {error}", case.name));
+        program_to_aot_ir(&program, &typed_program)
+            .unwrap_or_else(|error| panic!("{} failed AoT IR conversion: {error}", case.name));
+
+        if let (Some(expected_slot), Some(expected_stdout)) =
+            (case.expected_slot, case.expected_stdout)
+        {
+            let rust_code = compile_to_rust(case.source)
+                .unwrap_or_else(|error| panic!("{} failed to compile: {error}", case.name));
+            assert!(
+                rust_code.contains(expected_slot),
+                "{} must preserve its expected local representation `{}`:\n{}",
+                case.name,
+                expected_slot,
+                rust_code
+            );
+            assert_generated_rust_runs_with_stdout(&rust_code, case.name, expected_stdout);
+        }
+    }
 }
 
 fn nonzero_span(span: Span) -> Span {
@@ -273,7 +458,9 @@ fn merge_prelude_program(program: &mut Program, prelude_program: Program) {
         .into_iter()
         .filter(|f| !user_func_names.contains(f.name.as_str()))
         .map(|mut f| {
-            f.is_base_extension = true;
+            // `prelude_program` was just lowered above, so each Arc here is
+            // uniquely owned (refcount 1) — `make_mut` never clones.
+            std::sync::Arc::make_mut(&mut f).is_base_extension = true;
             f
         })
         .collect();
@@ -546,6 +733,35 @@ println(x)
 }
 
 #[test]
+fn test_aot_e2e_nested_assignment_materializes_every_store_11310() {
+    let plain = compile_to_rust("result = (x = 42)\nprintln(result + x)\n")
+        .expect("plain nested assignment should compile");
+    assert!(plain.contains("let mut x: i64 = 42i64;"), "{plain}");
+    assert!(plain.contains("let mut result: i64 = x;"), "{plain}");
+
+    let timed_chain = compile_to_rust("@time a = (b = 42)\nprintln(a + b)\n")
+        .expect("timed chained assignment should compile");
+    assert!(
+        timed_chain.contains("let mut b: i64 = 42i64;"),
+        "{timed_chain}"
+    );
+    assert!(timed_chain.contains("let mut a: i64 = b;"), "{timed_chain}");
+
+    let assigned_time = compile_to_rust("y = @time x = 42\nprintln(y + x)\n")
+        .expect("assigned @time expression should compile");
+    assert!(
+        assigned_time.contains("let mut x: i64 = 42i64;"),
+        "{assigned_time}"
+    );
+    assert!(
+        assigned_time.lines().any(|line| line
+            .trim_start()
+            .starts_with("let mut y: i64 = result__time_")),
+        "{assigned_time}"
+    );
+}
+
+#[test]
 fn test_aot_time_macro_base_expansion_uses_time_ns_7059() {
     let source = r#"
 @time println(1 + 2)
@@ -636,7 +852,28 @@ println(f(1))
 
 #[test]
 fn test_aot_e2e_mandelbrot_broadcast_codegen_regression() {
-    let source = include_str!("../../examples/mandelbrot.jl");
+    let source = r#"
+function mandelbrot_escape(c::ComplexF64, maxiter::Int64)::Int64
+    z = 0.0 + 0.0im
+    for k in 1:maxiter
+        if abs2(z) > 4.0
+            return k - 1
+        end
+        z = z * z + c
+    end
+    return maxiter
+end
+
+function mandelbrot_grid(width::Int64, height::Int64, maxiter::Int64)
+    xs = range(-2.0, 1.0; length=width)
+    ys = range(1.2, -1.2; length=height)
+    C = xs' .+ im .* ys
+    counts = mandelbrot_escape.(C, maxiter)
+    sum(counts)
+end
+
+println(mandelbrot_grid(50, 40, 50))
+"#;
     let result = compile_to_rust_with_base_optimized(source);
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 
@@ -658,13 +895,19 @@ fn test_aot_e2e_mandelbrot_broadcast_codegen_regression() {
         rust_code
     );
     assert!(
-        !rust_code.contains("-> Value"),
-        "AoT functions should not return concrete range/broadcast values from `Value` signatures, got:\n{}",
+        rust_code.contains("fn op_add_f64_complex") && rust_code.contains("fn op_mul_complex_f64"),
+        "broadcast operator references should have emitted Rust wrappers, got:\n{}",
         rust_code
     );
     assert!(
-        rust_code.contains("fn op_add_f64_complex") && rust_code.contains("fn op_mul_complex_f64"),
-        "broadcast operator references should have emitted Rust wrappers, got:\n{}",
+        rust_code.contains("__aot_broadcast_outer_product(op_add_f64_complex,")
+            && !rust_code.contains("op_add_f64_complex_float64_"),
+        "broadcast operator references should use emitted ComplexF64 wrappers, got:\n{}",
+        rust_code
+    );
+    assert!(
+        rust_code.contains("if let Some(x) = value.as_f64() { return x * x; }"),
+        "boxed abs2 should handle real Value inputs before Complex-only fallback, got:\n{}",
         rust_code
     );
     assert!(
@@ -676,6 +919,25 @@ fn test_aot_e2e_mandelbrot_broadcast_codegen_regression() {
         "broadcast materialization should lower to AoT helpers without generic Base calls, got:\n{}",
         rust_code
     );
+
+    assert_generated_rust_compiles(&rust_code, "aot_mandelbrot_broadcast_8790");
+}
+
+#[test]
+fn test_aot_e2e_matrix_sum_column_major_order_8790() {
+    let source = r#"
+A = [1.0e100 1.0; -1.0e100 2.0]
+println(sum(A) == 3.0)
+"#;
+    let rust_code = compile_to_rust_with_base_optimized(source).expect("matrix sum should compile");
+
+    assert!(
+        rust_code.contains("__sjulia_sum_arr[__sjulia_i0][__sjulia_i1].clone()")
+            && !rust_code.contains(".flatten().cloned().sum"),
+        "sum(matrix) should iterate in Julia column-major order, got:\n{}",
+        rust_code
+    );
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_matrix_sum_column_major_8790", "true");
 }
 
 #[test]
@@ -1628,6 +1890,46 @@ only_string(1)
         err.contains("no method matching only_string(::Int64)"),
         "unexpected no-method diagnostic: {err}"
     );
+}
+
+#[test]
+fn test_aot_complexf64_annotation_matches_im_arithmetic_result_issue_8795() {
+    let source = r#"
+function f(c::ComplexF64)::Float64
+    abs2(c)
+end
+
+f(1.0 + 2.0im)
+"#;
+    let result = compile_to_rust(source);
+    assert!(
+        result.is_ok(),
+        "ComplexF64 annotation should match the inferred im-arithmetic Complex result: {:?}",
+        result.err()
+    );
+    assert_generated_rust_checks_with_warnings_denied(
+        &result.unwrap(),
+        "aot_complexf64_annotation_8795",
+    );
+}
+
+#[test]
+fn test_aot_e2e_abs2_any_return_stays_boxed_issue_8790() {
+    let source = r#"
+function f(x::Any)
+    abs2(x)
+end
+
+x::Any = 3.0
+f(x)
+"#;
+    let rust_code = compile_to_rust_with_base_optimized(source).expect("boxed abs2 should compile");
+    assert!(
+        rust_code.contains("Value::from(abs2_value"),
+        "boxed abs2 should return a runtime Value for Any/Union callers, got:\n{}",
+        rust_code
+    );
+    assert_generated_rust_compiles(&rust_code, "aot_abs2_any_boxed_8790");
 }
 
 #[test]
@@ -4452,6 +4754,38 @@ end
 }
 
 #[test]
+fn test_aot_generated_rust_ownership_gate_detects_reused_value_11202() {
+    let source = r#"
+function count_items(itr)
+    n = 0
+    next = iterate(itr)
+    while next !== nothing
+        val, st = next
+        n = n + 1
+        next = iterate(itr, st)
+    end
+    n
+end
+"#;
+    let rust_code = compile_to_rust(source).expect("ownership probe should generate Rust");
+    assert!(
+        rust_code.contains("dynamic_call(\"iterate\", &[itr])")
+            && rust_code.contains("dynamic_call(\"iterate\", &[itr, st])"),
+        "probe must contain both uses of the same generated binding, got:\n{rust_code}"
+    );
+
+    let output = check_generated_rust(&rust_code, "sjulia_aot_ownership_negative_11202", false);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success() && stderr.contains("E0382") && stderr.contains("itr"),
+        "known #10663 output must be rejected as a moved-value use until that issue flips this to a positive compile gate\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+}
+
+#[test]
 fn test_e2e_pipeline_valid_rust_structure() {
     // Verify the overall structure of generated Rust code
     let source = r#"
@@ -5162,6 +5496,64 @@ println(a + b + c)
 }
 
 #[test]
+fn test_flat_nonliteral_destructuring_codegen_10464() {
+    let source = r#"
+function pair_10464(x)
+    (x, x + 1)
+end
+
+function destructure_tail_10464(x)
+    (a, b) = pair_10464(x)
+end
+
+destructure_tail_10464(10)
+"#;
+    let rust_code = compile_to_rust(source)
+        .expect("flat nonliteral destructuring should compile through explicit AoT IR");
+
+    assert!(
+        rust_code.contains("let _destructure_value_aot_")
+            && rust_code.contains("let mut a: i64 = _destructure_value_aot_")
+            && rust_code.contains("let mut b: i64 = _destructure_value_aot_"),
+        "AoT should evaluate the RHS into one tuple temp and bind both indexed elements:\n{}",
+        rust_code
+    );
+    assert!(
+        rust_code.contains("_destructure_value_aot_") && rust_code.contains(".1"),
+        "tail position should yield the original tuple temp:\n{}",
+        rust_code
+    );
+}
+
+#[test]
+fn test_indexable_and_arity_destructuring_codegen_10464() {
+    let source = r#"
+function from_array_10464()
+    (a, b) = [1, 2, 3]
+    a + b
+end
+function from_range_10464()
+    (a, b) = 4:7
+    a + b
+end
+function short_10464()
+    (a, b) = (8,)
+    a + b
+end
+from_array_10464()
+from_range_10464()
+"#;
+    let rust_code = compile_to_rust(source)
+        .expect("Array/Range destructuring and short tuple runtime checks should codegen");
+    assert!(rust_code.contains("BoundsError"), "{rust_code}");
+    assert!(rust_code.contains("SjuliaRange"), "{rust_code}");
+    assert!(
+        rust_code.contains("destructure_cursor_aot") && rust_code.contains(".as_mut().next()"),
+        "{rust_code}"
+    );
+}
+
+#[test]
 fn test_tuple_return_rest_destructuring_codegen_7391() {
     let source = r#"
 function triple(x)
@@ -5326,6 +5718,110 @@ println(xs[1] + xs[2] + xs[3] + ys[1] + ys[2] + total + zs[1] + zs[2] + zs[3])
         rust_code
     );
     assert_generated_rust_checks_with_warnings_denied(&rust_code, "aot_generator_7046");
+}
+
+#[test]
+fn test_aot_generator_filtered_and_tuple_binding_lift_reversal_9292() {
+    // Regression (Issue #9292): PR #9274 (Issue #9127) extended the generator
+    // lowering to lift a filtered generator's predicate into `__gen_pred_N` and
+    // to inject a tuple-destructuring prologue (`a = arg[1]; b = arg[2]`) into the
+    // lifted `__gen_body_N` / `__gen_pred_N` functions. The AoT lift-reversal
+    // pre-pass (Issue #9179) originally inlined only the scalar body, so:
+    //   * a filtered generator left a dangling `__gen_pred_N(x)` filter whose
+    //     dropped definition made the AoT control-flow condition `Any` (the
+    //     reported failure), and
+    //   * a tuple-binding generator's prologue defeated the single-`return`
+    //     inliner and tripped the #7014 diagnostic.
+    // The pre-pass now inlines the predicate and substitutes the destructuring
+    // prologue, so both shapes reverse to the eager/inline generator AoT supports.
+
+    // Filtered scalar generators: the predicate must inline to an inline Bool
+    // condition (not a dangling `__gen_pred_N` call), across `collect` and `sum`.
+    let filtered = r#"
+ys = collect(x * 2 for x in 1:6 if x > 2)
+total = sum(x + 1 for x in 1:5 if x < 3)
+println(ys[1] + ys[2] + ys[3] + ys[4] + total)
+"#;
+    let rust = compile_to_rust(filtered).expect("filtered generator should compile to Rust");
+    assert!(
+        rust.contains(".filter_map(move |x|") && rust.contains("if (x > 2i64)"),
+        "filtered generator should lower to filter_map with an inline predicate, got:\n{}",
+        rust
+    );
+    assert!(
+        !rust.contains("__gen_pred") && !rust.contains("__gen_body"),
+        "lifted body/predicate must be inlined, not left as helper calls, got:\n{}",
+        rust
+    );
+    assert_generated_rust_checks_with_warnings_denied(&rust, "aot_generator_filtered_9292");
+
+    // Tuple-destructuring generators, plain and filtered: the prologue
+    // (`a = arg[1]; b = arg[2]`) must be substituted into inline index
+    // expressions over the loop element, leaving no synthetic helper/param.
+    let tuple = r#"
+pairs = [(1, 5), (7, 2), (3, 4)]
+sums = collect(a + b for (a, b) in pairs)
+picks = collect(a * b for (a, b) in pairs if a < b)
+println(sums[1] + sums[2] + sums[3] + picks[1] + picks[2])
+"#;
+    let rust = compile_to_rust(tuple).expect("tuple-binding generator should compile to Rust");
+    // The lifted body/predicate helpers must be inlined away; the synthetic
+    // single tuple parameter (`__gen_arg_N`) legitimately survives as the
+    // reversed generator's loop variable / closure parameter, which the body
+    // indexes by field (`__gen_arg_N.0`, `__gen_arg_N.1`).
+    assert!(
+        !rust.contains("__gen_body") && !rust.contains("__gen_pred"),
+        "tuple-binding lift must inline the body/predicate helpers, got:\n{}",
+        rust
+    );
+    assert!(
+        rust.contains(".map(move |__gen_arg") && rust.contains(".filter_map(move |__gen_arg"),
+        "tuple-binding generator should reverse to inline map / filter_map over the loop element, got:\n{}",
+        rust
+    );
+    assert_generated_rust_checks_with_warnings_denied(&rust, "aot_generator_tuple_9292");
+}
+
+#[test]
+fn test_aot_generator_lifted_body_expression_position_9179() {
+    // Regression (Issue #9179): the #9103 generator-body lift wraps a non-trivial
+    // generator body (anything other than a plain unary `f(var)` call) in a
+    // bindings-free `let` block of the shape
+    //     let function __gen_body_N(x); return x * x + 1; end
+    //         (__gen_body_N(x) for x in 1:3) end
+    // In expression position (a `sum(...)` / `collect(...)` argument) the AoT IR
+    // converter rejected this with the #7014 "expression-position begin/let block"
+    // diagnostic. The converter now reverses the lift (inlining the trivial call
+    // into the generator body), so the program compiles and the body is emitted
+    // inline rather than through a standalone (dead) helper function.
+    let source = r#"
+total = sum(x * x + 1 for x in 1:3)
+doubled = collect(x + x for x in 1:3)
+println(total + doubled[1] + doubled[2] + doubled[3])
+"#;
+    let rust_code = compile_to_rust(source).expect(
+        "lifted generator body in expression position should compile to Rust (Issue #9179)",
+    );
+
+    // The lifted body must be inlined into the generator, not routed through a
+    // standalone `__gen_body_*` helper (which would also be dead code under
+    // `-D warnings`).
+    assert!(
+        !rust_code.contains("__gen_body"),
+        "lifted generator body should be inlined, not emitted as a helper function, got:\n{}",
+        rust_code
+    );
+    assert!(
+        rust_code.contains(".sum::<i64>()"),
+        "sum over a lifted generator should consume the iterator directly, got:\n{}",
+        rust_code
+    );
+    assert!(
+        rust_code.contains(".map(move |x|"),
+        "lifted generator should still lower to a mapped iterator, got:\n{}",
+        rust_code
+    );
+    assert_generated_rust_checks_with_warnings_denied(&rust_code, "aot_generator_lifted_9179");
 }
 
 #[test]
@@ -5622,4 +6118,480 @@ fn test_aot_mandelbrot_scalar_codegen() {
     );
 
     assert_generated_rust_checks_with_warnings_denied(&rust_code, "aot_mandelbrot_scalar");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR_BACKEND_STRATEGY.md acceptance programs (Issue #8639)
+//
+// The owner-decided acceptance bar for the AoT backend: the three benchmark
+// kernels (coprime pi / Aizawa / Mandelbrot) must compile AND run under AoT
+// with stdout identical to upstream Julia. Third-party package loading is
+// explicitly OUT of the AoT guarantee. The same fixtures also run under the
+// VM via fixtures/aot/manifest.toml, so VM/AoT/julia stay in three-way parity.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compile the generated Rust into a crate and RUN it, asserting exact stdout.
+fn assert_generated_rust_runs_with_stdout(
+    rust_code: &str,
+    crate_name: &str,
+    expected_stdout: &str,
+) {
+    let dir = tempfile::tempdir().expect("create generated Rust temp dir");
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).expect("create generated Rust src dir");
+    fs::write(src_dir.join("main.rs"), rust_code).expect("write generated main.rs");
+
+    let runtime_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .join("subset_julia_vm_runtime");
+    let manifest = format!(
+        r#"[package]
+name = "{crate_name}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+subset_julia_vm_runtime = {{ path = "{}" }}
+"#,
+        runtime_path.display()
+    );
+    let manifest_path = dir.path().join("Cargo.toml");
+    fs::write(&manifest_path, manifest).expect("write generated Cargo.toml");
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .arg("run")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(&manifest_path)
+        .env("CARGO_TARGET_DIR", dir.path().join("target"))
+        .output()
+        .expect("run generated Rust binary");
+
+    assert!(
+        output.status.success(),
+        "generated Rust binary must run successfully\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim_end(),
+        expected_stdout,
+        "AoT binary stdout must match upstream Julia exactly (ADR #8639 acceptance)"
+    );
+}
+
+/// Strip the trailing bare fixture-result expression (`result == <val>`) so the
+/// acceptance program ends with its `println` — the AoT binary's stdout is then
+/// exactly the parity payload.
+fn acceptance_source(fixture: &str) -> String {
+    let mut lines: Vec<&str> = fixture.lines().collect();
+    while let Some(last) = lines.last() {
+        if last.trim().is_empty() || last.trim_start().starts_with("result ==") {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+    lines.join("\n")
+}
+
+#[test]
+fn test_aot_acceptance_coprime_pi_8639() {
+    let source = acceptance_source(include_str!("fixtures/aot/coprime_pi_acceptance_aot.jl"));
+    let rust_code = compile_to_rust_with_base_optimized(&source)
+        .expect("ADR #8639 acceptance: coprime pi must compile via the AoT pipeline");
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_accept_coprime_pi",
+        "3.139597498005517",
+    );
+}
+
+#[test]
+fn test_aot_acceptance_aizawa_8639() {
+    let source = acceptance_source(include_str!("fixtures/aot/aizawa_acceptance_aot.jl"));
+    let rust_code = compile_to_rust_with_base_optimized(&source)
+        .expect("ADR #8639 acceptance: Aizawa attractor must compile via the AoT pipeline");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_accept_aizawa", "6617.642224697513");
+}
+
+#[test]
+fn test_aot_acceptance_mandelbrot_8639() {
+    let source = acceptance_source(include_str!("fixtures/aot/mandelbrot_acceptance_aot.jl"));
+    let rust_code = compile_to_rust_with_base_optimized(&source)
+        .expect("ADR #8639 acceptance: Mandelbrot must compile via the AoT pipeline");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_accept_mandelbrot", "8278");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #10251 / #10111: same-named locals in sibling `let` scopes must get
+// independent, precisely-typed storage — NOT be unified under the first-seen
+// static type. Two sibling top-level `let` blocks that each bind `r` to a
+// different concrete numeric type previously collapsed onto one slot, emitting
+// non-compiling Rust (`Value: From<i8>` unsatisfied — the runtime `Value` enum
+// has no Int8/UInt8 variant) or a truncating `i8::try_from(144)` panic. The IR
+// converter now enters/exits a lexical scope per `let` block, so each `r` is a
+// fresh binding typed by its own initializer and the two `let mut r` shadow
+// correctly in the flattened Rust scope.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_aot_sibling_let_same_name_distinct_types_10251() {
+    // Mirrors the #10111 reproduction: `r` is bound to Int8 in the first `let`
+    // and UInt8 in the second. Upstream Julia and the sjulia VM both print
+    // `Int8 6` / `UInt8 144`; the AoT binary must match.
+    let source = "\
+let
+    r = Int8(3) + Int8(3)
+    println(typeof(r), \" \", r)
+end
+let
+    r = UInt8(200) + UInt8(200)
+    println(typeof(r), \" \", r)
+end
+";
+    let rust_code = compile_to_rust(source)
+        .expect("sibling let blocks with same-named distinct-typed locals must compile (#10251)");
+    // Each sibling `let` must declare its own `r` with its own concrete type.
+    assert!(
+        rust_code.matches("let mut r: i8").count() == 1
+            && rust_code.matches("let mut r: u8").count() == 1,
+        "each sibling `let` must get an independently-typed `r` (i8 then u8), got:\n{}",
+        rust_code
+    );
+    assert!(
+        !rust_code.contains("let mut r: Value"),
+        "same-named sibling locals must not be unified to a boxed `Value` slot, got:\n{}",
+        rust_code
+    );
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_sibling_let_10251",
+        "Int8 6\nUInt8 144",
+    );
+}
+
+#[test]
+fn test_aot_base_prelude_sibling_let_same_name_distinct_types_10111() {
+    // The CLI path merges the Base prelude before conversion. That prelude path
+    // must preserve the same lexical-scope precision as the minimal converter
+    // above; otherwise Int8/UInt8 initializers are widened to `Value` slots and
+    // the generated Rust fails to compile (`Value: From<i8/u8>`).
+    let source = "\
+let
+    r = Int8(3) + Int8(3)
+    println(typeof(r), \" \", r)
+end
+let
+    r = UInt8(200) + UInt8(200)
+    println(typeof(r), \" \", r)
+end
+";
+    let rust_code = compile_to_rust_with_base_canonical(source)
+        .expect("CLI/Base AoT path must compile sibling let blocks (#10111)");
+    assert!(
+        rust_code.matches("let mut r: i8").count() == 1
+            && rust_code.matches("let mut r: u8").count() == 1,
+        "CLI/Base path must keep each sibling `let` local precisely typed, got:\n{}",
+        rust_code
+    );
+    assert!(
+        !rust_code.contains("let mut r: Value"),
+        "CLI/Base path must not widen same-named sibling locals to `Value`, got:\n{}",
+        rust_code
+    );
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_base_sibling_let_10111",
+        "Int8 6\nUInt8 144",
+    );
+}
+
+#[test]
+fn test_aot_sibling_let_same_name_int_float_10251() {
+    // A second concrete pair (Int64 then Float64) to guard the general case,
+    // not just the Int8/UInt8 boundary that first surfaced the bug.
+    let source = "\
+let
+    v = 7
+    println(typeof(v), \" \", v)
+end
+let
+    v = 2.5
+    println(typeof(v), \" \", v)
+end
+";
+    let rust_code = compile_to_rust(source)
+        .expect("sibling let blocks (Int64 then Float64) must compile (#10251)");
+    assert!(
+        rust_code.contains("let mut v: i64") && rust_code.contains("let mut v: f64"),
+        "each sibling `let` must get its own concrete slot type (i64 then f64), got:\n{}",
+        rust_code
+    );
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_sibling_let_int_float_10251",
+        "Int64 7\nFloat64 2.5",
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #10537 (codex review of #10528): scope-local join of `StaticType::Any`
+// (not only `Union`) must keep a boxed `Value` slot. A later assignment through
+// an Any-returning call used to drop the env entry, declare `i64` from the first
+// concrete assignment, then fail codegen on the Any store (#6978).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_aot_let_any_return_reassignment_uses_value_slot_10537() {
+    // Source-level regression for the #10528 codex finding: before the fix,
+    // compile_to_rust failed with "cannot store value of type Any in slot type
+    // Int64" (#6978). After the fix, the IR converter emits a boxed Value slot.
+    // Assert the generated Rust shape rather than running the binary: the
+    // call-site still needs Value-wrapping of concrete args into `g(::Any)`,
+    // which is a separate codegen concern from the scope-local env entry.
+    let source = "\
+function g(x::Any)::Any
+    return x
+end
+let
+    x = 1
+    x = g(\"s\")
+    println(typeof(x), \" \", x)
+end
+";
+    let rust_code = compile_to_rust(source)
+        .expect("let local reassigned via Any-returning call must compile (#10537)");
+    assert!(
+        rust_code.contains("let mut x: Value"),
+        "scope-local Any join must box to Value, got:\n{}",
+        rust_code
+    );
+    assert!(
+        !rust_code.contains("let mut x: i64"),
+        "must not declare a concrete i64 slot when a later Any store is in scope, got:\n{}",
+        rust_code
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #10955: AoT codegen-template panic strings (`.pop().expect(...)`,
+// `panic!("popfirst! ...")`, the `dynamic_binop`/`dynamic_call`/dispatcher
+// `.unwrap()` fallbacks) emitted a raw Rust panic into the GENERATED program
+// instead of routing through `subset_julia_vm_runtime::error::aot_throw` —
+// the same diverging-error mechanism every other Julia-visible error site in
+// this codegen module already uses for BoundsError/KeyError/InexactError/etc.
+// `pop!`/`popfirst!` on an empty collection now emit the same
+// `ArgumentError: array must be non-empty` message as the VM interpreter
+// (`VmError::EmptyArrayPop`) and upstream Julia. This builds and RUNS the
+// generated Rust binary (not just `cargo check`) to prove the failure path
+// itself — not just successful programs — stays free of the old raw text.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compile the generated Rust into a crate and RUN it, asserting the process
+/// exits non-zero and stderr contains the expected Julia-shaped error message
+/// routed through `aot_throw` (Issue #10955). Returns captured stderr so
+/// callers can assert on its full content (e.g. that stale pre-conversion
+/// panic text is gone).
+fn assert_generated_rust_run_fails_with_stderr(
+    rust_code: &str,
+    crate_name: &str,
+    expected_stderr_substring: &str,
+) -> String {
+    let dir = tempfile::tempdir().expect("create generated Rust temp dir");
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).expect("create generated Rust src dir");
+    fs::write(src_dir.join("main.rs"), rust_code).expect("write generated main.rs");
+
+    let runtime_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .join("subset_julia_vm_runtime");
+    let manifest = format!(
+        r#"[package]
+name = "{crate_name}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+subset_julia_vm_runtime = {{ path = "{}" }}
+"#,
+        runtime_path.display()
+    );
+    let manifest_path = dir.path().join("Cargo.toml");
+    fs::write(&manifest_path, manifest).expect("write generated Cargo.toml");
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .arg("run")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(&manifest_path)
+        .env("CARGO_TARGET_DIR", dir.path().join("target"))
+        .output()
+        .expect("run generated Rust binary");
+
+    assert!(
+        !output.status.success(),
+        "generated Rust binary must fail on this input but exited successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        stderr.contains(expected_stderr_substring),
+        "generated Rust binary stderr must contain the Julia-shaped error {:?} (Issue #10955), got:\n{}",
+        expected_stderr_substring,
+        stderr
+    );
+    stderr
+}
+
+#[test]
+fn test_aot_pop_empty_collection_throws_julia_argument_error_10955() {
+    // pop!(arr) on an empty Vector must route through `aot_throw` with an
+    // upstream-shaped `ArgumentError: array must be non-empty` message (both
+    // upstream `julia` and the sjulia VM interpreter raise this exact
+    // ArgumentError for `pop!`/`popfirst!` on an empty collection), not the
+    // old raw `.expect("pop! from empty collection")` panic text.
+    let source = "\
+arr = Int64[]
+pop!(arr)
+";
+    let rust_code = compile_to_rust(source)
+        .expect("pop! on an empty array literal must still compile (Issue #10955)");
+    assert!(
+        !rust_code.contains("pop! from empty collection"),
+        "pop! codegen must no longer emit the raw pre-conversion panic text (Issue #10955), got:\n{}",
+        rust_code
+    );
+    assert!(
+        rust_code.contains("subset_julia_vm_runtime::error::aot_throw"),
+        "pop! codegen must route the empty-collection failure through aot_throw (Issue #10955), got:\n{}",
+        rust_code
+    );
+    let stderr = assert_generated_rust_run_fails_with_stderr(
+        &rust_code,
+        "aot_pop_empty_10955",
+        "ArgumentError: array must be non-empty",
+    );
+    assert!(
+        !stderr.contains("pop! from empty collection"),
+        "runtime failure must surface the Julia-style ArgumentError message, not the old raw panic text, got:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn test_aot_popfirst_empty_collection_throws_julia_argument_error_10955() {
+    // Same contract as pop! above, for popfirst!'s separate codegen template
+    // (previously a bare `panic!("popfirst! from empty collection")`).
+    let source = "\
+arr = Int64[]
+popfirst!(arr)
+";
+    let rust_code = compile_to_rust(source)
+        .expect("popfirst! on an empty array literal must still compile (Issue #10955)");
+    assert!(
+        !rust_code.contains("popfirst! from empty collection"),
+        "popfirst! codegen must no longer emit the raw pre-conversion panic text (Issue #10955), got:\n{}",
+        rust_code
+    );
+    assert!(
+        rust_code.contains("subset_julia_vm_runtime::error::aot_throw"),
+        "popfirst! codegen must route the empty-collection failure through aot_throw (Issue #10955), got:\n{}",
+        rust_code
+    );
+    let stderr = assert_generated_rust_run_fails_with_stderr(
+        &rust_code,
+        "aot_popfirst_empty_10955",
+        "ArgumentError: array must be non-empty",
+    );
+    assert!(
+        !stderr.contains("popfirst! from empty collection"),
+        "runtime failure must surface the Julia-style ArgumentError message, not the old raw panic text, got:\n{}",
+        stderr
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #10131: isless / mixed-type min-max / non-Int64 div-family in AoT.
+// Each program's expected stdout is the verbatim upstream `julia` output.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_aot_isless_total_order_10131() {
+    // isless follows Julia's canonical total order: `<` for integers, and for
+    // floats NaN sorts after everything and -0.0 before 0.0 (the upstream
+    // `_fpint` bit-pattern order).
+    let source = "\
+println(isless(3, 3))
+println(isless(2, 3))
+println(isless(2.5, 3))
+println(isless(NaN, Inf))
+println(isless(Inf, NaN))
+println(isless(-0.0, 0.0))
+println(isless(Int32(1), Int32(2)))
+";
+    let rust_code =
+        compile_to_rust(source).expect("isless must compile in AoT (Issue #10131 gap 1)");
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_isless_total_order_10131",
+        "false\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue",
+    );
+}
+
+#[test]
+fn test_aot_min_max_mixed_type_promotion_10131() {
+    // min/max promote mixed numeric operands like upstream `promote`
+    // (`min(3, 2.5) == 2.5`), instead of emitting an ill-typed Rust
+    // `i64::min(f64)` call (Issue #10131 gap 2).
+    let source = "\
+println(min(3, 2.5))
+println(max(3, 2.5))
+println(min(Float32(2.5), 3))
+m = min(Int64(3), 2.5)
+println(typeof(m))
+";
+    let rust_code = compile_to_rust(source)
+        .expect("mixed-type min/max must compile in AoT (Issue #10131 gap 2)");
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_min_max_promotion_10131",
+        "2.5\n3.0\n2.5\nFloat64",
+    );
+}
+
+#[test]
+fn test_aot_div_family_non_int64_widths_10131() {
+    // div/fld/cld/rem/mod work on every integer width: the runtime `Value`
+    // has boxing variants for the narrow/unsigned widths, and Value-typed
+    // slots receive `Value::from(...)`-wrapped native results
+    // (Issue #10131 gap 3). typeof must observe the exact width.
+    let source = "\
+x = div(Int8(7), Int8(3))
+println(typeof(x))
+println(x)
+y = fld(UInt64(5), UInt64(2))
+println(typeof(y))
+println(y)
+u = rem(UInt16(7), UInt16(3))
+println(typeof(u))
+println(u)
+println(mod(UInt8(7), UInt8(3)))
+println(cld(Int32(7), Int32(3)))
+println(rem(Int16(7), Int16(3)))
+";
+    let rust_code = compile_to_rust(source)
+        .expect("non-Int64 div-family must compile in AoT (Issue #10131 gap 3)");
+    assert_generated_rust_runs_with_stdout(
+        &rust_code,
+        "aot_div_family_widths_10131",
+        "Int8\n2\nUInt64\n2\nUInt16\n1\n1\n3\n1",
+    );
 }

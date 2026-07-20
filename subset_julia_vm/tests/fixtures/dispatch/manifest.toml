@@ -1,6 +1,18 @@
 # Test manifest for dispatch category
 
 [[tests]]
+name = "dispatch_eval_method_redefinition_after_warmup_8561"
+file = "eval_method_redefinition_after_warmup_8561.jl"
+expected = true
+description = "Eval-time method redefinition after a dynamic dispatch site was warmed in a loop is observed by the warmed site (per-call-site inline caches are generation-invalidated on method-table mutation, Issue #8561)"
+
+[[tests]]
+name = "dispatch_precise_cache_invalidation_unrelated_method_9197"
+file = "precise_cache_invalidation_unrelated_method_9197.jl"
+expected = true
+description = "Precise per-name dispatch-cache invalidation (Issue #9197 S6): an eval-time redefinition of one generic function updates its own warmed dynamic-dispatch site while leaving an unrelated warmed site untouched and correct; matches upstream Julia"
+
+[[tests]]
 name = "dispatch_alias_where_bound_parametric_struct_8406"
 file = "alias_where_bound_parametric_struct_8406.jl"
 expected = true
@@ -13,40 +25,10 @@ expected = true
 description = "After a parametric method is selected, VM frame binding recovers `T` from a user struct admitted through a union-alias user-abstract arm, so the method body can construct Fraction{T,R} instead of raising UndefVarError (Issue #8409)"
 
 [[tests]]
-name = "dispatch_where_bounds_upstream_applicability_8427"
-file = "where_bounds_upstream_applicability_8427.jl"
+name = "dispatch_module_local_parametric_bound_8899"
+file = "module_local_parametric_bound_8899.jl"
 expected = true
-description = "Where-clause lower bounds and cross-variable bounds follow upstream applicability: invalid bindings still select the method, but referencing the unbound static parameter raises UndefVarError (Issue #8427)"
-
-[[tests]]
-name = "dispatch_abstractmatrix_no_loose_match_function_7334"
-file = "dispatch_abstractmatrix_no_loose_match_function_7334.jl"
-expected = true
-description = "A `::AbstractMatrix` (= `AbstractArray{T,2}`) method parameter only matches 2-D array values: a function singleton (`typeof(sin)`) must NOT loose-match it. The compile-time struct-parents fallback no longer conservatively accepts a function-singleton struct name as a subtype of an arbitrary abstract bound (it resolves through its known built-in `Function` supertype instead), so `h(sin)` selects the specific `h(::Function)` method and a lone `g(::AbstractMatrix)` raises a MethodError for `g(sin)`, matching upstream Julia (Issue #7334, same conservative-accept class as #7266; unblocks the #7275 `scatter(sin)` path)"
-
-[[tests]]
-name = "dispatch_morespecific_partial_order_5926"
-file = "dispatch_morespecific_partial_order_5926.jl"
-expected = true
-description = "Method specificity consults the upstream morespecific partial order (subtype-decidable fragment) before the integer score: container vs abstract supertype (Vector{T} vs AbstractVector), diagonal Tuple{T,T} vs Tuple{Any,Any}, bounded where-params (Vector{<:Integer} vs Vector{<:Real}, previously a spurious ambiguity), and nested parametrics dispatch to the more specific method, matching upstream Julia; the override is gated on the argument tuple being a subtype of the chosen signature so an imprecise (Any) argument still defers to runtime dispatch (no codegen over-commit) (Issue #5926, part of #5072)"
-
-[[tests]]
-name = "dispatch_runtime_bounded_dispatch_from_any_6202"
-file = "runtime_bounded_dispatch_from_any_6202.jl"
-expected = true
-description = "Runtime dispatch from Any container elements preserves bounded where-method specificity for Type{T} and Vector{T}: T<:Integer beats T<:Real for Int64/Vector{Int64}, while Float64/Vector{Float64} still route to the looser Real method (Issue #6202, advancing #5926/#5072)"
-
-[[tests]]
-name = "dispatch_any_single_specific_methoderror_5984"
-file = "any_single_specific_methoderror_5984.jl"
-expected = true
-description = "A statically Any argument must not compile-time commit to a single specific method; runtime dispatch raises MethodError for non-matching values (Issue #5984)"
-
-[[tests]]
-name = "dispatch_direct_static_no_method_methoderror_6007"
-file = "direct_static_no_method_methoderror_6007.jl"
-expected = true
-description = "A direct statically mismatched method call evaluates at runtime and raises a catchable MethodError instead of aborting compilation with NoMethodFound (Issue #6007)"
+description = "A module-local parametric struct whose type parameter is bounded by a module-local abstract type (struct Poly{R<:Ring} in module M) constructs without a spurious compile-time bound violation: the compile-time struct/abstract bound check compares parent-vs-bound modulo a leading module prefix, so a module-qualified parent_type (M.Ring) matches a bare bound (Ring) written in the same module scope (Issue #8899)"
 
 [[tests]]
 name = "dispatch_any_dispatch"
@@ -61,46 +43,16 @@ expected = true
 description = "Dynamic field access on Any-typed struct values (Issue #401)"
 
 [[tests]]
-name = "dispatch_anonymous_typed"
-file = "anonymous_typed_dispatch.jl"
-expected = true
-description = "Method dispatch for anonymous typed parameters (::StructType) (Issue #635)"
-
-[[tests]]
-name = "dispatch_abstract_type"
-file = "abstract_type_dispatch.jl"
-expected = true
-description = "Method dispatch with abstract type parameters (Issue #636)"
-
-[[tests]]
 name = "dispatch_float64_method"
 file = "float64_method_dispatch.jl"
 expected = true
 description = "Float64/Float32 dispatch to user-defined methods for custom types (Issue #634)"
 
 [[tests]]
-name = "dispatch_symbol_type_param"
-file = "symbol_type_param_dispatch.jl"
-expected = true
-description = "Symbol type parameters and Float64 dispatch through wrapper function (Issue #633)"
-
-[[tests]]
 name = "dispatch_array_type"
 file = "array_type_dispatch.jl"
 expected = true
 description = "::Array type annotation in function parameters (Issue #662)"
-
-[[tests]]
-name = "dispatch_parametric_array"
-file = "parametric_array_dispatch.jl"
-expected = true
-description = "Parametric array type dispatch: Vector{Int64} vs Vector{Float64} (Issue #1237)"
-
-[[tests]]
-name = "dispatch_array_dimension_params"
-file = "array_dimension_dispatch.jl"
-expected = true
-description = "Array{T,N} dispatch distinguishes Vector, Matrix, and higher-dimensional arrays"
 
 [[tests]]
 name = "dispatch_iterate_collect_any_user_methods_4276"
@@ -121,46 +73,17 @@ expected = true
 description = "getindex (xs[i]) through an Any-typed binding dispatches to user array overrides instead of the native-indexing fast path (Issue #6657)"
 
 [[tests]]
-name = "dispatch_bool_int64"
-file = "bool_int_dispatch.jl"
-expected = true
-description = "Bool argument dispatches to Bool method, not Int64 method (Issue #1441)"
-
-[[tests]]
 name = "dispatch_global_const_function_access"
 file = "global_const_function_access.jl"
 expected = true
-description = "Functions can access global const values from prelude (Issue #1443)"
-
-[[tests]]
-name = "dispatch_number_array_bug"
-file = "number_array_dispatch_bug.jl"
-expected = true
-description = "Abstract type Number should not match Array types in dispatch (Issue #1658)"
-
-[[tests]]
-name = "dispatch_float16_mixed_type"
-file = "float16_mixed_type_dispatch.jl"
-expected = true
-description = "Float16 mixed-type arithmetic dispatch: F16+I64, F16+F32, F16+F64 (Issue #1898)"
-
-[[tests]]
-name = "dispatch_uint_int_mixed_comparison"
-file = "uint_int_mixed_comparison.jl"
-expected = true
-description = "UInt8/Int64 mixed-type comparison, promotion, and arithmetic (Issue #1853)"
+description = "Functions can access global const values from prelude (Issue #1443). NOTE: asserts sjulia's `RoundingMode.mode` field accessor (upstream RoundingMode has no `.mode` field), so not runnable under upstream julia (Issue #10237)."
+skip_julia_test = true
 
 [[tests]]
 name = "dispatch_parametric_function"
 file = "parametric_function_dispatch.jl"
 expected = true
 description = "Function dispatch inside where T context and workarounds (Issue #2388)"
-
-[[tests]]
-name = "dispatch_where_context"
-file = "where_context_dispatch.jl"
-expected = true
-description = "TypeVar upper bounds used for dispatch in where T context; Integer-bounded builtin matrix preserves concrete integer widths through fresh Base compilation (Issues #2556, #5413)"
 
 [[tests]]
 name = "dispatch_user_convert_promote"
@@ -175,22 +98,10 @@ expected = true
 description = "convert consults Julia methods before Rust fallback (Issue #3764)"
 
 [[tests]]
-name = "dispatch_parametric_abstract"
-file = "test_parametric_abstract_dispatch.jl"
-expected = true
-description = "Parametric abstract type dispatch with type params preserved at runtime (Issue #2523)"
-
-[[tests]]
 name = "dispatch_covariant_type"
 file = "test_covariant_type_dispatch.jl"
 expected = true
 description = "Covariant bounds (<:T) in Type dispatch: Type{<:Animal} matches subtypes (Issue #2526)"
-
-[[tests]]
-name = "dispatch_vararg_typed"
-file = "test_vararg_typed_dispatch.jl"
-expected = true
-description = "Vararg{T} and Vararg{T,N} typed varargs dispatch (Issue #2525)"
 
 [[tests]]
 name = "dispatch_tuple_vararg_unbounded_4857"
@@ -203,66 +114,6 @@ name = "dispatch_user_base_coexist"
 file = "test_user_base_coexist.jl"
 expected = true
 description = "User-defined function coexists with base function of same name without breaking cache alignment (Issue #2726)"
-
-[[tests]]
-name = "dispatch_multi_level_abstract"
-file = "multi_level_abstract_dispatch.jl"
-expected = true
-description = "Multi-level abstract type hierarchy dispatch with sibling abstract types (Issue #3147)"
-
-[[tests]]
-name = "dispatch_println_arg_stack_dispatch_3780"
-file = "println_arg_stack_dispatch_3780.jl"
-expected = true
-description = "Function argument evaluation containing println does not corrupt later Bool dispatch (Issue #3780)"
-
-[[tests]]
-name = "dispatch_dynamic_callable_datatype"
-file = "dynamic_callable_datatype.jl"
-expected = true
-description = "Any-typed callable values route through runtime callable dispatch for DataType constructors and functions (Issue #3895)"
-
-[[tests]]
-name = "dispatch_type_parametric_singleton"
-file = "type_parametric_singleton_dispatch.jl"
-expected = true
-description = "Parametric type expressions dispatch as Type{T} singletons without matching ordinary values (Issues #4039/#4044)"
-
-[[tests]]
-name = "dispatch_type_any_specificity_4131"
-file = "type_any_specificity_4131.jl"
-expected = true
-description = "Type{Any} singleton methods beat bare Type while Type{T} remains generic (Issue #4131)"
-
-[[tests]]
-name = "dispatch_call_dynamic_resolver_scoring_3910"
-file = "call_dynamic_resolver_scoring_3910.jl"
-expected = true
-description = "Generic CallDynamic uses shared resolver scoring for exact, parametric, and bare matches (Issue #3910)"
-
-[[tests]]
-name = "dispatch_call_dynamic_or_builtin_resolver_3910"
-file = "call_dynamic_or_builtin_resolver_3910.jl"
-expected = true
-description = "CallDynamicOrBuiltin uses shared resolver scoring before builtin fallback (Issue #3910)"
-
-[[tests]]
-name = "dispatch_typed_dispatch_covariant_resolver_3910"
-file = "typed_dispatch_covariant_resolver_3910.jl"
-expected = true
-description = "CallTypedDispatch covariant fallback uses shared resolver for Any-typed Type objects (Issue #3910)"
-
-[[tests]]
-name = "dispatch_call_dynamic_binary_one_any_resolver_3910"
-file = "call_dynamic_binary_one_any_resolver_3910.jl"
-expected = true
-description = "CallDynamicBinary uses shared resolver scoring for one Any-typed binary operand (Issue #3910)"
-
-[[tests]]
-name = "dispatch_call_dynamic_binary_both_resolver_3910"
-file = "call_dynamic_binary_both_resolver_3910.jl"
-expected = true
-description = "CallDynamicBinaryBoth uses shared resolver scoring for both Any-typed binary operands (Issue #3910)"
 
 [[tests]]
 name = "dispatch_array_ne_uses_user_eq_4276"
@@ -311,12 +162,6 @@ name = "dispatch_callable_singleton_hof_user_method_4276"
 file = "callable_singleton_hof_user_method_4276.jl"
 expected = true
 description = "Callable singleton map/broadcast methods win before generic HOF fallbacks (Issue #4276)"
-
-[[tests]]
-name = "dispatch_broadcast_identity_materialization_4276"
-file = "broadcast_identity_materialization_4276.jl"
-expected = true
-description = "Generic unary broadcast materializes typed arrays instead of failing in VM fallback (Issue #4276)"
 
 [[tests]]
 name = "dispatch_collection_mutation_user_method_4276"
@@ -385,52 +230,10 @@ expected = true
 description = "String/Symbol/Bool/Char/Type == and != honor user-defined equality methods before VM fallback (Issues #4298/#5555)"
 
 [[tests]]
-name = "dispatch_complex_array_logical_dispatch_3908"
-file = "complex_array_logical_dispatch_3908.jl"
-expected = true
-description = "Vector{Complex{Float64}} dispatch uses logical ArrayValue element type instead of raw storage tags (Issue #3908)"
-
-[[tests]]
-name = "dispatch_complex_array_isa_logical_element_3908"
-file = "complex_array_isa_logical_element_3908.jl"
-expected = true
-description = "isa(::Vector{Complex{Float64}}, Vector{Complex{Float64}}) uses logical ArrayValue element type instead of raw storage tags (Issue #3908)"
-
-[[tests]]
-name = "dispatch_abstract_dict_array_disambiguation_4708"
-file = "abstract_dict_array_disambiguation_4708.jl"
-expected = true
-description = "Defining overloads on AbstractString/AbstractDict/AbstractArray does not make Array spuriously match AbstractString or AbstractDict (Issue #4708)"
-
-[[tests]]
-name = "dispatch_module_param_specificity_5005"
-file = "module_param_specificity_5005.jl"
-expected = true
-description = "A ::Module parameter wins dispatch specificity over an untyped parameter when both methods match (Issue #5005)"
-
-[[tests]]
-name = "dispatch_bare_abstract_numeric_param_type_generic_5076"
-file = "bare_abstract_numeric_param_type_generic_5076.jl"
-expected = true
-description = "Bare abstract-numeric param annotations (::Real/::Number/::Integer/::Signed) preserve the concrete arg type for type-generic calls (zero/one/oneunit), matching upstream and the where{T<:Real} form (Issue #5076)"
-
-[[tests]]
-name = "dispatch_interproc_forward_abstract_numeric_type_generic_5167"
-file = "interproc_forward_abstract_numeric_type_generic_5167.jl"
-expected = true
-description = "A bare abstract-numeric param forwarded into another user function's type-generic call (g(y)=zero(y); f(x::Real)=g(x)) preserves the concrete arg type instead of widening to Float64, matching upstream Julia 1.12 (Issue #5167 part 2)"
-
-[[tests]]
 name = "dispatch_direct_param_return_abstract_numeric_5242"
 file = "direct_param_return_abstract_numeric_5242.jl"
 expected = true
 description = "A user method that directly returns a bare abstract-numeric param (f(x::Real)=x, ::Number/::Integer/::Signed) preserves the concrete arg type instead of widening to Float64 or erroring, matching upstream Julia 1.12 and Base real/conj (Issue #5242)"
-
-[[tests]]
-name = "dispatch_nothing_missing_singleton_5069"
-file = "nothing_missing_singleton_5069.jl"
-expected = true
-description = "Nothing/Missing singleton type-system integration: identity (typeof), isa/subtype, Union{T,Nothing} Optional-pattern runtime dispatch f(::Nothing) vs f(::Int) with String returns, isnothing/ismissing, something/coalesce, and Missing propagation — matching upstream Julia 1.12 (Issue #5069)"
 
 [[tests]]
 name = "dispatch_instr_slice_no_swap_5177"
@@ -439,40 +242,16 @@ expected = true
 description = "Dispatch loop holds an immutable snapshot of the shared code slice instead of swapping each instruction out to Nop and back per cycle: hot loops (loop-back re-execution), runtime CallSpecialize bytecode append, and eval-driven re-entrant dispatch on the same live code slot all still work (Issue #5177)"
 
 [[tests]]
-name = "dispatch_val_symbol_dispatch_5291"
-file = "val_symbol_dispatch_5291.jl"
-expected = true
-description = "Val{:sym} multiple dispatch routes by the symbol value parameter; identifier symbols render in colon form (Issue #5291)"
-
-[[tests]]
-name = "dispatch_struct_method_primitive_dispatch_5314"
-file = "struct_method_primitive_dispatch_5314.jl"
-expected = true
-description = "Adding a Struct-arg method to a base function (min/max/isless/zero/oneunit) keeps primitive-arg dispatch to the base method (Issue #5314)"
-
-[[tests]]
 name = "dispatch_user_struct_builtin_abstract_subtype_5363"
 file = "user_struct_builtin_abstract_subtype_5363.jl"
 expected = true
 description = "User struct declaring a built-in abstract supertype (struct S <: Real) dispatches to ::Real/::Number/::Integer params via its declared supertype chain, incl. transitivity; non-subtypes don't over-match (Issue #5363)"
 
 [[tests]]
-name = "dispatch_bounded_typevar_outranks_untyped_5375"
-file = "bounded_typevar_outranks_untyped_5375.jl"
-expected = true
-description = "A value-position bounded type-variable method f(x::T) where {T<:Number} is ranked more specific than an untyped fallback f(x), independent of definition order; tighter bounds and concrete params still win; holds under runtime dispatch (Issue #5375)"
-
-[[tests]]
-name = "dispatch_subtype_isa_first_class_5115"
-file = "subtype_isa_first_class_5115.jl"
-expected = true
-description = "<:, >:, isa are first-class function/operator values: 2-arg calls (<:)(A,B)/(>:)(A,B)/isa(x,T), bound to a variable then called, qualified as Base.:(<:)/Base.:(>:)/Base.:(isa), and used inside higher-order filter/map predicates (Issue #5115)"
-
-[[tests]]
 name = "dispatch_invoke_explicit_signature_5123"
 file = "invoke_explicit_signature_5123.jl"
 expected = true
-description = "invoke(f, Tuple{ArgTypes...}, args...) dispatches to the method matching the explicitly named signature (not the most specific applicable one): single/multi-arg, Vararg, parametric, Base.invoke/Core.invoke, function & signature aliases, and keyword args all match upstream (Issue #5123)"
+description = "invoke(f, Tuple{ArgTypes...}, args...) dispatches to the explicitly named signature across direct/stored callables, static/dynamic signature tuples, positional/keyword lanes, Any/abstract declarations, Vararg, parametric, aliases, and Base/Core qualification (Issues #5123/#11619)"
 
 [[tests]]
 name = "dispatch_subtype_isa_arity_5493"
@@ -481,16 +260,16 @@ expected = true
 description = "Type-operator builtins validate argument count: too-few/too-many calls to <: and isa raise a catchable ArgumentError (matching upstream JL_NARGS), and >: raises a MethodError as an ordinary 2-arg function; the correct 2-arg forms still work (Issue #5493)"
 
 [[tests]]
-name = "dispatch_method_ambiguity_runtime_5071"
-file = "method_ambiguity_runtime_5071.jl"
-expected = true
-description = "An ambiguous method call raises a catchable runtime MethodError (matching upstream Julia) instead of aborting compilation; try/catch and @test_throws MethodError catch it, and adding a most-specific resolver method keeps the call unambiguous (Issue #5071)"
-
-[[tests]]
 name = "dispatch_method_identity_order_redefinition_4271"
 file = "method_identity_order_redefinition_4271.jl"
 expected = true
 description = "Method identity / order / redefinition boundaries: the most-specific method wins regardless of textual definition order (a general method may follow the specific one), a same-signature redefinition within the compilation unit replaces the earlier body, and disjoint signatures keep independent inferred return types (inference keyed by matched method, not collapsed across the generic name), matching upstream Julia 1.12.6 (Issue #4271)"
+
+[[tests]]
+name = "dispatch_source_order_redefinition_world_age_9400"
+file = "source_order_redefinition_world_age_9400.jl"
+expected = true
+description = "Top-level script calls dispatch against the methods visible at their source point: a later same-signature redefinition and a later more-specific method do not retroactively affect an earlier call, while calls after the definition see the new method (Issue #9400)"
 
 [[tests]]
 name = "dispatch_parametric_struct_where_bound_5646"
@@ -631,24 +410,6 @@ expected = true
 description = "Runtime Any-typed dynamic dispatch (CallDynamicBinaryBoth / CallDynamicOrBuiltin) enforces where-clause bounds on parametric struct params (Wrap{T} where T<:Real rejects Wrap{String}), resolves user-abstract bounds through the struct hierarchy at full structural tier (Box{T} where T<:Animal beats bare Box for Box{Dog}), and enforces cross-slot typevar binding consistency ((Holder{T}, Holder{T}) where T rejects mixed element types), all matching upstream Julia (Issue #6536, via the Issue #6502 slice-2 core_signature-based structured candidate matching)"
 
 [[tests]]
-name = "dispatch_assignform_operator_where_bounds_6537"
-file = "assignform_operator_where_bounds_6537.jl"
-expected = true
-description = "Assignment-form operator methods (*(a::Wrap{T}, b::Wrap{T}) where {T<:Real} = ...) keep their braced where-clause typevar bounds in type_params, so a bounded method no longer shadows the {T,S} generic one for non-Real payloads; covers *, ==, + spellings, multi-typevar bounds, a function-form control, runtime (Any[]) plus compile-time dispatch, and the previously unparseable unbraced `where T<:Real = ...` spelling, matching upstream Julia (Issue #6537)"
-
-[[tests]]
-name = "dispatch_callable_value_where_bound_test_inline_6539"
-file = "callable_value_where_bound_test_inline_6539.jl"
-expected = true
-description = "Where-clause bounds are enforced on the callable-value channel (f = abs; f(x) via resolve_callable_value_candidates rejects a Holder{T} where T<:Real method for Holder{String}), and expressions inlined into @test no longer mis-evaluate: abs(::Any) is not assumed Float64 (so abs(x) == \"s\" stops constant-folding to false at the String-vs-non-String equality shortcut), and a user ==(::Box, ::Box) returning a non-Bool widens equality result inference to Any (so (a == b) == \"box-any\" compares at runtime), all matching upstream Julia (Issue #6539)"
-
-[[tests]]
-name = "dispatch_typebound_strict_structhierarchy_6596"
-file = "typebound_strict_structhierarchy_6596.jl"
-expected = true
-description = "A `Type{<:Bound}` whose bound is a user abstract (Animal) or a parametric family (Base.Pairs) is judged through the struct hierarchy, not permissively accepted: Type{Rock} <: Type{<:Animal} is false, describe(Rock) falls through to ::Type, only_animal(Rock) MethodErrors, exact Type{Tree} still beats Type{<:Animal}, and Type{<:Base.Pairs} still resolves a concrete Pairs — all matching upstream Julia 1.12 (Issue #6596)"
-
-[[tests]]
 name = "dispatch_anonymous_typed_params_where_6661"
 file = "anonymous_typed_params_where_6661.jl"
 expected = true
@@ -659,12 +420,6 @@ name = "dispatch_setindex_any_user_method_6806"
 file = "setindex_any_user_method_6806.jl"
 expected = true
 description = "setindex! (xs[i]=v) through an Any-typed binding reaches a user setindex!(::Vector{Int64},...) override instead of the native write fast path, which is refused by the disable_array_setindex_specialization gate (mirrors #6657 for writes). A non-overridden element type still writes normally (Issue #6806)."
-
-[[tests]]
-name = "dispatch_compile_runtime_parity_6836"
-file = "compile_runtime_dispatch_parity_6836.jl"
-expected = true
-description = "Compiler-vs-runtime method-selection parity (Issue #6836): each scenario dispatches a method once with a statically-typed argument (compile-time CallResolved / typed dispatch) and once with the same value pulled from an Any container (runtime find_best_method_index); both paths route through the shared inference_core selection core and must select the same method for single-arg concrete/abstract, multi-arg, and parametric-container cases"
 
 [[tests]]
 name = "dispatch_comprehension_arg_abstract_array_7266"
@@ -703,22 +458,10 @@ expected = true
 description = "Single-arg `rand(x)`/`randn(x)` where `x` is statically `Any` (function return, struct field, `Any[]` element, `::Any` parameter) compiles to the Rust builtin and previously errored on a `StructRef` via `rng_value_to_dim`; it now defers to the user/library `rand`/`randn` method on that struct type before treating the argument as a dimension, mirroring the builtin-defer-through-`Any` precedent (#6657 getindex/first/last, #6610 haskey/isempty/empty!, #6638 iterate). Integer dimension arguments keep producing a vector (no regression) (Issue #7901)"
 
 [[tests]]
-name = "dispatch_abstract_multi_value_param_dispatch_7960"
-file = "abstract_multi_value_param_dispatch_7960.jl"
-expected = true
-description = "Dispatch on an abstract type parameterized by integer VALUE parameters, called through a concrete subtype, selects the matching value-parameter specialization instead of the last-defined one. The historical projection dropped every parameter to the bare family name (`AbsM{2,2,T}` -> `AbsM`), collapsing all specializations into one signature so `h(ConM{2,2})` wrongly returned the `AbsM{3,3,T}` method; the concrete subtype's value parameters are now projected up to the abstract supertype's instantiation and compared, and the parametric method outranks the generic one regardless of definition order (Issue #7960)"
-
-[[tests]]
 name = "dispatch_parametric_matrix_specificity_8025"
 file = "dispatch_parametric_matrix_specificity_8025.jl"
 expected = true
 description = "A parameterized matrix method `::AbstractMatrix{<:MyNum}` / `::Matrix{MyNum}` is ranked more specific than the bare `::AbstractMatrix` when dispatching a `Matrix{MyNum}` whose element is a USER struct. The runtime dispatch type of a user-struct-element array previously collapsed its element type to `Any` (the registry-free array-wrapper type reported `Matrix{Any}`), so the parametric method failed to match against its bare sibling and dispatch fell to `\"generic\"`; `get_value_julia_type` now resolves the `StructOf` element type through `struct_defs` like `typeof`/reflection (Issue #7304), so the parametric method matches and wins specificity, matching upstream Julia (Issue #8025)"
-
-[[tests]]
-name = "dispatch_callable_abstract_parent_dispatch_8264"
-file = "callable_abstract_parent_dispatch_8264.jl"
-expected = true
-description = "Callable object dispatch considers call methods declared on abstract supertypes of the concrete callable instance. A concrete parent object whose call overload is written as `(parent::AbstractParent)(args...)` now finds the generated `__callable_AbstractParent` method instead of looking only for `__callable_ConcreteParent`, matching upstream Julia and the AbstractAlgebra fraction-field parent pattern (Issue #8264)"
 
 [[tests]]
 name = "dispatch_ntuple_length_where_8404"
@@ -743,3 +486,188 @@ name = "dispatch_abstract_matrix_integer_getindex_specificity_8400"
 file = "abstract_matrix_integer_getindex_specificity_8400.jl"
 expected = true
 description = "The local Base AbstractMatrix linear-index fallback accepts ::Integer, so a concrete AbstractMatrix subtype's getindex(::Concrete, ::Integer) method wins for direct calls and index syntax instead of routing through the fallback's 2-D A[i,j] path (Issue #8400)"
+
+[[tests]]
+name = "dispatch_bare_parametric_value_param_dispatch_8537"
+file = "bare_parametric_value_param_dispatch_8537.jl"
+expected = true
+description = "An inline-constructed parametric struct value (typed at compile time only by its bare family, e.g. SVector(1.0,2.0) as Struct(\"SVector\")) reaches the parameter-generic method via runtime dispatch instead of statically binding to a concrete value-parameter sibling like svclass(::SVector{0,T}); covers SVector and a plain factory struct, and the real 0-d / N=1 values still select their concrete methods (Issue #8537)"
+
+[[tests]]
+name = "dispatch_nested_union_typemap_dispatch_8817"
+file = "nested_union_typemap_dispatch_8817.jl"
+expected = true
+description = "Methods with ground Union types in invariant positions (Type{Union{A,B}}, Vector{Union{A,B}}) are dispatched through the typemap after retiring the DeferSignature path: the signature-side core_type_is_sig_invariant_ground predicate accepts ground Unions while the arg-side core_type_is_dispatch_precise continues to reject them (Issue #8817, engine fix #8582)"
+
+[[tests]]
+name = "dispatch_tuple_array_dim_rank_check_8804"
+file = "tuple_array_dim_rank_check_8804.jl"
+expected = true
+description = "Tuple{Vector{Int64}} <: Tuple{Matrix} was incorrectly true because array_family_pattern_params_match_with_lookup had an early return for empty pattern_params that bypassed the rank check; after fix a bare Matrix pattern rejects a Vector arg (rank 1 != 2) (Issue #8804)"
+
+[[tests]]
+name = "dispatch_symbol_value_where_param_bind_8869"
+file = "symbol_value_where_param_bind_8869.jl"
+expected = true
+description = "A Symbol-valued type parameter (Foo{:hello}) was bound as a DataType wrapper instead of the raw Symbol value; bind_type_params now materializes symbol type-parameter values via strip_prefix(':') and sets VarTypeTag::ValSymbol (Issue #8869)"
+
+[[tests]]
+name = "dispatch_callspecialize_resolved_function_10457"
+file = "callspecialize_resolved_function_10457.jl"
+expected = true
+description = "Prevention fixture for Issue #10457 (regression: Issue #10423, fixed in PR #10456): forces first-class function arguments through both runtime-specialization entry points — CallSpecialize sites (untyped-param callee) and the where-parametric direct-call bridge (try_specialized_entry_for_runtime_call) — while the callee body materializes a resolved function value via PushResolvedFunction (identity/abs/user function with multiple methods). The specializer must fall back to generic bytecode instead of recompiling the resolved value into a bare module-local global lookup; repeated calls exercise the initial specialize attempt and the cached/negative-cached re-entry, and multi-method dispatch through the passed value asserts candidate metadata survives"
+
+[[tests]]
+name = "dispatch_splatted_promote_self_recursion_9513"
+file = "splatted_promote_self_recursion_9513.jl"
+expected = true
+description = "A splatted self-recursive call f(x::Integer,y::Integer)=f(promote(x,y)...) dispatches the promoted tuple on its concrete element types, selecting the more-specific diagonal f(x::T,y::T) where {T<:Integer} instead of re-selecting the same (Integer,Integer) method and recursing to a StackOverflow; the splat path now routes expanded arguments through the value-based runtime dispatcher like the two-variable form (Issue #9513)"
+
+[[tests]]
+name = "dispatch_eval_redefined_function_value_hof_9742"
+file = "eval_redefined_function_value_hof_9742.jl"
+expected = true
+description = "A function redefined by top-level eval is visible to subsequent higher-order Function-value calls (`map` and broadcast) instead of executing the stale pre-redefinition candidate set; direct named calls remain updated as a control (Issue #9742)"
+
+[[tests]]
+name = "dispatch_source_world_function_body_redefinition_9650"
+file = "source_world_function_body_redefinition_9650.jl"
+expected = true
+description = "A top-level call through an earlier-defined function body executes in the call site's source world: the call before a callee redefinition sees the old callee method, while the call after the redefinition sees the new one (Issue #9650)"
+
+[[tests]]
+name = "dispatch_callable_value_module_context_vararg_fallback_9992"
+file = "callable_value_module_context_vararg_fallback_9992.jl"
+expected = true
+description = "Combines the three #9979 callable-value dispatch axes in one call site: a Function singleton captured from a user module (package-like context) selects a Function-typed method over both a same-arity Any candidate and a broad vararg Any... catch-all, end-to-end through the real VM/module-dispatch path rather than the synthetic resolver unit tests alone (Issue #9992)"
+
+[[tests]]
+name = "dispatch_similar_nodims_rank_static_dispatch_10076"
+file = "similar_nodims_rank_static_dispatch_10076.jl"
+expected = true
+description = "similar(a) (no explicit dims) computed its compile-time return type as infer_expr_type(&args[0]) — the source array's own inferred ValueType — whose Expr::ArrayLiteral inference (both the infer_expr_type arm and the parallel compile_expr bytecode-emission arm that populates a variable's stored local type) always erased the literal's rank to None regardless of its shape field, unlike infer_julia_type's Expr::ArrayLiteral arm, which correctly computes shape.len(); a rank-dispatched call on similar(a)'s result for a 2-D matrix-literal source then statically bound to Array{T,1} instead of Array{T,2} even though the runtime value was a correctly-shaped Matrix; fixed by carrying shape.len() as the ArrayOf rank in both inference arms (Issue #10076, unaffected by the #9642 explicit-dims fix)"
+
+[[tests]]
+name = "dispatch_similar_dims_rank_static_dispatch_9642"
+file = "similar_dims_rank_static_dispatch_9642.jl"
+expected = true
+description = "similar(a, dims...)'s compile-time return type reused the source array a's own rank instead of the dims count (upstream to_shape(dims) in julia/base/abstractarray.jl), so rank_dispatch(similar(a, dims...)) could statically bind to the wrong rank-specialized method (e.g. similar([1,2,3], 1, 3, 1) is rank 3 but bound to the rank-1 method); fixed by computing the result rank from the dims arg count/tuple arity, falling back to the conservative rank-erased type (forcing runtime dispatch) when the dims shape is not statically countable (Issue #9642)"
+
+[[tests]]
+name = "dispatch_agg_misc_9671"
+file = "dispatch_agg_misc_9671.jl"
+expected = true
+description = "Aggregated concat-safe dispatch miscellaneous fixtures (9 sources, Issue #9671 Phase 3)"
+
+[[tests]]
+name = "dispatch_qualified_function_value_identity_10077"
+file = "qualified_function_value_identity_10077.jl"
+expected = true
+description = "A module-qualified function value (`h = Module.func`) baked the module-qualified spelling into the captured FunctionValue's name instead of the bare declared name, unlike the exact same function captured via a bare/imported access (`h = func`); the embedded module-prefix dot corrupted the `typeof(...)` callable-singleton recognition, making `isa Function` false and `typeof(...)` diverge from the bare-access identity even though both access paths capture the identical generic function. Fixed by resolving candidate method indices through the (possibly qualified) registry key while emitting the bare declared name as the value's identity; covers isa Function, typeof identity, and calling/HOF-callback correctness for both access paths (Issue #10077)"
+
+[[tests]]
+name = "dispatch_agg_abstract_callable_10238"
+file = "dispatch_agg_abstract_callable_10238.jl"
+expected = true
+description = "Aggregated dispatch abstract-type and callable-object dispatch fixtures with top-level definitions, each former fixture isolated in its own module (9 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "dispatch_agg_misc_10238"
+file = "dispatch_agg_misc_10238.jl"
+expected = true
+description = "Aggregated dispatch miscellaneous definition-heavy fixtures with top-level definitions, each former fixture isolated in its own module (12 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "dispatch_agg_parametric_where_10238"
+file = "dispatch_agg_parametric_where_10238.jl"
+expected = true
+description = "Aggregated dispatch parametric / where-bound dispatch fixtures with top-level definitions, each former fixture isolated in its own module (16 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+
+[[tests]]
+name = "dispatch_agg_resolver_runtime_10238"
+file = "dispatch_agg_resolver_runtime_10238.jl"
+expected = true
+description = "Aggregated dispatch call resolver tiers and runtime dispatch fixtures with top-level definitions, each former fixture isolated in its own module (8 sources; pass-count verified equal to the members' sum under sjulia and green under upstream julia; Issue #10238, #9671 Phase 3)"
+[[tests]]
+name = "dispatch_qualified_base_builtin_function_value_identity_10284"
+file = "qualified_base_builtin_function_value_identity_10284.jl"
+expected = true
+description = "Residual of Issue #10077: `Base.<fn>` for the small `is_base_function` allowlist (sqrt/floor/ceil/round/println, operators via function_name_to_binary_op) still baked the qualified `\"Base.<fn>\"` spelling into the captured FunctionValue's name because these BuiltinOp/intrinsic-backed names have no genuine `\"Base.<fn>\"` entry in method_tables to resolve candidates through (unlike Pure Julia Base functions such as Base.map/Base.sin, unaffected by this bug), making `isa Function` false and `typeof` diverge from the bare-access identity. Fixed by resolving candidates through the bare `<fn>` method-table key (where Base's own extensions/methods for these names actually live) while still emitting the bare display name, mirroring the general Base.<fn>-as-value convention (Issue #8137); covers isa Function, typeof identity, direct calling, and HOF-callback (map/filter) correctness for the allowlist and representative operators, plus a regression guard for is_base_function's type/constructor-name entries (Int/String/Char/Ref/IOBuffer), which require the type-name check in compile_module_function_ref to run before the is_base_function branch so they keep resolving as DataType values, not Function values (Issue #10284, #10255)"
+
+[[tests]]
+name = "dispatch_comprehension_concrete_array_family_10206"
+file = "comprehension_concrete_array_family_10206.jl"
+expected = true
+description = "A multi-iterator comprehension's rank-known/element-unresolved bare Vector/Matrix alias (Issue #6817) previously statically matched NO method against a CONCRETE ::Array{Any,N}-typed candidate (only abstract AbstractVector/AbstractMatrix candidates triggered the runtime-dispatch-deferral fallback), raising a spurious compile-time MethodError for rank >= 2 instead of deferring to runtime dispatch on the genuinely Matrix{Any}/Array{Any,N} runtime value. Fixed by broadening the fallback's array-family probe to abstract-or-concrete (core_is_array_family_type); covers a variable-bound and an inline rank-2 comprehension, a rank-1 non-regression, and a 3-D comprehension against a bare ::Array/::Array{Any,3} pair. Verified against upstream julia 1.12 (Issue #10206)"
+
+[[tests]]
+name = "dispatch_comprehension_runtime_narrow_dispatch_10315"
+file = "comprehension_runtime_narrow_dispatch_10315.jl"
+expected = true
+description = "An untyped rank-1 comprehension whose body is statically unresolved can runtime-typejoin to Vector{Int64}; its compiler result must preserve rank-known/element-unknown provenance instead of collapsing to proven Vector{Any}, so an overload set containing Vector{Any} and Vector{Int64} defers to runtime dispatch. Covers assigned and inline range paths, Set iteration-protocol lowering, tuple destructuring, and genuine heterogeneous/explicitly typed Vector{Any} controls. Verified against upstream Julia 1.12 (Issue #10315)."
+
+[[tests]]
+name = "dispatch_known_any_field_array_family_10206"
+file = "known_any_field_array_family_10206.jl"
+expected = true
+description = "The companion Known-side case to dispatch_comprehension_concrete_array_family_10206: `expr.args` really is Vector{Any} at compile time and runtime (unlike a comprehension's rank-known/element-unresolved placeholder, Issue #6817), sharing the identical ArrayOf(ArrayElementType::Any, Some(n)) ValueType shape the infer_julia_type bridge could not disambiguate (Issue #10267). Before the fix a Vector{Any}-typed method parameter could not statically bind to an `expr.args`-derived variable (spurious `MethodError: no method matching g(::Vector)`) even though `typeof` matched upstream exactly. Fixed by recording explicit assignment-site provenance (`known_any_rank_array_locals`) so only the proven-Any expr.args shape reports the concrete VectorOf(Any); covers variable-bound and inline `.args` access, a more-specific Array{Any,1}-vs-bare-Array candidate pair, and the pre-existing empty-literal (`x = []`) non-regression. Verified against upstream julia 1.12 (Issue #10206, #10267)"
+
+[[tests]]
+name = "dispatch_param_shadows_builtin_type_constructor_10146_10268"
+file = "param_shadows_builtin_type_constructor_10146_10268.jl"
+expected = true
+description = "A function-scope parameter named after a NON-numeric builtin type constructor (String/Bool/BigInt) shadows the global constructor throughout the body, matching upstream Julia lexical scoping: `f(String) = String(2)` called as `f(x -> x + 10)` calls the PARAMETER (the lambda), returning 12, not the builtin String constructor. Complements the numeric case (Float64/Int64, Issue #10146) covered by functions/parameter_shadows_numeric_constructor_10146.jl (PR #10417, the lazy runtime specializer fix) — this fixture covers the REMAINING surface #10417 left unfixed: static return-type inference (src/compile/abstract_interp/engine/mod.rs), which previously fell through to the builtin-constructor transfer-function registry for any unresolved local-bound call, mis-declaring a String-shadowed function's return type as Str and CRASHING a caller with \"Type error: expected String, got Int64\". Reporting Any when the callee name is env-bound closes that gap. Also covers non-shadowed builtin-constructor calls (String from Char array; unshadowed numeric conversion) and the pre-existing shadowed-plain-value-reference case (Issue #10268)"
+
+[[tests]]
+name = "dispatch_where_binder_shadows_builtin_type_10407"
+file = "where_binder_shadows_builtin_type_10407.jl"
+expected = true
+description = "A where-clause binder whose name collides with a builtin/global type name (`h(x::Float64) where {Float64}`) must be a fresh method-local TypeVar shadowing the global BOTH in the signature and in the body, matching upstream lexical scoping. Two coupled fixes: (1) lowering resolved the annotation to the builtin concrete type before the TypeVar conversion pass, so dispatch spuriously raised `MethodError: no method matching h(::Int64)` — parse_type_name now resolves an active where-binder name (ScopedExclusion, Issue #7847 mechanism) as a plain Struct so convert_params_with_type_vars rewrites it into the TypeVar with declared bounds; (2) the lazy runtime specializer (src/vm/specialize) baked the builtin type object/constructor into the specialized body for any name not in its locals, so `Float64(2)` returned `2.0` even when the TypeVar was bound to Int64 — where binders are now registered as Any locals so compile_var/compile_call emit dynamic LoadAny consulting the per-call frame type_bindings (extending the Issue #10146 local-callee gate to where binders). Shadowing is name-based: `x::Int` under `where {Int64}` still resolves to the global Int alias. Covers short/full form, plain value load of the binder, bounded colliding binder (bounds still restrict dispatch), the non-colliding `where {T}` control, and unshadowed builtin conversions. Distinct from the parameter-shadowing fix #10146/#10268 (PR #10417). Verified against upstream julia 1.12 (Issue #10407)"
+
+[[tests]]
+name = "dispatch_parametric_ctor_callable_parity_10502"
+file = "parametric_ctor_callable_parity_10502.jl"
+expected = true
+description = "Prevention audit for Issue #10502 (follow-up to #10405/PR #10487): pairs DIRECT parametric constructor syntax with FIRST-CLASS DataType callable forms (bound variable, map) for the public parametric constructors beyond the array/ctor_direct_vs_callable_parity_10213 coverage — Dict{K,V} (varargs/empty/vector-of-pairs), Rational{T} with Bool/Int32/BigInt sibling parameterizations each resolving to their OWN instantiation, and Complex{T} including the default-constructor-fallback-after-dispatch-miss class (Complex{Int64}(re, im) must keep constructing even though generic Complex{T} candidates exist). Negative guards: InexactError for Rational{Bool}(2), catchable MethodError for String arguments to Rational/Complex callables. User-struct directions: a generic TypeVar ctor method (G{T}(::String) where {T}) is shared across instantiations (direct/bound/map), and a method defined only on one concrete instantiation stays invisible to sibling parameterizations (miss-free assertions only — the default-ctor-suppression crash and the non-convertible-argument divergence are tracked as Issues #10592/#10593 and documented in the fixture header instead of asserted). Sibling-selectable argument shape (Codex review on PR #10601): a Bool-only method on one concrete instantiation is paired with sibling default-ctor calls taking the SAME Bool argument (direct/bound/map), so a candidate-augmentation leak surfaces as a wrong value/type instead of needing the #10593-blocked MethodError direction. Verified against upstream julia 1.12 (Issue #10502)"
+
+[[tests]]
+name = "dispatch_module_function_identity_matrix_11088"
+file = "module_function_identity_matrix_11088.jl"
+expected = true
+description = "Same-named functions declared in sibling modules must NOT compare ==/=== as one value (the function/method-domain analog of Issue #11021's same-named-struct collapse), found investigating Issue #10990 (Phase 3 of the semantic-ID epic #10459, FunctionId/MethodId). emit_function_value_named (subset_julia_vm_compile/src/compile/core_compiler.rs) always baked the BARE declared name into a resolved function value's runtime type identity — correct for Issue #10077 (the SAME declaration must report the SAME typeof regardless of qualified-vs-bare/imported access) but over-applied: it did not distinguish that case from two DIFFERENT declarations that merely share a bare name across sibling modules. Fixed by checking, at the point a qualified access's identity name is chosen, whether ANOTHER module's qualified method-table key also ends in the same bare name (a non-destructive key-existence check, immune to MethodTable::add_method's same-signature dedup which can otherwise silently evict one sibling's entry from the shared bare-name table, Issue #8079) — using the qualified spelling as the identity only when a sibling declaration exists. Covers direct sibling-module collision (===/==/typeof, both directions), nested-module same-name collision, self-identity sanity, calling correctness, and the Issue #10077 invariant (bare-vs-qualified access to the SAME declaration keeps identical typeof) in one matrix, mirroring modules/module_struct_identity_matrix_11021.jl's structure. Verified against upstream julia 1.12.6 (Issue #11088, #10990, #10459)"
+
+[[tests]]
+name = "dispatch_user_abstract_builtin_binary_dominance_11230"
+file = "user_abstract_builtin_binary_dominance_11230.jl"
+expected = true
+description = "Binary operator dispatch must select a user-defined abstract subtype pair over a broad AbstractMatrix/AbstractVector method independently of candidate registration order. Runtime signatures encode the narrow parameters as AbstractUser nodes with structured parents; full-signature dominance must follow those parents into built-in abstract array aliases instead of falling back to the first global function index (Issue #11230, found while implementing prevention Issue #11036)"
+
+[[tests]]
+name = "dispatch_parametric_lower_bound_type_object_11233"
+file = "parametric_lower_bound_type_object_11233.jl"
+expected = true
+description = "Static dispatch through a structured Type{SubArray{T}} signature must enforce the method TypeVar's parametric lower bound after extracting T, matching runtime function-value dispatch and upstream Julia (Issue #11233)"
+
+[[tests]]
+name = "dispatch_callable_struct_vararg_self_11386"
+file = "callable_struct_vararg_self_11386.jl"
+expected = true
+description = "Bound-form callable structs `(self::Type)(args)` with a vararg call overload dropped the bound self instance during runtime dispatch: callable_struct_needs_self originally judged applicability from candidate arity alone, which cannot distinguish an anonymous vararg method (`(::Type)(a, xs...)`) from a bound vararg method (`(self::Type)(xs...)`) since both present the same fixed-arity/vararg-index shape (Issue #11386). A follow-up heuristic (comparing the first parameter's JuliaType name against the method's own `__callable_<TypeName>` registration suffix) fixed that but misclassified an anonymous method whose own first parameter merely happens to be annotated with the struct's own type, e.g. `(::B)(x::B, xs...)`, as bound-form (Issue #11553). Fixed for good by determining bound-ness structurally at *definition* time: lowering marks the synthesized `self` parameter's name with a reserved marker (ground truth, not inferred from type/arity), which survives into `FunctionInfo::params[0].0` and is aliased back to the user's chosen identifier via a body prologue. Covers fixed-arity (control/no regression), plain vararg, splatted vararg, kwargs+vararg callable-struct calls (Issue #11386), and an anonymous-form self-typed-first-vararg-parameter method that must NOT bind self (Issue #11553), verified against upstream julia 1.12.6"
+
+[[tests]]
+name = "dispatch_repeated_where_param_conflict_11231"
+file = "repeated_where_param_conflict_11231.jl"
+expected = true
+description = "A method `where` parameter that repeats across positions (Pair{T,T}, nested Wrap2{T,Boxx{T}}, three-occurrence Trip3{T,T,T}, built-in Tuple{T,T}) must unify to the SAME type; a second conflicting binding rejects the candidate instead of silently accepting any combination. Issue #11231 fixed the struct-to-struct binding extractor in both subset_julia_vm_types/src/types/julia_type/comparison.rs (legacy rendered-Struct path) and subset_julia_vm_types/src/inference_core/dispatch_resolver/core_match.rs (structured CoreType matcher), plus the VM's post-selection extract_type_bindings_for_selected_method fallback in subset_julia_vm_vm/src/vm/dispatch.rs, to merge bindings with a conflict-aware unify-check (type equality) rather than a raw insert/extend. Issue #11490 (different root cause, found while writing this fixture) fixed a SEPARATE compile-time-only bug: a literal built-in Tuple{...} type argument used a single-arg static-dispatch fast path (core_static_datatype_exact_match in subset_julia_vm_compile/src/compile/expr/call/dispatch.rs) that checked each where-bound Tuple element independently with no shared binding state, so Tuple{Int,String} wrongly matched Tuple{T,T}; fixed by threading a HashMap<String,CoreType> of typevar bindings through the recursive match (anonymous covariant/contravariant `_` placeholders exempted). Covers both static and runtime (variable-bound) dispatch. Verified against upstream julia 1.12.6 (Issues #11231, #11490)"
+
+[[tests]]
+name = "dispatch_constructor_return_exact_or_any_11436"
+file = "constructor_return_exact_or_any_11436.jl"
+expected = true
+description = "Constructor calls whose inferred return remains Any must not acquire an arbitrary same-base Struct identity: forward/reverse sibling instantiation and method registration orders preserve Outer{Inner{Int64}} and direct-vs-Any dispatch parity across the dispatch seed sweep (Issues #11434/#11436)"
+
+[[tests]]
+name = "dispatch_splat_vararg_forward_type_apply_11539"
+file = "splat_vararg_forward_type_apply_11539.jl"
+expected = true
+description = "Splatting the SAME vararg collection forward into a runtime type-application curly (Foo{M,N,T,n}(xs...), a local-variable trailing value parameter, an inline-call one, and a module-qualified struct) must resolve identically to the non-splat form (Foo{M,N,T,n}(xs)): the compiler now builds the runtime DataType callee (emit_parametric_type_arg_value + ApplyTypeDynamic) and invokes it through the splat-aware runtime call path instead of falling through to compile_splat_call (which mis-resolved the whole curly text as an undefined variable name) or into owned_constructor_name_in_scope's eager compile_runtime_datatype_value_call (which rejected a where-bound runtime type variable); the VM's CallFunctionVariableWithSplat handler was also missing the DataType/Struct/StructRef callee arms CallFunctionVariable already had (Issue #11539)"

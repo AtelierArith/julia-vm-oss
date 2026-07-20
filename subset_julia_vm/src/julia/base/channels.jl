@@ -3,11 +3,8 @@
 # =============================================================================
 # Based on Julia's base/channels.jl
 #
-# This implements a simplified Channel type for SubsetJuliaVM's
-# cooperative multitasking model.
-#
-# Note: SubsetJuliaVM has limitations with struct field operations.
-# This implementation works around those limitations.
+# This implements Channel on SubsetJuliaVM's VM-owned cooperative task
+# continuations. Blocking operations park only the current task.
 
 # =============================================================================
 # Channel Type
@@ -21,9 +18,6 @@
 
 Construct a typed `Channel{T}` with an internal buffer that can hold a maximum of `size` objects.
 `Channel(size)` (without type parameter) creates a `Channel{Any}`.
-
-Note: In SubsetJuliaVM's cooperative model, blocking operations may cause errors
-since there is no true task scheduler. Use buffered channels for best results.
 
 # Examples
 ```julia
@@ -40,13 +34,13 @@ mutable struct Channel{T}
     excp                    # exception to be thrown when state !== :open
     data::Vector{Any}       # buffer for stored items (untyped for VM compatibility)
     sz_max::Int             # maximum size of channel (0 = unbuffered)
-    pending_puts::Vector{Any}  # overflow queue: values queued when buffer is full (Issue #3451)
+    waiters::Any            # (put_waiters, take_waiters), both Vector{Any}
 
     function Channel{T}(sz::Integer=0) where T
         if sz < 0
             throw(ArgumentError("Channel size must be either 0, a positive integer or Inf"))
         end
-        return new{T}(:open, nothing, Any[], sz, Any[])
+        return new{T}(:open, nothing, Any[], sz, (Any[], Any[]))
     end
 end
 
@@ -86,7 +80,8 @@ Determine whether a channel is full.
 """
 function isfull(c::Channel)
     if !isbuffered(c)
-        return length(c.data) > 0
+        # An unbuffered Channel has no storage capacity, matching upstream.
+        return true
     end
     return length(c.data) >= c.sz_max
 end
@@ -95,16 +90,49 @@ end
     isready(c::Channel)
 
 Determine whether a channel has a value available to take without blocking.
-Returns `true` if the buffer or pending queue is non-empty.
+Returns `true` if a value is available without blocking.
 """
-isready(c::Channel) = length(c.data) > 0 || length(c.pending_puts) > 0
+isready(c::Channel) = length(c.data) > 0
 
 """
     isempty(c::Channel)
 
-Determine whether a channel has no values (buffer and pending queue both empty).
+Determine whether a channel has no available values.
 """
-isempty(c::Channel) = length(c.data) == 0 && length(c.pending_puts) == 0
+isempty(c::Channel) = length(c.data) == 0
+
+function _wake_channel_takers(c::Channel)
+    take_waiters = c.waiters[2]
+    if length(take_waiters) > 0
+        waiters = take_waiters
+        waiter = waiters[1]
+        c.waiters = (c.waiters[1], waiters[2:end])
+        _task_wake(waiter.vm_id)
+    end
+    return nothing
+end
+
+function _wake_channel_putters(c::Channel)
+    put_waiters = c.waiters[1]
+    if length(put_waiters) > 0
+        waiters = put_waiters
+        waiter = waiters[1]
+        c.waiters = (waiters[2:end], c.waiters[2])
+        _task_wake(waiter.vm_id)
+    end
+    return nothing
+end
+
+function _wake_all_channel_waiters(c::Channel)
+    for waiter in c.waiters[1]
+        _task_wake(waiter.vm_id)
+    end
+    for waiter in c.waiters[2]
+        _task_wake(waiter.vm_id)
+    end
+    c.waiters = (Any[], Any[])
+    return nothing
+end
 
 # =============================================================================
 # Close Channel
@@ -117,6 +145,7 @@ Close a channel.
 """
 function close(c::Channel)
     c.state = :closed
+    _wake_all_channel_waiters(c)
     return nothing
 end
 
@@ -128,6 +157,7 @@ Close a channel with an exception.
 function close(c::Channel, excp::Exception)
     c.state = :closed
     c.excp = excp
+    _wake_all_channel_waiters(c)
     return nothing
 end
 
@@ -149,33 +179,38 @@ end
 """
     put!(c::Channel, v)
 
-Append an item `v` to the channel `c`. If the buffer is full, the value is queued
-in a pending overflow queue and will be drained into the buffer on the next `take!`.
-This approximates blocking semantics within SubsetJuliaVM's cooperative model (Issue #3451).
+Append an item `v` to the channel `c`. A full buffered channel parks the
+calling task until a `take!` makes room. An unbuffered channel performs a true
+rendezvous: the producer resumes only after a consumer takes the value.
 """
 function put!(c::Channel, v)
     check_channel_state(c)
 
-    # Buffer full for a buffered channel: queue in pending overflow
-    if isbuffered(c) && isfull(c)
-        pq = c.pending_puts
-        pq = vcat(pq, [v])
-        c.pending_puts = pq
-        return v
+    # Buffered producers wait for capacity. For an unbuffered rendezvous, only
+    # one producer may publish a value at a time; later producers keep `v` in
+    # their suspended frame until the preceding handshake completes.
+    while isopen(c) &&
+            ((isbuffered(c) && isfull(c)) || (!isbuffered(c) && !isempty(c.data)))
+        c.waiters = (vcat(c.waiters[1], [current_task()]), c.waiters[2])
+        _task_park()
     end
+    check_channel_state(c)
 
-    # Unbuffered channel: at most one item lives in data at a time; overflow to pending
-    if !isbuffered(c) && length(c.data) > 0
-        pq = c.pending_puts
-        pq = vcat(pq, [v])
-        c.pending_puts = pq
-        return v
-    end
-
-    # Normal path: add directly to buffer
     d = c.data
     d = vcat(d, [v])
     c.data = d
+    _wake_channel_takers(c)
+
+    if !isbuffered(c)
+        while isopen(c) && !isempty(c.data)
+            c.waiters = (vcat(c.waiters[1], [current_task()]), c.waiters[2])
+            _task_park()
+        end
+        check_channel_state(c)
+        # The consumer woke the producer whose value it consumed. That
+        # producer hands the rendezvous slot to the next FIFO putter.
+        _wake_channel_putters(c)
+    end
 
     return v
 end
@@ -183,33 +218,19 @@ end
 """
     take!(c::Channel)
 
-Remove and return a value from a Channel. After taking from the buffer, one pending
-put (if any) is drained into the buffer, approximating blocking semantics (Issue #3451).
+Remove and return a value from a Channel, parking until one is available.
 """
 function take!(c::Channel)
-    # Buffer has items: take from buffer, then drain one pending put
+    while isopen(c) && isempty(c.data)
+        c.waiters = (c.waiters[1], vcat(c.waiters[2], [current_task()]))
+        _task_park()
+    end
+
     if !isempty(c.data)
         d = c.data
         result = d[1]
         c.data = d[2:end]
-
-        if length(c.pending_puts) > 0
-            pq = c.pending_puts
-            val = pq[1]
-            c.pending_puts = pq[2:end]
-            nd = c.data
-            nd = vcat(nd, [val])
-            c.data = nd
-        end
-
-        return result
-    end
-
-    # Buffer empty but pending queue has items: return directly
-    if length(c.pending_puts) > 0
-        pq = c.pending_puts
-        result = pq[1]
-        c.pending_puts = pq[2:end]
+        _wake_channel_putters(c)
         return result
     end
 
@@ -221,22 +242,23 @@ function take!(c::Channel)
         end
         throw(InvalidStateException("Channel is closed.", :closed))
     end
-    throw(InvalidStateException("Channel is empty. In cooperative model, cannot block.", :empty))
+    throw(InvalidStateException("Channel is empty.", :empty))
 end
 
 """
     fetch(c::Channel)
 
 Get the first available item from the Channel without removing it.
-Checks the pending queue when the buffer is empty (Issue #3451).
+Parks until a value is available, without removing it.
 """
 function fetch(c::Channel)
-    if !isempty(c.data)
-        return c.data[1]
+    while isopen(c) && isempty(c.data)
+        c.waiters = (c.waiters[1], vcat(c.waiters[2], [current_task()]))
+        _task_park()
     end
 
-    if length(c.pending_puts) > 0
-        return c.pending_puts[1]
+    if !isempty(c.data)
+        return c.data[1]
     end
 
     if !isopen(c)
@@ -246,7 +268,7 @@ function fetch(c::Channel)
         end
         throw(InvalidStateException("Channel is closed.", :closed))
     end
-    throw(InvalidStateException("Channel is empty. In cooperative model, cannot block.", :empty))
+    throw(InvalidStateException("Channel is empty.", :empty))
 end
 
 # =============================================================================
@@ -260,14 +282,14 @@ end
 Iterate over a Channel.
 """
 function iterate(c::Channel)
-    if isempty(c)
+    if !isopen(c) && isempty(c)
         return nothing
     end
     return (take!(c), nothing)
 end
 
 function iterate(c::Channel, state)
-    if isempty(c)
+    if !isopen(c) && isempty(c)
         return nothing
     end
     return (take!(c), nothing)
@@ -276,9 +298,9 @@ end
 """
     length(c::Channel)
 
-Return the number of items currently in the channel buffer plus any pending puts.
+Return the number of immediately available items.
 """
-length(c::Channel) = length(c.data) + length(c.pending_puts)
+length(c::Channel) = length(c.data)
 
 # =============================================================================
 # Collection Interface
@@ -308,11 +330,13 @@ popfirst!(c::Channel) = take!(c)
 """
     empty!(c::Channel)
 
-Remove all items from the channel buffer and pending queue. Returns `c`.
+Remove all buffered items and wake producers waiting for space. Returns `c`.
 """
 function empty!(c::Channel)
     c.data = Any[]
-    c.pending_puts = Any[]
+    while length(c.waiters[1]) > 0
+        _wake_channel_putters(c)
+    end
     return c
 end
 
@@ -336,7 +360,8 @@ c = Channel(10)
 t = Task(() -> put!(c, 42))
 bind(c, t)
 schedule(t)
-isopen(c)  # false - closed after task completed
+wait(t)
+isopen(c)  # false
 ```
 """
 function bind(c::Channel, task::Task)
@@ -374,8 +399,8 @@ end
 """
     Channel(func::Function, sz::Integer=0)
 
-Create a buffered channel of size `sz` and execute `func(channel)` synchronously.
-The channel is closed automatically when the function completes (or throws).
+Create a channel of size `sz` and run `func(channel)` on a scheduled Task.
+The channel is closed automatically when the producer task completes or fails.
 
 Enables the do-block producer pattern:
 
@@ -385,23 +410,38 @@ c = Channel(10) do ch
         put!(ch, i)
     end
 end
-# c has 5 items buffered; isopen(c) == false
+# The producer is live; consuming the Channel drives it to completion.
+collect(c) == [1, 2, 3, 4, 5]
 ```
 """
-function Channel(func::Function, sz::Integer=0)
-    c = Channel(sz)
-    try
-        func(c)
-        if isopen(c)
-            close(c)
-        end
-    catch e
-        if isopen(c)
-            close(c)
-        end
-        rethrow()
-    end
+function _channel_with_task(c::Channel, func::Function)
+    t = Task(() -> func(c))
+    bind(c, t)
+    schedule(t)
     return c
+end
+
+function Channel(func::Function, sz::Integer=0)
+    return _channel_with_task(Channel(sz), func)
+end
+
+"""
+    Channel{T}(func::Function, sz)
+
+Typed do-block producer constructor (Issue #10353), mirroring upstream
+`Channel{T}(f::Function, size=0)`: the producer task fills a `Channel{T}`.
+The size parameter carries no default here: the default-argument expansion
+would synthesize an arity-1 `Channel{T}(func::Function)` method that the
+parametric-constructor dispatcher currently confuses with the arity-1 inner
+`Channel{T}(sz::Integer)` constructor.
+"""
+function Channel{T}(func::Function, sz::Integer) where {T}
+    return _channel_with_task(Channel{T}(sz), func)
+end
+
+function Channel{T}(func::Function, sz::Float64) where {T}
+    sz_int = (sz == Inf ? typemax(Int) : convert(Int, sz))
+    return Channel{T}(func, sz_int)
 end
 
 """

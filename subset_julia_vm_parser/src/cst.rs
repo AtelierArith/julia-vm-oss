@@ -2,12 +2,27 @@
 //!
 //! Provides a tree structure compatible with tree-sitter's output format.
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 use crate::node_kind::NodeKind;
 use crate::span::Span;
 
 /// A node in the Concrete Syntax Tree
+///
+/// `text` was previously stored as an owned `Option<String>` on every leaf
+/// node (identifiers, literals, operators — the bulk of all nodes a parse
+/// produces). It is always recoverable from `span` via
+/// `&source[span.byte_range()]`, and every production consumer already reads
+/// text that way (`CstWalker::text` / `text_from_source`, and the `Meta.parse`
+/// builtin's `cst_to_value`) rather than through the stored field, so the
+/// field was pure allocation overhead with no runtime beneficiary. Call
+/// [`CstNode::text_from_source`] with the original source string instead
+/// (Issue #10126). `field_name` uses borrowed static field labels during parser
+/// construction so fixed field names do not allocate (Issue #10188).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CstNode {
     /// The kind of node
@@ -22,13 +37,9 @@ pub struct CstNode {
     /// Child nodes
     pub children: Vec<CstNode>,
 
-    /// For leaf nodes: the text content (optional, can be extracted from source)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-
     /// Field name if this node is a named field of its parent
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub field_name: Option<String>,
+    pub field_name: Option<Cow<'static, str>>,
 }
 
 impl CstNode {
@@ -39,19 +50,18 @@ impl CstNode {
             span,
             is_named: kind.is_named(),
             children: Vec::new(),
-            text: None,
             field_name: None,
         }
     }
 
-    /// Create a new leaf node with text
-    pub fn leaf(kind: NodeKind, span: Span, text: impl Into<String>) -> Self {
+    /// Create a new leaf node. Text is not stored — recover it from `span`
+    /// via [`CstNode::text_from_source`] (Issue #10126).
+    pub fn leaf(kind: NodeKind, span: Span) -> Self {
         Self {
             kind,
             span,
             is_named: kind.is_named(),
             children: Vec::new(),
-            text: Some(text.into()),
             field_name: None,
         }
     }
@@ -63,7 +73,6 @@ impl CstNode {
             span,
             is_named: kind.is_named(),
             children,
-            text: None,
             field_name: None,
         }
     }
@@ -74,15 +83,10 @@ impl CstNode {
     }
 
     /// Add a named field child
-    pub fn push_field(&mut self, field_name: impl Into<String>, child: CstNode) {
+    pub fn push_field(&mut self, field_name: &'static str, child: CstNode) {
         let mut child = child;
-        child.field_name = Some(field_name.into());
+        child.field_name = Some(Cow::Borrowed(field_name));
         self.children.push(child);
-    }
-
-    /// Set the text content
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        self.text = Some(text.into());
     }
 
     /// Get child by index
@@ -131,11 +135,6 @@ impl CstNode {
         self.children.iter().filter(move |c| c.kind == kind)
     }
 
-    /// Get text content as Option<&str> (convenience method)
-    pub fn text_str(&self) -> Option<&str> {
-        self.text.as_deref()
-    }
-
     /// Get the number of children
     pub fn child_count(&self) -> usize {
         self.children.len()
@@ -177,8 +176,17 @@ impl CstNode {
         CstWalker::new(self)
     }
 
-    /// Convert to JSON-compatible format for WASM
-    pub fn to_json(&self) -> serde_json::Value {
+    /// Convert to JSON-compatible format for WASM.
+    ///
+    /// `source` is the original source string the node was parsed from; leaf
+    /// nodes (no children) include their `text` derived from `span`, matching
+    /// the previous stored-`text`-field shape (Issue #10126).
+    pub fn to_json(&self, source: &str) -> serde_json::Value {
+        let text = if self.children.is_empty() {
+            Some(self.text_from_source(source))
+        } else {
+            None
+        };
         serde_json::json!({
             "type": self.kind.as_str(),
             "start": self.span.start,
@@ -188,15 +196,17 @@ impl CstNode {
             "start_column": self.span.start_column,
             "end_column": self.span.end_column,
             "is_named": self.is_named,
-            "text": self.text,
-            "children": self.children.iter().map(|c| c.to_json()).collect::<Vec<_>>()
+            "text": text,
+            "children": self.children.iter().map(|c| c.to_json(source)).collect::<Vec<_>>()
         })
     }
 
     /// Print AST structure in a human-readable format for debugging.
     ///
     /// This is useful for understanding the tree structure when writing tests
-    /// or debugging parser issues.
+    /// or debugging parser issues. `source` is the original source string the
+    /// node was parsed from, used to recover leaf text from `span` (Issue
+    /// #10126).
     ///
     /// # Example output
     /// ```text
@@ -204,7 +214,7 @@ impl CstNode {
     ///   name: Identifier = "x"
     ///   value: IntegerLiteral = "42"
     /// ```
-    pub fn debug_ast(&self, indent: usize) {
+    pub fn debug_ast(&self, indent: usize, source: &str) {
         let pad = "  ".repeat(indent);
 
         // Build the line: [field_name: ]NodeKind[ = "text"]
@@ -213,28 +223,29 @@ impl CstNode {
             None => String::new(),
         };
 
-        let text_suffix = match &self.text {
-            Some(t) => format!(" = {:?}", t),
-            None => String::new(),
+        let text_suffix = if self.children.is_empty() {
+            format!(" = {:?}", self.text_from_source(source))
+        } else {
+            String::new()
         };
 
         println!("{}{}{:?}{}", pad, field_prefix, self.kind, text_suffix);
 
         for child in &self.children {
-            child.debug_ast(indent + 1);
+            child.debug_ast(indent + 1, source);
         }
     }
 
     /// Return AST structure as a string for debugging.
     ///
     /// Similar to `debug_ast()` but returns a String instead of printing.
-    pub fn debug_ast_string(&self) -> String {
+    pub fn debug_ast_string(&self, source: &str) -> String {
         let mut output = String::new();
-        self.debug_ast_to_string(&mut output, 0);
+        self.debug_ast_to_string(&mut output, 0, source);
         output
     }
 
-    fn debug_ast_to_string(&self, output: &mut String, indent: usize) {
+    fn debug_ast_to_string(&self, output: &mut String, indent: usize, source: &str) {
         use std::fmt::Write;
 
         let pad = "  ".repeat(indent);
@@ -244,24 +255,32 @@ impl CstNode {
             None => String::new(),
         };
 
-        let text_suffix = match &self.text {
-            Some(t) => format!(" = {:?}", t),
-            None => String::new(),
+        let text_suffix = if self.children.is_empty() {
+            format!(" = {:?}", self.text_from_source(source))
+        } else {
+            String::new()
         };
 
-        writeln!(
+        // Writing to a `String` via `std::fmt::Write` cannot fail (its
+        // `write_str` always returns `Ok(())`), so discard the result instead
+        // of an infallible-but-panicking unwrap call that could otherwise
+        // turn a future `output` type change into a live panic path
+        // (Issue #10904).
+        let _ = writeln!(
             output,
             "{}{}{:?}{}",
             pad, field_prefix, self.kind, text_suffix
-        )
-        .unwrap();
+        );
 
         for child in &self.children {
-            child.debug_ast_to_string(output, indent + 1);
+            child.debug_ast_to_string(output, indent + 1, source);
         }
     }
 
-    /// Create from JSON-compatible format
+    /// Create from JSON-compatible format. The `text` field (if present) is
+    /// ignored — it is no longer stored on `CstNode`; recover leaf text from
+    /// `span` via [`CstNode::text_from_source`] against the original source
+    /// instead (Issue #10126).
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
         let kind = value.get("type")?.as_str()?.parse::<NodeKind>().ok()?;
         let span = Span::new(
@@ -273,10 +292,6 @@ impl CstNode {
             value.get("end_column")?.as_u64()? as usize,
         );
         let is_named = value.get("is_named")?.as_bool()?;
-        let text = value
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
         let children = value
             .get("children")?
             .as_array()?
@@ -289,7 +304,6 @@ impl CstNode {
             span,
             is_named,
             children,
-            text,
             field_name: None,
         })
     }
@@ -355,47 +369,50 @@ pub mod testing {
 
     /// Assert that a node has the expected kind, showing AST structure on failure.
     ///
+    /// `source` is the original source string the node was parsed from (used
+    /// only for the diagnostic dump on failure; Issue #10126).
+    ///
     /// # Example
     /// ```ignore
     /// use subset_julia_vm_parser::cst::testing::assert_node_kind;
     /// let node = parse_expr("x + 1");
-    /// assert_node_kind(&node, NodeKind::BinaryExpression);
+    /// assert_node_kind(&node, NodeKind::BinaryExpression, "x + 1");
     /// ```
-    pub fn assert_node_kind(node: &CstNode, expected: NodeKind) {
+    pub fn assert_node_kind(node: &CstNode, expected: NodeKind, source: &str) {
         if node.kind != expected {
             eprintln!("\n=== AST Structure (on assertion failure) ===\n");
-            eprintln!("{}", node.debug_ast_string());
+            eprintln!("{}", node.debug_ast_string(source));
             panic!("Expected node kind {:?}, but got {:?}", expected, node.kind);
         }
     }
 
     /// Assert that a node has the expected text, showing AST structure on failure.
-    pub fn assert_node_text(node: &CstNode, expected: &str) {
-        let actual = node.text.as_deref();
-        if actual != Some(expected) {
+    pub fn assert_node_text(node: &CstNode, expected: &str, source: &str) {
+        let actual = node.text_from_source(source);
+        if actual != expected {
             eprintln!("\n=== AST Structure (on assertion failure) ===\n");
-            eprintln!("{}", node.debug_ast_string());
+            eprintln!("{}", node.debug_ast_string(source));
             panic!("Expected node text {:?}, but got {:?}", expected, actual);
         }
     }
 
     /// Assert that a node has the expected child count, showing AST structure on failure.
-    pub fn assert_child_count(node: &CstNode, expected: usize) {
+    pub fn assert_child_count(node: &CstNode, expected: usize, source: &str) {
         let actual = node.children.len();
         if actual != expected {
             eprintln!("\n=== AST Structure (on assertion failure) ===\n");
-            eprintln!("{}", node.debug_ast_string());
+            eprintln!("{}", node.debug_ast_string(source));
             panic!("Expected {} children, but got {}", expected, actual);
         }
     }
 
     /// Assert that a node has a child with the given field name and kind.
-    pub fn assert_field_kind(node: &CstNode, field: &str, expected: NodeKind) {
+    pub fn assert_field_kind(node: &CstNode, field: &str, expected: NodeKind, source: &str) {
         match node.child_by_field(field) {
             Some(child) if child.kind == expected => {}
             Some(child) => {
                 eprintln!("\n=== AST Structure (on assertion failure) ===\n");
-                eprintln!("{}", node.debug_ast_string());
+                eprintln!("{}", node.debug_ast_string(source));
                 panic!(
                     "Expected field '{}' to have kind {:?}, but got {:?}",
                     field, expected, child.kind
@@ -403,7 +420,7 @@ pub mod testing {
             }
             None => {
                 eprintln!("\n=== AST Structure (on assertion failure) ===\n");
-                eprintln!("{}", node.debug_ast_string());
+                eprintln!("{}", node.debug_ast_string(source));
                 panic!("Expected field '{}' to exist, but it was not found", field);
             }
         }
@@ -417,7 +434,7 @@ pub mod testing {
         eprintln!("\n=== Source ===");
         eprintln!("{}", source);
         eprintln!("\n=== AST Structure ===\n");
-        eprintln!("{}", cst.debug_ast_string());
+        eprintln!("{}", cst.debug_ast_string(source));
 
         if !errors.is_empty() {
             eprintln!("=== Parse Errors ===");
@@ -429,6 +446,7 @@ pub mod testing {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -446,18 +464,19 @@ mod tests {
 
     #[test]
     fn test_leaf_node() {
+        let source = "12345";
         let span = Span::new(0, 5, 1, 1, 1, 6);
-        let node = CstNode::leaf(NodeKind::IntegerLiteral, span, "12345");
+        let node = CstNode::leaf(NodeKind::IntegerLiteral, span);
 
         assert_eq!(node.kind, NodeKind::IntegerLiteral);
-        assert_eq!(node.text, Some("12345".to_string()));
+        assert_eq!(node.text_from_source(source), "12345");
     }
 
     #[test]
     fn test_child_access() {
         let span = Span::new(0, 20, 1, 1, 1, 21);
-        let child1 = CstNode::leaf(NodeKind::Identifier, Span::new(0, 3, 1, 1, 1, 4), "foo");
-        let child2 = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(6, 8, 1, 1, 7, 9), "42");
+        let child1 = CstNode::leaf(NodeKind::Identifier, Span::new(0, 3, 1, 1, 1, 4));
+        let child2 = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(6, 8, 1, 1, 7, 9));
 
         let mut parent = CstNode::new(NodeKind::Assignment, span);
         parent.push_field("name", child1);
@@ -470,10 +489,52 @@ mod tests {
     }
 
     #[test]
+    fn push_field_keeps_static_field_name_and_lookup_works() {
+        use std::borrow::Cow;
+
+        let span = Span::new(0, 20, 1, 1, 1, 21);
+        let name = CstNode::leaf(NodeKind::Identifier, Span::new(0, 3, 1, 1, 1, 4));
+        let value = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(6, 8, 1, 1, 7, 9));
+
+        let mut parent = CstNode::new(NodeKind::Assignment, span);
+        parent.push_field("name", name);
+        parent.push_field("value", value);
+
+        assert!(matches!(
+            parent.child(0).and_then(|child| child.field_name.as_ref()),
+            Some(Cow::Borrowed("name"))
+        ));
+        assert_eq!(
+            parent.child_by_field("name").map(|child| child.kind),
+            Some(NodeKind::Identifier)
+        );
+        assert_eq!(
+            parent
+                .children_by_field("value")
+                .map(|child| child.kind)
+                .collect::<Vec<_>>(),
+            vec![NodeKind::IntegerLiteral]
+        );
+
+        let serialized = serde_json::to_value(&parent).unwrap();
+        let restored: CstNode = serde_json::from_value(serialized).unwrap();
+        assert_eq!(
+            restored.child_by_field("name").map(|child| child.kind),
+            Some(NodeKind::Identifier)
+        );
+        assert!(matches!(
+            restored
+                .child(0)
+                .and_then(|child| child.field_name.as_ref()),
+            Some(Cow::Owned(name)) if name == "name"
+        ));
+    }
+
+    #[test]
     fn test_walker() {
         let span = Span::new(0, 20, 1, 1, 1, 21);
-        let child1 = CstNode::leaf(NodeKind::Identifier, Span::new(0, 3, 1, 1, 1, 4), "foo");
-        let child2 = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(6, 8, 1, 1, 7, 9), "42");
+        let child1 = CstNode::leaf(NodeKind::Identifier, Span::new(0, 3, 1, 1, 1, 4));
+        let child2 = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(6, 8, 1, 1, 7, 9));
 
         let parent = CstNode::with_children(NodeKind::Assignment, span, vec![child1, child2]);
 
@@ -490,28 +551,33 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip() {
+        let source = "12345";
         let span = Span::new(0, 5, 1, 1, 1, 6);
-        let node = CstNode::leaf(NodeKind::IntegerLiteral, span, "12345");
+        let node = CstNode::leaf(NodeKind::IntegerLiteral, span);
 
-        let json = node.to_json();
+        let json = node.to_json(source);
         let restored = CstNode::from_json(&json).unwrap();
 
         assert_eq!(restored.kind, node.kind);
         assert_eq!(restored.span, node.span);
-        assert_eq!(restored.text, node.text);
+        assert_eq!(
+            restored.text_from_source(source),
+            node.text_from_source(source)
+        );
     }
 
     #[test]
     fn test_debug_ast_string() {
+        let source = "x = 42";
         let span = Span::new(0, 20, 1, 1, 1, 21);
-        let child1 = CstNode::leaf(NodeKind::Identifier, Span::new(0, 1, 1, 1, 1, 2), "x");
-        let child2 = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(4, 6, 1, 1, 5, 7), "42");
+        let child1 = CstNode::leaf(NodeKind::Identifier, Span::new(0, 1, 1, 1, 1, 2));
+        let child2 = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(4, 6, 1, 1, 5, 7));
 
         let mut parent = CstNode::new(NodeKind::Assignment, span);
         parent.push_field("name", child1);
         parent.push_field("value", child2);
 
-        let output = parent.debug_ast_string();
+        let output = parent.debug_ast_string(source);
 
         // Should contain proper structure
         assert!(output.contains("Assignment"));
@@ -526,17 +592,18 @@ mod tests {
     #[test]
     fn test_debug_ast_nested() {
         // Create a nested structure: BinaryExpr -> Identifier, IntegerLiteral
+        let source = "a + 1";
         let span = Span::new(0, 10, 1, 1, 1, 11);
-        let left = CstNode::leaf(NodeKind::Identifier, Span::new(0, 1, 1, 1, 1, 2), "a");
-        let right = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(4, 5, 1, 1, 5, 6), "1");
-        let op = CstNode::leaf(NodeKind::Operator, Span::new(2, 3, 1, 1, 3, 4), "+");
+        let left = CstNode::leaf(NodeKind::Identifier, Span::new(0, 1, 1, 1, 1, 2));
+        let right = CstNode::leaf(NodeKind::IntegerLiteral, Span::new(4, 5, 1, 1, 5, 6));
+        let op = CstNode::leaf(NodeKind::Operator, Span::new(2, 3, 1, 1, 3, 4));
 
         let mut binary = CstNode::new(NodeKind::BinaryExpression, span);
         binary.push_field("left", left);
         binary.push_child(op);
         binary.push_field("right", right);
 
-        let output = binary.debug_ast_string();
+        let output = binary.debug_ast_string(source);
 
         // Verify structure
         assert!(output.contains("BinaryExpression\n"));

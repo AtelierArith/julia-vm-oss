@@ -12,4 +12,10 @@ using Test
     @test (result) == 2.0
 end
 
+@testset "<: with where-expression RHS (Issue #9783)" begin
+    @test (Array{Float64,1} <: (SubArray{T,N,P,I,L} where {T,N,P,I,L})) == false
+    @test (Complex{Int64} <: Complex{T} where {T<:Real}) == true
+    @test (Complex{Int64} <: (Complex{T} where {T<:Real})) == true
+end
+
 true  # Test passed

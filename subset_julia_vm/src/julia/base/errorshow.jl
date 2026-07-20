@@ -7,9 +7,8 @@
 # exceptions are displayed. It provides default implementations for
 # all exception types defined in error.jl.
 #
-# Note: SubsetJuliaVM has a known limitation where print(io, ...) does not
-# write to IOBuffer (see Issue #1217). As a workaround, these implementations
-# use string concatenation and the internal _showerror_str functions.
+# The internal `_showerror_str` helpers keep each exception's formatting in one
+# place; public `showerror(io, ex)` writes those strings to the supplied IO.
 
 # =============================================================================
 # Internal string-based implementations
@@ -45,9 +44,11 @@ end
 function _showerror_str(ex::BoundsError)
     if ex.a === nothing
         return "BoundsError"
-    else
-        return string("BoundsError: attempt to access ", typeof(ex.a), " at index [", ex.i, "]")
     end
+    # Upstream renders a tuple index as its joined components:
+    # `at index [9, 9]`, not `[(9, 9)]` (Issue #11374).
+    idx = ex.i isa Tuple ? join(ex.i, ", ") : ex.i
+    return string("BoundsError: attempt to access ", typeof(ex.a), " at index [", idx, "]")
 end
 
 # OverflowError
@@ -90,15 +91,24 @@ function _showerror_str(ex::DomainError)
 end
 
 # InexactError
-# Mirrors julia/base/errorshow.jl `showerror(io, ex::InexactError)`: the target
-# type `T` is omitted when `nameof(T) === ex.func` (e.g. `InexactError: Int64(1.5)`
-# rather than `Int64(Int64, 1.5)`), matching upstream display (Issue #8212).
+# Mirrors Julia 1.12's `(func, args)` layout. The target type is omitted when
+# `nameof(args[1]) === ex.func` (e.g. `InexactError: Int64(1.5)`) (Issue #8732).
 function _showerror_str(ex::InexactError)
-    if nameof(ex.T) === ex.func
-        return string("InexactError: ", ex.func, "(", ex.val, ")")
-    else
-        return string("InexactError: ", ex.func, "(", ex.T, ", ", ex.val, ")")
+    args = ex.args
+    n = length(args)
+    if n == 2 && nameof(args[1]) === ex.func
+        return string("InexactError: ", ex.func, "(", args[2], ")")
     end
+    result = string("InexactError: ", ex.func, "(")
+    i = 1
+    while i <= n
+        if i > 1
+            result = string(result, ", ")
+        end
+        result = string(result, args[i])
+        i = i + 1
+    end
+    return string(result, ")")
 end
 
 # TypeError
@@ -139,15 +149,35 @@ function _showerror_str(ex::UndefKeywordError)
 end
 
 # UndefVarError
+# Issue #10318: when a scope is known (module-qualified lookup, e.g.
+# `SomeModule.undefined_name`), keep the scope in the message so it matches
+# upstream Julia 1.12's `not defined in `<scope>`` phrasing. A bare
+# lookup (scope === nothing) prints `not defined` unchanged.
 function _showerror_str(ex::UndefVarError)
-    return string("UndefVarError: `", ex.var, "` not defined")
+    if ex.scope === nothing
+        return string("UndefVarError: `", ex.var, "` not defined")
+    else
+        return string("UndefVarError: `", ex.var, "` not defined in `", ex.scope, "`")
+    end
 end
 
 # MethodError
+# Note: when raised from a Rust VmError::MethodError, ex.f holds the full
+# error message string and ex.args is an empty tuple (Issue #8748/#8664).
 function _showerror_str(ex::MethodError)
     args = ex.args
+    if args === nothing
+        # Fallback: MethodError constructed with Nothing args (legacy path).
+        return string("MethodError: ", ex.f)
+    end
     n = length(args)
-    result = string("MethodError: no method matching ", ex.f, "(")
+    if n == 0 && ex.f isa AbstractString
+        return string("MethodError: ", ex.f)
+    end
+    # A Function payload renders by name ("f", not "function f"),
+    # matching upstream's `no method matching f(::T)` (Issue #11374).
+    fname = ex.f isa Function ? string(nameof(ex.f)) : string(ex.f)
+    result = string("MethodError: no method matching ", fname, "(")
     i = 1
     while i <= n
         if i > 1
@@ -187,6 +217,14 @@ end
 # InvalidStateException
 function _showerror_str(ex::InvalidStateException)
     return string("InvalidStateException: ", ex.msg, " (state: ", ex.state, ")")
+end
+
+# FieldError (Julia 1.12+)
+# Mirrors julia/base/errorshow.jl `showerror(io, exc::FieldError)`.
+# Upstream accesses `exc.type.name.wrapper` for the type name; here we use
+# string(ex.type) as sjulia does not expose .name.wrapper (Issue #8664).
+function _showerror_str(ex::FieldError)
+    return string("FieldError: type ", ex.type, " has no field `", ex.field, "`")
 end
 
 # CanonicalIndexError
@@ -243,9 +281,9 @@ end
 # =============================================================================
 # Public showerror API
 # =============================================================================
-# These functions write to an IO stream. Currently, they just print to stdout
-# since print(io, ...) does not work with IOBuffer (Issue #1217).
-# When Issue #1217 is fixed, these can use print(io, ...) directly.
+# These functions write to the supplied IO stream. The old Issue #1217
+# workaround printed to stdout and made `sprint(showerror, ex)` capture the
+# wrong text after IOBuffer writes were fixed (Issue #9774).
 
 """
     showerror(io, e)
@@ -253,8 +291,8 @@ end
 Show a descriptive representation of an exception object `e`.
 This method is used to display the exception after a call to [`throw`](@ref).
 
-Note: Due to a current limitation (Issue #1217), this prints to stdout
-rather than the provided IO stream. Use `sprint_showerror` for string output.
+`showerror(io, e)` writes to the provided IO stream, so `sprint(showerror, e)`
+captures the same text that direct error display emits.
 
 # Examples
 ```julia
@@ -270,130 +308,132 @@ julia> sprint_showerror(err)
 ```
 """
 function showerror(io::IO, ex)
-    # Note: print(io, ...) currently writes to stdout, not the IOBuffer.
-    # This is a known limitation (Issue #1217).
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 # Specialized versions call the internal string functions
 function showerror(io::IO, ex::ErrorException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::DimensionMismatch)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::KeyError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::StringIndexError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::BoundsError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::OverflowError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::StackOverflowError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::OutOfMemoryError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::UndefRefError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::AssertionError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::DivideError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::DomainError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::InexactError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::TypeError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::ArgumentError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::EOFError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::UndefKeywordError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::UndefVarError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::MethodError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::ParseError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
+end
+
+function showerror(io::IO, ex::FieldError)
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::SystemError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::IOError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::LoadError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::MissingException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::InvalidStateException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::CanonicalIndexError)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::CapturedException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::CompositeException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::TaskFailedException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 function showerror(io::IO, ex::ProcessFailedException)
-    print(_showerror_str(ex))
+    print(io, _showerror_str(ex))
 end
 
 """
@@ -417,8 +457,8 @@ end
 
 Return a string representation of the exception using `showerror`.
 
-This function works around the current IOBuffer limitation (Issue #1217)
-by using internal string-based implementations.
+This helper returns the same string body used by `showerror(io, ex)`, without
+allocating an `IOBuffer`.
 
 # Examples
 ```julia

@@ -35,3 +35,36 @@ name = "ref_unionall_predicates"
 file = "ref_unionall_predicates.jl"
 expected = true
 description = "bare Ref / Base.RefValue UnionAll type-object + isconcretetype/isabstracttype/isstructtype/typeof predicates (Issue #5223)"
+
+[[tests]]
+name = "ref_independent_cells_9323"
+file = "ref_independent_cells_9323.jl"
+expected = true
+description = "two Ref(x) constructors allocate independent cells and are not CSE-aliased (Issue #9323, sibling of #9270)"
+
+[[tests]]
+name = "ref_weakref_finalizer_weakkeydict_8990"
+file = "ref_weakref_finalizer_weakkeydict_8990.jl"
+expected = true
+description = "WeakRef.value access, explicit finalizer/finalize, and WeakKeyDict GC cleanup basics (Issue #8990)"
+# WeakRef/GC semantics change with the persistent-cache mode (the #10092 escape:
+# has_inner_constructor lost on cache restore). Tagging any entry in this
+# category makes scripts/check_cache_sensitive_fixture_lane.sh run the whole
+# ref:: category under BOTH cache modes (Issue #10223).
+cache_sensitive = true
+
+[[tests]]
+name = "ref_weakref_show_10221"
+file = "ref_weakref_show_10221.jl"
+expected = true
+description = "WeakRef show/string formatting renders WeakRef(value) with Julia show formatting instead of Rust RefCell Debug output (Issue #10221)"
+cache_sensitive = true
+
+[[tests]]
+name = "ref_weakref_gc_standalone_10092"
+file = "ref_weakref_gc_standalone_10092.jl"
+expected = true
+description = "standalone WeakRef target is cleared by GC.gc() (and kept when rooted) under both cache modes (Issue #10092)"
+# The #10092 regression fixture itself: its assertions differ by cache mode, so
+# it is the canonical cache-sensitive entry (Issue #10223).
+cache_sensitive = true

@@ -1,3 +1,10 @@
+# Kept standalone: adds a method to Base.:+ on a Base argument type
+# (`+(::Vector{Int64}, ::Vector{Int64})`), i.e. method piracy. Method-table
+# extension is process-global, not module-scoped (even inside a @testset), so
+# wrapping this in a module inside an aggregate would leak the pirated `+` to
+# every later member that adds integer vectors — and to other aggregates in the
+# same test process. Same #5966 class as the dispatch/*_user_method_* fixtures;
+# excluded from Issue #10238 module-wrap aggregation.
 using Test
 
 @testset "Vector arraymath dispatch-first (Issue #4019)" begin

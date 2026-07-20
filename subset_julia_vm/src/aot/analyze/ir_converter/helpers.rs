@@ -186,7 +186,7 @@ impl<'a> IrConverter<'a> {
     /// forms, or non-type expressions (Issue #7037).
     pub(crate) fn expr_as_static_type_name(&self, expr: &Expr) -> Option<String> {
         match expr {
-            Expr::Var(name, _) if self.is_known_type_name(name) => Some(name.clone()),
+            Expr::Var(name, _) if self.is_known_type_name(name) => Some(name.to_string()),
             _ => None,
         }
     }
@@ -273,6 +273,11 @@ impl<'a> IrConverter<'a> {
             "abs" | "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" |
             "exp" | "log" | "floor" | "ceil" | "round" | "trunc" |
             "min" | "max" | "clamp" | "sign" | "copysign" |
+            // Total order / div-family / float classification builtins
+            // (Issue #10131): claimed by AotBuiltinOp codegen so the Base
+            // Julia definitions are not pulled into AoT conversion.
+            "isless" | "fld" | "cld" | "mod" | "rem" |
+            "isnan" | "isinf" | "isfinite" | "signbit" |
             // Type constructors (handled as casts)
             "Int64" | "Int32" | "Int16" | "Int8" |
             "UInt64" | "UInt32" | "UInt16" | "UInt8" |

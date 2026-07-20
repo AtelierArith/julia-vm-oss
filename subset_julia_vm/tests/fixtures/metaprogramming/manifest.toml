@@ -13,6 +13,12 @@ expected = true
 description = "Meta.parse: parse strings to Expr AST nodes"
 
 [[tests]]
+name = "metaprogramming_metaparse_float32_eval_9759"
+file = "metaparse_float32_eval_9759.jl"
+expected = true
+description = "Meta.parse Float32 literals evaluate as Float32 values instead of failing in CST-to-Value float parsing (Issue #9759)"
+
+[[tests]]
 name = "meta_module_reference"
 file = "meta_module_reference.jl"
 expected = true
@@ -79,6 +85,12 @@ expected = true
 description = "eval executes Expr(:try, ...) else branch values and unwinds caught eval frames (Issues #7727/#7730)"
 
 [[tests]]
+name = "metaprogramming_eval_method_redefinition_opaque_8825"
+file = "eval_method_redefinition_opaque_8825.jl"
+expected = true
+description = "Opaque eval-defined method redefinitions and newly-defined names are observed by later compiled call sites through runtime global dispatch (Issue #8825)."
+
+[[tests]]
 name = "metaprogramming_expr_quotenode_symbol_print_7696"
 file = "expr_quotenode_symbol_print_7696.jl"
 expected = true
@@ -95,6 +107,18 @@ name = "meta_symbol_equality"
 file = "symbol_equality.jl"
 expected = true
 description = "Symbol equality comparison: :x == :x, ex.args[1] == :+ in Expr"
+
+[[tests]]
+name = "metaprogramming_expr_args_push_preserves_int_9557"
+file = "expr_args_push_preserves_int_9557.jl"
+expected = true
+description = "push!(expr.args, ::Int) preserves the boxed Int64 element instead of coercing to Float64 (Issue #9557)"
+
+[[tests]]
+name = "metaprogramming_struct_like_reflection_matrix_9546"
+file = "struct_like_reflection_matrix_9546.jl"
+expected = true
+description = "Struct-like AST reflection keeps fieldnames/nfields/isdefined/getfield in sync for Expr, QuoteNode, LineNumberNode, and GlobalRef (Issue #9546); Core.Binding's unset :value/:partitions/:backedges raise a catchable UndefRefError, not a missing-field error (Issue #10067)"
 
 [[tests]]
 name = "meta_gensym"
@@ -396,3 +420,117 @@ name = "metaprogramming_quoted_standalone_subtype_7863"
 file = "quoted_standalone_subtype_7863.jl"
 expected = true
 description = "A standalone quoted subtype/supertype constraint (`:(S<:Real)`, `:(S>:Int)`) uses the operator as its head (Expr(:<:, :S, :Real) / Expr(:>:, :S, :Int)) instead of the Expr(:call, :<:, ...) shape, matching upstream Julia (Issue #7863)"
+
+[[tests]]
+name = "metaprogramming_eval_expr_function_def_8647"
+file = "eval_expr_function_def_8647.jl"
+expected = true
+description = "eval of a runtime-constructed Expr(:(=), call_or_where, body) defines a callable method (brand-new names, multi-arg, where, trailing varargs, zero-arg) instead of raising \"assignment target must be Symbol, got Expr\"; redefinition through eval is observed by later eval-driven calls even after the dispatch decision has been warmed (Issue #8561 cache-invalidation contract extended to plain eval) (Issue #8647)"
+
+[[tests]]
+name = "metaprogramming_expr_egal_identity_9264"
+file = "expr_egal_identity_9264.jl"
+expected = true
+description = "`===` (egal) on Expr is object identity, not structural: two independently-built `:(x + 1)` are `!==` while an alias / the same object is `===`; `==` and `isequal` stay field-structural (nested Expr recurse via `==`, not `===`) so #9183's structural equality still holds (Issue #9264)"
+
+[[tests]]
+name = "meta_dump_struct_field_index"
+file = "dump_struct.jl"
+expected = 1.0
+description = "getfield(x, i::Int) and isdefined(x, i::Int) support 1-based field access by integer index on structs, returning false for out-of-bounds isdefined checks (Issue #9470)."
+
+[[tests]]
+name = "meta_quotenode_field_index"
+file = "quotenode_field.jl"
+expected = 1.0
+description = "getfield(::QuoteNode, 1) returns the wrapped value by integer field index, matching upstream Julia (Issue #9470)."
+
+[[tests]]
+name = "metaprogramming_macroexpand1_9471"
+file = "macroexpand1_9471.jl"
+expected = true
+description = "@macroexpand1 expands a user macro once instead of being rejected as an unknown macro (Issue #9471)"
+
+[[tests]]
+name = "metaprogramming_macroexpand_9471"
+file = "macroexpand.jl"
+expected = true
+description = "@macroexpand and @macroexpand1 return expanded user macro expressions that can be inspected and evaluated (Issue #9471)"
+
+[[tests]]
+name = "metaprogramming_macro_return_global_let_9476"
+file = "macro_return_global_let_9476.jl"
+expected = true
+description = "Macro expansions returning Expr(:global, ...) and Expr(:let, ...) lower and execute like source global declarations and let blocks (Issue #9476)"
+
+# --- merged from `meta` category (Issue #9671 Phase 2) ---
+[[tests]]
+name = "meta_isexpr_pure_julia"
+file = "meta_isexpr_pure_julia.jl"
+expected = true
+description = "Meta.isexpr Pure Julia implementation - check Expr head and args length"
+
+[[tests]]
+name = "meta_quot_pure_julia"
+file = "meta_quot_pure_julia.jl"
+expected = true
+description = "Meta.quot Pure Julia implementation - create quoted expressions"
+
+[[tests]]
+name = "meta_isidentifier_validation"
+file = "meta_isidentifier_validation.jl"
+expected = true
+description = "Meta.isidentifier - validate Julia identifier strings and symbols"
+
+[[tests]]
+name = "meta_operator_predicates"
+file = "meta_operator_predicates.jl"
+expected = true
+description = "Meta.isoperator, isunaryoperator, isbinaryoperator, ispostfixoperator"
+
+[[tests]]
+name = "meta_show_sexpr_basics"
+file = "meta_show_sexpr_basics.jl"
+expected = true
+description = "Meta.show_sexpr - display expression as S-expression"
+
+[[tests]]
+name = "meta_symbol_multi_arg_4780"
+file = "meta_symbol_multi_arg_4780.jl"
+expected = true
+description = "Symbol(parts...) multi-arg constructor concatenates string forms of each arg and creates a single Symbol, matching upstream Base.Symbol(args...) = Symbol(string(args...)) (Issue #4780)"
+
+[[tests]]
+name = "meta_symbol_interning_5174"
+file = "meta_symbol_interning_5174.jl"
+expected = true
+description = "Symbol interning (Issue #5174): SymbolValue backed by an interned Rc<str> preserves all observable Symbol semantics — ===/== identity, String round trip, Dict/Set hashing, and Val{:sym} dispatch"
+
+[[tests]]
+name = "meta_base_isexpr_7527"
+file = "base_isexpr_7527.jl"
+expected = true
+description = "Base.isexpr qualified calls route to the Meta.isexpr implementation instead of failing unqualified import checks (Issue #7527)"
+
+[[tests]]
+name = "meta_quotenode_value_dynamic_7535"
+file = "quotenode_value_dynamic_7535.jl"
+expected = true
+description = "QuoteNode.value works through dynamic GetFieldByName when static type is Any (Issue #7535)"
+
+[[tests]]
+name = "meta_expr_scalar_equality_9183"
+file = "expr_scalar_equality_9183.jl"
+expected = true
+description = "Scalar Expr == Expr and QuoteNode == QuoteNode use field-structural equality dispatch instead of falling through the numeric fast path (which errored 'Cannot convert Expr to I64') (Issue #9183)"
+[[tests]]
+name = "metaprogramming_eval_treewalker_catch_scope_11075"
+file = "eval_treewalker_catch_scope_11075.jl"
+expected = true
+description = "Issue #11075: catch variables created by generated-expression and eval-defined-method tree walking are lexical to the catch body, while the body retains access to its legitimate function frame."
+
+[[tests]]
+name = "metaprogramming_eval_struct_construct_field_10525"
+file = "eval_struct_construct_field_10525.jl"
+expected = true
+description = "Runtime eval() constructs already-compiled structs by name (bare struct name routes as a type-object callable through the default-DataType construction) and reads struct fields via dot syntax (Expr(:., obj, QuoteNode(:name)) desugars to getfield) (Issue #10525)"
