@@ -80,6 +80,29 @@ Mandelbrot Set (50x25):
 
 ```
 
+### Windows
+
+Build `juliars` from PowerShell with the same Cargo command. Windows executable
+names use the `.exe` suffix:
+
+```powershell
+cargo build --release -p subset_julia_vm --features aot --bin juliars
+.\target\release\juliars.exe --minimal-prelude examples\mandelbrot.jl --emit-binary target\mandelbrot_aot.exe
+.\target\mandelbrot_aot.exe
+```
+
+Rust and the MSVC build tools must be installed. Run the commands from a
+Developer PowerShell for Visual Studio so that the MSVC linker and runtime
+libraries are available. The Cranelift backend also supports Windows/MSVC and
+looks for `link.exe` or `lld-link` when linking native artifacts.
+
+The default Rust backend currently builds the generated executable but fails to
+copy it to the `--emit-binary` destination on Windows because it looks for the
+temporary executable without its `.exe` suffix. Until that is fixed, generating
+Rust source with `-o output.rs` remains available, while the complete
+`--emit-binary` command above is expected to fail during the final copy step
+(Issue [#11809](https://github.com/AtelierArith/ailujsoi/issues/11809)).
+
 `--minimal-prelude` is currently required for this example. The full prelude
 still includes Base paths that reach unsupported AoT `BigInt`/parametric
 constructor code, even though the Mandelbrot program itself can compile through
