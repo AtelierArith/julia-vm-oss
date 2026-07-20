@@ -1,0 +1,108 @@
+# Declarative PR fixture-test selection for .github/workflows/pr-fast.yml.
+#
+# Rules are deliberately conservative: any Rust/Julia VM path that is not
+# matched here falls back to the full fixture suite. Changed fixture files are
+# always mapped dynamically from their parent category.
+
+[selection]
+smoke_filters = [
+  "essentials::",
+  "arithmetic::",
+]
+
+full_fallback_patterns = [
+  "Cargo.toml",
+  "Cargo.lock",
+  ".cargo/**",
+  ".config/**",
+  ".github/workflows/pr-fast.yml",
+  ".github/workflows/main-full.yml",
+  ".github/fixture-selection.toml",
+  "scripts/select_pr_fixture_tests.py",
+  "scripts/test_with_cache.sh",
+  "subset_julia_vm/**/*.rs",
+  "subset_julia_vm/src/julia/**/*.jl",
+  "subset_julia_vm_parser/**",
+  "subset_julia_vm_ffi/**",
+  "subset_julia_vm_runtime/**",
+  "subset_julia_vm_web/**",
+]
+
+[[rules]]
+name = "base-strings"
+paths = [
+  "subset_julia_vm/src/julia/base/strings.jl",
+  "subset_julia_vm/src/julia/base/strings/**",
+]
+filters = [
+  "strings::",
+  "string_::",
+]
+
+[[rules]]
+name = "base-arrays"
+paths = [
+  "subset_julia_vm/src/julia/base/array.jl",
+  "subset_julia_vm/src/julia/base/array/**",
+]
+filters = [
+  "array::",
+  "arrays::",
+  "array_utils::",
+  "broadcast::",
+  "memory::",
+  "subarray::",
+  "views::",
+]
+
+[[rules]]
+name = "base-dict-sets"
+paths = [
+  "subset_julia_vm/src/julia/base/dict.jl",
+  "subset_julia_vm/src/julia/base/dict/**",
+  "subset_julia_vm/src/julia/base/set.jl",
+  "subset_julia_vm/src/julia/base/set/**",
+]
+filters = [
+  "dict::",
+  "sets::",
+  "collections::",
+  "hashing::",
+]
+
+[[rules]]
+name = "base-iteration"
+paths = [
+  "subset_julia_vm/src/julia/base/iterators.jl",
+  "subset_julia_vm/src/julia/base/iterators/**",
+  "subset_julia_vm/src/julia/base/range.jl",
+  "subset_julia_vm/src/julia/base/range/**",
+]
+filters = [
+  "iteration::",
+  "iterators::",
+  "range::",
+  "generator::",
+  "reduce::",
+  "hof::",
+]
+
+[[rules]]
+name = "base-numeric"
+paths = [
+  "subset_julia_vm/src/julia/base/operators.jl",
+  "subset_julia_vm/src/julia/base/math.jl",
+  "subset_julia_vm/src/julia/base/number.jl",
+  "subset_julia_vm/src/julia/base/promotion.jl",
+]
+filters = [
+  "arithmetic::",
+  "operators::",
+  "comparison::",
+  "math::",
+  "number::",
+  "numeric::",
+  "promotion::",
+  "rational::",
+  "complex::",
+]

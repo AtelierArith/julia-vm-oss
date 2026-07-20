@@ -9,7 +9,7 @@
 #
 # Requirements:
 #   - julia on PATH
-#   - ./target/release/juliars already built:
+#   - $CARGO_TARGET_DIR/release/juliars already built (or JULIARS_BIN set):
 #       cargo build --release -p subset_julia_vm --features aot --bin juliars
 #
 # This is intentionally a developer helper, not a `check_*.sh` CI audit script.
@@ -17,6 +17,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo_target_dir.sh"
+cargo_target_dir="$(resolve_cargo_target_dir "$ROOT")"
+export CARGO_TARGET_DIR="$cargo_target_dir"
+JULIARS_BIN="${JULIARS_BIN:-$cargo_target_dir/release/juliars}"
+export JULIARS_BIN
 
 if [[ $# -ne 1 ]]; then
     echo "Usage: bash scripts/aot_fixture_julia_parity.sh <fixture.jl>" >&2
@@ -29,13 +34,11 @@ if [[ ! -f "$fixture" ]]; then
     exit 2
 fi
 
-if ! command -v julia >/dev/null 2>&1; then
-    echo "ERROR: 'julia' is not on PATH. Install upstream Julia or skip this parity check." >&2
-    exit 2
-fi
+# Version-check the comparison julia against PARITY_TARGET (Issue #8667).
+# May be two words (e.g. "julia +1.12"); expand unquoted on purpose.
+JULIA_CMD="$(bash "$ROOT/scripts/parity_julia_version.sh")"
 
-juliars_bin="$ROOT/target/release/juliars"
-if [[ ! -x "$juliars_bin" ]]; then
+if [[ ! -x "$JULIARS_BIN" ]]; then
     echo "ERROR: juliars binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features aot --bin juliars" >&2
     exit 2
@@ -52,7 +55,7 @@ aot_bin="$tmp_dir/fixture_bin"
 aot_out="$tmp_dir/aot.out"
 julia_out="$tmp_dir/julia.out"
 
-if ! timeout 1800 "$juliars_bin" "$fixture" -o "$generated_rs" --emit-binary "$aot_bin" >"$tmp_dir/juliars.out" 2>&1; then
+if ! timeout 1800 "$JULIARS_BIN" "$fixture" -o "$generated_rs" --emit-binary "$aot_bin" >"$tmp_dir/juliars.out" 2>&1; then
     echo "ERROR: juliars failed for $fixture" >&2
     tail -40 "$tmp_dir/juliars.out" >&2
     exit 1
@@ -64,7 +67,8 @@ if ! timeout 120 "$aot_bin" >"$aot_out" 2>&1; then
     exit 1
 fi
 
-if ! timeout 120 julia "$fixture" >"$julia_out" 2>&1; then
+# shellcheck disable=SC2086 # JULIA_CMD may carry a juliaup channel arg
+if ! timeout 120 $JULIA_CMD "$fixture" >"$julia_out" 2>&1; then
     echo "ERROR: upstream julia failed for $fixture" >&2
     tail -40 "$julia_out" >&2
     exit 1

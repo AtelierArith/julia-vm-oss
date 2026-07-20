@@ -23,11 +23,11 @@ while IFS= read -r line; do
     continue
   fi
   count=$((count + 1))
-done < <(grep -rn "for kwparam in &func\.kwparams" subset_julia_vm/src/vm/exec/ || true)
+done < <(grep -rn "for kwparam in &func\.kwparams" subset_julia_vm_vm/src/vm/exec/ || true)
 
 if [ "$count" -gt "$BASELINE" ]; then
   echo "ERROR: Found $count inline kwparam loops (baseline: $BASELINE). New call handlers must use bind_kwargs_defaults() (Issue #3324)" >&2
-  echo "Run: grep -rn 'for kwparam in &func.kwparams' subset_julia_vm/src/vm/exec/ to see all occurrences" >&2
+  echo "Run: grep -rn 'for kwparam in &func.kwparams' subset_julia_vm_vm/src/vm/exec/ to see all occurrences" >&2
   exit 1
 fi
 

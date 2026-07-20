@@ -1,5 +1,12 @@
 .git
 target
+dist
+
+# Agent scratch/config and its git worktrees (hundreds of GB of full repo
+# copies) — never part of a build. Excluding this keeps the build context small.
+.claude
+.agents
+.cursor
 
 julia
 SubsetJuliaVMApp
@@ -8,6 +15,7 @@ web
 benchmarks
 
 **/target
+**/.git
 **/*.xcframework
 **/build
 

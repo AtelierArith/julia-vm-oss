@@ -1,0 +1,316 @@
+# release.yml — Build and publish versioned artifacts to a GitHub Release.
+#
+# Triggered on version tag pushes (v*) and via workflow_dispatch for manual
+# releases.  Produces:
+#
+#   Linux:
+#     sjulia-linux-x86_64.tar.gz         — release CLI binary
+#     subset_julia_vm_web_pkg.tar.gz      — wasm-pack web-release package
+#     SHA256SUMS.txt                      — checksums of all attachments
+#
+#   macOS (xcframework — macOS runner required):
+#     SubsetJuliaVM.xcframework.tar.gz    — universal iOS xcframework
+#     (also appended to SHA256SUMS.txt)
+#
+# Runner cost note:
+#   - Linux jobs: ubuntu-latest (~$0.008/min)
+#   - macOS jobs: macos-latest (~$0.08/min, 10× Linux)
+#   The xcframework job is macOS-only because cross-compiling for iOS targets
+#   requires Xcode tooling available only on macOS runners.  The Linux jobs
+#   (sjulia binary + WASM) are independent and run in parallel.
+#
+# Reproducible builds (Issue #9002):
+#   All cargo build and wasm-pack build calls pass --locked so dependency
+#   resolution is pinned to the committed Cargo.lock.
+#
+# iOS / xcframework validation note:
+#   The xcframework job uses `macos-latest` GitHub-hosted runners with
+#   Xcode/Apple toolchain.  It cannot be validated on a Linux dev machine;
+#   CI is the validation environment.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to release (e.g. v0.1.0). Must exist in the repo."
+        required: true
+        type: string
+
+permissions:
+  contents: write   # create GitHub Release and upload assets
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Linux sjulia CLI binary
+  # ──────────────────────────────────────────────────────────────────────────
+  linux-sjulia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Resolve tag ref
+        id: ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.tag }}
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Build sjulia release binary (Linux x86_64)
+        run: cargo build --locked --release -p subset_julia_vm --bin sjulia --features repl
+
+      - name: Package sjulia binary
+        run: |
+          mkdir -p dist
+          cp target/release/sjulia dist/sjulia
+          tar -czf dist/sjulia-linux-x86_64.tar.gz -C dist sjulia
+          rm dist/sjulia
+
+      - name: Upload sjulia artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-sjulia
+          path: dist/sjulia-linux-x86_64.tar.gz
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. WASM package (subset_julia_vm_web)
+  # ──────────────────────────────────────────────────────────────────────────
+  wasm-pkg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Resolve tag ref
+        id: ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.tag }}
+
+      - name: Install faster linker (lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and WASM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      # Build with the embedded Base bytecode + prelude Program caches
+      # (scripts/wasm_build_with_cache.sh) so the shipped tarball's FIRST
+      # run_from_source() deserializes Base from an embedded &'static [u8]
+      # instead of compiling Base from source in the browser. Without the
+      # embedded cache the distributed artifact's cold first execution is
+      # ~10x slower than a local cache-embedded build (Issue #2929 / #6026).
+      # The script builds a host sjulia, precompiles both caches, then runs
+      # `wasm-pack build --locked --target web --profile web-release` with
+      # SJULIA_BASE_CACHE / SJULIA_PRELUDE_PROGRAM_CACHE set.
+      - name: Build WASM package (web-release, embedded Base/prelude cache)
+        run: scripts/wasm_build_with_cache.sh --target web --out-dir subset_julia_vm_web/pkg
+
+      - name: Package WASM bundle
+        run: |
+          mkdir -p dist
+          tar -czf dist/subset_julia_vm_web_pkg.tar.gz subset_julia_vm_web/pkg
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: dist/subset_julia_vm_web_pkg.tar.gz
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. iOS xcframework (macOS runner required — Xcode toolchain)
+  #    Note: This job cannot be validated on a Linux machine; CI is the
+  #    validation environment (Issue #9002).
+  # ──────────────────────────────────────────────────────────────────────────
+  xcframework:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Resolve tag ref
+        id: ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.tag }}
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Cache cargo registry and iOS build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+            target
+          key: ${{ runner.os }}-cargo-ios-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-ios-
+            ${{ runner.os }}-cargo-
+
+      - name: Build iOS FFI library (aarch64-apple-ios)
+        run: cargo build --locked --release -p subset_julia_vm_ffi --target aarch64-apple-ios
+
+      - name: Build iOS FFI library (aarch64-apple-ios-sim)
+        run: cargo build --locked --release -p subset_julia_vm_ffi --target aarch64-apple-ios-sim
+
+      - name: Build iOS FFI library (x86_64-apple-ios)
+        run: cargo build --locked --release -p subset_julia_vm_ffi --target x86_64-apple-ios
+
+      - name: Create universal simulator fat library
+        run: |
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libsubset_julia_vm.a \
+            target/x86_64-apple-ios/release/libsubset_julia_vm.a \
+            -output target/libsubset_julia_vm_sim.a
+
+      - name: Create xcframework
+        run: |
+          rm -rf dist/SubsetJuliaVM.xcframework
+          mkdir -p dist
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libsubset_julia_vm.a \
+            -headers subset_julia_vm_ffi/include \
+            -library target/libsubset_julia_vm_sim.a \
+            -headers subset_julia_vm_ffi/include \
+            -output dist/SubsetJuliaVM.xcframework
+
+      - name: Package xcframework
+        run: |
+          tar -czf dist/SubsetJuliaVM.xcframework.tar.gz -C dist SubsetJuliaVM.xcframework
+
+      - name: Upload xcframework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcframework
+          path: dist/SubsetJuliaVM.xcframework.tar.gz
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Publish GitHub Release with all artifacts + SHA-256 checksums
+  # ──────────────────────────────────────────────────────────────────────────
+  publish:
+    needs: [linux-sjulia, wasm-pkg, xcframework]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve tag ref
+        id: ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten artifact directories
+        run: |
+          mkdir -p dist
+          find release-assets -type f | xargs -I{} cp {} dist/
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.ref.outputs.tag }}"
+          # Create a draft release if it doesn't exist yet; idempotent on re-runs.
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "SubsetJuliaVM $TAG" \
+            --notes "Versioned release $TAG. See [DONE.md](docs/vm/DONE.md) for changes." \
+            --draft \
+            dist/sjulia-linux-x86_64.tar.gz \
+            dist/subset_julia_vm_web_pkg.tar.gz \
+            dist/SubsetJuliaVM.xcframework.tar.gz \
+            dist/SHA256SUMS.txt \
+            || gh release upload "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              dist/sjulia-linux-x86_64.tar.gz \
+              dist/subset_julia_vm_web_pkg.tar.gz \
+              dist/SubsetJuliaVM.xcframework.tar.gz \
+              dist/SHA256SUMS.txt

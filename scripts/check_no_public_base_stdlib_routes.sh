@@ -21,10 +21,10 @@ Statistics
 Test
 "
 
-MODULE_CALL_FILE="subset_julia_vm/src/compile/expr/call/module_call.rs"
-BASE_FUNCTIONS_FILE="subset_julia_vm/src/compile/base_functions.rs"
-CORE_COMPILER_FILE="subset_julia_vm/src/compile/core_compiler.rs"
-PIPELINE_CTX_FILE="subset_julia_vm/src/compile/pipeline_ctx.rs"
+MODULE_CALL_FILE="subset_julia_vm_compile/src/compile/expr/call/module_call.rs"
+BASE_FUNCTIONS_FILE="subset_julia_vm_compile/src/compile/base_functions.rs"
+CORE_COMPILER_FILE="subset_julia_vm_compile/src/compile/core_compiler.rs"
+PIPELINE_CTX_FILE="subset_julia_vm_compile/src/compile/pipeline_ctx.rs"
 
 ERRORS=0
 
@@ -80,10 +80,10 @@ while IFS= read -r module; do
     fail "is_base_submodule_function exposes Base.$module as a public Base submodule route."
   fi
 
-  if grep -RIn "\"Base\\.$module" subset_julia_vm/src/compile \
+  if grep -RIn "\"Base\\.$module" subset_julia_vm_compile/src/compile \
       | grep -v "Issue #8278" >/dev/null; then
     fail "compile code contains a direct Base.$module string route; use the root stdlib or a private bridge."
-    grep -RIn "\"Base\\.$module" subset_julia_vm/src/compile >&2 || true
+    grep -RIn "\"Base\\.$module" subset_julia_vm_compile/src/compile >&2 || true
   fi
 
   if grep -In "submodule == \"$module\"" "$MODULE_CALL_FILE" >/dev/null; then

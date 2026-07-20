@@ -6,15 +6,16 @@ Status: normative. This is the root durable rule book for the SubsetJuliaVM
 QA/audit automation. The vendored upstream `julia/` tree is **reference only**
 — never modify it; treat it as the compatibility gold standard.
 
-Last amended: 2026-06-30.
+Last amended: 2026-07-06 (sjulia Invariants + Definition of Done, Issue #9129).
 
 ## Read Order And Authority
 
 Read these files before changing behavior:
 
 1. `REPOSITORY_RULES.md` — durable repository rules and prohibitions (this file).
-2. `CLAUDE.md` / `AGENTS.md` — operational entry: build/test commands, git
-   workflow, fixture conventions, and the Agent Skills table.
+2. `AGENTS.md` — operational entry: build/test commands, git workflow, fixture
+   conventions, and the Agent Skills table (`CLAUDE.md` is a symlink to it;
+   they are one document).
 3. `docs/vm/ARCHITECTURE_OVERVIEW.md` — long-term pipeline architecture, layer
    ownership, and runtime model.
 4. `docs/vm/CHECKLISTS.md` — implementation checklists for new types, literals,
@@ -33,6 +34,57 @@ When two normative documents appear to disagree, stop and reconcile the canon
 before changing code. **Upstream Julia is the compatibility gold standard.**
 While a conflict is being resolved, the stricter upstream-compatibility /
 no-JIT-iOS-viability rule applies.
+
+## sjulia Invariants
+
+"sjulia らしさ" — the properties that make this a faithful, shippable Julia
+subset rather than a lookalike — reduces to **five invariants**. They are the
+charter the rest of this rule book serves. Derived from the milestone-58/59/60
+bulk-work retrospective (Issue #9129: ~120 Issues / 100+ PRs of observed
+failure modes). Every large change — a new ADR, a large or milestone-track PR,
+a refactor that moves modules or crates — must **declare which invariants it
+touches** (the pull-request template carries this field) and must not weaken
+one without an explicit, Issue-tracked justification.
+
+1. **True Subset.** Output must match the upstream Julia `PARITY_TARGET` series;
+   parity is the gold standard, not an aspiration. Measured by NS-1 (parity
+   fixture pass rate, `scripts/fixture_julia_parity.sh`), NS-2 (parser corpus
+   sweep), and the dispatch-compare / numeric-matrix parity ratchets. A change
+   that lowers parity requires a stated reason and an Issue — see the
+   NS-1/NS-2 monotonic-ratchet rule in `docs/vm/NORTH_STAR.md`.
+2. **Pure Julia First.** Julia-expressible semantics live in
+   `subset_julia_vm/src/julia/` at the matching upstream path; Rust keeps only
+   what Julia cannot express, or what a *measured* performance boundary
+   justifies (`RUST_BOUNDARY_JUSTIFICATION.md` conditions 1–4). Measured by the
+   `inventory_rust_semantics.sh` inventory and the `check_rust_semantics_ratchet.sh`
+   / `check_no_new_domain_builtins.sh` ratchets (perf-pending reached 0 in
+   #9098). New Rust semantics require a boundary justification or a tracked
+   `pure-julia-migration` Issue.
+3. **Single-threaded / no-JIT / panic-free VM.** iOS/WASM executability is the
+   top runtime constraint. The VM is single-threaded by design
+   (`SINGLE_THREADED_VM.md`), must not depend on JIT (the interpreter → register
+   VM is the default backend, `ADR_BACKEND_STRATEGY.md`), and must not panic on
+   user input (`PANIC_FREE.md`, the panic-free / UB-detection ratchets). AoT is
+   a first-class backend but must not leak AoT-only assumptions into the shared
+   VM path.
+4. **Measurement-driven decisions.** Performance- or representation-affecting
+   *large* decisions follow the pattern *agree the decision formula in advance →
+   measure (interleaved A/B, cache-embedded for CLI numbers) → accept or reject
+   mechanically → record the finding in reference memory + docs even on
+   rejection*. Demonstrated twice: I128 boxing rejected (#8650), cache eviction
+   rejected (#9097). The full procedure is the **Performance Decision Protocol**
+   in `docs/vm/CHECKLISTS.md`, and is mandatory for performance-motivated
+   representation changes (boxing, cache strategy, instruction fusion, …).
+5. **Issue-Driven + Prevention.** Every workaround, scope reduction, or deferral
+   carries a tracking Issue number; upstream gaps are filed *before* being
+   routed around (the `unsupported-feature` / `bug` Discovery Rules), workarounds
+   are registered in `docs/vm/WORKAROUNDS.md`, and each bug fix produces a
+   prevention mechanism (`sjulia-bug-prevention`). The `scripts/check_*.sh` /
+   `scripts/audit_*.sh` family is the machine enforcement of this invariant — and
+   the audits themselves are guarded by
+   `scripts/check_audit_negative_selftest.sh` (Issue #9129), so a safety net that
+   silently stops guarding is *caught*, not trusted (failure mode F2: the
+   #8655/#8656 crate split broke three audits without turning any gate red).
 
 ## Canon-First Change Protocol
 
@@ -53,6 +105,37 @@ no-JIT-iOS-viability rule applies.
 - When sjulia diverges from upstream Julia, the divergence must be recorded as
   an Issue (`unsupported-feature` or `bug`) before any workaround lands. See
   the `sjulia-report-gap` Agent Skill.
+
+## Repository Memory Lifecycle
+
+`memory/` is the repository's shared long-lived knowledge store, organized by
+entry type: `memory/user/`, `memory/feedback/`, `memory/project/` (active work
+— at least one referenced Issue still open), `memory/reference/`, and
+`memory/archive/project/` (resolved work notes, kept verbatim and greppable but
+NOT indexed). Keep `memory/MEMORY.md` as an index of ACTIVE entries only: each
+row is a one-line pointer, while details live in one topic file. Durable rules
+discovered in memory entries must be promoted to this file or the relevant
+`docs/vm/` canon instead of living only in memory.
+
+- `feedback_*` entries capture reusable agent/process lessons. When a lesson
+  has durable value, promote the rule or checklist item into `CLAUDE.md`,
+  `docs/vm/CHECKLISTS.md`, or `docs/vm/CODE_AUDITS.md`, then shrink the memory
+  entry to a pointer. Delete feedback entries that no longer carry reusable
+  knowledge.
+- `project_*` entries are working notes tied to Issues, milestones, or PR
+  sessions. After the referenced Issues are closed, triage the entry: integrate
+  reusable technical knowledge into the matching `docs/vm/` topic doc, then
+  move the entry to `memory/archive/project/` (verbatim `git mv`) and remove
+  its index row. Judgment overrides the mechanical check: keep an entry active
+  if its content is load-bearing for a still-open epic even when its own
+  Issue refs are closed.
+- `reference_*` and `user_*` entries are stable reference and preference notes.
+  Leave them in place unless they are stale, wrong, or superseded by a clearer
+  canonical reference.
+- Run `bash scripts/memory_triage.sh` at least quarterly, and also whenever
+  `memory/MEMORY.md` exceeds 200 lines. The script lists candidate
+  `memory/project/*.md` entries whose referenced Issues are closed; it does
+  not decide what to promote, archive, or keep active.
 
 ## Root-Cause Fix Discipline
 
@@ -109,6 +192,15 @@ no-JIT-iOS-viability rule applies.
 - `subset_julia_vm_runtime/` is the AoT bytecode runtime. AoT-only assumptions
   must not leak into the no-JIT VM path (VM performance priority — see below).
 - `julia/` is reference only. Never modify, branch, or vendored-edit it.
+- **`extern/` convention** (Issue #9000): `extern/` contains Julia package source
+  trees used as parity oracles and implementation references. It is `.gitignore`'d
+  (too large). The pinned version of every package is recorded in
+  `extern/MANIFEST.tsv` (name / version / upstream_url / commit_sha / fetch_date /
+  notes); reproduce with `bash scripts/populate_extern.sh`. When a fixture
+  references `extern/<Pkg>.jl/<path>`, the MANIFEST version is the authoritative
+  parity oracle — document the version in the fixture or DONE.md entry. To update
+  a parity oracle version: update MANIFEST.tsv, re-clone, update the fixture
+  expected output, commit MANIFEST + fixture together.
 
 ## Type System And Dispatch Discipline
 
@@ -154,6 +246,23 @@ no-JIT-iOS-viability rule applies.
   `CompiledProgram`, and report CLI and VM-only numbers separately.
 - Performance impact → add a benchmark to `benches/` (Issue #3210).
 
+## Upstream Parity Target
+
+- "Output must match official Julia" means: match the **latest patch release
+  of the Julia series named in the root `PARITY_TARGET` file** (currently
+  1.12.x). Full policy, the three canonical representations (`PARITY_TARGET`
+  file / `julia/` submodule / the julia binary used for comparison runs), and
+  the known-drift table live in `docs/vm/PARITY_TARGET.md` (Issue #8644).
+- The `julia/` submodule must point at the release tag of the target series'
+  latest patch. Update the submodule pointer and `PARITY_TARGET` together, in
+  the same PR, following the submodule-update checklist in
+  `docs/vm/CHECKLISTS.md` (Issue #8668).
+- sjulia's `VERSION` constant reports SubsetJuliaVM's own version, not the
+  parity target — an intentional divergence documented in
+  `docs/vm/PARITY_TARGET.md`. Fixtures must not compare `VERSION` itself.
+- Behavior found only in a newer upstream series (1.13+/DEV) is not ported
+  until the parity target moves to that series.
+
 ## Error Spans And Output Compatibility
 
 - All errors carry precise spans. Parser/lowering/runtime error output must
@@ -174,6 +283,17 @@ no-JIT-iOS-viability rule applies.
 - New `check_*.sh` scripts follow the "Adding a New Audit Script" checklist in
   `docs/vm/CODE_AUDITS.md` and must pass
   `bash scripts/check_audit_scripts_bash3_compat.sh`.
+- **Audit the audits (Issue #9129, failure modes F2/F4).** An audit that reports
+  "OK" after it has silently stopped guarding its invariant is worse than no
+  audit. `scripts/check_audit_negative_selftest.sh` injects a known-bad sample
+  into a sandbox for each covered audit and requires the audit to FAIL with a
+  stated reason; it also lints every `check_*.sh` / `audit_*.sh` for a
+  failure-diagnostic emit (a silent `exit 1` is banned — it hides which audit
+  broke, cf. the `set -e`-swallowed FAIL report in PR #9095). When adding a new
+  audit, add a matching negative self-test (or record why the invariant has no
+  injectable violation). A/B benchmarks must assert both arms differ in
+  configuration so a gate cannot pass by measuring the same thing twice (F4:
+  #9065 measured SSA-on against SSA-on).
 - AoT changes run the AoT gate (the default test feature set does not build
   `#[cfg(feature = "aot")]` code; there is no PR CI — regressions slip
   through, cf. #6629/#5658):
@@ -332,9 +452,35 @@ To reduce conflicts on these files:
 ## Git Workflow And Logical Commits
 
 - Branch from `main`, keep branches short-lived, and use **regular merge**
-  (never squash): `gh pr merge --auto --merge`.
+  (never squash) through the guarded draft-certification flow below.
+- **Draft until certified (Issue #11056).** Agent-created implementation PRs
+  remain draft while review or required local gates are incomplete. An
+  implementation agent never marks its PR ready or merges it. The lead runs
+  `scripts/premerge_gate.sh --pr <N>` on the exact current `origin/main` and
+  exact PR head; only that successful guarded run may transition the PR to
+  ready and perform the pinned regular merge. The GitHub `protect main`
+  ruleset strictly requires the `sjulia/guarded-certification` status emitted
+  by that gate; verify it with `scripts/github_merge_ruleset.sh --check`.
 - **Issue-driven:** create the `unsupported-feature` / `bug` Issue before any
   workaround or fix; link it in the PR.
+- **Definition of Done (Issue #9129, failure modes F1/F5).** An Issue is *done*
+  only when its implementation PR is **MERGED** — an `--auto --merge` reservation
+  is *not* completion (it can sit `CONFLICTING` forever; verify the merge landed
+  before reporting done). The closing comment re-verifies each acceptance
+  criterion **one item at a time**; any criterion that cannot be met is closed
+  *only* by explicit hand-off to a scoped follow-up Issue (the honest-deferral
+  pattern of #8998 / #8885 / #9089 / #9090), never by silent omission. When a
+  large **parent/track** Issue closes, judge whether its *original purpose* was
+  achieved **independently of** its child Issues' completion — closing all
+  children does not prove the goal was met (F1: #8640's build-time target was
+  unmet at child-completion and was honestly deferred to #9090).
+- **Rebase-audit before merge (Issue #9129, failure mode F3/F).** Before merging,
+  rebase onto fresh `origin/main` and run `git diff origin/main` to confirm the
+  rebase did not silently drop sibling code that landed in parallel (a real
+  rebase dropped a new `enforce_*_cache_limit` in this repo's history). Parallel
+  work on the same hot surface (dispatch resolver, `Value` representation, parser
+  allowlist) is serialized or single-owner — see "Concurrent Work And
+  Merge-Conflict Avoidance".
 - **Logical commits:** commit as a sequence of buildable, self-contained
   logical units — one coherent change per commit (fix + its regression fixture
   + matching `docs/vm` update together; workaround comment + `WORKAROUNDS.md`
@@ -374,9 +520,13 @@ To reduce conflicts on these files:
 
 ## Agent Skills
 
-The mandatory workflows below are encoded as project-scoped Cursor Agent
-Skills under `.cursor/skills/`. They auto-load from their `description` trigger
-terms and are the operational form of rules in this file.
+The mandatory workflows below are encoded as project-scoped Agent Skills
+under `.agents/skills/` (the canonical location; `.claude/skills` and
+`.cursor/skills` are symlinks to it, so every agent — Claude Code, Cursor,
+Codex, opencode, … — sees the same set). Skill-aware agents auto-load them
+from their `description` trigger terms; agents without native skill support
+follow the dispatch table in `AGENTS.md`. They are the operational form of
+rules in this file. The full skill list lives in `AGENTS.md`.
 
 | Skill | Encodes |
 |-------|---------|
@@ -384,3 +534,4 @@ terms and are the operational form of rules in this file.
 | `sjulia-report-gap` | The Canon-First / Root-Cause rule: when upstream `julia` runs a construct but sjulia does not, STOP, file an `unsupported-feature`/`bug` Issue before any workaround. |
 | `sjulia-bug-prevention` | Root-Cause Fix Discipline: after a fix, file a prevention Issue (root cause, missed-test reason, regression test, blast radius, prevention mechanism). |
 | `sjulia-logical-commits` | Git Workflow: commit as buildable, self-contained logical units with WHY-focused messages and Issue links. |
+| `sjulia-postmortem` | Repository Memory Lifecycle + Documentation And Work Records: after finishing a task, record insights in `memory/`, file the prevention Issue for bug fixes, and file follow-up Issues for deferred work before reporting completion. |

@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-source_file="subset_julia_vm/src/vm/exec/binary_both.rs"
+source_file="subset_julia_vm_vm/src/vm/exec/binary_both.rs"
 doc_file="docs/vm/BINARY_DISPATCH.md"
 
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/binary-both-inventory.XXXXXX")

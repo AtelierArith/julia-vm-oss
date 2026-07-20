@@ -56,10 +56,9 @@ if [[ ! -x "$SJULIA" ]]; then
     echo "  cargo build --release --bin sjulia --features repl" >&2
     exit 2
 fi
-if ! command -v julia >/dev/null 2>&1; then
-    echo "ERROR: julia not on PATH" >&2
-    exit 2
-fi
+# Version-check the comparison julia against PARITY_TARGET (Issue #8667).
+# May be two words (e.g. "julia +1.12"); expand unquoted on purpose.
+JULIA_CMD="$(bash "$(dirname "${BASH_SOURCE[0]}")/parity_julia_version.sh")"
 
 # Each probe is a single line of Julia source. The expected output is
 # whatever upstream julia produces — recomputed every run, so probes
@@ -177,7 +176,8 @@ for probe in "${PROBES[@]}"; do
     printf '%s\n' "$probe" >"$TMP_PROBE"
 
     sj_out="$("$SJULIA" "$TMP_PROBE" 2>&1 || true)"
-    jl_out="$(julia "$TMP_PROBE" 2>&1 || true)"
+    # shellcheck disable=SC2086 # JULIA_CMD may carry a juliaup channel arg
+    jl_out="$($JULIA_CMD "$TMP_PROBE" 2>&1 || true)"
 
     if [[ "$sj_out" == "$jl_out" ]]; then
         if [[ "$VERBOSE" == "1" ]]; then

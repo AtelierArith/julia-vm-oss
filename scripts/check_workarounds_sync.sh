@@ -5,7 +5,7 @@
 # See: Issue #3263
 set -euo pipefail
 
-SRC_DIR="subset_julia_vm/src"
+SRC_DIRS=(subset_julia_vm*/src)
 WORKAROUNDS_DOC="docs/vm/WORKAROUNDS.md"
 ERRORS=0
 
@@ -24,7 +24,7 @@ issue_nums=()
 while IFS= read -r num; do
     issue_nums+=("$num")
 done < <(
-    grep -rn "// Workaround:" "$SRC_DIR" --include="*.rs" \
+    grep -rn "// Workaround:" "${SRC_DIRS[@]}" --include="*.rs" \
     | grep -v "///" \
     | grep -oE "\(Issue #[0-9]+\)" \
     | grep -oE "[0-9]+" \

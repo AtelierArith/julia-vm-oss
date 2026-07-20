@@ -57,6 +57,15 @@ BUNDLE_ID_DEFAULT = "jp.atelier-arith.subsetjuliavm"
 # change (find them with `--dump-ax`).
 REPL_TAB_ROLE, REPL_TAB_DESC = "AXRadioButton", "REPL"
 INPUT_ROLE = "AXTextField"
+RESET_ROLE, RESET_DESC = "AXButton", "Reset"
+
+
+class InfraFailure(RuntimeError):
+    """Harness failure that must not be counted as a sample failure."""
+
+    def __init__(self, kind: str, message: str):
+        self.kind = kind
+        super().__init__(f"{kind}: {message}")
 
 
 def log(msg: str) -> None:
@@ -112,6 +121,7 @@ def launch_app(device: str, bundle_id: str, relaunch: bool) -> None:
         check=True,
         capture_output=True,
     )
+    activate_simulator()
 
 
 # ---------------------------------------------------------------------------
@@ -126,16 +136,27 @@ def osascript(script: str) -> str:
     )
     out = (cp.stdout or "").strip()
     err = (cp.stderr or "").strip()
-    if "-1719" in err or "not allowed assistive access" in err:
-        die(
+    if "not allowed assistive access" in err:
+        raise InfraFailure(
+            "accessibility_denied",
             "Accessibility permission denied for the controlling app.\n"
             "  Grant it in System Settings → Privacy & Security → Accessibility\n"
             "  to the terminal/app running this script (note: under tmux the\n"
-            "  'responsible' process can differ from the visible terminal)."
+            "  'responsible' process can differ from the visible terminal).",
         )
+    if "-1719" in err:
+        return f"ERR:{err}"
     if err and not out:
         return f"ERR:{err}"
     return out
+
+
+def restart_simulator_app() -> None:
+    log("AX preflight failed; restarting Simulator once")
+    subprocess.run(["osascript", "-e", 'tell application "Simulator" to quit'], check=False)
+    time.sleep(1.0)
+    subprocess.run(["open", "-a", "Simulator"], check=False)
+    time.sleep(1.0)
 
 
 def activate_simulator() -> None:
@@ -144,7 +165,15 @@ def activate_simulator() -> None:
     # `entire contents of window 1` fails with "Invalid index".
     subprocess.run(["open", "-a", "Simulator"], check=False)
     osascript('tell application "Simulator" to activate\ndelay 0.3')
-    wait_for_window()
+    if wait_for_window():
+        return
+    restart_simulator_app()
+    osascript('tell application "Simulator" to activate\ndelay 0.3')
+    if not wait_for_window():
+        raise InfraFailure(
+            "ax_wedge",
+            "Simulator exposes 0 windows / -1719 after one automatic restart",
+        )
 
 
 def wait_for_window(retries: int = 30) -> bool:
@@ -294,14 +323,68 @@ def paste_cmd_v() -> None:
 def click_ax(role: str, desc: str | None, label: str) -> None:
     frame = ax_element_frame(role, desc)
     if frame is None:
-        die(
+        raise InfraFailure(
+            "ax_element_missing",
             f"could not locate {label} (role={role}, desc={desc}). "
-            f"Run with --dump-ax to inspect the AX tree; is the app on screen?"
+            f"Run with --dump-ax to inspect the AX tree; is the app on screen?",
         )
     x, y, w, h = frame
     cx, cy = x + w / 2.0, y + h / 2.0
     log(f"click {label} at ({cx:.0f},{cy:.0f})")
     click(cx, cy)
+
+
+def ax_static_text_dump() -> str:
+    script = '''
+    tell application "System Events" to tell process "Simulator"
+      set frontmost to true
+      set out to ""
+      try
+        set els to entire contents of window 1
+      on error errMsg
+        return "ERR:" & errMsg
+      end try
+      repeat with e in els
+        set r to ""
+        try
+          set r to role of e
+        end try
+        if r is "AXStaticText" then
+          set v to ""
+          try
+            set v to (value of e) as string
+          end try
+          if v is "" then
+            try
+              set v to (description of e) as string
+            end try
+          end if
+          set out to out & v & linefeed
+        end if
+      end repeat
+      return out
+    end tell
+    '''
+    out = osascript(script)
+    if out.startswith("ERR:"):
+        raise InfraFailure("ax_read_failed", out)
+    return out
+
+
+def reset_repl_state() -> None:
+    click_ax(RESET_ROLE, RESET_DESC, "REPL Reset button")
+    time.sleep(0.8)
+    text = ax_static_text_dump()
+    if "[ms]" in text or " ms]" in text:
+        raise InfraFailure(
+            "repl_reset_unverified",
+            "REPL output still contains timing text after Reset",
+        )
+    if "Julia REPL (" in text and "0 eval" not in text:
+        raise InfraFailure(
+            "repl_reset_unverified",
+            "REPL eval counter did not reset to 0 before paste",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +407,7 @@ def paste_and_run(args) -> None:
     # 1) REPL tab
     click_ax(REPL_TAB_ROLE, REPL_TAB_DESC, "REPL tab")
     time.sleep(1.0)
+    reset_repl_state()
 
     # 2) input field
     click_ax(INPUT_ROLE, None, "REPL input field")
@@ -361,16 +445,19 @@ def main() -> None:
     p.add_argument("--dump-ax", action="store_true", help="Print the Simulator window AX tree and exit.")
     args = p.parse_args()
 
-    if args.dump_ax:
-        activate_simulator()
-        time.sleep(0.3)
-        print(dump_ax_tree())
-        return
+    try:
+        if args.dump_ax:
+            activate_simulator()
+            time.sleep(0.3)
+            print(dump_ax_tree())
+            return
 
-    if args.code is None and args.code_file is None:
-        die("provide --code-file or --code (or use --dump-ax).")
+        if args.code is None and args.code_file is None:
+            die("provide --code-file or --code (or use --dump-ax).")
 
-    paste_and_run(args)
+        paste_and_run(args)
+    except InfraFailure as exc:
+        die(str(exc), code=2)
 
 
 if __name__ == "__main__":

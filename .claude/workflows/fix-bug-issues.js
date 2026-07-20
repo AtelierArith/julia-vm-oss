@@ -1,12 +1,11 @@
 export const meta = {
   name: 'fix-bug-issues',
-  description: 'Triage, fix, PR, and (optionally) merge open bug-labeled GitHub issues for SubsetJuliaVM',
-  whenToUse: 'When you want to clear the open `bug` label backlog: clusters issues by root cause, fixes each cluster in an isolated git worktree with a fixture test, opens one PR per work-item, adversarially verifies each fix against upstream julia, and (when args.merge is set) merges each confirmed PR to main independently as soon as it passes — without waiting for siblings.',
+  description: 'Triage, fix, draft PR, and verify open bug-labeled GitHub issues for SubsetJuliaVM; lead certification merges separately',
+  whenToUse: 'When you want to clear the open `bug` label backlog: clusters issues by root cause, fixes each cluster in an isolated git worktree with a fixture test, opens one draft PR per work-item, and adversarially verifies each fix against upstream julia for later lead certification.',
   phases: [
     { title: 'Triage', detail: 'Read every bug issue and cluster by genuine shared root cause into work-items' },
     { title: 'Fix', detail: 'One isolated git worktree per work-item: reproduce, fix, add fixture test, targeted tests, push branch, open PR' },
     { title: 'Verify', detail: 'Adversarially review each PR diff against upstream julia as the oracle' },
-    { title: 'Merge', detail: 'Merge each confirmed PR to main independently (regular merge), resolving doc-only conflicts; only runs when args.merge is set' },
   ],
 }
 
@@ -14,7 +13,6 @@ export const meta = {
 // `args.issues` (REQUIRED) is the live list of open bug-issue numbers, collected by
 // the caller via `gh issue list --label bug --state open`. We deliberately do NOT
 // hardcode a snapshot: a stale snapshot caused a run to "fix" already-closed issues.
-// `args.merge` (optional bool): when true, auto-merge each CONFIRMED PR to main.
 const REPO = 'AtelierArith/ailujsoi'
 const PRIMARY_DIR = '/Users/terasaki/work/atelierarith/ailujsoi'
 // `args` may arrive as an object, as a JSON-encoded string (depending on how the
@@ -25,9 +23,8 @@ if (typeof input === 'string') {
 }
 if (Array.isArray(input)) input = { issues: input }
 input = input || {}
-log(`args received: type=${typeof args}; normalized.issues=${JSON.stringify(input.issues)}; merge=${input.merge}`)
+log(`args received: type=${typeof args}; normalized.issues=${JSON.stringify(input.issues)}`)
 const ISSUES = Array.isArray(input.issues) ? input.issues : []
-const AUTO_MERGE = !!input.merge
 
 if (!ISSUES.length) {
   log('No issues provided. Pass args.issues — collect the LIVE list first with:')
@@ -98,19 +95,6 @@ const VERIFY_SCHEMA = {
   required: ['id', 'verdict', 'matchesUpstream', 'addressesRootCause', 'testActuallyCovers', 'concerns'],
 }
 
-const MERGE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    id: { type: 'string' },
-    merged: { type: 'boolean' },
-    prUrl: { type: 'string' },
-    skippedReason: { type: 'string', description: 'why not merged (rejected/blocked/no-PR/non-doc-conflict)' },
-    notes: { type: 'string' },
-  },
-  required: ['id', 'merged'],
-}
-
 // ---- Prompts ------------------------------------------------------------
 const triagePrompt = `You are triaging open \`bug\`-labeled GitHub issues for SubsetJuliaVM (a static no-JIT subset-of-Julia VM; repo ${REPO}). Working dir is the repo root — read ./CLAUDE.md and ./docs/vm/ as needed.
 
@@ -153,9 +137,9 @@ STEPS
      git fetch origin main --quiet && git switch -c ${item.suggestedBranch} origin/main
    Then \`git add\` your files (stage ONLY your intended files) and commit. End the commit message body with:
      Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
-   Push: \`git push -u origin ${item.suggestedBranch}\`. Then \`gh pr create --repo ${REPO} --base main\` with a title and a body that: lists "Closes #<n>" for each issue, summarizes the root cause + fix, gives a Test Plan (commands run + results), and ENDS with:
+   Push: \`git push -u origin ${item.suggestedBranch}\`. Then \`gh pr create --draft --repo ${REPO} --base main\` with a title and a body that: lists "Closes #<n>" for each issue, summarizes the root cause + fix, gives a Test Plan (commands run + results), and ENDS with:
      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-   Do NOT enable auto-merge and do NOT merge (the orchestrator handles merging). Capture the PR URL.
+   Do NOT enable auto-merge and do NOT merge (the lead handles certification and merging). Capture the PR URL.
 8. If the fix is genuinely too large/risky/uncertain, set status "partial" or "blocked" with a clear blockers note rather than shipping a broken or speculative PR.
 
 Return ONLY the structured object (status, branch, prUrl, filesChanged, testsAdded, reproBefore, targetedTestResult, clippyResult, summary, blockers).`
@@ -176,39 +160,14 @@ If status is "blocked"/"partial"/"fixed-no-pr" with no PR, just report verdict "
 2. ORACLE CHECK: run each issue's MWE through upstream \`julia\` (1.12, on PATH) to get the ground-truth output. Confirm the added fixture test's \`expected\` matches upstream julia EXACTLY (set matchesUpstream).
 3. Read the diff critically: does it address the stated root cause or only mask the visible symptom (addressesRootCause)? Does the added test actually exercise the bug — would it fail on old code (testActuallyCovers)? Does it follow CLAUDE.md (pure-Julia-first, dispatch over type-checks, precise error spans, category-prefixed fixture names)?
 4. Assess regression risk: broad/structural changes (e.g. to free-variable analysis or dispatch) carry higher risk — call it out (regressionRisk). Note anything the integrator must re-test in the FULL suite.
-5. Set verdict "confirmed" ONLY if the fix is correct, matches upstream, and the test genuinely covers the bug with acceptable regression risk. Use "concerns" for anything uncertain, "rejected" if the fix is wrong or masks the symptom. (Only "confirmed" PRs are auto-merged; "concerns"/"rejected" are surfaced for human review.)
+5. Set verdict "confirmed" ONLY if the fix is correct, matches upstream, and the test genuinely covers the bug with acceptable regression risk. Use "concerns" for anything uncertain, "rejected" if the fix is wrong or masks the symptom. All implementation PRs remain draft; only the lead's guarded certification may mark a confirmed PR ready and merge it (Issue #11056).
 
 Return ONLY the structured object.`
 }
 
-function mergePrompt(fix, verify, item) {
-  return `You are MERGING a verified bug-fix PR for SubsetJuliaVM to \`main\`, INDEPENDENTLY of sibling work — merge as soon as THIS PR is ready; do not wait for other PRs. Working dir is the repo root (${PRIMARY_DIR}).
-
-WORK-ITEM "${item.id}" — issues ${item.issues.map(n => '#' + n).join(', ')}
-PR:      ${fix.prUrl}
-Branch:  ${fix.branch}
-Verdict: ${verify.verdict}
-
-RULES
-- This repo merges with a REGULAR merge commit, NEVER squash. There is effectively no blocking PR CI, so do NOT wait on checks.
-- Bring the branch up to date with the fast-moving main and merge:
-  1. \`git fetch origin main --quiet\`.
-  2. \`gh pr view ${fix.prUrl} --json mergeable,mergeStateStatus\`. If already mergeable, go to step 4.
-  3. If behind/conflicting, update the branch IN AN ISOLATED WORKTREE so you never disturb the primary checkout:
-       WT=$(mktemp -d)/wt; git worktree add --quiet "$WT" ${fix.branch}
-       cd "$WT" && git merge --no-edit origin/main
-     The ONLY conflicts you may resolve are docs/vm/STATUS.md and docs/vm/DONE.md — resolve by KEEPING BOTH sides' added sections (union; NEVER drop another work-item's entries; group under the shared dated header per CLAUDE.md). Verify no \`<<<<<<<\` markers remain, commit, and \`git push origin HEAD:${fix.branch}\`. Then \`git worktree remove --force "$WT"\`.
-     If ANY non-doc file conflicts, do NOT force it: set merged=false, skippedReason="non-doc conflict needs manual resolution", and STOP.
-  4. Merge: \`gh pr merge ${fix.prUrl} --repo ${REPO} --merge\`. If GitHub reports a transient conflict (a sibling merged meanwhile), repeat the fetch→merge-main→push→merge loop up to 3 times.
-- After merging, confirm \`gh pr view ${fix.prUrl} --json state\` shows MERGED.
-- Do NOT run the full test suite (the orchestrator runs the final full-suite gate). Do NOT delete branches you did not create.
-
-Return ONLY the structured object (id, merged, prUrl, skippedReason, notes).`
-}
-
 // ---- Orchestration ------------------------------------------------------
 phase('Triage')
-log(`Triaging ${ISSUES.length} bug issues${AUTO_MERGE ? ' (auto-merge ON for confirmed PRs)' : ''}: ${ISSUES.map(n => '#' + n).join(', ')}`)
+log(`Triaging ${ISSUES.length} bug issues: ${ISSUES.map(n => '#' + n).join(', ')}`)
 const triage = await agent(triagePrompt, { schema: TRIAGE_SCHEMA, phase: 'Triage', label: 'triage', effort: 'high' })
 
 if (!triage || !triage.workItems || !triage.workItems.length) {
@@ -222,9 +181,9 @@ const items = triage.workItems.slice().sort((a, b) =>
 
 log(`Triage -> ${items.length} work-items: ${items.map(i => i.id + '[' + i.issues.join(',') + ']').join('  ')}`)
 
-// Each work-item flows independently through Fix (isolated worktree) -> Verify -> Merge.
-// No barrier: a confirmed fix merges as soon as it is verified, while a slower one is
-// still building — exactly the "merge without waiting for others" behavior.
+// Each implementation work-item flows independently through Fix -> Verify.
+// Confirmed draft PRs are returned to the lead; this workflow never marks
+// ready or merges (Issue #11056).
 const results = await pipeline(
   items,
   item => agent(fixPrompt(item), {
@@ -234,7 +193,7 @@ const results = await pipeline(
     isolation: 'worktree',
   }),
   (fix, item) => {
-    if (!fix) return { fix: null, verify: null, merge: null, item }
+    if (!fix) return { fix: null, verify: null, item }
     return agent(verifyPrompt(fix, item), {
       schema: VERIFY_SCHEMA,
       phase: 'Verify',
@@ -242,32 +201,12 @@ const results = await pipeline(
       effort: 'high',
     }).then(verify => ({ fix, verify, item }))
   },
-  (prev, item) => {
-    if (!prev) return prev
-    if (!AUTO_MERGE) return prev
-    const fix = prev.fix
-    const verify = prev.verify
-    if (!fix || fix.status !== 'fixed-pr' || !fix.prUrl) {
-      return { ...prev, merge: { id: item.id, merged: false, skippedReason: `no mergeable PR (status=${fix && fix.status})` } }
-    }
-    if (!verify || verify.verdict !== 'confirmed') {
-      return { ...prev, merge: { id: item.id, merged: false, skippedReason: `verdict=${verify && verify.verdict} (only "confirmed" auto-merges; left for human review)` } }
-    }
-    return agent(mergePrompt(fix, verify, item), {
-      schema: MERGE_SCHEMA,
-      phase: 'Merge',
-      label: 'merge:' + item.id,
-      effort: 'high',
-    }).then(merge => ({ ...prev, merge }))
-  },
 )
 
 const clean = results.filter(Boolean)
 return {
   triageNotes: triage.notes,
-  autoMerge: AUTO_MERGE,
   workItemCount: items.length,
-  mergedCount: clean.filter(r => r.merge && r.merge.merged).length,
   results: clean.map(r => ({
     id: r.item.id,
     issues: r.item.issues,
@@ -282,7 +221,5 @@ return {
     addressesRootCause: r.verify && r.verify.addressesRootCause,
     concerns: r.verify && r.verify.concerns,
     regressionRisk: r.verify && r.verify.regressionRisk,
-    merged: r.merge ? r.merge.merged : false,
-    mergeSkippedReason: r.merge && r.merge.skippedReason,
   })),
 }

@@ -3,7 +3,7 @@
 # bytecode cache (Issue #2929) and parsed/lowered prelude Program cache
 # (Issue #6026) into the WASM binary.
 #
-# At runtime, `compile_base_functions()` (subset_julia_vm/src/compile/cache.rs)
+# At runtime, `compile_base_functions()` (subset_julia_vm_compile/src/compile/cache.rs)
 # loads Base bytecode from this embedded `&'static [u8]` instead of compiling
 # Base from source. `parse_and_lower()` also loads the embedded prelude Program
 # instead of parsing/lowering the prelude source on first `run_from_source()`.
@@ -75,7 +75,7 @@ fi
 echo "== [1/4] build host sjulia =="
 # IMPORTANT: do NOT set SJULIA_BASE_CACHE here — this build is what
 # generates the caches. Setting it would make build.rs panic.
-cargo build --release --bin sjulia --features repl
+cargo build --locked --release --bin sjulia --features repl
 
 echo "== [2/4] generate prelude Program cache =="
 mkdir -p "$CARGO_TARGET_DIR"
@@ -188,6 +188,8 @@ fi
 if [[ "$has_profile" == false ]]; then
   wasm_pack_args+=(--profile web-release)
 fi
+# Pin dependency resolution to Cargo.lock (Issue #9002).
+wasm_pack_args+=(--locked)
 
 cd "$WEB_CRATE"
 SJULIA_BASE_CACHE="$BASE_CACHE" \

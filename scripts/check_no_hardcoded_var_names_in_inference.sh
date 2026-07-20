@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-INFERENCE_DIR="subset_julia_vm/src/compile/expr/infer"
+INFERENCE_DIR="subset_julia_vm_compile/src/compile/expr/infer"
 
 if [[ ! -d "$INFERENCE_DIR" ]]; then
     echo "ERROR: $INFERENCE_DIR not found. Run this script from the repository root."

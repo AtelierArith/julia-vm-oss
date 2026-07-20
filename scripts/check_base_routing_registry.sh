@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-file="subset_julia_vm/src/compile/base_functions.rs"
+file="subset_julia_vm_compile/src/compile/base_functions.rs"
 
 if ! grep -q "BASE_FUNCTION_ROUTES" "$file"; then
   echo "ERROR: BASE_FUNCTION_ROUTES registry not found in $file" >&2
@@ -53,7 +53,7 @@ if printf '%s\n' "$dispatch_first_body" | grep -q "matches!("; then
   exit 1
 fi
 
-string_file="subset_julia_vm/src/compile/expr/builtin_string.rs"
+string_file="subset_julia_vm_compile/src/compile/expr/builtin_string.rs"
 STRING_ROUTES_FILE="$(mktemp)"
 STRING_EXEMPTIONS_FILE="$(mktemp)"
 STRING_DIRECT_FILE="$(mktemp)"

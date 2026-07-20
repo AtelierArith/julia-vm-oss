@@ -82,6 +82,23 @@ cut -f1 "$tmp" | sort -u | while read -r category; do
 done
 
 echo
+echo "# 4b. Smoke tier (Issue #9671 Phase 4): changed categories + representative"
+echo "#     cross-cutting categories that historically surface dispatch/inference/"
+echo "#     promotion interactions (the #5966 one-process-interaction class). This is"
+echo "#     an inner-loop check ONLY — the FULL suite remains the merge gate."
+# Representative cross-cutting categories + whatever changed above, de-duplicated.
+smoke_categories="$(
+    {
+        printf '%s\n' dispatch type_inference types promotion iteration numeric strings
+        cut -f1 "$tmp"
+    } | sort -u | tr '\n' ' '
+)"
+smoke_filter="$(
+    for c in $smoke_categories; do printf '%s:: ' "$c"; done
+)"
+echo "timeout 1800 cargo nextest run --release --test fixture_tests ${smoke_filter}--no-fail-fast"
+
+echo
 echo "# 5. iOS gates when VM/compiler/runtime behavior changed"
 echo "timeout 1800 cargo build --release -p subset_julia_vm_ffi --target aarch64-apple-ios-sim"
 echo "timeout 1800 xcodebuild -project SubsetJuliaVMApp/SubsetJuliaVMApp.xcodeproj -scheme SubsetJuliaVMApp -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPad (A16)' build"

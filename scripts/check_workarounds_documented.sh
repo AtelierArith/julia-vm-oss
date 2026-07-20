@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check_workarounds_documented.sh
 #
-# Verify that every "// Workaround:" comment in subset_julia_vm/src/ carries
+# Verify that every "// Workaround:" comment in workspace Rust sources carries
 # an Issue link of the form "(Issue #NNNN)".
 #
 # CLAUDE.md convention (Workaround Management section):
@@ -15,10 +15,10 @@
 
 set -euo pipefail
 
-SRC_DIR="subset_julia_vm/src"
+SRC_DIRS=(subset_julia_vm*/src)
 
-if [[ ! -d "$SRC_DIR" ]]; then
-    echo "ERROR: $SRC_DIR not found. Run this script from the repository root."
+if [[ ! -d "subset_julia_vm/src" ]]; then
+    echo "ERROR: subset_julia_vm/src not found. Run this script from the repository root."
     exit 1
 fi
 
@@ -26,7 +26,7 @@ fi
 # Exclude:
 #   - Doc comments (/// ...) that mention // Workaround: as example text
 #   - Backtick-quoted patterns (`// Workaround: ...`) in doc strings
-hits=$(grep -rn "// Workaround:" "$SRC_DIR" --include="*.rs" \
+hits=$(grep -rn "// Workaround:" "${SRC_DIRS[@]}" --include="*.rs" \
     | grep -v "Issue #[0-9]" \
     | grep -v "^[^:]*:.*///" \
     | grep -v '`// Workaround:' \

@@ -11,21 +11,33 @@
 #      two-digit pass count (regression guard for the greedy-regex
 #      bug fixed during PR #4713 that turned "15 passed, 0 failed"
 #      into "5 0").
+#   3. Boolean-return fixtures without Test.jl summaries are checked
+#      through wrapper final-value extraction against manifest expected.
 #
 # NAMING: prefix `test_` (not `check_`) keeps it out of the
-# `check_*.sh` audit registration (Issue #4714) — this is a
-# developer-side smoke test, not a CI gate yet.
+# `check_*.sh` audit registration (Issue #4714). CI runs this as the
+# fixture-parity smoke gate (Issue #8459), while the exhaustive parity helper
+# remains directly runnable for focused local investigations.
 #
 # Usage: bash scripts/test_fixture_julia_parity.sh
 #
 # Requirements:
 #   - julia on PATH
-#   - ./target/release/sjulia already built (same as the parity helper)
+#   - $CARGO_TARGET_DIR/release/sjulia already built (same as the parity helper,
+#     or SJULIA_BIN set)
 
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo_target_dir.sh"
+cargo_target_dir="$(resolve_cargo_target_dir "$ROOT")"
+export CARGO_TARGET_DIR="$cargo_target_dir"
+SJULIA_BIN="${SJULIA_BIN:-$cargo_target_dir/release/sjulia}"
+export SJULIA_BIN
+
 PARITY="scripts/fixture_julia_parity.sh"
 KNOWN_GOOD="subset_julia_vm/tests/fixtures/io/summary.jl"
+BOOLEAN_RETURN="subset_julia_vm/tests/fixtures/linalg/factorization_inplace_values_7464.jl"
 
 if [[ ! -x "$PARITY" ]]; then
     echo "ERROR: $PARITY not found or not executable." >&2
@@ -35,14 +47,21 @@ if [[ ! -f "$KNOWN_GOOD" ]]; then
     echo "ERROR: known-good fixture $KNOWN_GOOD missing — update this test." >&2
     exit 2
 fi
+if [[ ! -f "$BOOLEAN_RETURN" ]]; then
+    echo "ERROR: boolean-return fixture $BOOLEAN_RETURN missing — update this test." >&2
+    exit 2
+fi
 
 if ! command -v julia >/dev/null 2>&1; then
     echo "SKIP: julia not on PATH — cannot self-test the parity helper." >&2
     exit 0
 fi
-if [[ ! -x "./target/release/sjulia" ]]; then
-    echo "SKIP: ./target/release/sjulia not built — run:" >&2
-    echo "  cargo build --release --bin sjulia --features repl" >&2
+# Honor the same SJULIA_BIN override as the parity helper itself (Issues
+# #8632/#11598), including its CARGO_TARGET_DIR-derived default.
+if [[ ! -x "$SJULIA_BIN" ]]; then
+    echo "SKIP: sjulia binary not built ($SJULIA_BIN) — run:" >&2
+    echo "  cargo build --release -p subset_julia_vm --bin sjulia --features repl" >&2
+    echo "  (or set SJULIA_BIN to an existing sjulia binary)" >&2
     exit 0
 fi
 
@@ -122,4 +141,20 @@ if ! echo "$helper_output" | grep -q "2 passed, 0 failed"; then
 fi
 echo "OK: multi-testset per-testset summaries extracted correctly"
 
-echo "OK: scripts/fixture_julia_parity.sh self-tests pass (Issues #4718, #4720)."
+# Case 4 (Issue #8467): boolean-return fixture with no Test.jl summary.
+# Direct process exit status is not enough here: the helper must print and
+# compare the wrapped final value and the manifest expected value.
+helper_output=$(bash "$PARITY" "$BOOLEAN_RETURN" 2>&1)
+if ! echo "$helper_output" | grep -q "final value: true"; then
+    echo "FAIL: boolean-return fixture final value was not reported" >&2
+    echo "$helper_output" >&2
+    exit 1
+fi
+if ! echo "$helper_output" | grep -q "manifest expected: true"; then
+    echo "FAIL: boolean-return fixture manifest expected value was not reported" >&2
+    echo "$helper_output" >&2
+    exit 1
+fi
+echo "OK: boolean-return fixture final value and manifest expected value reported"
+
+echo "OK: scripts/fixture_julia_parity.sh self-tests pass (Issues #4718, #4720, #8467)."

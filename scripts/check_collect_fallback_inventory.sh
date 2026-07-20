@@ -4,12 +4,12 @@
 set -euo pipefail
 
 source_files=(
-    "subset_julia_vm/src/compile/expr/builtin.rs"
-    "subset_julia_vm/src/compile/expr/call/mod.rs"
-    "subset_julia_vm/src/compile/expr/call/handlers/arrays.rs"
-    "subset_julia_vm/src/vm/builtins_exec.rs"
-    "subset_julia_vm/src/vm/exec/call_dynamic.rs"
-    "subset_julia_vm/src/vm/type_ops/iteration.rs"
+    "subset_julia_vm_compile/src/compile/expr/builtin.rs"
+    "subset_julia_vm_compile/src/compile/expr/call/mod.rs"
+    "subset_julia_vm_compile/src/compile/expr/call/handlers/arrays.rs"
+    "subset_julia_vm_vm/src/vm/builtins_exec.rs"
+    "subset_julia_vm_vm/src/vm/exec/call_dynamic.rs"
+    "subset_julia_vm_vm/src/vm/type_ops/iteration.rs"
 )
 doc_file="docs/vm/COLLECTIONS.md"
 

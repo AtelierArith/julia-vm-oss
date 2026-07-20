@@ -11,7 +11,8 @@
 #
 # Requirements:
 #   - julia on PATH
-#   - ./target/release/juliars already built with Cranelift support:
+#   - $CARGO_TARGET_DIR/release/juliars already built with Cranelift support
+#     (or JULIARS_BIN set):
 #       cargo build --release -p subset_julia_vm --features cranelift --bin juliars
 #
 # This is intentionally a developer helper, not a `check_*.sh` CI audit script.
@@ -19,6 +20,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo_target_dir.sh"
+cargo_target_dir="$(resolve_cargo_target_dir "$ROOT")"
+export CARGO_TARGET_DIR="$cargo_target_dir"
+JULIARS_BIN="${JULIARS_BIN:-$cargo_target_dir/release/juliars}"
+export JULIARS_BIN
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: bash scripts/aot_cranelift_fixture_differential.sh <fixture.jl> [...]" >&2
@@ -30,14 +36,13 @@ if ! command -v julia >/dev/null 2>&1; then
     exit 2
 fi
 
-juliars_bin="$ROOT/target/release/juliars"
-if [[ ! -x "$juliars_bin" ]]; then
+if [[ ! -x "$JULIARS_BIN" ]]; then
     echo "ERROR: juliars binary not built. Run:" >&2
     echo "  cargo build --release -p subset_julia_vm --features cranelift --bin juliars" >&2
     exit 2
 fi
 
-if ! "$juliars_bin" --help | grep -q -- "--jit-run"; then
+if ! "$JULIARS_BIN" --help | grep -q -- "--jit-run"; then
     echo "ERROR: juliars does not expose --jit-run. Rebuild with current sources and the cranelift feature." >&2
     exit 2
 fi
@@ -63,7 +68,7 @@ for fixture in "$@"; do
     cranelift_out="$tmp_dir/cranelift.out"
     julia_out="$tmp_dir/julia.out"
 
-    if ! timeout 1800 "$juliars_bin" "$fixture" -o "$generated_rs" --emit-binary "$rust_bin" >"$tmp_dir/juliars-rust.out" 2>&1; then
+    if ! timeout 1800 "$JULIARS_BIN" "$fixture" -o "$generated_rs" --emit-binary "$rust_bin" >"$tmp_dir/juliars-rust.out" 2>&1; then
         echo "ERROR: Rust backend juliars failed for $fixture" >&2
         tail -40 "$tmp_dir/juliars-rust.out" >&2
         exit 1
@@ -75,7 +80,7 @@ for fixture in "$@"; do
         exit 1
     fi
 
-    if ! timeout 120 "$juliars_bin" "$fixture" --backend cranelift --jit-run >"$cranelift_out" 2>&1; then
+    if ! timeout 120 "$JULIARS_BIN" "$fixture" --backend cranelift --jit-run >"$cranelift_out" 2>&1; then
         echo "ERROR: Cranelift JIT run failed for $fixture" >&2
         tail -40 "$cranelift_out" >&2
         exit 1

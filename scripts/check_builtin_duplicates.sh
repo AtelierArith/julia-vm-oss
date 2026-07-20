@@ -22,43 +22,50 @@
 
 set -euo pipefail
 
-SRCDIR="subset_julia_vm/src/vm"
+SRCDIR="subset_julia_vm_vm/src/vm"
 
 if [[ ! -d "$SRCDIR" ]]; then
     echo "ERROR: $SRCDIR not found. Run from the repository root." >&2
     exit 1
 fi
 
-declare -A id_files
+# bash 3.2 compatible: no associative arrays (`declare -A` is a bash-4 builtin
+# flag that exits 2 on macOS stock /bin/bash — Issue #9461). We instead write a
+# `BuiltinId::Variant<TAB>file` pair per line (deduplicated per file via
+# `sort -u`) to a temp file, then group by variant with plain cut/sort/uniq/awk.
+pairs_file="$(mktemp)"
+trap 'rm -f "$pairs_file"' EXIT
 
 for f in "$SRCDIR"/builtins_*.rs; do
     # Skip the fallback handler file — it intentionally shadows specialized handlers
     [[ "$f" == *"builtins_exec.rs" ]] && continue
 
     # Extract BuiltinId::Variant references from non-comment lines only,
-    # deduplicated per file.
+    # deduplicated per file, and record one `variant<TAB>file` pair per line.
+    # (Exclude lines that are entirely comments: optional whitespace + //.)
+    # NOTE: feed the loop via process substitution `< <(...)`, NOT a pipe — a
+    # trailing `grep | while` would let a no-match grep (exit 1) trip
+    # `set -o pipefail` + `set -e` for files with no BuiltinId reference.
     while IFS= read -r id; do
-        [[ -n "$id" ]] && id_files["$id"]+="$f "
+        [[ -n "$id" ]] && printf '%s\t%s\n' "$id" "$f" >> "$pairs_file"
     done < <(
-        # Exclude lines that are entirely comments (optional whitespace + //)
-        grep -v '^\s*//' "$f" 2>/dev/null \
-        | grep -oE 'BuiltinId::[A-Za-z_]+' \
-        | sort -u
+        grep -v '^[[:space:]]*//' "$f" 2>/dev/null \
+            | grep -oE 'BuiltinId::[A-Za-z_]+' \
+            | sort -u
     )
 done
 
+# A variant handled in more than one specialized file appears on >1 pair line
+# (already unique per file). `cut`+`sort`+`uniq -d` lists exactly those.
+dup_ids="$(cut -f1 "$pairs_file" | sort | uniq -d)"
+
 found=0
-for id in "${!id_files[@]}"; do
-    files="${id_files[$id]}"
-    count=$(echo "$files" | wc -w | tr -d ' ')
-    if [[ "$count" -gt 1 ]]; then
-        echo "DUPLICATE: $id"
-        for f in $files; do
-            echo "  $f"
-        done
-        found=1
-    fi
-done
+while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    echo "DUPLICATE: $id"
+    awk -F'\t' -v want="$id" '$1 == want { print "  " $2 }' "$pairs_file"
+    found=1
+done <<< "$dup_ids"
 
 if [[ "$found" -eq 0 ]]; then
     echo "OK: no duplicate BuiltinId handlers found in specialized builtins_*.rs files"

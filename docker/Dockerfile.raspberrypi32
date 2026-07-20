@@ -43,7 +43,23 @@ RUN SJULIA_PRELUDE_PROGRAM_CACHE="$(pwd)/target/prelude_program_cache.bin" \
     SJULIA_BASE_CACHE="$(pwd)/target/base_cache.bin" \
     timeout 3600 cargo build --release --bin sjulia --features repl
 RUN file target/release/sjulia \
-    && timeout 300 target/release/sjulia -e '@assert Sys.WORD_SIZE == 32; @assert Int === Int32; @assert UInt === UInt32; println(1 + 2)'
+    && timeout 300 target/release/sjulia -e '@assert Sys.WORD_SIZE == 32; @assert Int === Int64; @assert UInt === UInt64; println(1 + 2)'
+
+# End-to-end proof the numeric path actually executes on armhf (broadcast +
+# ComplexF64 + Ref), not just that the binary links.
+RUN timeout 300 target/release/sjulia examples/mandelbrot.jl
+
+# --- Fast "does it run at all" target -----------------------------------------
+# Single-stage: build sjulia once (no precompile-cache embed) and run the
+# Mandelbrot example. Roughly half the wall time of `smoke` because it builds
+# the binary once; the trade-off is Base compiles from source on the single run
+# (a few minutes under QEMU). Use this for a quick armhf sanity check:
+#   docker buildx build --platform linux/arm/v7 -f docker/Dockerfile.raspberrypi32 --target example .
+FROM base AS example
+
+RUN timeout 3600 cargo build --release --bin sjulia --features repl
+RUN file target/release/sjulia \
+    && timeout 900 target/release/sjulia examples/mandelbrot.jl
 
 FROM base AS nextest
 

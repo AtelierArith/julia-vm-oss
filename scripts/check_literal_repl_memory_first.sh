@@ -6,7 +6,7 @@ set -euo pipefail
 
 errors=0
 
-if rg -n 'ArrayValue::from_(f64|i64|bool)\(' subset_julia_vm/src/compile/expr/mod.rs subset_julia_vm/src/compile/utils.rs; then
+if rg -n 'ArrayValue::from_(f64|i64|bool)\(' subset_julia_vm_compile/src/compile/expr/mod.rs subset_julia_vm_compile/src/compile/utils.rs; then
     echo "ERROR: Literal::Array* conversion must use ArrayValue::memory_first_from_* helpers."
     errors=$((errors + 1))
 fi

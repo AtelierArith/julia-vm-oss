@@ -1,18 +1,35 @@
 [workspace]
 members = [
     "subset_julia_vm",
+    "subset_julia_vm_compile",
+    "subset_julia_vm_vm",
+    "subset_julia_vm_bytecode",
     "subset_julia_vm_ffi",
+    "subset_julia_vm_ir",
+    "subset_julia_vm_lowering",
     "subset_julia_vm_parser",
+    "subset_julia_vm_parser_common",
+    "subset_julia_vm_types",
     "subset_julia_vm_web",
     "subset_julia_vm_runtime",
 ]
 default-members = [
     "subset_julia_vm",
+    "subset_julia_vm_compile",
+    "subset_julia_vm_vm",
+    "subset_julia_vm_bytecode",
+    "subset_julia_vm_ir",
+    "subset_julia_vm_lowering",
     "subset_julia_vm_parser",
+    "subset_julia_vm_parser_common",
+    "subset_julia_vm_types",
     "subset_julia_vm_web",
     "subset_julia_vm_runtime",
 ]
 resolver = "2"
+
+[workspace.package]
+rust-version = "1.95"
 
 # Vendored, locally-patched astro-float-num (Issue #6794): bounds the Ziv
 # precision-refinement loops in exp/ln so fractional BigFloat powers
@@ -59,7 +76,7 @@ lto = true
 #   target/dev-fast/sjulia path/to/fixture.jl
 #
 # release-fast: release-like gates with shorter compile; not for perf benchmarks or shipping.
-#   cargo nextest run --profile release-fast --test fixture_tests <category>::
+#   cargo nextest run --cargo-profile release-fast --test fixture_tests <category>::
 [profile.dev-fast]
 inherits = "dev"
 opt-level = 1

@@ -4,16 +4,11 @@
 # Audit Pure Julia helpers under subset_julia_vm/src/julia/ for
 # silently-wrong stub implementations.
 #
-# NOTE ON NAMING: this is intentionally NOT named check_*.sh. The
-# check_*.sh CI perimeter requires a matching .github/workflows/ci.yml
-# lint + run stanza, and pushing ci.yml changes needs the GitHub
-# `workflow` OAuth scope that the automation token lacks (see
-# docs/vm/CODE_AUDITS.md "When automation cannot update ci.yml", Issue
-# #4714). It is therefore a developer-run / pre-commit audit for now,
-# matching the fixture_julia_parity.sh / probe_base_api_parity.sh
-# precedent. Issue #4705 tracks renaming it to check_julia_base_stubs.sh
-# and wiring it into CI once a maintainer with `workflow` scope can land
-# the ci.yml stanza in the same PR.
+# NOTE ON NAMING: this is intentionally NOT named check_*.sh. It predates
+# the check_*.sh registration perimeter and remains an audit_* tool for
+# compatibility with existing docs and local workflows. CI now shellchecks and
+# runs it directly (Issue #8459); a future cleanup can decide whether to rename
+# it to check_julia_base_stubs.sh.
 #
 # A "silent stub" is a `function NAME(args...)` whose ENTIRE body is a
 # single trivial `return <constant-or-bare-arg>` and whose positional
@@ -54,22 +49,19 @@ fi
 
 # Files that have been swept against upstream julia/base and whose
 # trivial-body untyped helpers are all either correct (and marked
-# INTENTIONAL_NOOP) or tracked (and marked STUB). Add a file here only
-# after auditing every trivial untyped helper in it against
-# julia/base; the script then guarantees no NEW unmarked silent stub is
-# introduced into that file. Other src/julia files are deliberately
-# excluded for now to avoid false positives on legitimate generic
-# one-liners that have not been swept yet — extend this list as files
-# are audited.
-AUDIT_FILES=(
-    "subset_julia_vm/src/julia/base/essentials.jl"
-    "subset_julia_vm/src/julia/base/number.jl"
-    "subset_julia_vm/src/julia/base/bool.jl"
-    "subset_julia_vm/src/julia/base/missing.jl"
-    "subset_julia_vm/src/julia/base/range.jl"
-    "subset_julia_vm/src/julia/base/broadcast.jl"
-    "subset_julia_vm/src/julia/base/iterators.jl"
-)
+# INTENTIONAL_NOOP) or tracked (and marked STUB). The list is now
+# derived automatically from the per-file
+#   # upstream: julia/base/<path> @ <commit> (swept YYYY-MM-DD)
+# header convention (Issue #9005). Add the header to a file only after
+# auditing every trivial untyped helper in it against julia/base; the
+# script then guarantees no NEW unmarked silent stub is introduced into
+# that file. Other src/julia files are deliberately excluded for now to
+# avoid false positives on legitimate generic one-liners that have not
+# been swept yet — extend coverage by adding the upstream: header.
+AUDIT_FILES=()
+while IFS= read -r candidate; do
+    AUDIT_FILES+=("$candidate")
+done < <(grep -rl '^# upstream: julia/' subset_julia_vm/src/julia/ 2>/dev/null | sort)
 
 hits_file=$(mktemp)
 trap 'rm -f "$hits_file"' EXIT
