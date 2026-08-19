@@ -1,0 +1,119 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::aot::ir::{Instruction, IrFunction, VarRef};
+use crate::aot::{AotError, AotResult};
+use wasm_encoder::ValType;
+
+use super::ops::required_type;
+
+pub(super) type PhiEdges = HashMap<(String, String), Vec<(VarRef, VarRef)>>;
+
+pub(super) struct LocalLayout {
+    pub(super) locals: HashMap<String, u32>,
+    pub(super) phi_scratch: HashMap<String, u32>,
+    pub(super) declarations: Vec<(u32, ValType)>,
+    pub(super) pc: u32,
+}
+
+pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout> {
+    let locals = collect_locals(function)?;
+    let param_count = u32::try_from(function.params.len())
+        .map_err(|_| AotError::CodegenError("too many Wasm parameters".to_string()))?;
+    let mut indices = HashMap::new();
+    for (index, (name, _)) in function.params.iter().enumerate() {
+        indices.insert(name.clone(), checked_index(index, "parameters")?);
+    }
+    for (offset, (name, _)) in locals.iter().enumerate() {
+        indices.insert(name.clone(), param_count + checked_index(offset, "locals")?);
+    }
+    let pc = param_count + checked_index(locals.len(), "locals")?;
+    let mut declarations: Vec<_> = locals.iter().map(|(_, ty)| (1, *ty)).collect();
+    declarations.push((1, ValType::I32));
+    let mut phi_scratch = HashMap::new();
+    for (offset, (name, ty)) in collect_phi_scratch(function)?.iter().enumerate() {
+        phi_scratch.insert(name.clone(), pc + 1 + checked_index(offset, "phi locals")?);
+        declarations.push((1, *ty));
+    }
+    Ok(LocalLayout {
+        locals: indices,
+        phi_scratch,
+        declarations,
+        pc,
+    })
+}
+
+fn checked_index(index: usize, kind: &str) -> AotResult<u32> {
+    u32::try_from(index).map_err(|_| AotError::CodegenError(format!("too many Wasm {kind}")))
+}
+
+fn collect_locals(function: &IrFunction) -> AotResult<Vec<(String, ValType)>> {
+    let params: HashSet<_> = function
+        .params
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    let mut locals = Vec::new();
+    let mut seen = HashSet::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            for dest in destinations(instruction) {
+                if !params.contains(dest.name.as_str()) && seen.insert(dest.name.clone()) {
+                    locals.push((dest.name.clone(), required_type(&dest.ty)?));
+                }
+            }
+        }
+    }
+    Ok(locals)
+}
+
+fn collect_phi_scratch(function: &IrFunction) -> AotResult<Vec<(String, ValType)>> {
+    let mut scratch = Vec::new();
+    let mut seen = HashSet::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Instruction::Phi { dest, .. } = instruction {
+                if seen.insert(dest.name.clone()) {
+                    scratch.push((dest.name.clone(), required_type(&dest.ty)?));
+                }
+            }
+        }
+    }
+    Ok(scratch)
+}
+
+fn destinations(instruction: &Instruction) -> Vec<&VarRef> {
+    match instruction {
+        Instruction::LoadConst { dest, .. }
+        | Instruction::Copy { dest, .. }
+        | Instruction::BinOp { dest, .. }
+        | Instruction::UnaryOp { dest, .. }
+        | Instruction::GetIndex { dest, .. }
+        | Instruction::GetField { dest, .. }
+        | Instruction::GetFieldOffset { dest, .. }
+        | Instruction::TypeAssert { dest, .. }
+        | Instruction::Phi { dest, .. }
+        | Instruction::StructNew { dest, .. } => vec![dest],
+        Instruction::Call { dest, .. } => dest.iter().collect(),
+        Instruction::CallMulti { dests, .. } => dests.iter().collect(),
+        Instruction::SetIndex { .. }
+        | Instruction::SetField { .. }
+        | Instruction::SetFieldOffset { .. } => Vec::new(),
+    }
+}
+
+pub(super) fn collect_phi_edges(function: &IrFunction) -> PhiEdges {
+    let mut edges = HashMap::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Instruction::Phi { dest, incoming } = instruction {
+                for (source, value) in incoming {
+                    edges
+                        .entry((source.clone(), block.label.clone()))
+                        .or_insert_with(Vec::new)
+                        .push((dest.clone(), value.clone()));
+                }
+            }
+        }
+    }
+    edges
+}
