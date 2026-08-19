@@ -8,6 +8,16 @@
 
 ---
 
+## 最新対応 (2026-08-18)
+
+### General Wasm AoT first slice
+
+Added `AotBackend::Wasm`, exact-pinned `wasm-encoder`, a typed Core IR → AoT →
+`IrModule` → Wasm path, structured CFG dispatch, direct calls, scalar operations,
+and a versioned generic UInt8 descriptor ABI. Consolidated AoT tests execute five
+unrelated Julia sources and RGBA alpha-preserving mutation in Node. No transform
+registry, JS kernel, imports, dynamic dispatch, or fallback is present.
+
 ## 最新対応 (2026-07-20)
 
 ### Windows default LOAD_PATH includes embedded stdlib (Issue #11800)
