@@ -27,6 +27,7 @@ sjulia has four execution paths:
 | **Register VM** | Future default (#8448, SSA IR #8440) | Prototype measurements (#8559) |
 | **AoT** (Core IR → Rust codegen, Cranelift; `subset_julia_vm_runtime`) | Static native-code output path | `--features aot` only: **nightly** `test_aot.sh` (#8633); no PR gate |
 | **WASM** | Web runtime (`subset_julia_vm_web`) | Build-only; execution smoke tracked as #8688 |
+| **Wasm AoT** | Experimental standalone `IrModule` output (`aot-wasm`) | Node execution tests; no runtime imports or backend fallback |
 
 The problem this ADR resolves: AoT's standing was **contradictory**. Design
 principle 7 ("prioritize VM over AoT unless asked") declared it non-priority,
@@ -133,6 +134,28 @@ Concretely:
 - `#[cfg(feature = "aot")]` gating stays: the default build/test matrix is
   unchanged; protection comes from the new CI jobs, not from unconditional
   compilation.
+
+### Experimental standalone Wasm AoT slice (2026-08-18)
+
+`AotBackend::Wasm` is a separate artifact backend, not the
+`subset_julia_vm_web` interpreter transport. With `aot-wasm`, the canonical
+Core IR → inference → optimized `AotProgram` pipeline lowers into the same
+backend-neutral `IrModule` model consumed by native codegen and encodes a core
+WebAssembly module with `wasm-encoder =0.244.0`.
+
+The first supported surface is deliberately static: Int64, Float64, Bool,
+UInt8, one-dimensional `Vector{UInt8}` descriptors, constants, locals,
+arithmetic/comparisons, unary operations, branches, loops, phi edges, returns,
+and direct calls. Every unsupported type, expression, instruction, or terminator
+returns `UnsupportedInstructionDiagnostic`; there is no Rust, VM, or JavaScript
+fallback. Generated modules import nothing.
+
+Linear-memory descriptor ABI v1 is five little-endian i32 fields:
+`{version, ptr, len, element_type, stride}`. `element_type=1` means UInt8 and
+`stride=1`. Julia indices remain one-based. Version/type/stride mismatch and
+out-of-bounds access trap via WebAssembly `unreachable`; successful mutation is
+in-place and functions return their declared scalar result. The module exports
+`memory` and `__sjulia_wasm_abi_version`.
 - REGISTER_VM.md's side-by-side policy for the stack VM is untouched. When
   the register VM reaches parity, the stack VM's retirement terms get decided
   there, informed by this ADR's lesson: **no backend lingers in unverified
