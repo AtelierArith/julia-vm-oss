@@ -58,7 +58,6 @@ pub(super) fn emit_u8_address(
         body.instruction(&W::LocalGet(layout.memory.term));
         emit_i64_load(body, descriptor, &layout.locals, dim_offset)?;
         trap_if(body, W::I64GeU);
-        body.instruction(&W::LocalGet(layout.memory.max_offset));
         body.instruction(&W::LocalGet(layout.memory.term));
         emit_i64_load(body, descriptor, &layout.locals, stride_offset)?;
         body.instruction(&W::I64Mul);

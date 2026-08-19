@@ -4,6 +4,7 @@ use wasm_encoder::ValType;
 
 pub const ABI_VERSION: i32 = 2;
 pub(super) const MAX_RANK: usize = 8;
+pub(super) const MAX_DIMENSION: i64 = 1_i64 << 31;
 pub(super) const DESCRIPTOR_FLAGS_OFFSET: u64 = 4;
 pub(super) const DESCRIPTOR_ELEMENT_TAG_OFFSET: u64 = 8;
 pub(super) const DESCRIPTOR_ELEMENT_SIZE_OFFSET: u64 = 12;

@@ -5,6 +5,14 @@ import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
 const packageUrl = new URL("pkg-compiler-final/", root);
+const artifactManifest = JSON.parse(
+  await readFile(fileURLToPath(new URL("ARTIFACT_MANIFEST.json", packageUrl)), "utf8"),
+);
+assert.equal(
+  artifactManifest.compiler_abi_version,
+  1,
+  "pkg-compiler-final smoke descriptor writer must migrate with the Todo 3d artifact rebuild",
+);
 const compiler = await import(new URL("subset_julia_vm_web.js", packageUrl));
 const compilerBytes = await readFile(fileURLToPath(new URL("subset_julia_vm_web_bg.wasm", packageUrl)));
 await compiler.default({ module_or_path: compilerBytes });
@@ -58,21 +66,15 @@ const mutation = compile(
 const mutationInstance = await instantiate(mutation);
 const memory = mutationInstance.exports.memory;
 const descriptor = 32;
-const pointer = 128;
+const pointer = 64;
 const input = new Uint8Array(memory.buffer, pointer, 4);
 const descriptorView = new DataView(memory.buffer);
 input.set([1, 2, 254, 0]);
-descriptorView.setUint32(descriptor, 2, true);
-descriptorView.setUint32(descriptor + 4, 0, true);
-descriptorView.setUint32(descriptor + 8, 1, true);
-descriptorView.setUint32(descriptor + 12, 1, true);
-descriptorView.setUint32(descriptor + 16, 0, true);
-descriptorView.setUint32(descriptor + 20, 1, true);
-descriptorView.setUint32(descriptor + 24, pointer, true);
-descriptorView.setUint32(descriptor + 28, 0, true);
-descriptorView.setBigUint64(descriptor + 32, BigInt(input.length), true);
-descriptorView.setBigUint64(descriptor + 40, BigInt(input.length), true);
-descriptorView.setBigInt64(descriptor + 48, 1n, true);
+descriptorView.setInt32(descriptor, 1, true);
+descriptorView.setInt32(descriptor + 4, pointer, true);
+descriptorView.setInt32(descriptor + 8, input.length, true);
+descriptorView.setInt32(descriptor + 12, 1, true);
+descriptorView.setInt32(descriptor + 16, 1, true);
 assert.equal(mutationInstance.exports["increment!"](descriptor), 4n);
 assert.deepEqual(Array.from(input), [2, 3, 255, 1]);
 assert.equal(mutationInstance.exports.__sjulia_wasm_abi_version(), mutation.abi_version);

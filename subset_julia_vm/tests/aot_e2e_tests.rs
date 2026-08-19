@@ -6729,6 +6729,23 @@ mod wasm_backend_tests {
         run_wasm_bytes_node(&output.wasm_bytes, javascript)
     }
 
+    fn wasm_text(wasm_bytes: &[u8]) -> String {
+        let dir = tempfile::tempdir().expect("create Wasm text directory");
+        let wasm_path = dir.path().join("module.wasm");
+        fs::write(&wasm_path, wasm_bytes).expect("write Wasm text module");
+        let output = Command::new("wasm-tools")
+            .arg("print")
+            .arg(&wasm_path)
+            .output()
+            .expect("print generated Wasm");
+        assert!(
+            output.status.success(),
+            "wasm-tools print failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("generated WAT should be UTF-8")
+    }
+
     #[test]
     fn wasm_backend_is_an_explicit_aot_backend() {
         // Given: the public AoT backend selector.
@@ -7377,6 +7394,106 @@ console.log(traps);
 
         // Then: rank overflow is a typed compile diagnostic, not a runtime ABI guess.
         assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_dimension_limit_is_inclusive_and_traps_before_store() {
+        // Given: a zero-stride view whose one-byte extent isolates dimension validation.
+        let source = "function write_and_length!(bytes::Vector{UInt8})::Int64\nbytes[1] = UInt8(99)\nreturn length(bytes)\nend";
+        let javascript = r#"
+const memory = instance.exports.memory;
+const view = new DataView(memory.buffer);
+const descriptor = 32;
+const pointer = 128;
+const input = new Uint8Array(memory.buffer, pointer, 1);
+function write(dim) {
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, 0, true);
+  view.setUint32(descriptor + 8, 1, true);
+  view.setUint32(descriptor + 12, 1, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, 1, true);
+  view.setUint32(descriptor + 24, pointer, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, dim, true);
+  view.setBigUint64(descriptor + 40, dim, true);
+  view.setBigInt64(descriptor + 48, 0n, true);
+}
+write(0x80000000n);
+input[0] = 7;
+const boundary = instance.exports["write_and_length!"](descriptor);
+write(0x80000001n);
+input[0] = 7;
+let trapped = 0;
+try { instance.exports["write_and_length!"](descriptor); } catch (error) {
+  if (error instanceof WebAssembly.RuntimeError && input[0] === 7) trapped = 1;
+}
+console.log(`${boundary}:${trapped}:${input[0]}`);
+"#;
+
+        // When: Node executes the inclusive boundary and then boundary plus one.
+        let value = compile_and_run_node(
+            source,
+            "write_and_length!",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            javascript,
+        );
+
+        // Then: 2^31 is accepted and 2^31+1 traps before the sentinel changes.
+        assert_eq!(value, "2147483648:1:7");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_stride_zero_is_an_aliasing_view() {
+        // Given: a module-owned 2x3 view with both strides zero and one backing byte.
+        let source = "function alias_write!(bytes::Matrix{UInt8})::Int64\nbytes[2, 3] = UInt8(99)\nreturn Int64(bytes[1, 1]) + length(bytes)\nend";
+
+        // When: Node calls the view through a valid ABI v2 descriptor.
+        let value = compile_and_run_node(
+            source,
+            "alias_write!",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(2),
+            }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const pointer = 128; const input = new Uint8Array(memory.buffer, pointer, 1); input[0] = 7; view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 1, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 2, true); view.setUint32(descriptor + 24, pointer, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 6n, true); view.setBigUint64(descriptor + 40, 2n, true); view.setBigInt64(descriptor + 48, 0n, true); view.setBigUint64(descriptor + 56, 3n, true); view.setBigInt64(descriptor + 64, 0n, true); const result = instance.exports[\"alias_write!\"](descriptor); console.log(`${result}:${input[0]}`);",
+        );
+
+        // Then: every logical index aliases the same safe in-bounds byte.
+        assert_eq!(value, "105:99");
+    }
+
+    #[test]
+    fn wasm_u8_address_emission_has_no_unused_max_offset_operand() {
+        // Given: a generated rank-1 load with checked descriptor addressing.
+        let source = "read_first(bytes::Vector{UInt8}) = bytes[1]";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "read_first",
+                "read_first",
+                vec![StaticType::Array {
+                    element: Box::new(StaticType::U8),
+                    ndims: Some(1),
+                }],
+            )],
+            ..CompileConfig::default()
+        };
+        let output = compile_wasm_source(source, &config).expect("rank-1 load should compile");
+
+        // When: the generated operator stream is rendered as canonical WAT.
+        let wat = wasm_text(&output.wasm_bytes);
+        let operators = wat.lines().map(str::trim).collect::<Vec<_>>().join("\n");
+
+        // Then: address multiplication starts from the zero-based index, not max_offset.
+        assert!(
+            !operators
+                .contains("local.get 9\nlocal.get 10\nlocal.get 0\ni64.load offset=48 align=1"),
+            "address emission retained an unused max-offset operand:\n{wat}"
+        );
     }
 
     #[test]

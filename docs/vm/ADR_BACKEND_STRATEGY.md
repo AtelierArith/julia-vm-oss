@@ -154,8 +154,11 @@ Linear-memory descriptor ABI v2 uses a 40-byte aligned header followed by inline
 `{dim:u64,stride:i64}` pairs. UInt8 keeps stable element tag 1, rank is capped at
 8, and `layout_id=0` remains reserved. Static tag/rank, mirrored size/count,
 checked shape/address extents, and metadata/data disjointness are validated before
-data access. Julia indices remain one-based; negative strides trap until the
-general array slice. The module exports `memory` and `__sjulia_wasm_abi_version`.
+data access. Each dimension is bounded inclusively at `2^31`. Julia indices remain
+one-based; stride zero intentionally represents an aliasing view even when
+`MODULE_OWNED` controls its lifetime. Ownership does not yet imply canonical
+strides. Negative strides and canonical-stride rules are deferred to the general
+array slice. The module exports `memory` and `__sjulia_wasm_abi_version`.
 - REGISTER_VM.md's side-by-side policy for the stack VM is untouched. When
   the register VM reaches parity, the stack VM's retirement terms get decided
   there, informed by this ADR's lesson: **no backend lingers in unverified

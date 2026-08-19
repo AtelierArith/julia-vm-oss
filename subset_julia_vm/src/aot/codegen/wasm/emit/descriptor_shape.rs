@@ -4,7 +4,7 @@ use wasm_encoder::{BlockType, Function, Instruction as W};
 
 use super::super::types::{
     DescriptorLayout, DESCRIPTOR_AXIS_SIZE, DESCRIPTOR_DIM_OFFSET, DESCRIPTOR_ELEMENT_COUNT_OFFSET,
-    DESCRIPTOR_STRIDE_OFFSET,
+    DESCRIPTOR_STRIDE_OFFSET, MAX_DIMENSION,
 };
 use super::descriptor::{emit_i64_load, trap_if, DescriptorContext};
 
@@ -32,6 +32,9 @@ pub(super) fn emit_shape_validation(
             * DESCRIPTOR_AXIS_SIZE;
         let dim_offset = checked_offset(DESCRIPTOR_DIM_OFFSET, axis_offset)?;
         let stride_offset = checked_offset(DESCRIPTOR_STRIDE_OFFSET, axis_offset)?;
+        emit_i64_load(body, descriptor, context.locals, dim_offset)?;
+        body.instruction(&W::I64Const(MAX_DIMENSION));
+        trap_if(body, W::I64GtU);
         emit_i64_load(body, descriptor, context.locals, stride_offset)?;
         body.instruction(&W::I64Const(0));
         trap_if(body, W::I64LtS);

@@ -122,8 +122,8 @@ The module exports `memory` and `__sjulia_wasm_abi_version`. A descriptor has a
 | 24 | `data_ptr:u32` | tag-aligned; zero only for zero elements |
 | 28 | `reserved:u32` | `0` |
 | 32 | `element_count:u64` | checked product of inline dimensions |
-| 40+16k | `dim[k]:u64` | axis length |
-| 48+16k | `stride[k]:i64` | nonnegative stride in element units |
+| 40+16k | `dim[k]:u64` | axis length, inclusive maximum `2^31` |
+| 48+16k | `stride[k]:i64` | nonnegative stride in element units; zero aliases one element |
 
 Julia indexing is one-based per axis. Validation is fail-closed before every
 length/load/store: pointer/header alignment and range, ABI/flags/reserved,
@@ -131,8 +131,13 @@ inline metadata extent, expected tag/size/layout/rank, checked dimension product
 rank-0 and zero-count rules, nonnegative strides, maximum address/data extent,
 and metadata/data disjointness must all hold. Addressing computes
 `sum((index-1)*stride)` in widened arithmetic and wraps to i32 only after proving
-the byte address lies in current memory. Negative strides are deferred to the
-general array work in Todo 5. The host owns allocation in this slice.
+the byte address lies in current memory. Each dimension is at most `2^31`, so a
+single-axis length remains a nonnegative Julia `Int64`; `2^31` is accepted and
+`2^31+1` traps. Stride zero is intentionally valid for aliasing views, where
+multiple logical indices address the same element. `MODULE_OWNED` controls data
+lifetime only and does not currently imply canonical strides. Negative strides
+and canonical-stride enforcement are deferred to the general array work in Todo
+5. The host owns allocation in this slice.
 
 ## Coverage
 
