@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "sourceFiles": {
+    "Glyph": {
+      "file": "src/Glyph.jl",
+      "sha256": "431180eabdf9b660eaf1445f11b3f8ccf89fde4e9330e88258a4d20e80baa580",
+      "expectedExports": 14
+    },
+    "Imhotep": {
+      "file": "src/Imhotep.jl",
+      "sha256": "00a101da84695bde7dde1824bd18dbfbd4f8d5f93fdd8f30ee37eb7f1dd7da61",
+      "expectedExports": 27
+    }
+  },
+  "rows": [
+    {
+      "module": "Glyph",
+      "symbol": "⊙",
+      "source": { "file": "src/Glyph.jl", "startLine": 9, "endLine": 9, "sha256": "23479df5c0069425d7bc733afc8343c9fe1e59c8f4263625a81f07a4dd2f0df8" },
+      "caseId": "glyph-hadamard-product",
+      "fixture": "pending:glyph/hadamard_product.jl",
+      "case": "pending:rank-2 numeric arrays",
+      "exportWrapper": "sjulia_sokaris_glyph_hadamard_product",
+      "arguments": [{ "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }, { "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }],
+      "result": { "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "☽",
+      "source": { "file": "src/Glyph.jl", "startLine": 8, "endLine": 8, "sha256": "749d3d864d4735a5cb1778265cada71197e992fcc7d0fa6d3f689fe599756b63" },
+      "caseId": "glyph-compose", "fixture": "pending:glyph/compose.jl", "case": "pending:composed scalar closures", "exportWrapper": "sjulia_sokaris_glyph_compose",
+      "arguments": [{ "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }, { "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }, "comparison": { "mode": "exact", "tolerance": 0 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "∅",
+      "source": { "file": "src/Glyph.jl", "startLine": 10, "endLine": 10, "sha256": "cf963d94edab79f5ee078e82d016e1779cad6a4baf9405c077c5b30006588f40" },
+      "caseId": "glyph-map", "fixture": "pending:glyph/map.jl", "case": "pending:mapped numeric vector", "exportWrapper": "sjulia_sokaris_glyph_map",
+      "arguments": [{ "type": "Array{Float64,1}", "elementType": "f64", "rank": 1 }, { "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Array{Float64,1}", "elementType": "f64", "rank": 1 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "▷",
+      "source": { "file": "src/Glyph.jl", "startLine": 6, "endLine": 6, "sha256": "27072c2726e20ee3cb245fb92553cbfee95f6a2a0dc830de12d9ead8df8f9580" },
+      "caseId": "glyph-apply", "fixture": "pending:glyph/apply.jl", "case": "pending:scalar function application", "exportWrapper": "sjulia_sokaris_glyph_apply",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }, { "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Float64", "elementType": "f64", "rank": 0 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "✧",
+      "source": { "file": "src/Glyph.jl", "startLine": 11, "endLine": 11, "sha256": "78261c9257caf6f67638a801677a1a065d6a4da30bb7035ccdf12b482b07da15" },
+      "caseId": "glyph-fold", "fixture": "pending:glyph/fold.jl", "case": "pending:fold numeric vector", "exportWrapper": "sjulia_sokaris_glyph_fold",
+      "arguments": [{ "type": "Array{Float64,1}", "elementType": "f64", "rank": 1 }, { "type": "Function{Tuple{Float64,Float64},Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Float64", "elementType": "f64", "rank": 0 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "🝡",
+      "source": { "file": "src/Glyph.jl", "startLine": 7, "endLine": 7, "sha256": "4bf3ddf726b27448cb409ae71a4725f532c065f6a2afacf5f4cfecb4bb497de1" },
+      "caseId": "glyph-apply-alias", "fixture": "pending:glyph/apply_alias.jl", "case": "pending:alias function application", "exportWrapper": "sjulia_sokaris_glyph_apply_alias",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }, { "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Float64", "elementType": "f64", "rank": 0 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "⚕",
+      "source": { "file": "src/Glyph.jl", "startLine": 13, "endLine": 13, "sha256": "a3a7d5a9115e50254ff2d18f996b33606198252979075cca1a3de1129493cb43" },
+      "caseId": "glyph-coalesce", "fixture": "pending:glyph/coalesce.jl", "case": "pending:nothing and NaN defaults", "exportWrapper": "sjulia_sokaris_glyph_coalesce",
+      "arguments": [{ "type": "Union{Nothing,Float64}", "elementType": "tagged_f64", "rank": 0 }, { "type": "Float64", "elementType": "f64", "rank": 0 }],
+      "result": { "type": "Float64", "elementType": "f64", "rank": 0 }, "comparison": { "mode": "nan-aware", "tolerance": 0 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "☿",
+      "source": { "file": "src/Glyph.jl", "startLine": 21, "endLine": 29, "sha256": "644af18b81652443b1d07df81a961a528c58c84508df7ac89ad0f31f101685c1" },
+      "caseId": "glyph-memoize", "fixture": "pending:glyph/memoize.jl", "case": "pending:repeated closure key", "exportWrapper": "sjulia_sokaris_glyph_memoize",
+      "arguments": [{ "type": "Function{Int64,Int64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Function{Int64,Int64}", "elementType": "function_ref", "rank": 0 }, "comparison": { "mode": "exact", "tolerance": 0 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "⚹",
+      "source": { "file": "src/Glyph.jl", "startLine": 31, "endLine": 41, "sha256": "7af36097172a2db076e854d558eedaf229e4f61454c9e11407ce74184e993356" },
+      "caseId": "glyph-hex-neighbors", "fixture": "pending:glyph/hex_neighbors.jl", "case": "pending:matrix edge and center", "exportWrapper": "sjulia_sokaris_glyph_hex_neighbors",
+      "arguments": [{ "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }, { "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }],
+      "result": { "type": "Array{Float64,1}", "elementType": "f64", "rank": 1 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "✦",
+      "source": { "file": "src/Glyph.jl", "startLine": 43, "endLine": 43, "sha256": "5d3c9d48229d94477dfb1ce8aac8107e73f059b4fa4f866c8db1071495068ba9" },
+      "caseId": "glyph-cartesian-product", "fixture": "pending:glyph/cartesian_product.jl", "case": "pending:two numeric vectors", "exportWrapper": "sjulia_sokaris_glyph_cartesian_product",
+      "arguments": [{ "type": "Array{Int64,1}", "elementType": "i64", "rank": 1 }, { "type": "Array{Int64,1}", "elementType": "i64", "rank": 1 }],
+      "result": { "type": "Array{Tuple{Int64,Int64},2}", "elementType": "tuple_i64_i64", "rank": 2 }, "comparison": { "mode": "exact", "tolerance": 0 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "☥",
+      "source": { "file": "src/Glyph.jl", "startLine": 44, "endLine": 44, "sha256": "fac2dae51d1b97399bd250bcb912b403d1b79d4c0ba57c1ae12bd82b5c8971a4" },
+      "caseId": "glyph-deepcopy", "fixture": "pending:glyph/deepcopy.jl", "case": "pending:post-copy mutation", "exportWrapper": "sjulia_sokaris_glyph_deepcopy",
+      "arguments": [{ "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }],
+      "result": { "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "⚸",
+      "source": { "file": "src/Glyph.jl", "startLine": 45, "endLine": 45, "sha256": "437af903da9a8638640e65147ed9ec42b4db7d53379f1666f594cb02a9a989cf" },
+      "caseId": "glyph-accumulate", "fixture": "pending:glyph/accumulate.jl", "case": "pending:numeric prefix accumulation", "exportWrapper": "sjulia_sokaris_glyph_accumulate",
+      "arguments": [{ "type": "Array{Float64,1}", "elementType": "f64", "rank": 1 }, { "type": "Function{Tuple{Float64,Float64},Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Array{Float64,1}", "elementType": "f64", "rank": 1 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "⇉",
+      "source": { "file": "src/Glyph.jl", "startLine": 12, "endLine": 12, "sha256": "05bb67a5dacae9a71a7b9387e489fe6be87dea2360f55196013be6d2628b1fb0" },
+      "caseId": "glyph-fanout", "fixture": "pending:glyph/fanout.jl", "case": "pending:paired closure result", "exportWrapper": "sjulia_sokaris_glyph_fanout",
+      "arguments": [{ "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }, { "type": "Function{Float64,Float64}", "elementType": "function_ref", "rank": 0 }],
+      "result": { "type": "Function{Float64,Tuple{Float64,Float64}}", "elementType": "function_ref", "rank": 0 }, "comparison": { "mode": "exact", "tolerance": 0 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Glyph", "symbol": "𓇬",
+      "source": { "file": "src/Glyph.jl", "startLine": 17, "endLine": 19, "sha256": "dd7962a44ea2c9d2bca1ce2d0311a5a17db11dd0b0794afb9f3e163f770eda04" },
+      "caseId": "glyph-clamp", "fixture": "pending:glyph/clamp.jl", "case": "pending:numeric and color arrays", "exportWrapper": "sjulia_sokaris_glyph_clamp",
+      "arguments": [{ "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }],
+      "result": { "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }, "comparison": { "mode": "absolute", "tolerance": 1e-12 },
+      "requiredImports": [], "effect": "compute", "wave": "glyph", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "invert",
+      "source": { "file": "src/Imhotep.jl", "startLine": 21, "endLine": 21, "sha256": "6c671626657ab19caddbdb5e2272db0e3fad3dff4bbb99ff3d1170ff95927f3a" },
+      "caseId": "imhotep-invert", "fixture": "pending:imhotep/invert.jl", "case": "pending:RGBA channel inversion", "exportWrapper": "sjulia_sokaris_imhotep_invert",
+      "arguments": [{ "type": "Array{RGBA{Float64},2}", "elementType": "rgba_f64", "rank": 2 }], "result": { "type": "Array{RGBA{Float64},2}", "elementType": "rgba_f64", "rank": 2 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-12 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "gamma",
+      "source": { "file": "src/Imhotep.jl", "startLine": 24, "endLine": 26, "sha256": "d034779382c14ed9a7b8d9eb922dc979395d4087499f36339a89c3321512eba9" },
+      "caseId": "imhotep-gamma", "fixture": "pending:imhotep/gamma.jl", "case": "pending:RGBA gamma correction", "exportWrapper": "sjulia_sokaris_imhotep_gamma",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-10 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "brightness",
+      "source": { "file": "src/Imhotep.jl", "startLine": 28, "endLine": 30, "sha256": "009a4096dc78d036ff1eb47f0f525296722fbf5cb717eb2fb5a104e5280af059" },
+      "caseId": "imhotep-brightness", "fixture": "pending:imhotep/brightness.jl", "case": "pending:clamped RGBA brightness", "exportWrapper": "sjulia_sokaris_imhotep_brightness",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-12 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "contrast",
+      "source": { "file": "src/Imhotep.jl", "startLine": 32, "endLine": 34, "sha256": "52434ab27681d4efb11c534731adf7ced2f89fd30959f1b3f10dcdde5db59659" },
+      "caseId": "imhotep-contrast", "fixture": "pending:imhotep/contrast.jl", "case": "pending:clamped RGBA contrast", "exportWrapper": "sjulia_sokaris_imhotep_contrast",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-12 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "saturate",
+      "source": { "file": "src/Imhotep.jl", "startLine": 62, "endLine": 67, "sha256": "27e553f90a0898b4ba59bc95193acf65049ea09640f41aed0f6f8cbdb7a996e6" },
+      "caseId": "imhotep-saturate", "fixture": "pending:imhotep/saturate.jl", "case": "pending:HSV saturation", "exportWrapper": "sjulia_sokaris_imhotep_saturate",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-10 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "desaturate",
+      "source": { "file": "src/Imhotep.jl", "startLine": 69, "endLine": 69, "sha256": "253063992fe417b3339c5d207603abddf8a1afc39e1a16b17bba987d274242dd" },
+      "caseId": "imhotep-desaturate", "fixture": "pending:imhotep/desaturate.jl", "case": "pending:HSV desaturation", "exportWrapper": "sjulia_sokaris_imhotep_desaturate",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-10 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "grayscale",
+      "source": { "file": "src/Imhotep.jl", "startLine": 71, "endLine": 71, "sha256": "fe2470f995a7253fbbc56d52e78a02cd5f87931223e72cafec68bb6223fba636" },
+      "caseId": "imhotep-grayscale", "fixture": "pending:imhotep/grayscale.jl", "case": "pending:RGB to Gray", "exportWrapper": "sjulia_sokaris_imhotep_grayscale",
+      "arguments": [{ "type": "Array{RGB{Float64},2}", "elementType": "rgb_f64", "rank": 2 }], "result": { "type": "Array{Gray{Float64},2}", "elementType": "gray_f64", "rank": 2 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-10 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "gaussian",
+      "source": { "file": "src/Imhotep.jl", "startLine": 37, "endLine": 37, "sha256": "adb6b0060ad4a321f5db9837997e93d4f8c9072e47d3b2d786c19bf04833c898" },
+      "caseId": "imhotep-gaussian", "fixture": "pending:imhotep/gaussian.jl", "case": "pending:non-square Gaussian blur", "exportWrapper": "sjulia_sokaris_imhotep_gaussian",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "box_blur",
+      "source": { "file": "src/Imhotep.jl", "startLine": 39, "endLine": 39, "sha256": "5d0c347eb7d6771f5f7f39c940baef16f2396d89d24f25905f493e7565bd1779" },
+      "caseId": "imhotep-box-blur", "fixture": "pending:imhotep/box_blur.jl", "case": "pending:odd box kernel", "exportWrapper": "sjulia_sokaris_imhotep_box_blur",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "median_blur",
+      "source": { "file": "src/Imhotep.jl", "startLine": 41, "endLine": 41, "sha256": "bc469b8047098ad61d6ee57e414db8f78b0e61d290226d195220c774c92800cb" },
+      "caseId": "imhotep-median-blur", "fixture": "pending:imhotep/median_blur.jl", "case": "pending:odd median window", "exportWrapper": "sjulia_sokaris_imhotep_median_blur",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "motion_blur",
+      "source": { "file": "src/Imhotep.jl", "startLine": 43, "endLine": 59, "sha256": "c01aec76b5e340603329b6e8f5a327072c5b418cc3ea2fd5e04f8a91c8f5aff5" },
+      "caseId": "imhotep-motion-blur", "fixture": "pending:imhotep/motion_blur.jl", "case": "pending:horizontal and diagonal kernels", "exportWrapper": "sjulia_sokaris_imhotep_motion_blur",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "sharpen",
+      "source": { "file": "src/Imhotep.jl", "startLine": 74, "endLine": 78, "sha256": "7889937b322b2891dac68ce4e68a8e762521b078255c1101004b36b923d60443" },
+      "caseId": "imhotep-sharpen", "fixture": "pending:imhotep/sharpen.jl", "case": "pending:sharpen amount", "exportWrapper": "sjulia_sokaris_imhotep_sharpen",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "edge_detect",
+      "source": { "file": "src/Imhotep.jl", "startLine": 80, "endLine": 80, "sha256": "e9df75175cf203b10645a91052da2b215c4b0fbc91ed4fae21cd7580f8f88a26" },
+      "caseId": "imhotep-edge-detect", "fixture": "pending:imhotep/edge_detect.jl", "case": "pending:Sobel edges", "exportWrapper": "sjulia_sokaris_imhotep_edge_detect",
+      "arguments": [{ "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }], "result": { "type": "Array{Float64,3}", "elementType": "f64", "rank": 3 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "emboss",
+      "source": { "file": "src/Imhotep.jl", "startLine": 82, "endLine": 85, "sha256": "0f6a08c83225149ce40e2e747efde41d4c60648bfed4acd5314c6711c8b7d6b3" },
+      "caseId": "imhotep-emboss", "fixture": "pending:imhotep/emboss.jl", "case": "pending:emboss kernel", "exportWrapper": "sjulia_sokaris_imhotep_emboss",
+      "arguments": [{ "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 }], "result": { "type": "Array{Float64,2}", "elementType": "f64", "rank": 2 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "posterize",
+      "source": { "file": "src/Imhotep.jl", "startLine": 88, "endLine": 88, "sha256": "e33ca9a8c914b18a8976b95b0357db211cc8ebf97afbb142d1338ae0db208038" },
+      "caseId": "imhotep-posterize", "fixture": "pending:imhotep/posterize.jl", "case": "pending:rounding boundaries", "exportWrapper": "sjulia_sokaris_imhotep_posterize",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-12 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "threshold",
+      "source": { "file": "src/Imhotep.jl", "startLine": 90, "endLine": 90, "sha256": "226096bffe0ebf7adec6329cf6821fa2361d825bf456b95a3b34ec209d659862" },
+      "caseId": "imhotep-threshold", "fixture": "pending:imhotep/threshold.jl", "case": "pending:threshold equality", "exportWrapper": "sjulia_sokaris_imhotep_threshold",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "exact", "tolerance": 0 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "solarize",
+      "source": { "file": "src/Imhotep.jl", "startLine": 92, "endLine": 96, "sha256": "9eea93b9320ea8f642da02453944b53bec6f473cd52c1ebf27e1cc892fa865da" },
+      "caseId": "imhotep-solarize", "fixture": "pending:imhotep/solarize.jl", "case": "pending:solarize threshold", "exportWrapper": "sjulia_sokaris_imhotep_solarize",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-12 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-color", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "noise",
+      "source": { "file": "src/Imhotep.jl", "startLine": 99, "endLine": 102, "sha256": "0bdf643a444d8e5e5ff541e31fafe4f8bf63b3611ecb320c67defd3a8357e5c1" },
+      "caseId": "imhotep-noise", "fixture": "pending:imhotep/noise.jl", "case": "pending:seeded Gaussian noise", "exportWrapper": "sjulia_sokaris_imhotep_noise",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-10 }, "requiredImports": [], "effect": "compute", "wave": "rng", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "pixelate",
+      "source": { "file": "src/Imhotep.jl", "startLine": 104, "endLine": 124, "sha256": "6751abf376ddac34b1a4090ced2f1b25f74686270e93eb4c3bf164b1c3eded08" },
+      "caseId": "imhotep-pixelate", "fixture": "pending:imhotep/pixelate.jl", "case": "pending:partial edge blocks", "exportWrapper": "sjulia_sokaris_imhotep_pixelate",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-10 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "crop",
+      "source": { "file": "src/Imhotep.jl", "startLine": 133, "endLine": 138, "sha256": "8a160eab3b8b0871a200ecdc0afc6aa07efa1c295712e3f1b957e3542c2e40eb" },
+      "caseId": "imhotep-crop", "fixture": "pending:imhotep/crop.jl", "case": "pending:bounded crop", "exportWrapper": "sjulia_sokaris_imhotep_crop",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }],
+      "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 }, "comparison": { "mode": "exact", "tolerance": 0 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "crop_center",
+      "source": { "file": "src/Imhotep.jl", "startLine": 146, "endLine": 153, "sha256": "8007b6751b7aff6a76e520727b15d2a9cb1384863ffaedd00a79458869836084" },
+      "caseId": "imhotep-crop-center", "fixture": "pending:imhotep/crop_center.jl", "case": "pending:odd center crop", "exportWrapper": "sjulia_sokaris_imhotep_crop_center",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "exact", "tolerance": 0 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "crop_to",
+      "source": { "file": "src/Imhotep.jl", "startLine": 161, "endLine": 177, "sha256": "cda2cc94e9a46a0169a3dd5cc97caf457953a119494f78217cfe7267cda25c54" },
+      "caseId": "imhotep-crop-to", "fixture": "pending:imhotep/crop_to.jl", "case": "pending:target dimensions", "exportWrapper": "sjulia_sokaris_imhotep_crop_to",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "exact", "tolerance": 0 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "scale_crop",
+      "source": { "file": "src/Imhotep.jl", "startLine": 187, "endLine": 212, "sha256": "4b863493f01875d03a45bd1c12dee44bdacf2a01e6e35bf07e936a93a1955f9b" },
+      "caseId": "imhotep-scale-crop", "fixture": "pending:imhotep/scale_crop.jl", "case": "pending:grow then center crop", "exportWrapper": "sjulia_sokaris_imhotep_scale_crop",
+      "arguments": [{ "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "text_overlay",
+      "source": { "file": "src/Imhotep.jl", "startLine": 260, "endLine": 345, "sha256": "2c0891af46c0c43d6b0714ef59aa42bfdcd97455ddd5f30ab2bc99e1e0bdf8fa" },
+      "caseId": "imhotep-text-overlay", "fixture": "pending:imhotep/text_overlay.jl", "case": "pending:Unicode RGBA overlay", "exportWrapper": "sjulia_sokaris_imhotep_text_overlay",
+      "arguments": [{ "type": "String", "elementType": "utf8", "rank": 1 }, { "type": "Int64", "elementType": "i64", "rank": 0 }, { "type": "Int64", "elementType": "i64", "rank": 0 }],
+      "result": { "type": "Array{RGBA{Float64},2}", "elementType": "rgba_f64", "rank": 2 }, "comparison": { "mode": "absolute", "tolerance": 1e-8 },
+      "requiredImports": [{ "module": "sjulia_host", "name": "text_overlay" }], "effect": "host", "wave": "host", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "glow",
+      "source": { "file": "src/Imhotep.jl", "startLine": 226, "endLine": 234, "sha256": "4419a8ae45577769a31d95746b37f3e4407663ab4cf50a85d2c1b0912038d1c6" },
+      "caseId": "imhotep-glow", "fixture": "pending:imhotep/glow.jl", "case": "pending:RGBA blur composite", "exportWrapper": "sjulia_sokaris_imhotep_glow",
+      "arguments": [{ "type": "Float64", "elementType": "f64", "rank": 0 }, { "type": "Float64", "elementType": "f64", "rank": 0 }], "result": { "type": "Function{Image,Image}", "elementType": "function_ref", "rank": 0 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [], "effect": "compute", "wave": "imhotep-filters", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "load",
+      "source": { "file": "src/Imhotep.jl", "startLine": 8, "endLine": 8, "sha256": "77f75af7295198e7aac6bf2baabc4086d634541ee5c9cb2775e57929c4383323" },
+      "caseId": "imhotep-load", "fixture": "pending:imhotep/load.jl", "case": "pending:host image decode", "exportWrapper": "sjulia_sokaris_imhotep_load",
+      "arguments": [{ "type": "String", "elementType": "utf8", "rank": 1 }], "result": { "type": "Array{RGBA{Float64},2}", "elementType": "rgba_f64", "rank": 2 },
+      "comparison": { "mode": "absolute", "tolerance": 1e-8 }, "requiredImports": [{ "module": "sjulia_host", "name": "load" }], "effect": "host", "wave": "host", "status": "planned"
+    },
+    {
+      "module": "Imhotep", "symbol": "save",
+      "source": { "file": "src/Imhotep.jl", "startLine": 8, "endLine": 8, "sha256": "77f75af7295198e7aac6bf2baabc4086d634541ee5c9cb2775e57929c4383323" },
+      "caseId": "imhotep-save", "fixture": "pending:imhotep/save.jl", "case": "pending:host image encode", "exportWrapper": "sjulia_sokaris_imhotep_save",
+      "arguments": [{ "type": "String", "elementType": "utf8", "rank": 1 }, { "type": "Array{RGBA{Float64},2}", "elementType": "rgba_f64", "rank": 2 }],
+      "result": { "type": "Nothing", "elementType": "none", "rank": 0 }, "comparison": { "mode": "exact", "tolerance": 0 },
+      "requiredImports": [{ "module": "sjulia_host", "name": "save" }], "effect": "host", "wave": "host", "status": "planned"
+    }
+  ]
+}
