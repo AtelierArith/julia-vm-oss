@@ -36,6 +36,29 @@ prelude Program cache を作成または再利用してから、cache を埋め�
 を `wasm-pack` で生成します。`wasm-pack` が未インストールの場合は
 `cargo install wasm-pack` が必要です。
 
+### ブラウザコンパイラ package
+
+AoT compiler を含む独立 package はリポジトリルートの `pkg-compiler-final/` に生成します。
+通常の Playground build とは feature を分離し、次の command で明示的に有効化します。
+
+```bash
+cd ../
+wasm-pack build subset_julia_vm_web \
+  --target web \
+  --profile web-release \
+  --out-dir pkg-compiler-final \
+  --locked \
+  -- --features aot-wasm
+node scripts/compiler_wasm_smoke.mjs
+```
+
+生成 API は `compile_to_wasm(source, options?)` です。`options.exports` で
+`export_name`、Julia function 名、引数型を指定し、成功時は import-free な core
+WebAssembly module を `wasm_bytes: Uint8Array` として返します。失敗時は panic
+せず、source span 付き diagnostics を返します。詳細な result shape、入力上限、
+artifact hash は `../COMPILER_SPIKE.md` と `../pkg-compiler-final/ARTIFACT_MANIFEST.json`
+を参照してください。
+
 注意: 埋め込まれるのは Base bytecode cache と prelude Program cache です。
 `run_from_source` の初回には user source の parser/lowering、embedded Base cache
 deserialize/restore、user program compile がまだ残ります。Playground では Run button
@@ -59,6 +82,31 @@ timeout 1800 cargo nextest run --release -p subset_julia_vm_web
 ```
 
 ## JavaScript API
+
+### `compile_to_wasm(source, options?)` (`aot-wasm` feature)
+
+```javascript
+import init, { compile_to_wasm } from '../pkg-compiler-final/subset_julia_vm_web.js';
+
+await init();
+const result = compile_to_wasm(
+  'add_scale(x::Int64, y::Int64) = (x + y) * 2',
+  {
+    exports: [{
+      export_name: 'public_add_scale',
+      function_name: 'add_scale',
+      arg_types: ['Int64', 'Int64'],
+    }],
+  },
+);
+if (result.success) {
+  const module = await WebAssembly.compile(result.wasm_bytes);
+  const instance = await WebAssembly.instantiate(module, {});
+  console.log(instance.exports.public_add_scale(10n, 11n)); // 42n
+} else {
+  console.error(result.diagnostics);
+}
+```
 
 ### `run_from_source(source, seed)`
 

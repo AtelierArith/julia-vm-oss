@@ -134,6 +134,7 @@ error として拒否します。これらの将来 ABI は [ABI_AND_NUMERIC_CON
 
 - **Rust codegen**: `subset_julia_vm/src/aot/codegen/aot_codegen/`（Rustソースを生成 → `rustc`）
 - **Cranelift**: `subset_julia_vm/src/aot/codegen/cranelift/`（`cranelift` feature、実験的）
+- **Standalone Wasm**: `subset_julia_vm/src/aot/codegen/wasm/`（`aot-wasm` feature、実験的）。public `compile_wasm` API が既存 AoT pipeline と backend-neutral `IrModule` を再利用し、import/fallback のない core Wasm bytes を返します。初期対応範囲と descriptor ABI は root の `COMPILER_SPIKE.md` を参照してください。
 
 ## 対応サブセット / 既知の制限
 
