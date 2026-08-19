@@ -14,6 +14,36 @@ use serde::{Deserialize, Serialize};
 use subset_julia_vm_bytecode::CompiledProgram;
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "aot-wasm")]
+mod compiler_api;
+#[cfg(all(test, feature = "aot-wasm"))]
+mod compiler_api_tests;
+
+#[cfg(feature = "aot-wasm")]
+pub use compiler_api::compile_to_wasm;
+
+const BROWSER_IMAGE_PRELUDE: &str = r#"
+struct BrowserImage
+    width::Int64
+    height::Int64
+    data::Array{UInt8,3}
+end
+
+function load(name)
+    if name != __browser_image_name
+        error("browser image not found: " * name)
+    end
+    BrowserImage(__browser_image_width, __browser_image_height, copy(__browser_image_rgba))
+end
+"#;
+
+struct BrowserImageInput {
+    name: String,
+    width: usize,
+    height: usize,
+    rgba: Vec<u8>,
+}
+
 // Set up panic hook for better error messages in browser console
 #[wasm_bindgen(start)]
 pub fn init() {
@@ -192,7 +222,63 @@ pub fn run_from_source_typed(source: &str, seed: u64) -> JsValue {
     run_from_source(source, seed)
 }
 
+/// Run Julia source with one named browser RGBA image available through `load(name)`.
+#[wasm_bindgen]
+pub fn run_from_source_with_image(
+    source: &str,
+    seed: u64,
+    name: String,
+    width: usize,
+    height: usize,
+    rgba: Vec<u8>,
+) -> JsValue {
+    let result = run_from_source_with_image_internal(source, seed, &name, width, height, rgba);
+    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+}
+
+fn run_from_source_with_image_internal(
+    source: &str,
+    seed: u64,
+    name: &str,
+    width: usize,
+    height: usize,
+    rgba: Vec<u8>,
+) -> ExecutionResult {
+    let Some(expected_len) = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+    else {
+        return ExecutionResult::error("browser image dimensions overflow".to_string());
+    };
+    if rgba.len() != expected_len {
+        return ExecutionResult::error(format!(
+            "browser image RGBA length mismatch: expected {expected_len}, got {}",
+            rgba.len()
+        ));
+    }
+
+    let source = format!("{BROWSER_IMAGE_PRELUDE}\n{source}");
+    run_from_source_with_input(
+        &source,
+        seed,
+        Some(BrowserImageInput {
+            name: name.to_string(),
+            width,
+            height,
+            rgba,
+        }),
+    )
+}
+
 fn run_from_source_internal(source: &str, seed: u64) -> ExecutionResult {
+    run_from_source_with_input(source, seed, None)
+}
+
+fn run_from_source_with_input(
+    source: &str,
+    seed: u64,
+    image: Option<BrowserImageInput>,
+) -> ExecutionResult {
     use subset_julia_vm::compile::host_support::compile_with_cache;
     // The Web Playground "Run" button runs a whole buffer, so it uses strict
     // file-mode soft scope (Issue #9283 / #9210) to match `julia file.jl`: a
@@ -222,6 +308,20 @@ fn run_from_source_internal(source: &str, seed: u64) -> ExecutionResult {
     // Execute
     let rng = StableRng::new(seed);
     let mut vm = Vm::new_program(compiled, rng);
+    if let Some(image) = image {
+        use subset_julia_vm_bytecode::value::{native_array_value_from_array, ArrayValue, Value};
+
+        vm.store_global_value("__browser_image_name", Value::str_new(image.name));
+        vm.store_global_value("__browser_image_width", Value::I64(image.width as i64));
+        vm.store_global_value("__browser_image_height", Value::I64(image.height as i64));
+        vm.store_global_value(
+            "__browser_image_rgba",
+            native_array_value_from_array(ArrayValue::memory_first_from_u8(
+                image.rgba,
+                vec![4, image.width, image.height],
+            )),
+        );
+    }
     // The Web Playground renders display artifacts, so activate the graphical
     // display: `display(plot(cos))` routes into the artifact channel instead of
     // echoing the struct text (Issue #9262).
@@ -493,6 +593,41 @@ pub fn unicode_reverse_lookup(unicode_char: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_image_load_exposes_native_rgba_to_user_source() {
+        // Given: two row-major RGBA pixels supplied by the browser host.
+        let rgba = vec![10, 20, 30, 40, 100, 110, 120, 130];
+        let source = r#"
+image = load("input")
+for pixel in 1:(image.width * image.height)
+    base = (pixel - 1) * 4
+    image.data[base + 1] = UInt8(255) - image.data[base + 1]
+    image.data[base + 2] = UInt8(255) - image.data[base + 2]
+    image.data[base + 3] = UInt8(255) - image.data[base + 3]
+end
+image.data
+"#;
+
+        // When: user Julia code loads and inverts RGB while preserving alpha.
+        let result = run_from_source_with_image_internal(source, 42, "input", 2, 1, rgba);
+
+        // Then: native dimensions and transformed UInt8 bytes are visible.
+        assert!(
+            result.success,
+            "unexpected error: {:?}",
+            result.error_message
+        );
+        assert_eq!(result.typed_value["element_type"], "UInt8");
+        assert_eq!(result.typed_value["shape"], serde_json::json!([4, 2, 1]));
+        let values = result.typed_value["elements"]
+            .as_array()
+            .expect("typed array elements")
+            .iter()
+            .map(|element| element["value"].as_u64().expect("UInt8 value"))
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![245, 235, 225, 40, 155, 145, 135, 130]);
+    }
 
     #[test]
     fn test_version() {
