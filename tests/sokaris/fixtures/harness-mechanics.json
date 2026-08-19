@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "glyph-apply": {
+      "evidenceKind": "harness_mechanics",
+      "oracleExpression": "Sokaris.Glyph.:(▷)(21.0, x -> x * 2.0)",
+      "compiler": {
+        "source": "sjulia_sokaris_glyph_apply(value::Float64)::Float64 = value * 2.0",
+        "functionName": "sjulia_sokaris_glyph_apply",
+        "argTypes": ["Float64"],
+        "arguments": [{ "kind": "f64", "value": 21.0 }]
+      }
+    },
+    "glyph-compose": {
+      "evidenceKind": "planned_unsupported",
+      "oracleExpression": "Sokaris.Glyph.:(☽)(x -> x + 1.0, x -> x * 2.0)(10.0)",
+      "compiler": {
+        "source": "sjulia_sokaris_glyph_compose()::Float64 = ☽(x -> x + 1.0, x -> x * 2.0)(10.0)",
+        "functionName": "sjulia_sokaris_glyph_compose",
+        "argTypes": [],
+        "arguments": []
+      }
+    }
+  }
+}

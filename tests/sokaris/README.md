@@ -72,3 +72,31 @@ When Sokaris source intentionally changes, update the source span and hashes in
 the same change as the corresponding coverage decision. Do not refresh hashes
 merely to silence the checker: first confirm the parsed export set and row ABI
 remain correct.
+
+## Julia-first differential harness
+
+The dependency-free harness validates this coverage contract before selecting
+cases, runs the pinned sibling Julia project before compiler work, invokes the
+checked `pkg-compiler-final` browser compiler artifact, executes generated Wasm
+in Node, and writes schema-versioned NDJSON under `target/sokaris-parity/`.
+
+```sh
+node scripts/sokaris_wasm_differential.mjs --case glyph-apply --require-upstream
+node scripts/sokaris_wasm_differential.mjs --case glyph-compose --require-upstream
+node scripts/sokaris_wasm_differential.mjs --wave glyph --require-upstream
+node scripts/sokaris_wasm_differential.mjs --module Glyph --require-upstream
+node scripts/sokaris_wasm_differential.mjs --all --require-upstream
+```
+
+Exactly one selector is required. Upstream Julia is mandatory even when
+`--require-upstream` is omitted; the flag documents the project safety policy.
+`--keep-artifacts` preserves per-case bundles and Wasm files, while NDJSON is
+always retained. `SOKARIS_JULIA` is the test/deployment seam for the Julia
+executable, and every child process has a bounded timeout.
+
+The initial `glyph-apply` executable fixture proves harness mechanics through an
+already-supported scalar compiler path and records `mechanics_passed`; it does
+not advance the coverage row from `planned` or claim that the generic closure
+body compiled. `glyph-compose` proves Julia-first ordering followed by a typed
+planned compiler diagnostic. Later parity Todos replace pending fixtures and
+add descriptor ABI v2 result decoding without changing the harness protocol.
