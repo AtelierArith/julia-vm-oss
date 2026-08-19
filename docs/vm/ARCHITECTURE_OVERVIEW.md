@@ -442,17 +442,17 @@ compute_function_effects` / `compute_stmt_effects` / `compute_block_effects`）
 | **レジスタ VM** | 実験的、`SJULIA_REGISTER_VM=1` でオプトイン | `SharedFunctionPlan` を持つ関数のみをロワリング（Issue #9089）。レガシー Core-IR パス上の関数はスタック VM のまま。切り替え判断は測定でゲート（`REGISTER_VM.md`） |
 | **AoT** | `aot` feature で有効化する別経路 | Core IR を解析、推論、最適化して Rust を生成する。`cranelift` feature は object 出力とデスクトップ向け JIT API を追加する。標準 VM、iOS FFI、WebAssembly binding では有効にならない |
 | **WASM** | `subset_julia_vm_web` 経由で `wasm-pack` | サイズに敏感：`web-release` プロファイルが LTO 設定を所有 |
-| **Wasm AoT** | 実験的、`aot-wasm` feature | 共通 AoT 解析後の backend-neutral `IrModule` を standalone core Wasm に encode。import/fallback なし。scalar + v1 UInt8 descriptor subset のみ |
+| **Wasm AoT** | 実験的、`aot-wasm` feature | 共通 AoT 解析後の backend-neutral `IrModule` を standalone core Wasm に encode。import/fallback なし。scalar + ABI v2 arbitrary-rank UInt8 descriptor subset のみ |
 
 Issue #9089 以降、スタック VM とレジスタ VM の両方のロワリングは、1 つの共有計画 IR（`SharedFunctionPlan`）を消費します。
 `FunctionInfo.shared_plan` フィールドは `#[serde(skip)]` なので、実行時のみ存在し、キャッシュのワイヤー形式は変更されません。
 これにより、将来の命令セット進化に対するバックエンドごとのコストを抑えます。
 
-Wasm AoT の linear-memory ABI v1 は little-endian i32 の
-`{version, ptr, len, element_type, stride}` で、UInt8 は `element_type=1`,
-`stride=1`。memory と ABI version function を export し、ABI mismatch と
-Julia 1-based index の bounds violation は trap する。詳細と測定値は root の
-`COMPILER_SPIKE.md` を参照。
+Wasm AoT の linear-memory descriptor ABI v2 は 40-byte aligned header と
+inline `{dim:u64,stride:i64}` rank pair を使う。UInt8 tag は stable value 1、rank
+上限は 8、layout_id は 0。静的 tag/rank、checked product/extent、metadata/data
+disjointness と Julia one-based axis bounds を全て検証してから load/store する。
+負 stride は Todo 5 まで trap する。詳細は root の `COMPILER_SPIKE.md` を参照。
 
 ### 9.2 起動キャッシュ
 

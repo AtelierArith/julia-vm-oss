@@ -13,6 +13,19 @@ pub(super) struct LocalLayout {
     pub(super) phi_scratch: HashMap<String, u32>,
     pub(super) declarations: Vec<(u32, ValType)>,
     pub(super) pc: u32,
+    pub(super) memory: MemoryLocals,
+}
+
+pub(super) struct MemoryLocals {
+    pub(super) descriptor_start: u32,
+    pub(super) memory_bytes: u32,
+    pub(super) metadata_end: u32,
+    pub(super) element_count: u32,
+    pub(super) product: u32,
+    pub(super) max_offset: u32,
+    pub(super) term: u32,
+    pub(super) data_start: u32,
+    pub(super) data_end: u32,
 }
 
 pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout> {
@@ -29,9 +42,25 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
     let pc = param_count + checked_index(locals.len(), "locals")?;
     let mut declarations: Vec<_> = locals.iter().map(|(_, ty)| (1, *ty)).collect();
     declarations.push((1, ValType::I32));
+    let memory_start = pc + 1;
+    declarations.push((9, ValType::I64));
+    let memory = MemoryLocals {
+        descriptor_start: memory_start,
+        memory_bytes: memory_start + 1,
+        metadata_end: memory_start + 2,
+        element_count: memory_start + 3,
+        product: memory_start + 4,
+        max_offset: memory_start + 5,
+        term: memory_start + 6,
+        data_start: memory_start + 7,
+        data_end: memory_start + 8,
+    };
     let mut phi_scratch = HashMap::new();
     for (offset, (name, ty)) in collect_phi_scratch(function)?.iter().enumerate() {
-        phi_scratch.insert(name.clone(), pc + 1 + checked_index(offset, "phi locals")?);
+        phi_scratch.insert(
+            name.clone(),
+            memory_start + 9 + checked_index(offset, "phi locals")?,
+        );
         declarations.push((1, *ty));
     }
     Ok(LocalLayout {
@@ -39,6 +68,7 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
         phi_scratch,
         declarations,
         pc,
+        memory,
     })
 }
 

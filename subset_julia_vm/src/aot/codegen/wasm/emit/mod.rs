@@ -1,4 +1,7 @@
 mod control;
+mod descriptor;
+mod descriptor_data;
+mod descriptor_shape;
 mod instruction;
 mod locals;
 mod memory;
@@ -198,7 +201,7 @@ fn emit_dispatch_block(
     body.instruction(&W::I32Ne);
     body.instruction(&W::BrIf(0));
     for instruction in &block.instructions {
-        emit_instruction(body, instruction, &layout.locals, functions)?;
+        emit_instruction(body, instruction, layout, functions)?;
     }
     let terminator = block.terminator.as_ref().ok_or_else(|| {
         AotError::InvalidIR(format!("Wasm IR block `{}` has no terminator", block.label))

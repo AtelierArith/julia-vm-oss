@@ -4,16 +4,21 @@ use crate::aot::ir::{BinOpKind, Instruction};
 use crate::aot::AotResult;
 use wasm_encoder::{Function, Instruction as W};
 
-use super::super::types::{unsupported, DESCRIPTOR_LEN_OFFSET};
-use super::memory::{emit_descriptor_check, emit_u8_address, memarg};
+use super::super::types::{descriptor_layout, unsupported, DESCRIPTOR_ELEMENT_COUNT_OFFSET};
+use super::descriptor::{
+    emit_descriptor_validation, emit_i64_load, DescriptorAccess, DescriptorContext,
+};
+use super::locals::LocalLayout;
+use super::memory::{emit_u8_address, memarg};
 use super::ops::{emit_binop, emit_const, emit_conversion, emit_unary, get, normalize_u8, set};
 
 pub(super) fn emit_instruction(
     body: &mut Function,
     instruction: &Instruction,
-    locals: &HashMap<String, u32>,
+    layout: &LocalLayout,
     functions: &HashMap<String, u32>,
 ) -> AotResult<()> {
+    let locals = &layout.locals;
     match instruction {
         Instruction::LoadConst { dest, value } => {
             emit_const(body, value)?;
@@ -55,10 +60,19 @@ pub(super) fn emit_instruction(
             set(body, locals, dest)?;
         }
         Instruction::Call { dest, func, args } if func == "__sjulia_u8_len" => {
-            emit_descriptor_check(body, &args[0], locals)?;
-            get(body, locals, &args[0])?;
-            body.instruction(&W::I32Load(memarg(DESCRIPTOR_LEN_OFFSET)));
-            body.instruction(&W::I64ExtendI32U);
+            let descriptor = &args[0];
+            let descriptor_layout = descriptor_layout(&descriptor.ty)?;
+            emit_descriptor_validation(
+                body,
+                descriptor,
+                descriptor_layout,
+                &DescriptorContext {
+                    locals,
+                    scratch: &layout.memory,
+                },
+                DescriptorAccess::Read,
+            )?;
+            emit_i64_load(body, descriptor, locals, DESCRIPTOR_ELEMENT_COUNT_OFFSET)?;
             if let Some(dest) = dest {
                 set(body, locals, dest)?;
             }
@@ -75,17 +89,21 @@ pub(super) fn emit_instruction(
                 set(body, locals, dest)?;
             }
         }
-        Instruction::GetIndex { dest, array, index } => {
-            emit_u8_address(body, array, index, locals)?;
+        Instruction::GetIndex {
+            dest,
+            array,
+            indices,
+        } => {
+            emit_u8_address(body, array, indices, layout, DescriptorAccess::Read)?;
             body.instruction(&W::I32Load8U(memarg(0)));
             set(body, locals, dest)?;
         }
         Instruction::SetIndex {
             array,
-            index,
+            indices,
             value,
         } => {
-            emit_u8_address(body, array, index, locals)?;
+            emit_u8_address(body, array, indices, layout, DescriptorAccess::Write)?;
             get(body, locals, value)?;
             body.instruction(&W::I32Store8(memarg(0)));
         }

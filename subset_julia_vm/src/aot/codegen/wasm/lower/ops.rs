@@ -11,8 +11,8 @@ pub(super) fn ensure_type(ty: &StaticType) -> AotResult<()> {
         }
         StaticType::Array {
             element,
-            ndims: Some(1),
-        } if **element == StaticType::U8 => Ok(()),
+            ndims: Some(rank),
+        } if **element == StaticType::U8 && *rank <= super::super::types::MAX_RANK => Ok(()),
         other => Err(unsupported(format!(
             "Wasm AoT does not support type `{}`",
             other.julia_type_name()

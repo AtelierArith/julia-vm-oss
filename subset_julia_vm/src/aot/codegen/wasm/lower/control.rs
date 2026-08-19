@@ -25,14 +25,17 @@ impl Lowerer<'_> {
                         ..
                     },
                 value,
-            } if indices.len() == 1 => {
+            } => {
                 let array = self.expr(array, function)?;
-                let index = self.expr(&indices[0], function)?;
+                let indices = indices
+                    .iter()
+                    .map(|index| self.expr(index, function))
+                    .collect::<AotResult<Vec<_>>>()?;
                 let value = self.expr(value, function)?;
                 self.current_block_mut(function)?
                     .push(Instruction::SetIndex {
                         array,
-                        index,
+                        indices,
                         value,
                     });
                 Ok(())

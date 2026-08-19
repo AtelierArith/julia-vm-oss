@@ -46,8 +46,10 @@ The corrected distributable web-target package is `pkg-compiler-final/`. It was 
 Rust 1.95.0, wasm-pack 0.15.0, and the workspace `web-release` profile. The
 compiler Wasm size and digest are recorded in
 `pkg-compiler-final/ARTIFACT_MANIFEST.json`, which records
-tool versions, generated-module ABI v1, artifact sizes, and SHA-256 hashes. This
-source snapshot has no Git metadata, so its `source_commit` is explicitly
+tool versions, generated-module ABI v1, artifact sizes, and SHA-256 hashes. The
+packaged artifact remains v1 until its separate regeneration slice; source-built
+generated modules now use ABI v2. This source snapshot has no Git metadata, so
+its `source_commit` is explicitly
 `unavailable_non_git_source_tree` rather than an invented commit.
 
 AoT timing originally used `std::time::Instant`, which panics under
@@ -86,8 +88,9 @@ and pass diagnostics before lowering to backend-neutral `IrModule`.
 
 Supported: i64/f64/bool/u8 constants and locals; copy/conversion; unary negate,
 not, bit-not; integer/float arithmetic and comparisons; bitwise/shift; IR blocks,
-jump/branch/return, phi edge copies; direct calls; one-dimensional UInt8 length,
-load, and store. Unsupported high-level expressions and low-level instructions
+jump/branch/return, phi edge copies; direct calls; arbitrary-rank statically typed
+UInt8 descriptor length, load, and store. Unsupported high-level expressions and
+low-level instructions
 return `UnsupportedInstructionDiagnostic`; source spans are retained where the
 upstream AoT conversion still provides them, while backend-only IR has no span.
 Phi inputs are staged in typed scratch locals before destination writes, so edge
@@ -102,22 +105,34 @@ emitting a self-jump. Duplicate/overloaded internal names and the reserved names
 `memory` and `__sjulia_wasm_abi_version` are rejected before function indices
 are built, so the compiler never returns an invalid module for those cases.
 
-## Linear-memory ABI v1
+## Linear-memory descriptor ABI v2
 
-The module exports `memory` and `__sjulia_wasm_abi_version`. A descriptor is 20
-bytes of little-endian i32 fields:
+The module exports `memory` and `__sjulia_wasm_abi_version`. A descriptor has a
+40-byte, 8-byte-aligned little-endian header followed immediately by one
+16-byte `{dim:u64, stride:i64}` pair per axis:
 
-| Offset | Field | v1 UInt8 value |
-|---:|---|---:|
-| 0 | version | 1 |
-| 4 | ptr | host allocation offset |
-| 8 | len | element count |
-| 12 | element_type | 1 |
-| 16 | stride | 1 |
+| Offset | Field | ABI v2 contract |
+|---:|---|---|
+| 0 | `abi_version:u32` | `2` |
+| 4 | `flags:u32` | `MODULE_OWNED=1`, `READONLY=2`; no other bits |
+| 8 | `element_tag:u32` | stable append-only table; UInt8 is `1` |
+| 12 | `element_size:u32` | mirror of tag-derived size; UInt8 is `1` |
+| 16 | `layout_id:u32` | `0` until generic isbits layouts land |
+| 20 | `rank:u32` | expected static rank, at most `8` |
+| 24 | `data_ptr:u32` | tag-aligned; zero only for zero elements |
+| 28 | `reserved:u32` | `0` |
+| 32 | `element_count:u64` | checked product of inline dimensions |
+| 40+16k | `dim[k]:u64` | axis length |
+| 48+16k | `stride[k]:i64` | nonnegative stride in element units |
 
-Julia indexing is one-based. ABI mismatch, `ptr+len` beyond current linear
-memory, or index bounds failure traps. The host owns allocation and writes
-descriptors/data before calling the compiled function.
+Julia indexing is one-based per axis. Validation is fail-closed before every
+length/load/store: pointer/header alignment and range, ABI/flags/reserved,
+inline metadata extent, expected tag/size/layout/rank, checked dimension product,
+rank-0 and zero-count rules, nonnegative strides, maximum address/data extent,
+and metadata/data disjointness must all hold. Addressing computes
+`sum((index-1)*stride)` in widened arithmetic and wraps to i32 only after proving
+the byte address lies in current memory. Negative strides are deferred to the
+general array work in Todo 5. The host owns allocation in this slice.
 
 ## Coverage
 
@@ -127,7 +142,8 @@ invert preserving alpha. Upstream Julia 1.12.4 was run directly for all six
 programs and returned, respectively, `42`, `5.5`, `45`, `42`,
 `4:2,3,255,1`, and `245,235,225,40,155,105,55,250`, exactly matching Node.
 Additional tests prove cyclic phi copies remain parallel and malformed ABI,
-stride, signed length, and pointer-range descriptors trap.
+flags, tags, sizes, rank, inline shapes, strides, extents, overlap, and pointer
+ranges trap before data mutation.
 Adversarial parity cases additionally pin UInt8 subtraction/addition wrapping,
 unsigned UInt8-to-Int64 widening (`255`), bounded implicit-tail handling,
 duplicate/reserved symbol diagnostics, and alias-only exports. Upstream Julia

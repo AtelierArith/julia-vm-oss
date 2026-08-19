@@ -26,7 +26,7 @@ export function decodeResult(value, descriptor) {
     throw new NodeRunnerError("malformed_result_descriptor", "result descriptor is malformed");
   }
   if (descriptor.rank !== 0) {
-    throw new NodeRunnerError("unsupported_result_shape", `rank-${descriptor.rank} results require generated-module descriptor ABI v2`);
+    throw new NodeRunnerError("unsupported_result_shape", `rank-${descriptor.rank} result decoding is deferred until generated arrays can be returned`);
   }
   if (descriptor.elementType === "f64") {
     if (typeof value !== "number") throw new NodeRunnerError("malformed_result", "expected a JavaScript number for f64");
@@ -48,7 +48,7 @@ export function decodeResult(value, descriptor) {
     if (value !== undefined) throw new NodeRunnerError("malformed_result", "expected no Wasm result");
     return { kind: "none", value: null };
   }
-  throw new NodeRunnerError("unsupported_result_shape", `element type '${descriptor.elementType}' is not decodable before ABI v2`);
+  throw new NodeRunnerError("unsupported_result_shape", `element type '${descriptor.elementType}' is not decodable by the current result adapter`);
 }
 
 function importIdentity(entry) {

@@ -144,18 +144,18 @@ backend-neutral `IrModule` model consumed by native codegen and encodes a core
 WebAssembly module with `wasm-encoder =0.244.0`.
 
 The first supported surface is deliberately static: Int64, Float64, Bool,
-UInt8, one-dimensional `Vector{UInt8}` descriptors, constants, locals,
+UInt8, arbitrary-rank statically typed UInt8 descriptors, constants, locals,
 arithmetic/comparisons, unary operations, branches, loops, phi edges, returns,
 and direct calls. Every unsupported type, expression, instruction, or terminator
 returns `UnsupportedInstructionDiagnostic`; there is no Rust, VM, or JavaScript
 fallback. Generated modules import nothing.
 
-Linear-memory descriptor ABI v1 is five little-endian i32 fields:
-`{version, ptr, len, element_type, stride}`. `element_type=1` means UInt8 and
-`stride=1`. Julia indices remain one-based. Version/type/stride mismatch and
-out-of-bounds access trap via WebAssembly `unreachable`; successful mutation is
-in-place and functions return their declared scalar result. The module exports
-`memory` and `__sjulia_wasm_abi_version`.
+Linear-memory descriptor ABI v2 uses a 40-byte aligned header followed by inline
+`{dim:u64,stride:i64}` pairs. UInt8 keeps stable element tag 1, rank is capped at
+8, and `layout_id=0` remains reserved. Static tag/rank, mirrored size/count,
+checked shape/address extents, and metadata/data disjointness are validated before
+data access. Julia indices remain one-based; negative strides trap until the
+general array slice. The module exports `memory` and `__sjulia_wasm_abi_version`.
 - REGISTER_VM.md's side-by-side policy for the stack VM is untouched. When
   the register VM reaches parity, the stack VM's retirement terms get decided
   there, informed by this ADR's lesson: **no backend lingers in unverified

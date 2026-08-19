@@ -24,7 +24,7 @@ const width = 888;
 const height = 862;
 const length = width * height * 4;
 const descriptor = 32;
-const pointer = 64;
+const pointer = 128;
 const memory = instance.exports.memory;
 const pixels = new Uint8Array(memory.buffer, pointer, length);
 for (let index = 0; index < length; index += 4) {
@@ -34,11 +34,17 @@ for (let index = 0; index < length; index += 4) {
   pixels[index + 3] = 255;
 }
 const descriptorView = new DataView(memory.buffer);
-descriptorView.setInt32(descriptor, 1, true);
-descriptorView.setInt32(descriptor + 4, pointer, true);
-descriptorView.setInt32(descriptor + 8, length, true);
-descriptorView.setInt32(descriptor + 12, 1, true);
-descriptorView.setInt32(descriptor + 16, 1, true);
+descriptorView.setUint32(descriptor, 2, true);
+descriptorView.setUint32(descriptor + 4, 0, true);
+descriptorView.setUint32(descriptor + 8, 1, true);
+descriptorView.setUint32(descriptor + 12, 1, true);
+descriptorView.setUint32(descriptor + 16, 0, true);
+descriptorView.setUint32(descriptor + 20, 1, true);
+descriptorView.setUint32(descriptor + 24, pointer, true);
+descriptorView.setUint32(descriptor + 28, 0, true);
+descriptorView.setBigUint64(descriptor + 32, BigInt(length), true);
+descriptorView.setBigUint64(descriptor + 40, BigInt(length), true);
+descriptorView.setBigInt64(descriptor + 48, 1n, true);
 entry(descriptor);
 
 const samples = [];

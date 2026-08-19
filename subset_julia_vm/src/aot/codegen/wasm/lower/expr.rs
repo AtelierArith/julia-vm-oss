@@ -98,15 +98,18 @@ impl Lowerer<'_> {
                 indices,
                 elem_ty,
                 is_tuple: false,
-            } if indices.len() == 1 => {
+            } => {
                 let array = self.expr(array, function)?;
-                let index = self.expr(&indices[0], function)?;
+                let indices = indices
+                    .iter()
+                    .map(|index| self.expr(index, function))
+                    .collect::<AotResult<Vec<_>>>()?;
                 let dest = self.temporary(elem_ty.clone());
                 self.current_block_mut(function)?
                     .push(Instruction::GetIndex {
                         dest: dest.clone(),
                         array,
-                        index,
+                        indices,
                     });
                 Ok(dest)
             }

@@ -14,7 +14,8 @@
 
 Added `AotBackend::Wasm`, exact-pinned `wasm-encoder`, a typed Core IR → AoT →
 `IrModule` → Wasm path, structured CFG dispatch, direct calls, scalar operations,
-and a versioned generic UInt8 descriptor ABI. Consolidated AoT tests execute five
+and generated-module descriptor ABI v2 with inline arbitrary-rank UInt8 metadata.
+Consolidated AoT tests execute five
 unrelated Julia sources and RGBA alpha-preserving mutation in Node. No transform
 registry, JS kernel, imports, dynamic dispatch, or fallback is present.
 

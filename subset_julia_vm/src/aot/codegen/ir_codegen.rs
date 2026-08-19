@@ -234,27 +234,39 @@ impl RustCodeGenerator {
                     fields.len()
                 ));
             }
-            Instruction::GetIndex { dest, array, index } => {
+            Instruction::GetIndex {
+                dest,
+                array,
+                indices,
+            } => {
                 let dest_name = self.var_to_rust(dest);
                 let array_name = self.var_to_rust(array);
-                let index_name = self.var_to_rust(index);
+                let index_names = indices
+                    .iter()
+                    .map(|index| format!("{} as usize", self.var_to_rust(index)))
+                    .collect::<Vec<_>>()
+                    .join("][");
                 let ty = self.type_to_rust(&dest.ty);
                 self.write_line(&format!(
-                    "let {}: {} = {}[{} as usize];",
-                    dest_name, ty, array_name, index_name
+                    "let {}: {} = {}[{}];",
+                    dest_name, ty, array_name, index_names
                 ));
             }
             Instruction::SetIndex {
                 array,
-                index,
+                indices,
                 value,
             } => {
                 let array_name = self.var_to_rust(array);
-                let index_name = self.var_to_rust(index);
+                let index_names = indices
+                    .iter()
+                    .map(|index| format!("{} as usize", self.var_to_rust(index)))
+                    .collect::<Vec<_>>()
+                    .join("][");
                 let value_name = self.var_to_rust(value);
                 self.write_line(&format!(
-                    "{}[{} as usize] = {};",
-                    array_name, index_name, value_name
+                    "{}[{}] = {};",
+                    array_name, index_names, value_name
                 ));
             }
             Instruction::GetField {

@@ -15,7 +15,9 @@
 
 `aot-wasm` は既存の parse/lower/inference/optimization と backend-neutral
 `IrModule` を再利用し、import のない standalone core Wasm を生成する。初期 subset
-は Int64/Float64/Bool、direct call、branch/loop、v1 UInt8 descriptor load/store。
+は Int64/Float64/Bool、direct call、branch/loop、ABI v2 arbitrary-rank UInt8
+descriptor length/load/store。inline dims/strides と checked extent/disjointness を
+data access 前に検証し、負 stride は general array slice まで trap する。
 未対応 IR は diagnostic で拒否し fallback しない。Node E2E と RGBA 888×862
 20-iteration benchmark の詳細は `COMPILER_SPIKE.md`。
 

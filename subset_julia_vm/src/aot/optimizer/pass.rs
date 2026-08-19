@@ -349,17 +349,21 @@ impl DeadCodeElimination {
                             uses.insert(format!("{}.{}", field.value.name, field.value.version));
                         }
                     }
-                    Instruction::GetIndex { array, index, .. } => {
+                    Instruction::GetIndex { array, indices, .. } => {
                         uses.insert(format!("{}.{}", array.name, array.version));
-                        uses.insert(format!("{}.{}", index.name, index.version));
+                        for index in indices {
+                            uses.insert(format!("{}.{}", index.name, index.version));
+                        }
                     }
                     Instruction::SetIndex {
                         array,
-                        index,
+                        indices,
                         value,
                     } => {
                         uses.insert(format!("{}.{}", array.name, array.version));
-                        uses.insert(format!("{}.{}", index.name, index.version));
+                        for index in indices {
+                            uses.insert(format!("{}.{}", index.name, index.version));
+                        }
                         uses.insert(format!("{}.{}", value.name, value.version));
                     }
                     Instruction::GetField { object, .. } => {
@@ -932,8 +936,8 @@ impl LoopInvariantCodeMotion {
             Instruction::Call { .. } | Instruction::CallMulti { .. } => false,
 
             // Array/field access may not be invariant (array contents may change)
-            Instruction::GetIndex { array, index, .. } => {
-                is_operand_invariant(array) && is_operand_invariant(index)
+            Instruction::GetIndex { array, indices, .. } => {
+                is_operand_invariant(array) && indices.iter().all(is_operand_invariant)
             }
 
             Instruction::GetField { object, .. } => is_operand_invariant(object),

@@ -6740,6 +6740,47 @@ mod wasm_backend_tests {
     }
 
     #[test]
+    fn wasm_descriptor_v2_reports_generated_module_abi_two() {
+        // Given: a generated scalar module with the ABI version export.
+        let source = "answer()::Int64 = 42";
+
+        // When: Node reads the generated-module ABI version.
+        let value = compile_and_run_node(
+            source,
+            "answer",
+            Vec::new(),
+            "console.log(instance.exports.__sjulia_wasm_abi_version());",
+        );
+
+        // Then: descriptor ABI v2 is the only accepted generated-module contract.
+        assert_eq!(value, "2");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_reads_rank_two_uint8_with_inline_metadata() {
+        // Given: a rank-2 UInt8 function and non-square column-major host storage.
+        let source = "function update_matrix!(bytes::Matrix{UInt8}, row::Int64, column::Int64)::Int64\nbytes[row, column] = UInt8(99)\nreturn Int64(bytes[row, column]) + length(bytes)\nend";
+
+        // When: Node supplies the v2 header followed by inline dimensions and strides.
+        let value = compile_and_run_node(
+            source,
+            "update_matrix!",
+            vec![
+                StaticType::Array {
+                    element: Box::new(StaticType::U8),
+                    ndims: Some(2),
+                },
+                StaticType::I64,
+                StaticType::I64,
+            ],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 128; const input = new Uint8Array(memory.buffer, ptr, 6); input.set([11, 12, 21, 22, 31, 32]); view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 2, true); view.setUint32(descriptor + 24, ptr, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 6n, true); view.setBigUint64(descriptor + 40, 2n, true); view.setBigInt64(descriptor + 48, 1n, true); view.setBigUint64(descriptor + 56, 3n, true); view.setBigInt64(descriptor + 64, 2n, true); const result = instance.exports[\"update_matrix!\"](descriptor, 2n, 3n); console.log(`${result}:${Array.from(input).join(',')}`);",
+        );
+
+        // Then: Julia one-based rank-aware addressing selects column three, row two.
+        assert_eq!(value, "105:11,12,21,22,31,99");
+    }
+
+    #[test]
     fn wasm_backend_emits_a_standalone_module_from_julia_source() {
         // Given: Julia source lowered through the real parser/lowering pipeline.
         let source = "add_i64(x::Int64, y::Int64) = x + y\nadd_i64(20, 22)";
@@ -6984,16 +7025,16 @@ mod wasm_backend_tests {
         // Given: a generic UInt8 mutation loop using Julia's one-based indexing.
         let source = "function increment!(bytes::Vector{UInt8})\ni = 1\nwhile i <= length(bytes)\nbytes[i] = UInt8(bytes[i] + 1)\ni = i + 1\nend\nreturn length(bytes)\nend";
 
-        // When: the host writes a v1 descriptor and invokes generated Wasm.
+        // When: the host writes a v2 descriptor and invokes generated Wasm.
         let value = compile_and_run_node(
             source,
             "increment!",
             vec![StaticType::Array { element: Box::new(StaticType::U8), ndims: Some(1) }],
-            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 64; const input = new Uint8Array(memory.buffer, ptr, 4); input.set([1, 2, 254, 0]); view.setInt32(descriptor, 1, true); view.setInt32(descriptor + 4, ptr, true); view.setInt32(descriptor + 8, 4, true); view.setInt32(descriptor + 12, 1, true); view.setInt32(descriptor + 16, 1, true); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('increment') && typeof v === 'function')[1]; const len = f(descriptor); console.log(`${len}:${Array.from(input).join(',')}:${instance.exports.__sjulia_wasm_abi_version()}`);",
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 128; const input = new Uint8Array(memory.buffer, ptr, 4); input.set([1, 2, 254, 0]); view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, ptr, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 4n, true); view.setBigUint64(descriptor + 40, 4n, true); view.setBigInt64(descriptor + 48, 1n, true); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('increment') && typeof v === 'function')[1]; const len = f(descriptor); console.log(`${len}:${Array.from(input).join(',')}:${instance.exports.__sjulia_wasm_abi_version()}`);",
         );
 
         // Then: bytes mutate in place and ABI metadata remains observable.
-        assert_eq!(value, "4:2,3,255,1:1");
+        assert_eq!(value, "4:2,3,255,1:2");
     }
 
     #[test]
@@ -7006,7 +7047,7 @@ mod wasm_backend_tests {
             source,
             "invert_rgba!",
             vec![StaticType::Array { element: Box::new(StaticType::U8), ndims: Some(1) }],
-            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 64; const input = new Uint8Array(memory.buffer, ptr, 8); input.set([10, 20, 30, 40, 100, 150, 200, 250]); view.setInt32(descriptor, 1, true); view.setInt32(descriptor + 4, ptr, true); view.setInt32(descriptor + 8, 8, true); view.setInt32(descriptor + 12, 1, true); view.setInt32(descriptor + 16, 1, true); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('invert_rgba') && typeof v === 'function')[1]; f(descriptor); console.log(Array.from(input).join(','));",
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 128; const input = new Uint8Array(memory.buffer, ptr, 8); input.set([10, 20, 30, 40, 100, 150, 200, 250]); view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, ptr, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 8n, true); view.setBigUint64(descriptor + 40, 8n, true); view.setBigInt64(descriptor + 48, 1n, true); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('invert_rgba') && typeof v === 'function')[1]; f(descriptor); console.log(Array.from(input).join(','));",
         );
 
         // Then: RGB channels invert while both alpha bytes stay unchanged.
@@ -7077,9 +7118,9 @@ mod wasm_backend_tests {
 
     #[test]
     fn wasm_uint8_descriptor_rejects_malformed_host_ranges() {
-        // Given: a real Julia UInt8 reader and four malformed host descriptors.
+        // Given: a real Julia UInt8 reader and four malformed v2 host descriptors.
         let source = "first_byte(bytes::Vector{UInt8}) = bytes[1]";
-        let javascript = "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('first_byte') && typeof v === 'function')[1]; const descriptor = 32; const cases = [[2, 64, 1, 1, 1], [1, 64, 1, 1, 2], [1, memory.buffer.byteLength - 1, 4, 1, 1], [1, 64, -1, 1, 1]]; let traps = 0; for (const [version, ptr, len, element, stride] of cases) { view.setInt32(descriptor, version, true); view.setInt32(descriptor + 4, ptr, true); view.setInt32(descriptor + 8, len, true); view.setInt32(descriptor + 12, element, true); view.setInt32(descriptor + 16, stride, true); try { f(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) traps += 1; } } console.log(traps);";
+        let javascript = "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('first_byte') && typeof v === 'function')[1]; const descriptor = 32; const ptr = 128; function valid() { view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, ptr, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 1n, true); view.setBigUint64(descriptor + 40, 1n, true); view.setBigInt64(descriptor + 48, 1n, true); } const cases = [() => view.setUint32(descriptor, 1, true), () => view.setBigUint64(descriptor + 32, 2n, true), () => view.setUint32(descriptor + 24, memory.buffer.byteLength, true), () => view.setBigInt64(descriptor + 48, -1n, true)]; let traps = 0; for (const corrupt of cases) { valid(); corrupt(); try { f(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) traps += 1; } } console.log(traps);";
 
         // When: Node calls generated Wasm with each malformed descriptor.
         let value = compile_and_run_node(
@@ -7094,6 +7135,248 @@ mod wasm_backend_tests {
 
         // Then: every malformed descriptor traps before a memory access succeeds.
         assert_eq!(value, "4");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_rejects_header_contract_violations_before_store() {
+        // Given: a rank-1 writer and malformed fixed-header or expected-type fields.
+        let source = "function set_first!(bytes::Vector{UInt8})::Int64\nbytes[1] = UInt8(99)\nreturn length(bytes)\nend";
+        let javascript = r#"
+const memory = instance.exports.memory;
+const view = new DataView(memory.buffer);
+const descriptor = 32;
+const pointer = 128;
+const input = new Uint8Array(memory.buffer, pointer, 1);
+const target = instance.exports["set_first!"];
+function valid() {
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, 0, true);
+  view.setUint32(descriptor + 8, 1, true);
+  view.setUint32(descriptor + 12, 1, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, 1, true);
+  view.setUint32(descriptor + 24, pointer, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, 1n, true);
+  view.setBigUint64(descriptor + 40, 1n, true);
+  view.setBigInt64(descriptor + 48, 1n, true);
+}
+const invalid = [
+  () => view.setUint32(descriptor, 1, true),
+  () => view.setUint32(descriptor, 3, true),
+  () => view.setUint32(descriptor + 4, 4, true),
+  () => view.setUint32(descriptor + 4, 2, true),
+  () => view.setUint32(descriptor + 8, 2, true),
+  () => view.setUint32(descriptor + 8, 99, true),
+  () => view.setUint32(descriptor + 12, 2, true),
+  () => view.setUint32(descriptor + 16, 1, true),
+  () => view.setUint32(descriptor + 20, 2, true),
+  () => view.setUint32(descriptor + 20, 9, true),
+  () => view.setUint32(descriptor + 28, 1, true),
+];
+let traps = 0;
+for (const corrupt of invalid) {
+  valid();
+  input[0] = 7;
+  corrupt();
+  try { target(descriptor); } catch (error) {
+    if (error instanceof WebAssembly.RuntimeError && input[0] === 7) traps += 1;
+  }
+}
+for (const invalidPointer of [0, -8, descriptor + 1, memory.buffer.byteLength - 32]) {
+  valid();
+  input[0] = 7;
+  try { target(invalidPointer); } catch (error) {
+    if (error instanceof WebAssembly.RuntimeError && input[0] === 7) traps += 1;
+  }
+}
+console.log(traps);
+"#;
+
+        // When: each corrupt descriptor is passed through the real Wasm export.
+        let value = compile_and_run_node(
+            source,
+            "set_first!",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            javascript,
+        );
+
+        // Then: all header violations trap before the sentinel can be stored.
+        assert_eq!(value, "15");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_rejects_shape_extent_and_index_violations_before_store() {
+        // Given: a rank-2 writer and malformed inline shape, stride, extent, and index cases.
+        let source = "function set_byte!(bytes::Matrix{UInt8}, row::Int64, column::Int64)::Int64\nbytes[row, column] = UInt8(99)\nreturn length(bytes)\nend";
+        let javascript = r#"
+const memory = instance.exports.memory;
+const view = new DataView(memory.buffer);
+const descriptor = 32;
+const pointer = 160;
+const input = new Uint8Array(memory.buffer, pointer, 6);
+const target = instance.exports["set_byte!"];
+function valid() {
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, 0, true);
+  view.setUint32(descriptor + 8, 1, true);
+  view.setUint32(descriptor + 12, 1, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, 2, true);
+  view.setUint32(descriptor + 24, pointer, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, 6n, true);
+  view.setBigUint64(descriptor + 40, 2n, true);
+  view.setBigInt64(descriptor + 48, 1n, true);
+  view.setBigUint64(descriptor + 56, 3n, true);
+  view.setBigInt64(descriptor + 64, 2n, true);
+}
+const invalid = [
+  [() => view.setBigUint64(descriptor + 32, 5n, true), 1n, 1n],
+  [() => { view.setBigUint64(descriptor + 40, 0xffffffffffffffffn, true); view.setBigUint64(descriptor + 56, 2n, true); }, 1n, 1n],
+  [() => view.setBigInt64(descriptor + 48, -1n, true), 1n, 1n],
+  [() => { view.setBigUint64(descriptor + 40, 3n, true); view.setBigInt64(descriptor + 48, 0x7fffffffffffffffn, true); }, 1n, 1n],
+  [() => { view.setBigUint64(descriptor + 40, 2n, true); view.setBigUint64(descriptor + 56, 2n, true); view.setBigUint64(descriptor + 32, 4n, true); view.setBigInt64(descriptor + 48, 0x7fffffffffffffffn, true); view.setBigInt64(descriptor + 64, 0x7fffffffffffffffn, true); }, 1n, 1n],
+  [() => view.setUint32(descriptor + 24, memory.buffer.byteLength - 1, true), 1n, 1n],
+  [() => view.setUint32(descriptor + 24, 0, true), 1n, 1n],
+  [() => view.setUint32(descriptor + 24, descriptor + 40, true), 1n, 1n],
+  [() => {}, 3n, 1n],
+  [() => {}, 1n, 4n],
+  [() => { view.setBigUint64(descriptor + 40, 0n, true); view.setBigUint64(descriptor + 32, 0n, true); view.setUint32(descriptor + 24, 0, true); }, 1n, 1n],
+];
+let traps = 0;
+for (const [corrupt, row, column] of invalid) {
+  valid();
+  input.fill(7);
+  corrupt();
+  try { target(descriptor, row, column); } catch (error) {
+    if (error instanceof WebAssembly.RuntimeError && input.every((byte) => byte === 7)) traps += 1;
+  }
+}
+console.log(traps);
+"#;
+
+        // When: Node invokes each malformed descriptor or out-of-bounds index pair.
+        let value = compile_and_run_node(
+            source,
+            "set_byte!",
+            vec![
+                StaticType::Array {
+                    element: Box::new(StaticType::U8),
+                    ndims: Some(2),
+                },
+                StaticType::I64,
+                StaticType::I64,
+            ],
+            javascript,
+        );
+
+        // Then: every case traps before any byte in the host buffer changes.
+        assert_eq!(value, "11");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_enforces_metadata_extent_and_rank_zero_rules() {
+        // Given: rank-1 and rank-0 length exports with boundary descriptors.
+        let rank_one = compile_and_run_node(
+            "array_len(bytes::Vector{UInt8}) = length(bytes)",
+            "array_len",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = memory.buffer.byteLength - 40; view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, 0, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 0n, true); let trapped = 0; try { instance.exports.array_len(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) trapped = 1; } console.log(trapped);",
+        );
+        let rank_zero = compile_and_run_node(
+            "array_len(bytes::Array{UInt8,0}) = length(bytes)",
+            "array_len",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(0),
+            }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const pointer = 128; function write(count) { view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 0, true); view.setUint32(descriptor + 24, pointer, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, count, true); } write(1n); const valid = instance.exports.array_len(descriptor); write(0n); let traps = 0; try { instance.exports.array_len(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) traps += 1; } write(2n); try { instance.exports.array_len(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) traps += 1; } console.log(`${valid}:${traps}`);",
+        );
+
+        // When: metadata truncation and invalid rank-0 counts cross the boundary.
+        // Then: truncation traps, rank-0 count one passes, and other counts trap.
+        assert_eq!(rank_one, "1");
+        assert_eq!(rank_zero, "1:2");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_enforces_readonly_and_zero_count_access_rules() {
+        // Given: UInt8 read/write exports and valid readonly or empty descriptors.
+        let readonly_read = compile_and_run_node(
+            "read_first(bytes::Vector{UInt8}) = bytes[1]",
+            "read_first",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const pointer = 128; new Uint8Array(memory.buffer, pointer, 1)[0] = 7; view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 2, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, pointer, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 1n, true); view.setBigUint64(descriptor + 40, 1n, true); view.setBigInt64(descriptor + 48, 1n, true); console.log(instance.exports.read_first(descriptor));",
+        );
+        let module_owned_read = compile_and_run_node(
+            "read_first(bytes::Vector{UInt8}) = bytes[1]",
+            "read_first",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const pointer = 128; new Uint8Array(memory.buffer, pointer, 1)[0] = 7; view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 1, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, pointer, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 1n, true); view.setBigUint64(descriptor + 40, 1n, true); view.setBigInt64(descriptor + 48, 1n, true); console.log(instance.exports.read_first(descriptor));",
+        );
+        let readonly_write = compile_and_run_node(
+            "function write_first!(bytes::Vector{UInt8})::Int64\nbytes[1] = UInt8(99)\nreturn length(bytes)\nend",
+            "write_first!",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const pointer = 128; const input = new Uint8Array(memory.buffer, pointer, 1); input[0] = 7; view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 2, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, pointer, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 1n, true); view.setBigUint64(descriptor + 40, 1n, true); view.setBigInt64(descriptor + 48, 1n, true); let trapped = 0; try { instance.exports[\"write_first!\"](descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) trapped = 1; } console.log(`${trapped}:${input[0]}`);",
+        );
+        let empty = compile_and_run_node(
+            "read_first(bytes::Vector{UInt8}) = bytes[1]",
+            "read_first",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            "const view = new DataView(instance.exports.memory.buffer); const descriptor = 32; view.setUint32(descriptor, 2, true); view.setUint32(descriptor + 4, 0, true); view.setUint32(descriptor + 8, 1, true); view.setUint32(descriptor + 12, 1, true); view.setUint32(descriptor + 16, 0, true); view.setUint32(descriptor + 20, 1, true); view.setUint32(descriptor + 24, 0, true); view.setUint32(descriptor + 28, 0, true); view.setBigUint64(descriptor + 32, 0n, true); view.setBigUint64(descriptor + 40, 0n, true); view.setBigInt64(descriptor + 48, 1n, true); let trapped = 0; try { instance.exports.read_first(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) trapped = 1; } console.log(trapped);",
+        );
+
+        // When: a read and store use READONLY, and an index targets zero elements.
+        // Then: only the read succeeds; both prohibited accesses trap without mutation.
+        assert_eq!(readonly_read, "7");
+        assert_eq!(module_owned_read, "7");
+        assert_eq!(readonly_write, "1:7");
+        assert_eq!(empty, "1");
+    }
+
+    #[test]
+    fn wasm_descriptor_v2_rejects_static_rank_above_limit() {
+        // Given: a statically typed UInt8 array above the ABI rank cap.
+        let source = "array_len(bytes::Array{UInt8,9}) = length(bytes)";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "array_len",
+                "array_len",
+                vec![StaticType::Array {
+                    element: Box::new(StaticType::U8),
+                    ndims: Some(9),
+                }],
+            )],
+            ..CompileConfig::default()
+        };
+
+        // When: the canonical Wasm pipeline validates the static descriptor type.
+        let error = compile_wasm_source(source, &config)
+            .expect_err("rank above MAX_RANK must remain unsupported");
+
+        // Then: rank overflow is a typed compile diagnostic, not a runtime ABI guess.
+        assert!(matches!(error, AotError::UnsupportedInstruction(_)));
     }
 
     #[test]

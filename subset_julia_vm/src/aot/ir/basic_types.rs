@@ -80,12 +80,12 @@ pub enum Instruction {
     GetIndex {
         dest: VarRef,
         array: VarRef,
-        index: VarRef,
+        indices: Vec<VarRef>,
     },
     /// Array/collection mutation
     SetIndex {
         array: VarRef,
-        index: VarRef,
+        indices: Vec<VarRef>,
         value: VarRef,
     },
     /// Field access

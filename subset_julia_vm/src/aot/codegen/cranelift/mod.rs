@@ -2249,7 +2249,7 @@ mod tests {
         func.entry_block_mut().unwrap().push(Instruction::GetIndex {
             dest: dest.clone(),
             array,
-            index,
+            indices: vec![index],
         });
         func.entry_block_mut()
             .unwrap()
@@ -2278,7 +2278,7 @@ mod tests {
         let value = VarRef::new("value".to_string(), StaticType::I64);
         func.entry_block_mut().unwrap().push(Instruction::SetIndex {
             array,
-            index,
+            indices: vec![index],
             value,
         });
         func.entry_block_mut()
