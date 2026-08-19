@@ -58,7 +58,7 @@ mod exit_code {
 /// Map an [`AotError`] to its classified exit code.
 fn exit_code_for(err: &AotError) -> i32 {
     match err {
-        AotError::ParseError(_) | AotError::LoweringError(_) => exit_code::PARSE,
+        AotError::ParseError { .. } | AotError::LoweringError { .. } => exit_code::PARSE,
         AotError::UnsupportedInstruction(_) => exit_code::UNSUPPORTED,
         AotError::CodegenError(_) => exit_code::CODEGEN,
         AotError::TypeInferenceError(_)
@@ -951,7 +951,10 @@ fn parse_source_with_diagnostics(source: &str) -> Result<ParseOutcome, Box<Sourc
             .and_then(|error| error.span().map(Span::from_parser_span));
         let message = format_parse_errors(&errors);
         return Err(Box::new(SourceDiagnostic::new(
-            AotError::ParseError(message),
+            AotError::ParseError {
+                message,
+                span: None,
+            },
             span,
         )));
     }
@@ -1002,7 +1005,10 @@ fn build_program(source: &str, minimal_prelude: bool) -> Result<Program, Box<Sou
     let mut lowering = Lowering::new(source);
     let mut program = lowering.lower(outcome).map_err(|e| {
         Box::new(SourceDiagnostic::new(
-            AotError::LoweringError(format_lowering_error(&e)),
+            AotError::LoweringError {
+                message: format_lowering_error(&e),
+                span: Some(e.span),
+            },
             Some(e.span),
         ))
     })?;
@@ -1169,16 +1175,28 @@ struct SourceDiagnostic {
 impl SourceDiagnostic {
     fn new(error: AotError, span: Option<Span>) -> Self {
         match error {
-            AotError::ParseError(message) => Self {
-                error: AotError::ParseError(message.clone()),
+            AotError::ParseError {
                 message,
-                span,
+                span: error_span,
+            } => Self {
+                error: AotError::ParseError {
+                    message: message.clone(),
+                    span: error_span,
+                },
+                message,
+                span: error_span.or(span),
                 workaround: None,
             },
-            AotError::LoweringError(message) => Self {
-                error: AotError::LoweringError(message.clone()),
+            AotError::LoweringError {
                 message,
-                span,
+                span: error_span,
+            } => Self {
+                error: AotError::LoweringError {
+                    message: message.clone(),
+                    span: error_span,
+                },
+                message,
+                span: error_span.or(span),
                 workaround: None,
             },
             other => Self::from_error(other),
@@ -1246,8 +1264,8 @@ impl From<Span> for JsonSpan {
 
 fn diagnostic_kind(error: &AotError) -> &'static str {
     match error {
-        AotError::ParseError(_) => "parse",
-        AotError::LoweringError(_) => "lowering",
+        AotError::ParseError { .. } => "parse",
+        AotError::LoweringError { .. } => "lowering",
         AotError::UnsupportedInstruction(_) => "unsupported",
         AotError::CodegenError(_) => "codegen",
         AotError::TypeInferenceError(_) => "type-inference",
@@ -2515,7 +2533,7 @@ mod tests {
             Err(diagnostic) => diagnostic,
             Ok(_) => panic!("expected parse error"),
         };
-        assert!(matches!(&diagnostic.error, AotError::ParseError(_)));
+        assert!(matches!(&diagnostic.error, AotError::ParseError { .. }));
         assert!(!diagnostic.message.contains("ParseFailed"));
         assert!(!diagnostic.message.contains("Span {"));
         assert!(diagnostic
@@ -2546,8 +2564,13 @@ mod tests {
         assert!(!message.contains("UnsupportedFeature"));
         assert!(message.contains("Unsupported feature: unsupported assignment target at 1:1"));
 
-        let diagnostic =
-            SourceDiagnostic::new(AotError::LoweringError(message.clone()), Some(err.span));
+        let diagnostic = SourceDiagnostic::new(
+            AotError::LoweringError {
+                message: message.clone(),
+                span: Some(err.span),
+            },
+            Some(err.span),
+        );
         let rendered = render_cli_diagnostic(
             &diagnostic,
             "<eval>",
@@ -2563,7 +2586,10 @@ mod tests {
     #[test]
     fn exit_codes_are_classified() {
         assert_eq!(
-            exit_code_for(&AotError::ParseError("x".into())),
+            exit_code_for(&AotError::ParseError {
+                message: "x".into(),
+                span: None,
+            }),
             exit_code::PARSE
         );
         assert_eq!(
