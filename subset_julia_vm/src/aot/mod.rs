@@ -21,6 +21,56 @@ use crate::span::Span;
 use std::fmt;
 use thiserror::Error;
 
+#[cfg(not(target_arch = "wasm32"))]
+struct AotTimer(std::time::Instant);
+
+#[cfg(target_arch = "wasm32")]
+struct AotTimer(f64);
+
+#[cfg(target_arch = "wasm32")]
+fn wasm_now_ms() -> f64 {
+    use wasm_bindgen::{JsCast, JsValue};
+
+    let global = js_sys::global();
+    let Ok(performance) = js_sys::Reflect::get(&global, &JsValue::from_str("performance")) else {
+        return js_sys::Date::now();
+    };
+    let Ok(now) = js_sys::Reflect::get(&performance, &JsValue::from_str("now")) else {
+        return js_sys::Date::now();
+    };
+    let Some(now) = now.dyn_ref::<js_sys::Function>() else {
+        return js_sys::Date::now();
+    };
+    now.call0(&performance)
+        .ok()
+        .and_then(|value| value.as_f64())
+        .unwrap_or_else(js_sys::Date::now)
+}
+
+impl AotTimer {
+    fn start() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self(std::time::Instant::now())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(wasm_now_ms())
+        }
+    }
+
+    fn elapsed(&self) -> std::time::Duration {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.0.elapsed()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            std::time::Duration::from_secs_f64(((wasm_now_ms() - self.0) / 1000.0).max(0.0))
+        }
+    }
+}
+
 pub mod abi;
 pub mod analyze;
 pub mod call_graph;
@@ -44,6 +94,8 @@ pub enum AotBackend {
     /// Compile through the experimental Cranelift backend when the crate is
     /// built with the `cranelift` feature.
     Cranelift,
+    /// Emit a standalone core WebAssembly module when built with `aot-wasm`.
+    Wasm,
 }
 
 /// User-facing detail for unsupported AoT instructions or semantic boundaries.
@@ -105,12 +157,12 @@ impl fmt::Display for UnsupportedInstructionDiagnostic {
 #[derive(Debug, Error)]
 pub enum AotError {
     /// Source could not be parsed
-    #[error("Parse error: {0}")]
-    ParseError(String),
+    #[error("Parse error: {message}")]
+    ParseError { message: String, span: Option<Span> },
 
     /// Lowering to Core IR failed
-    #[error("Lowering error: {0}")]
-    LoweringError(String),
+    #[error("Lowering error: {message}")]
+    LoweringError { message: String, span: Option<Span> },
 
     /// Type inference failed
     #[error("Type inference failed: {0}")]
@@ -143,6 +195,21 @@ pub enum AotError {
 
 /// Result type for AoT operations
 pub type AotResult<T> = Result<T, AotError>;
+
+impl AotError {
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::ParseError { span, .. } | Self::LoweringError { span, .. } => *span,
+            Self::UnsupportedInstruction(diagnostic) => diagnostic.span,
+            Self::TypeInferenceError(_)
+            | Self::CodegenError(_)
+            | Self::OptimizationError(_)
+            | Self::InvalidIR(_)
+            | Self::InternalError(_)
+            | Self::ConversionError(_) => None,
+        }
+    }
+}
 
 /// Statistics collected during AoT compilation
 #[derive(Debug, Default, Clone)]
@@ -271,6 +338,19 @@ pub struct CompileResult {
     pub timings: Vec<(&'static str, std::time::Duration)>,
 }
 
+/// Standalone WebAssembly output from the shared AoT preparation pipeline.
+#[derive(Debug)]
+pub struct WasmCompileResult {
+    /// Encoded core WebAssembly module bytes.
+    pub wasm_bytes: Vec<u8>,
+    /// Statistics gathered by parse-independent AoT preparation.
+    pub stats: AotStats,
+    /// Rendered AoT IR stage dumps requested by the compile configuration.
+    pub dumps: String,
+    /// Per-stage wall-clock timings, including Wasm lowering and codegen.
+    pub timings: Vec<(&'static str, std::time::Duration)>,
+}
+
 struct PreparedAotProgram {
     aot_program: ir::AotProgram,
     stats: AotStats,
@@ -291,7 +371,7 @@ pub fn compile_program(
     let mut prepared = prepare_aot_program(program, config)?;
 
     // Codegen
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     prepared.diagnostics.verify_and_record(
         pass_pipeline::AotPassStage::BeforeBackendCodegen,
         &prepared.aot_program,
@@ -354,7 +434,7 @@ fn prepare_aot_program(
     let mut diagnostics = AotPassDiagnostics::new(selection);
 
     // Dead Code Elimination
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     stats.functions_total = program.functions.len();
     let program = if config.c_abi_exports.is_empty() {
         let call_graph = CallGraph::from_program(&program);
@@ -377,7 +457,7 @@ fn prepare_aot_program(
     crate::aot::analyze::reverse_generator_lifts_in_program(&mut program);
 
     // Type inference
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     let mut type_engine = TypeInferenceEngine::new();
     let typed_program = type_engine.analyze_program(&program)?;
     stats.functions_compiled = program.functions.len();
@@ -385,7 +465,7 @@ fn prepare_aot_program(
     timings.push(("type-inference", t.elapsed()));
 
     // Convert Core IR to AoT IR
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     let mut aot_program = program_to_aot_ir(&program, &typed_program)?;
     diagnostics.verify_and_record(AotPassStage::AfterAotIrConversion, &aot_program)?;
     stats.instructions_processed = aot_program.instruction_count();
@@ -397,7 +477,7 @@ fn prepare_aot_program(
     }
 
     // Optimize
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     stats.optimizations_applied = optimize_aot_program_at_level_with_options(
         &mut aot_program,
         config.opt_level,
@@ -453,7 +533,98 @@ fn generate_backend_output(
             codegen.generate_program(aot_program)
         }
         AotBackend::Cranelift => generate_cranelift_output(aot_program, codegen_config),
+        AotBackend::Wasm => Err(AotError::CodegenError(
+            "Wasm output is binary; call compile_wasm instead of compile_program".to_string(),
+        )),
     }
+}
+
+/// Compile lowered Core IR to a standalone WebAssembly module.
+#[cfg(feature = "aot-wasm")]
+pub fn compile_wasm(
+    program: crate::ir::core::Program,
+    config: &CompileConfig,
+) -> AotResult<WasmCompileResult> {
+    if config.backend != AotBackend::Wasm {
+        return Err(AotError::CodegenError(
+            "compile_wasm requires CompileConfig.backend = AotBackend::Wasm".to_string(),
+        ));
+    }
+    let mut prepared = prepare_aot_program(program, config)?;
+    prepared.diagnostics.verify_and_record(
+        pass_pipeline::AotPassStage::BeforeBackendCodegen,
+        &prepared.aot_program,
+    )?;
+    let started = AotTimer::start();
+    let module = codegen::wasm::lower_program(&prepared.aot_program)?;
+    prepared
+        .timings
+        .push(("wasm-ir-lowering", started.elapsed()));
+    let started = AotTimer::start();
+    let wasm_bytes = codegen::wasm::emit_module(&module, &config.c_abi_exports)?;
+    prepared.timings.push(("wasm-codegen", started.elapsed()));
+    Ok(WasmCompileResult {
+        wasm_bytes,
+        stats: prepared.stats,
+        dumps: prepared.diagnostics.render_dumps(),
+        timings: prepared.timings,
+    })
+}
+
+/// Compile Julia source through the canonical parser/lowering pipeline to Wasm.
+#[cfg(feature = "aot-wasm")]
+pub fn compile_wasm_source(source: &str, config: &CompileConfig) -> AotResult<WasmCompileResult> {
+    let started = AotTimer::start();
+    let program = crate::pipeline::parse_source(source).map_err(|error| match error {
+        crate::pipeline::PipelineError::Parse(error) => {
+            let span = match &error {
+                crate::error::SyntaxError::ParseFailed(_) => None,
+                crate::error::SyntaxError::ErrorNodes(issues) => {
+                    issues.first().map(|issue| issue.span)
+                }
+            };
+            AotError::ParseError {
+                message: error.to_string(),
+                span,
+            }
+        }
+        crate::pipeline::PipelineError::Lower(error) => AotError::LoweringError {
+            message: error.to_string(),
+            span: Some(error.span),
+        },
+        crate::pipeline::PipelineError::Load(error) => AotError::InternalError(error.to_string()),
+    })?;
+    let source_parse_lower = started.elapsed();
+    let mut result = compile_wasm(program, config)?;
+    result
+        .timings
+        .insert(0, ("source-parse-lower", source_parse_lower));
+    Ok(result)
+}
+
+/// Report that source-to-Wasm compilation is unavailable without `aot-wasm`.
+#[cfg(not(feature = "aot-wasm"))]
+pub fn compile_wasm_source(_source: &str, _config: &CompileConfig) -> AotResult<WasmCompileResult> {
+    Err(AotError::UnsupportedInstruction(
+        UnsupportedInstructionDiagnostic::new(
+            "Wasm AoT output requires the `aot-wasm` Cargo feature",
+        )
+        .with_workaround("rebuild subset_julia_vm with `--features aot-wasm`"),
+    ))
+}
+
+/// Report that the Wasm backend was not compiled into this crate.
+#[cfg(not(feature = "aot-wasm"))]
+pub fn compile_wasm(
+    _program: crate::ir::core::Program,
+    _config: &CompileConfig,
+) -> AotResult<WasmCompileResult> {
+    Err(AotError::UnsupportedInstruction(
+        UnsupportedInstructionDiagnostic::new(
+            "Wasm AoT output requires the `aot-wasm` Cargo feature",
+        )
+        .with_workaround("rebuild subset_julia_vm with `--features aot-wasm`"),
+    ))
 }
 
 fn c_abi_export_root_names(
@@ -837,7 +1008,7 @@ pub fn compile_cranelift_object_for_target(
 
     let mut prepared = prepare_aot_program(program, &object_config)?;
 
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     prepared.diagnostics.verify_and_record(
         pass_pipeline::AotPassStage::BeforeBackendCodegen,
         &prepared.aot_program,
@@ -900,7 +1071,7 @@ pub fn run_cranelift_jit_main(
 
     let mut prepared = prepare_aot_program(program, &jit_config)?;
 
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     prepared.diagnostics.verify_and_record(
         pass_pipeline::AotPassStage::BeforeBackendCodegen,
         &prepared.aot_program,
@@ -912,7 +1083,7 @@ pub fn run_cranelift_jit_main(
     codegen.generate_module(&module)?;
     prepared.timings.push(("codegen", t.elapsed()));
 
-    let t = std::time::Instant::now();
+    let t = AotTimer::start();
     let main = unsafe {
         codegen
             .get_typed_function::<extern "C" fn()>("__juliars_main")
@@ -4402,7 +4573,7 @@ mod tests {
             span,
         });
 
-        let started = std::time::Instant::now();
+        let started = AotTimer::start();
         let result = compile_program(program, &CompileConfig::default()).unwrap();
         let elapsed = started.elapsed();
 

@@ -6649,3 +6649,500 @@ println(rem(Int16(7), Int16(3)))
         "Int8\n2\nUInt64\n2\nUInt16\n1\n1\n3\n1",
     );
 }
+
+mod wasm_backend_tests {
+    use std::fs;
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant};
+    use subset_julia_vm::aot::codegen::wasm::emit_module;
+    use subset_julia_vm::aot::codegen::CAbiExport;
+    use subset_julia_vm::aot::ir::{
+        BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction, IrModule, Terminator, VarRef,
+    };
+    use subset_julia_vm::aot::types::StaticType;
+    use subset_julia_vm::aot::{compile_wasm_source, AotBackend, AotError, CompileConfig};
+
+    fn run_wasm_bytes_node(wasm_bytes: &[u8], javascript: &str) -> String {
+        let dir = tempfile::tempdir().expect("create Wasm test directory");
+        let wasm_path = dir.path().join("module.wasm");
+        let script_path = dir.path().join("run.mjs");
+        fs::write(&wasm_path, wasm_bytes).expect("write Wasm module");
+        fs::write(
+            &script_path,
+            format!(
+                "const bytes = await import('node:fs').then(fs => fs.readFileSync({:?}));\nconst module = await WebAssembly.compile(bytes);\nconst instance = await WebAssembly.instantiate(module, {{}});\n{}",
+                wasm_path, javascript
+            ),
+        )
+        .expect("write Node Wasm runner");
+        let mut child = Command::new("node")
+            .arg(&script_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("execute Wasm through Node");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("poll Node Wasm runner") {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("terminate hung Node Wasm runner");
+                let _ = child.wait();
+                panic!("Node Wasm runner exceeded five-second deadline");
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        let result = child
+            .wait_with_output()
+            .expect("collect Node Wasm runner output");
+        assert!(
+            status.success(),
+            "Node must validate and execute generated Wasm\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout)
+            .expect("Node stdout should be UTF-8")
+            .trim()
+            .to_string()
+    }
+
+    fn compile_and_run_node(
+        source: &str,
+        function_name: &str,
+        arg_types: Vec<StaticType>,
+        javascript: &str,
+    ) -> String {
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                function_name,
+                function_name,
+                arg_types,
+            )],
+            ..CompileConfig::default()
+        };
+        let output =
+            compile_wasm_source(source, &config).expect("Wasm AoT compilation should succeed");
+        run_wasm_bytes_node(&output.wasm_bytes, javascript)
+    }
+
+    #[test]
+    fn wasm_backend_is_an_explicit_aot_backend() {
+        // Given: the public AoT backend selector.
+        // When: the Wasm backend is selected.
+        let backend = AotBackend::Wasm;
+
+        // Then: selection remains explicit rather than falling back to Rust.
+        assert_eq!(backend, AotBackend::Wasm);
+    }
+
+    #[test]
+    fn wasm_backend_emits_a_standalone_module_from_julia_source() {
+        // Given: Julia source lowered through the real parser/lowering pipeline.
+        let source = "add_i64(x::Int64, y::Int64) = x + y\nadd_i64(20, 22)";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            ..CompileConfig::default()
+        };
+
+        // When: the typed Wasm AoT entry point compiles the lowered program.
+        let output =
+            compile_wasm_source(source, &config).expect("Wasm AoT compilation should succeed");
+
+        // Then: the result is a standalone core WebAssembly module.
+        assert_eq!(&output.wasm_bytes[..4], b"\0asm");
+    }
+
+    #[test]
+    fn wasm_backend_rejects_unsupported_types_without_fallback() {
+        // Given: a statically typed function outside the documented Wasm subset.
+        let source = "string_identity(value::String)::String = value";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "string_identity",
+                "string_identity",
+                vec![StaticType::Str],
+            )],
+            ..CompileConfig::default()
+        };
+
+        // When: the canonical source-to-Wasm API reaches backend lowering.
+        let error = compile_wasm_source(source, &config)
+            .expect_err("String must remain outside the Wasm subset");
+
+        // Then: compilation returns the typed unsupported diagnostic, never fallback code.
+        assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+    }
+
+    #[test]
+    fn wasm_executes_integer_arithmetic_from_julia_source() {
+        // Given: an independently compiled integer function.
+        let source = "add_scale(x::Int64, y::Int64) = (x + y) * 2";
+
+        // When: Node validates, instantiates, and calls the generated module.
+        let value = compile_and_run_node(
+            source,
+            "add_scale",
+            vec![StaticType::I64, StaticType::I64],
+            "const f = Object.values(instance.exports).find(v => typeof v === 'function' && v.length === 2); console.log(f(10n, 11n).toString());",
+        );
+
+        // Then: Wasm matches Julia's Int64 result.
+        assert_eq!(value, "42");
+    }
+
+    #[test]
+    fn wasm_uint8_subtraction_wraps_before_unsigned_comparison() {
+        // Given: subtraction that wraps from zero to UInt8(255).
+        let source = "function wrapped_sub()::Bool\nx = UInt8(0) - UInt8(1)\nreturn x > 0x64\nend";
+
+        // When: Node executes the exported function.
+        let value = compile_and_run_node(
+            source,
+            "wrapped_sub",
+            Vec::new(),
+            "console.log(Number(instance.exports.wrapped_sub()));",
+        );
+
+        // Then: the wrapped byte compares as unsigned.
+        assert_eq!(value, "1");
+    }
+
+    #[test]
+    fn wasm_uint8_addition_wraps_before_comparison() {
+        // Given: addition that wraps UInt8(250) + UInt8(10) to UInt8(4).
+        let source =
+            "function wrapped_add()::Bool\nx = UInt8(250) + UInt8(10)\nreturn x > UInt8(100)\nend";
+
+        // When: Node executes the exported function.
+        let value = compile_and_run_node(
+            source,
+            "wrapped_add",
+            Vec::new(),
+            "console.log(Number(instance.exports.wrapped_add()));",
+        );
+
+        // Then: comparison observes the normalized byte.
+        assert_eq!(value, "0");
+    }
+
+    #[test]
+    fn wasm_uint8_widens_to_int64_without_sign_extension() {
+        // Given: a wrapped UInt8 value whose high bit is set.
+        let source = "widen_wrapped()::Int64 = Int64(UInt8(0) - UInt8(1))";
+
+        // When: Node executes the exported function.
+        let value = compile_and_run_node(
+            source,
+            "widen_wrapped",
+            Vec::new(),
+            "console.log(instance.exports.widen_wrapped().toString());",
+        );
+
+        // Then: UInt8 widens as 255 rather than -1.
+        assert_eq!(value, "255");
+    }
+
+    #[test]
+    fn wasm_implicit_trailing_value_returns_without_hanging() {
+        // Given: a typed function whose final statement is a ValueCarrier.
+        let source = "function h(x::Int64)::Int64\ny = x * 2\ny\nend";
+
+        // When: the backend reaches the currently unsupported trailing carrier.
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types("h", "h", vec![StaticType::I64])],
+            ..CompileConfig::default()
+        };
+        let error = compile_wasm_source(source, &config)
+            .expect_err("ambiguous trailing carriers must be rejected instead of looping");
+
+        // Then: compilation fails loudly and cannot emit a non-terminating module.
+        assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+        assert!(error.to_string().contains("no unambiguous return value"));
+    }
+
+    #[test]
+    fn wasm_rejects_duplicate_and_reserved_function_identities() {
+        // Given: overloads that collapse to one Wasm symbol and reserved ABI names.
+        let cases = [
+            (
+                "same(x::Int64)::Int64 = x\nsame(x::Float64)::Float64 = x",
+                "same",
+                vec![StaticType::I64],
+            ),
+            ("memory()::Int64 = 1", "memory", Vec::new()),
+            (
+                "__sjulia_wasm_abi_version()::Int64 = 1",
+                "__sjulia_wasm_abi_version",
+                Vec::new(),
+            ),
+        ];
+
+        for (source, name, arg_types) in cases {
+            // When: the canonical Wasm pipeline validates function identities.
+            let error = compile_wasm_source(
+                source,
+                &CompileConfig {
+                    backend: AotBackend::Wasm,
+                    c_abi_exports: vec![CAbiExport::with_arg_types(name, name, arg_types)],
+                    ..CompileConfig::default()
+                },
+            )
+            .expect_err("duplicate or reserved Wasm identities must be rejected");
+
+            // Then: callers receive a typed unsupported diagnostic, not invalid bytes.
+            assert!(
+                matches!(error, AotError::UnsupportedInstruction(_)),
+                "`{name}` produced unexpected diagnostic: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn wasm_honors_requested_export_alias_without_original_export() {
+        // Given: an explicit alias that differs from the Julia function name.
+        let source = "internal_add(x::Int64, y::Int64)::Int64 = x + y";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "public_add",
+                "internal_add",
+                vec![StaticType::I64, StaticType::I64],
+            )],
+            ..CompileConfig::default()
+        };
+
+        // When: the module is compiled and inspected through Node.
+        let output = compile_wasm_source(source, &config).expect("alias should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            "console.log(`${instance.exports.public_add(20n, 22n)}:${Object.hasOwn(instance.exports, 'internal_add')}`);",
+        );
+
+        // Then: only the requested public alias is required.
+        assert_eq!(value, "42:false");
+    }
+
+    #[test]
+    fn wasm_executes_float_comparison_and_conditional_from_julia_source() {
+        // Given: Float64 comparison and conditional control flow.
+        let source = "function choose(x::Float64, y::Float64)::Float64\nif x > y\nreturn x - y\nelse\nreturn y - x\nend\nend";
+
+        // When: the compiled function runs in Node.
+        let value = compile_and_run_node(
+            source,
+            "choose",
+            vec![StaticType::F64, StaticType::F64],
+            "const f = Object.values(instance.exports).find(v => typeof v === 'function' && v.length === 2); console.log(f(1.25, 6.75));",
+        );
+
+        // Then: branch selection and Float64 arithmetic agree with Julia.
+        assert_eq!(value, "5.5");
+    }
+
+    #[test]
+    fn wasm_executes_counted_loop_from_julia_source() {
+        // Given: a counted while loop with mutable scalar locals.
+        let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";
+
+        // When: the loop executes in generated Wasm.
+        let value = compile_and_run_node(
+            source,
+            "triangular",
+            vec![StaticType::I64],
+            "const f = Object.values(instance.exports).find(v => typeof v === 'function' && v.length === 1 && v !== instance.exports.__sjulia_wasm_abi_version); console.log(f(9n).toString());",
+        );
+
+        // Then: repeated block dispatch produces the expected sum.
+        assert_eq!(value, "45");
+    }
+
+    #[test]
+    fn wasm_executes_direct_helper_call_from_julia_source() {
+        // Given: two typed Julia functions with a direct call edge.
+        let source = "twice(x::Int64) = x * 2\nplus_twice(x::Int64, y::Int64) = x + twice(y)";
+
+        // When: the caller is executed from Node.
+        let value = compile_and_run_node(
+            source,
+            "plus_twice",
+            vec![StaticType::I64, StaticType::I64],
+            "const f = Object.entries(instance.exports).find(([name, v]) => name.includes('plus_twice') && typeof v === 'function')[1]; console.log(f(4n, 19n).toString());",
+        );
+
+        // Then: direct Wasm call resolution preserves the helper result.
+        assert_eq!(value, "42");
+    }
+
+    #[test]
+    fn wasm_mutates_uint8_memory_through_versioned_descriptor() {
+        // Given: a generic UInt8 mutation loop using Julia's one-based indexing.
+        let source = "function increment!(bytes::Vector{UInt8})\ni = 1\nwhile i <= length(bytes)\nbytes[i] = UInt8(bytes[i] + 1)\ni = i + 1\nend\nreturn length(bytes)\nend";
+
+        // When: the host writes a v1 descriptor and invokes generated Wasm.
+        let value = compile_and_run_node(
+            source,
+            "increment!",
+            vec![StaticType::Array { element: Box::new(StaticType::U8), ndims: Some(1) }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 64; const input = new Uint8Array(memory.buffer, ptr, 4); input.set([1, 2, 254, 0]); view.setInt32(descriptor, 1, true); view.setInt32(descriptor + 4, ptr, true); view.setInt32(descriptor + 8, 4, true); view.setInt32(descriptor + 12, 1, true); view.setInt32(descriptor + 16, 1, true); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('increment') && typeof v === 'function')[1]; const len = f(descriptor); console.log(`${len}:${Array.from(input).join(',')}:${instance.exports.__sjulia_wasm_abi_version()}`);",
+        );
+
+        // Then: bytes mutate in place and ABI metadata remains observable.
+        assert_eq!(value, "4:2,3,255,1:1");
+    }
+
+    #[test]
+    fn wasm_rgba_loop_preserves_alpha() {
+        // Given: an RGBA loop expressed only through generic UInt8 indexing.
+        let source = "function invert_rgba!(bytes::Vector{UInt8})\ni = 1\nwhile i <= length(bytes)\nbytes[i] = UInt8(255 - bytes[i])\nbytes[i + 1] = UInt8(255 - bytes[i + 1])\nbytes[i + 2] = UInt8(255 - bytes[i + 2])\ni = i + 4\nend\nreturn length(bytes)\nend";
+
+        // When: generated Wasm mutates host-owned linear memory.
+        let value = compile_and_run_node(
+            source,
+            "invert_rgba!",
+            vec![StaticType::Array { element: Box::new(StaticType::U8), ndims: Some(1) }],
+            "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const descriptor = 32; const ptr = 64; const input = new Uint8Array(memory.buffer, ptr, 8); input.set([10, 20, 30, 40, 100, 150, 200, 250]); view.setInt32(descriptor, 1, true); view.setInt32(descriptor + 4, ptr, true); view.setInt32(descriptor + 8, 8, true); view.setInt32(descriptor + 12, 1, true); view.setInt32(descriptor + 16, 1, true); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('invert_rgba') && typeof v === 'function')[1]; f(descriptor); console.log(Array.from(input).join(','));",
+        );
+
+        // Then: RGB channels invert while both alpha bytes stay unchanged.
+        assert_eq!(value, "245,235,225,40,155,105,55,250");
+    }
+
+    #[test]
+    fn wasm_phi_edge_copies_are_parallel() {
+        // Given: a low-level edge with cyclic phi assignments a <- b and b <- a.
+        let mut function = IrFunction::new("phi_swap".to_string(), Vec::new(), StaticType::I64);
+        let a = VarRef::new("a".to_string(), StaticType::I64);
+        let b = VarRef::new("b".to_string(), StaticType::I64);
+        let ten = VarRef::new("ten".to_string(), StaticType::I64);
+        let scaled = VarRef::new("scaled".to_string(), StaticType::I64);
+        let result = VarRef::new("result".to_string(), StaticType::I64);
+        let entry = function
+            .entry_block_mut()
+            .expect("IR function has entry block");
+        entry.push(Instruction::LoadConst {
+            dest: a.clone(),
+            value: ConstValue::Int64(1),
+        });
+        entry.push(Instruction::LoadConst {
+            dest: b.clone(),
+            value: ConstValue::Int64(2),
+        });
+        entry.set_terminator(Terminator::Jump("join".to_string()));
+        let mut join = BasicBlock::new("join".to_string());
+        join.push(Instruction::Phi {
+            dest: a.clone(),
+            incoming: vec![("entry".to_string(), b.clone())],
+        });
+        join.push(Instruction::Phi {
+            dest: b.clone(),
+            incoming: vec![("entry".to_string(), a.clone())],
+        });
+        join.push(Instruction::LoadConst {
+            dest: ten.clone(),
+            value: ConstValue::Int64(10),
+        });
+        join.push(Instruction::BinOp {
+            dest: scaled.clone(),
+            op: BinOpKind::Mul,
+            left: a.clone(),
+            right: ten,
+        });
+        join.push(Instruction::BinOp {
+            dest: result.clone(),
+            op: BinOpKind::Add,
+            left: scaled,
+            right: b,
+        });
+        join.set_terminator(Terminator::Return(Some(result)));
+        function.add_block(join);
+        let mut module = IrModule::new("phi_swap".to_string());
+        module.add_function(function);
+
+        // When: the backend emits and Node executes the cyclic phi edge.
+        let bytes = emit_module(&module, &[]).expect("phi module should emit");
+        let value = run_wasm_bytes_node(
+            &bytes,
+            "console.log(instance.exports.phi_swap().toString());",
+        );
+
+        // Then: both reads observe predecessor values before either destination changes.
+        assert_eq!(value, "21");
+    }
+
+    #[test]
+    fn wasm_uint8_descriptor_rejects_malformed_host_ranges() {
+        // Given: a real Julia UInt8 reader and four malformed host descriptors.
+        let source = "first_byte(bytes::Vector{UInt8}) = bytes[1]";
+        let javascript = "const memory = instance.exports.memory; const view = new DataView(memory.buffer); const f = Object.entries(instance.exports).find(([name, v]) => name.includes('first_byte') && typeof v === 'function')[1]; const descriptor = 32; const cases = [[2, 64, 1, 1, 1], [1, 64, 1, 1, 2], [1, memory.buffer.byteLength - 1, 4, 1, 1], [1, 64, -1, 1, 1]]; let traps = 0; for (const [version, ptr, len, element, stride] of cases) { view.setInt32(descriptor, version, true); view.setInt32(descriptor + 4, ptr, true); view.setInt32(descriptor + 8, len, true); view.setInt32(descriptor + 12, element, true); view.setInt32(descriptor + 16, stride, true); try { f(descriptor); } catch (error) { if (error instanceof WebAssembly.RuntimeError) traps += 1; } } console.log(traps);";
+
+        // When: Node calls generated Wasm with each malformed descriptor.
+        let value = compile_and_run_node(
+            source,
+            "first_byte",
+            vec![StaticType::Array {
+                element: Box::new(StaticType::U8),
+                ndims: Some(1),
+            }],
+            javascript,
+        );
+
+        // Then: every malformed descriptor traps before a memory access succeeds.
+        assert_eq!(value, "4");
+    }
+
+    #[test]
+    fn wasm_rgba_node_benchmark_meets_warm_loop_gate() {
+        // Given: the same general RGBA Julia function compiled by the full pipeline.
+        let source = "function invert_rgba!(bytes::Vector{UInt8})\ni = 1\nwhile i <= length(bytes)\nbytes[i] = UInt8(255 - bytes[i])\nbytes[i + 1] = UInt8(255 - bytes[i + 1])\nbytes[i + 2] = UInt8(255 - bytes[i + 2])\ni = i + 4\nend\nreturn length(bytes)\nend";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "invert_rgba!",
+                "invert_rgba!",
+                vec![StaticType::Array {
+                    element: Box::new(StaticType::U8),
+                    ndims: Some(1),
+                }],
+            )],
+            ..CompileConfig::default()
+        };
+        let output =
+            compile_wasm_source(source, &config).expect("RGBA Wasm compilation should succeed");
+        let dir = tempfile::tempdir().expect("create benchmark directory");
+        let wasm_path = dir.path().join("rgba.wasm");
+        fs::write(&wasm_path, output.wasm_bytes).expect("write benchmark Wasm");
+
+        // When: Node benchmarks 20 warm 888x862 RGBA iterations.
+        let result = Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../benchmarks/wasm_aot_rgba.mjs"
+            ))
+            .arg(&wasm_path)
+            .output()
+            .expect("run Node RGBA benchmark");
+
+        // Then: Node enforces the latency gate and emits all requested phases.
+        assert!(
+            result.status.success(),
+            "RGBA benchmark must meet p95 <100ms\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let node_timings = String::from_utf8(result.stdout).expect("benchmark output is UTF-8");
+        assert!(node_timings.contains("compile_ms="));
+        assert!(node_timings.contains("instantiate_ms="));
+        assert!(node_timings.contains("median_ms="));
+        assert!(node_timings.contains("p95_ms="));
+        for (phase, duration) in output.timings {
+            eprintln!("{phase}_ms={:.3}", duration.as_secs_f64() * 1_000.0);
+        }
+        eprintln!("{}", node_timings.trim());
+    }
+}

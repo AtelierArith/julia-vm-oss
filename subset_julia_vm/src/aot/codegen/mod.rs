@@ -7,12 +7,16 @@
 //!
 //! - **Rust**: Generates Rust source code that can be compiled with `rustc`
 //! - **Cranelift** (optional): Generates native code directly using Cranelift JIT
+//! - **Wasm** (optional): Generates standalone core WebAssembly modules
 
 pub mod aot_codegen;
 pub mod ir_codegen;
 
 #[cfg(feature = "cranelift")]
 pub mod cranelift;
+
+#[cfg(feature = "aot-wasm")]
+pub mod wasm;
 
 use super::ir::{IrFunction, IrModule};
 use super::optimizer::OptLevel;

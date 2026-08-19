@@ -10,7 +10,7 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-wasm = ["dep:js-sys", "subset_julia_vm_vm/wasm"]
+wasm = ["dep:js-sys", "dep:wasm-bindgen", "subset_julia_vm_vm/wasm"]
 # `profiling` arms the per-instruction VM profiler (Issue #5090). When OFF (the
 # default for library/iOS/wasm builds), `profiler::record`/`record_event` compile
 # down to nothing, so the hot interpreter dispatch loop pays zero overhead. The
@@ -23,6 +23,7 @@ profiling = ["subset_julia_vm_compile/profiling", "subset_julia_vm_vm/profiling"
 vm-handler-table = ["subset_julia_vm_vm/vm-handler-table"]
 repl = ["dep:rustyline", "profiling"]
 aot = ["dep:subset_julia_vm_runtime", "dep:thiserror"]
+aot-wasm = ["aot", "wasm", "dep:wasm-encoder"]
 cranelift = ["aot", "dep:cranelift-codegen", "dep:cranelift-frontend", "dep:cranelift-module", "dep:cranelift-jit", "dep:cranelift-object", "dep:gimli", "dep:object", "dep:target-lexicon"]
 
 [dependencies]
@@ -39,10 +40,12 @@ sha2 = "0.10"
 once_cell = "1.19"
 toml = "0.9"
 js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 rustyline = { version = "17", optional = true }
 tempfile = { version = "3", optional = true }
 subset_julia_vm_runtime = { path = "../subset_julia_vm_runtime", optional = true }
 thiserror = { version = "1.0", optional = true }
+wasm-encoder = { version = "=0.244.0", optional = true }
 cranelift-codegen = { version = "0.115", optional = true }
 cranelift-frontend = { version = "0.115", optional = true }
 cranelift-module = { version = "0.115", optional = true }
