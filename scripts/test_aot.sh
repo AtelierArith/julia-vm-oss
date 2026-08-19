@@ -60,9 +60,9 @@ for arg in "$@"; do
   esac
 done
 
-echo "== [1/8] cargo nextest run --locked --release -p subset_julia_vm --features aot =="
+echo "== [1/8] cargo nextest run --locked --release -p subset_julia_vm --features aot-wasm =="
 # ${arr[@]+...} guards the empty-array expansion under `set -u` on bash 3.2 (macOS).
-timeout 1800 cargo nextest run --locked --release -p subset_julia_vm --features aot \
+timeout 1800 cargo nextest run --locked --release -p subset_julia_vm --features aot-wasm \
   --no-fail-fast ${NEXTEST_ARGS[@]+"${NEXTEST_ARGS[@]}"}
 
 echo "== [2/8] cargo build --locked --release -p subset_julia_vm --features aot --bin juliars =="
@@ -89,6 +89,7 @@ fi
 if [[ "$RUN_CLIPPY" -eq 1 ]]; then
   echo "== [7/8] registered AoT Clippy lane =="
   timeout 1800 bash "$ROOT/scripts/run_clippy_lanes.sh" aot
+  timeout 1800 bash "$ROOT/scripts/run_clippy_lanes.sh" aot-wasm
 
   echo "== [8/8] generated Rust cargo clippy =="
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/sjulia-aot-clippy.XXXXXX")"

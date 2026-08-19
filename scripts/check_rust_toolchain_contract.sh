@@ -58,18 +58,22 @@ lane	scope	features	command
 default	workspace	none	cargo clippy --locked --workspace --all-targets -- -D warnings
 repl	subset_julia_vm	repl	cargo clippy --locked -p subset_julia_vm --features repl --all-targets -- -D warnings
 aot	subset_julia_vm	aot	cargo clippy --locked -p subset_julia_vm --features aot --all-targets -- -D warnings
+aot-wasm	subset_julia_vm	aot,aot-wasm	cargo clippy --locked -p subset_julia_vm --features aot,aot-wasm --all-targets -- -D warnings
 aot-cranelift	subset_julia_vm	aot,cranelift	cargo clippy --locked -p subset_julia_vm --features aot,cranelift --all-targets -- -D warnings
 EOF
 bash scripts/run_clippy_lanes.sh --list > "$actual"
 if ! diff -u "$expected" "$actual"; then
-  fail "mandatory default/repl/aot/aot-cranelift lane enumeration changed"
+  fail "mandatory default/repl/aot/aot-wasm/aot-cranelift lane enumeration changed"
 fi
 
 grep -Fq 'bash scripts/run_clippy_lanes.sh default' scripts/premerge_gate.sh ||
   fail "premerge_gate.sh must invoke the registered 'default' Clippy lane"
 # shellcheck disable=SC2016  # Match the literal ROOT reference in the owner script.
-grep -Fq 'bash "$ROOT/scripts/run_clippy_lanes.sh" aot' scripts/test_aot.sh ||
+grep -Fxq '  timeout 1800 bash "$ROOT/scripts/run_clippy_lanes.sh" aot' scripts/test_aot.sh ||
   fail "test_aot.sh must invoke the registered 'aot' Clippy lane"
+# shellcheck disable=SC2016  # Match the literal ROOT reference in the owner script.
+grep -Fxq '  timeout 1800 bash "$ROOT/scripts/run_clippy_lanes.sh" aot-wasm' scripts/test_aot.sh ||
+  fail "test_aot.sh must invoke the registered 'aot-wasm' Clippy lane"
 # shellcheck disable=SC2016  # Match the literal temporary-project path.
 grep -Fq 'cargo clippy --manifest-path "$tmp_dir/Cargo.toml" -- -D warnings' scripts/test_aot.sh ||
   fail "test_aot.sh must retain the generated-Rust Clippy smoke lane"

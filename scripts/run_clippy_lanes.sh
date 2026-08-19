@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-LANES=(default repl aot aot-cranelift)
+LANES=(default repl aot aot-wasm aot-cranelift)
 CARGO_ARGS=()
 SCOPE=""
 FEATURES=""
@@ -26,6 +26,11 @@ configure_lane() {
       SCOPE="subset_julia_vm"
       FEATURES="aot"
       CARGO_ARGS=(clippy --locked -p subset_julia_vm --features aot --all-targets -- -D warnings)
+      ;;
+    aot-wasm)
+      SCOPE="subset_julia_vm"
+      FEATURES="aot,aot-wasm"
+      CARGO_ARGS=(clippy --locked -p subset_julia_vm --features "aot,aot-wasm" --all-targets -- -D warnings)
       ;;
     aot-cranelift)
       SCOPE="subset_julia_vm"
