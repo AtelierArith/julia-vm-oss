@@ -9,6 +9,16 @@
 
 ---
 
+## 最新対応 (2026-08-18)
+
+### Experimental general Wasm AoT backend
+
+`aot-wasm` は既存の parse/lower/inference/optimization と backend-neutral
+`IrModule` を再利用し、import のない standalone core Wasm を生成する。初期 subset
+は Int64/Float64/Bool、direct call、branch/loop、v1 UInt8 descriptor load/store。
+未対応 IR は diagnostic で拒否し fallback しない。Node E2E と RGBA 888×862
+20-iteration benchmark の詳細は `COMPILER_SPIKE.md`。
+
 ## 最新対応 (2026-07-20)
 
 ### Windows の既定 LOAD_PATH 修正 (Issue #11800)
