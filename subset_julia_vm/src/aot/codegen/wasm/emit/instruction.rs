@@ -10,9 +10,10 @@ use super::descriptor::{
     emit_descriptor_validation, emit_i64_load, DescriptorAccess, DescriptorContext,
 };
 use super::locals::LocalLayout;
-use super::math::{emit_math_builtin, emit_pow};
+use super::math::emit_math_builtin;
 use super::memory::{emit_u8_address, memarg};
 use super::ops::{emit_binop, emit_const, emit_conversion, emit_unary, get, normalize_u8, set};
+use super::transcendental::emit_pow;
 
 pub(super) fn emit_instruction(
     body: &mut Function,

@@ -8,9 +8,10 @@ mod drop;
 mod free;
 mod instruction;
 mod locals;
-mod memory;
 mod math;
+mod memory;
 mod ops;
+mod transcendental;
 
 use std::collections::HashMap;
 
