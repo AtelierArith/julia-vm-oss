@@ -6,9 +6,12 @@ use super::super::types::unsupported;
 
 pub(super) fn ensure_type(ty: &StaticType) -> AotResult<()> {
     match ty {
-        StaticType::I64 | StaticType::I32 | StaticType::F64 | StaticType::Bool | StaticType::U8 => {
-            Ok(())
-        }
+        StaticType::I64
+        | StaticType::I32
+        | StaticType::F32
+        | StaticType::F64
+        | StaticType::Bool
+        | StaticType::U8 => Ok(()),
         StaticType::Array {
             element,
             ndims: Some(rank),

@@ -18,6 +18,9 @@ impl Lowerer<'_> {
             AotExpr::LitF64(value) => {
                 self.constant(ConstValue::Float64(*value), StaticType::F64, function)
             }
+            AotExpr::LitF32(value) => {
+                self.constant(ConstValue::Float32(*value), StaticType::F32, function)
+            }
             AotExpr::LitBool(value) => {
                 self.constant(ConstValue::Bool(*value), StaticType::Bool, function)
             }
@@ -119,6 +122,7 @@ impl Lowerer<'_> {
                     StaticType::U8
                         | StaticType::I64
                         | StaticType::I32
+                        | StaticType::F32
                         | StaticType::F64
                         | StaticType::Bool
                 ) =>
