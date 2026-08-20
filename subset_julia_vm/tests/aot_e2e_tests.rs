@@ -7385,6 +7385,45 @@ console.log(JSON.stringify({
     }
 
     #[test]
+    fn wasm_import_free_exp_log_match_julia_scalar_matrix() {
+        // Given: direct and composed exp/log functions for both floating widths.
+        let source = "f64_exp(x::Float64)::Float64 = exp(x)\nf64_log(x::Float64)::Float64 = log(x)\nf64_roundtrip(x::Float64)::Float64 = exp(log(x))\nf32_exp(x::Float32)::Float32 = exp(x)\nf32_log(x::Float32)::Float32 = log(x)";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types("f64_exp", "f64_exp", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f64_log", "f64_log", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f64_roundtrip", "f64_roundtrip", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f32_exp", "f32_exp", vec![StaticType::F32]),
+                CAbiExport::with_arg_types("f32_log", "f32_log", vec![StaticType::F32]),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: Node executes representative values, boundaries, and invalid domains.
+        let output = compile_wasm_source(source, &config).expect("exp/log should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const close = (actual, expected, tolerance) => Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected));
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  f64: [close(e.f64_exp(-20), Math.exp(-20), 1e-12), close(e.f64_exp(0), 1, 1e-12), close(e.f64_exp(20), Math.exp(20), 1e-12), close(e.f64_log(Number.MIN_VALUE), Math.log(Number.MIN_VALUE), 1e-12), close(e.f64_log(1), 0, 1e-12), close(e.f64_log(Number.MAX_VALUE), Math.log(Number.MAX_VALUE), 1e-12), close(e.f64_roundtrip(0.125), 0.125, 1e-12), traps(() => e.f64_log(-1))],
+  f32: [close(e.f32_exp(-10), Math.exp(-10), 1e-5), close(e.f32_exp(10), Math.exp(10), 1e-5), close(e.f32_log(0.125), Math.log(0.125), 1e-5), close(e.f32_log(3.4028234663852886e38), Math.log(3.4028234663852886e38), 1e-5), traps(() => e.f32_log(-1))],
+}));
+"#,
+        );
+
+        // Then: generated approximations remain import-free within manifest tolerances.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"f64":[true,true,true,true,true,true,true,true],"f32":[true,true,true,true,true]}"#
+        );
+    }
+
+    #[test]
     fn wasm_executes_counted_loop_from_julia_source() {
         // Given: a counted while loop with mutable scalar locals.
         let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";

@@ -108,6 +108,8 @@ impl Lowerer<'_> {
                     | AotBuiltinOp::Trunc
                     | AotBuiltinOp::Round
                     | AotBuiltinOp::Sqrt
+                    | AotBuiltinOp::Exp
+                    | AotBuiltinOp::Log
                     | AotBuiltinOp::Min
                     | AotBuiltinOp::Max
                     | AotBuiltinOp::Clamp

@@ -402,11 +402,9 @@ impl AotBuiltinOp {
             | AotBuiltinOp::Asin
             | AotBuiltinOp::Acos
             | AotBuiltinOp::Atan
-            | AotBuiltinOp::Atan2
-            | AotBuiltinOp::Exp
-            | AotBuiltinOp::Log => StaticType::F64,
+            | AotBuiltinOp::Atan2 => StaticType::F64,
 
-            AotBuiltinOp::Sqrt => match arg_types.first() {
+            AotBuiltinOp::Sqrt | AotBuiltinOp::Exp | AotBuiltinOp::Log => match arg_types.first() {
                 Some(StaticType::F32) => StaticType::F32,
                 _ => StaticType::F64,
             },

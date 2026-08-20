@@ -66,7 +66,7 @@ pub(super) fn emit_instruction(
             set(body, locals, dest)?;
         }
         Instruction::Builtin { dest, op, args } => {
-            emit_math_builtin(body, *op, args, locals)?;
+            emit_math_builtin(body, *op, args, locals, &layout.math)?;
             set(body, locals, dest)?;
         }
         Instruction::Call { dest, func, args } if func == "__sjulia_u8_len" => {

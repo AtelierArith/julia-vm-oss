@@ -99,6 +99,19 @@ fn emit_log(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::If(BlockType::Empty));
     body.instruction(&W::Unreachable);
     body.instruction(&W::End);
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::LocalSet(scratch.factor));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(f64::MIN_POSITIVE.into()));
+    body.instruction(&W::F64Lt);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(4_503_599_627_370_496.0.into()));
+    body.instruction(&W::F64Mul);
+    body.instruction(&W::LocalSet(scratch.x));
+    body.instruction(&W::F64Const((-52.0).into()));
+    body.instruction(&W::LocalSet(scratch.factor));
+    body.instruction(&W::End);
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::I64ReinterpretF64);
     body.instruction(&W::I64Const(52));
@@ -108,6 +121,8 @@ fn emit_log(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::I64Const(1023));
     body.instruction(&W::I64Sub);
     body.instruction(&W::F64ConvertI64S);
+    body.instruction(&W::LocalGet(scratch.factor));
+    body.instruction(&W::F64Add);
     body.instruction(&W::F64Const(LN_2.into()));
     body.instruction(&W::F64Mul);
     body.instruction(&W::LocalSet(scratch.sum));
@@ -190,6 +205,7 @@ pub(super) fn emit_math_builtin(
     op: AotBuiltinOp,
     args: &[VarRef],
     locals: &HashMap<String, u32>,
+    scratch: &MathLocals,
 ) -> AotResult<()> {
     let ty = args.first().map(|arg| &arg.ty).ok_or_else(|| {
         unsupported(format!("Wasm scalar builtin `{op}` requires an argument"))
@@ -201,6 +217,8 @@ pub(super) fn emit_math_builtin(
         | AotBuiltinOp::Trunc
         | AotBuiltinOp::Round => emit_native_unary(body, op, &args[0], locals),
         AotBuiltinOp::Sqrt => emit_sqrt(body, &args[0], locals),
+        AotBuiltinOp::Exp => emit_exp_builtin(body, &args[0], locals, scratch),
+        AotBuiltinOp::Log => emit_log_builtin(body, &args[0], locals, scratch),
         AotBuiltinOp::Min | AotBuiltinOp::Max => {
             emit_native_binary(body, op, args, locals)
         }
@@ -213,6 +231,36 @@ pub(super) fn emit_math_builtin(
             ty.julia_type_name()
         ))),
     }
+}
+
+fn emit_exp_builtin(
+    body: &mut Function,
+    arg: &VarRef,
+    locals: &HashMap<String, u32>,
+    scratch: &MathLocals,
+) -> AotResult<()> {
+    get_as_f64(body, arg, locals)?;
+    body.instruction(&W::LocalSet(scratch.x));
+    emit_exp(body, scratch);
+    if arg.ty == StaticType::F32 {
+        body.instruction(&W::F32DemoteF64);
+    }
+    Ok(())
+}
+
+fn emit_log_builtin(
+    body: &mut Function,
+    arg: &VarRef,
+    locals: &HashMap<String, u32>,
+    scratch: &MathLocals,
+) -> AotResult<()> {
+    get_as_f64(body, arg, locals)?;
+    body.instruction(&W::LocalSet(scratch.x));
+    emit_log(body, scratch);
+    if arg.ty == StaticType::F32 {
+        body.instruction(&W::F32DemoteF64);
+    }
+    Ok(())
 }
 
 fn emit_native_unary(
