@@ -2018,6 +2018,7 @@ impl CraneliftAotLowerer {
         self.current_block_mut(func)?
             .push(ir::Instruction::StructNew {
                 dest: dest.clone(),
+                layout_id: 0,
                 size: layout.size,
                 align: layout.align,
                 fields: inits,
@@ -2045,6 +2046,7 @@ impl CraneliftAotLowerer {
             .push(ir::Instruction::GetFieldOffset {
                 dest: dest.clone(),
                 object,
+                layout_id: 0,
                 offset: layout_field.offset as i32,
             });
         Ok(dest)
@@ -2072,6 +2074,7 @@ impl CraneliftAotLowerer {
             .push(ir::Instruction::GetFieldOffset {
                 dest: dest.clone(),
                 object,
+                layout_id: 0,
                 offset: layout_field.offset as i32,
             });
         Ok(dest)
@@ -2250,6 +2253,7 @@ impl CraneliftAotLowerer {
         self.current_block_mut(func)?
             .push(ir::Instruction::StructNew {
                 dest: dest.clone(),
+                layout_id: 0,
                 size: layout.size,
                 align: layout.align,
                 fields: vec![

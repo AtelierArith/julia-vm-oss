@@ -78,6 +78,7 @@ pub enum Instruction {
     /// Stack-allocated isbits struct construction.
     StructNew {
         dest: VarRef,
+        layout_id: u32,
         size: u32,
         align: u8,
         fields: Vec<StructFieldInit>,
@@ -104,6 +105,7 @@ pub enum Instruction {
     GetFieldOffset {
         dest: VarRef,
         object: VarRef,
+        layout_id: u32,
         offset: i32,
     },
     /// Field mutation
@@ -135,6 +137,21 @@ pub enum Instruction {
 pub struct StructFieldInit {
     pub offset: i32,
     pub value: VarRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AggregateLayout {
+    pub id: u32,
+    pub size: u32,
+    pub align: u8,
+    pub fields: Vec<AggregateField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AggregateField {
+    pub offset: u32,
+    pub ty: StaticType,
+    pub layout_id: u32,
 }
 
 /// Block terminator instruction
@@ -320,6 +337,7 @@ pub struct IrModule {
     pub name: String,
     /// Functions in this module
     pub functions: Vec<IrFunction>,
+    pub layouts: Vec<AggregateLayout>,
 }
 
 impl IrModule {
@@ -328,6 +346,7 @@ impl IrModule {
         Self {
             name,
             functions: Vec::new(),
+            layouts: Vec::new(),
         }
     }
 

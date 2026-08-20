@@ -19,7 +19,7 @@ pub use aot_types::{
     DynamicOpDiagnostic,
 };
 pub use basic_types::{
-    BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction, IrModule, StructFieldInit,
-    Terminator, UnaryOpKind, VarRef,
+    AggregateField, AggregateLayout, BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction,
+    IrModule, StructFieldInit, Terminator, UnaryOpKind, VarRef,
 };
 pub use ops::{AotBinOp, AotBuiltinOp, AotUnaryOp, CompoundAssignOp};

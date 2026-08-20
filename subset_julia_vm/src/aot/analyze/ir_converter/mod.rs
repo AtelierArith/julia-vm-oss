@@ -571,7 +571,7 @@ impl<'a> IrConverter<'a> {
                 StaticType::F64
             } else if let Some(type_expr) = &field.type_expr {
                 match type_expr {
-                    TypeExpr::Concrete(jt) => self.julia_type_to_static(jt),
+                    TypeExpr::Concrete(jt) => StaticType::from(jt),
                     TypeExpr::TypeVar(name)
                         if struct_def
                             .type_params

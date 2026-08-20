@@ -231,6 +231,7 @@ impl RustCodeGenerator {
             }
             Instruction::StructNew {
                 dest,
+                layout_id: _,
                 size,
                 align,
                 fields,
@@ -295,6 +296,7 @@ impl RustCodeGenerator {
             Instruction::GetFieldOffset {
                 dest,
                 object,
+                layout_id: _,
                 offset,
             } => {
                 let dest_name = self.var_to_rust(dest);
