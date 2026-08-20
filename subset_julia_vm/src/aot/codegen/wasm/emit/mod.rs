@@ -1,3 +1,4 @@
+mod aggregate;
 mod allocator;
 mod control;
 mod conversion;

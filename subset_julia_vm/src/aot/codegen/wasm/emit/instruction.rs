@@ -120,6 +120,17 @@ pub(super) fn emit_instruction(
             get(body, locals, value)?;
             body.instruction(&W::I32Store8(memarg(0)));
         }
+        Instruction::StructNew { .. } => {
+            super::aggregate::emit_new(body, instruction, locals, functions)?;
+        }
+        Instruction::GetFieldOffset {
+            dest,
+            object,
+            layout_id,
+            offset,
+        } => {
+            super::aggregate::emit_get(body, dest, object, *layout_id, *offset, locals)?;
+        }
         Instruction::Phi { .. } => {}
         other => {
             return Err(unsupported(format!(
