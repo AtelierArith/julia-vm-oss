@@ -6,7 +6,6 @@ use super::memory::memarg;
 pub(super) const ALLOC_NAME: &str = "__sjulia_alloc";
 pub(super) const FREE_NAME: &str = "__sjulia_free";
 pub(super) const DROP_NAME: &str = "__sjulia_drop";
-pub(super) const HEAP_BASE: i32 = 4_096;
 pub(super) const MAX_MEMORY_PAGES: u64 = 256;
 
 const HEADER_SIZE: i32 = 32;
@@ -32,16 +31,16 @@ pub(super) fn heap_global_type() -> GlobalType {
     }
 }
 
-pub(super) fn emit_alloc(heap_global: u32) -> Function {
+pub(super) fn emit_alloc(heap_global: u32, heap_base: i32) -> Function {
     let mut body = Function::new([(6, ValType::I64), (3, ValType::I32)]);
-    validate_request(&mut body);
+    validate_request(&mut body, heap_base);
     body.instruction(&W::LocalGet(0));
     body.instruction(&W::I64Eqz);
     body.instruction(&W::If(BlockType::Empty));
     body.instruction(&W::I32Const(0));
     body.instruction(&W::Return);
     body.instruction(&W::End);
-    body.instruction(&W::I64Const(i64::from(HEAP_BASE)));
+    body.instruction(&W::I64Const(i64::from(heap_base)));
     body.instruction(&W::LocalSet(2));
     body.instruction(&W::Block(BlockType::Empty));
     body.instruction(&W::Loop(BlockType::Empty));
@@ -133,12 +132,12 @@ pub(super) fn emit_alloc(heap_global: u32) -> Function {
     body
 }
 
-fn validate_request(body: &mut Function) {
+fn validate_request(body: &mut Function, heap_base: i32) {
     body.instruction(&W::LocalGet(0));
     body.instruction(&W::I64Const(0));
     trap_if(body, W::I64LtS);
     body.instruction(&W::LocalGet(0));
-    body.instruction(&W::I64Const(i64::from(u32::MAX - HEAP_BASE as u32)));
+    body.instruction(&W::I64Const(i64::from(u32::MAX - heap_base as u32)));
     trap_if(body, W::I64GtU);
     body.instruction(&W::LocalGet(1));
     body.instruction(&W::I32Const(1));

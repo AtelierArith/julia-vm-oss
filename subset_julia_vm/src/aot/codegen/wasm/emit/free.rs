@@ -1,15 +1,15 @@
 use wasm_encoder::{BlockType, Function, Instruction as W, ValType};
 
-use super::allocator::{load_header_end, validate_header_magic, HEAP_BASE};
+use super::allocator::{load_header_end, validate_header_magic};
 use super::descriptor::{trap_if, trap_on_stack};
 use super::memory::memarg;
 
-pub(super) fn emit_free(heap_global: u32) -> Function {
+pub(super) fn emit_free(heap_global: u32, heap_base: i32) -> Function {
     let mut body = Function::new([(2, ValType::I64)]);
     body.instruction(&W::LocalGet(0));
     body.instruction(&W::I32Eqz);
     trap_on_stack(&mut body);
-    body.instruction(&W::I64Const(i64::from(HEAP_BASE)));
+    body.instruction(&W::I64Const(i64::from(heap_base)));
     body.instruction(&W::LocalSet(1));
     body.instruction(&W::Block(BlockType::Empty));
     body.instruction(&W::Loop(BlockType::Empty));

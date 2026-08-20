@@ -13,6 +13,7 @@ use super::locals::LocalLayout;
 use super::math::emit_math_builtin;
 use super::memory::{emit_u8_address, memarg};
 use super::ops::{emit_binop, emit_const, emit_conversion, emit_unary, get, normalize_u8, set};
+use super::strings::StaticStrings;
 use super::transcendental::emit_pow;
 
 pub(super) fn emit_instruction(
@@ -20,11 +21,12 @@ pub(super) fn emit_instruction(
     instruction: &Instruction,
     layout: &LocalLayout,
     functions: &HashMap<String, u32>,
+    strings: &StaticStrings,
 ) -> AotResult<()> {
     let locals = &layout.locals;
     match instruction {
         Instruction::LoadConst { dest, value } => {
-            emit_const(body, value)?;
+            emit_const(body, value, strings)?;
             set(body, locals, dest)?;
         }
         Instruction::Copy { dest, src } => {

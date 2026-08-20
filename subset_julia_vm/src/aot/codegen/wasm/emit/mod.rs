@@ -11,6 +11,7 @@ mod locals;
 mod math;
 mod memory;
 mod ops;
+mod strings;
 mod transcendental;
 mod transcendental_approx;
 
@@ -44,6 +45,7 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     let mut functions = FunctionSection::new();
     let mut exports = ExportSection::new();
     let mut code = CodeSection::new();
+    let strings = strings::StaticStrings::collect(ir)?;
     let function_indices = function_indices(ir)?;
     for (index, function) in ir.functions.iter().enumerate() {
         let params = function
@@ -57,7 +59,7 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         let index = u32::try_from(index)
             .map_err(|_| AotError::CodegenError("too many Wasm functions".to_string()))?;
         functions.function(index);
-        code.function(&emit_function(function, &function_indices)?);
+        code.function(&emit_function(function, &function_indices, &strings)?);
     }
     let alloc_index = u32::try_from(ir.functions.len())
         .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
@@ -88,7 +90,7 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     let mut globals = GlobalSection::new();
     globals.global(
         allocator::heap_global_type(),
-        &ConstExpr::i32_const(allocator::HEAP_BASE),
+        &ConstExpr::i32_const(strings.heap_base()),
     );
     module.section(&globals);
     emit_function_exports(&mut exports, ir, requested_exports, &function_indices)?;
@@ -98,14 +100,17 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     exports.export(allocator::DROP_NAME, ExportKind::Func, drop_index);
     exports.export("__sjulia_wasm_abi_version", ExportKind::Func, abi_index);
     module.section(&exports);
-    code.function(&allocator::emit_alloc(0));
-    code.function(&free::emit_free(0));
+    code.function(&allocator::emit_alloc(0, strings.heap_base()));
+    code.function(&free::emit_free(0, strings.heap_base()));
     code.function(&drop::emit_drop(free_index));
     let mut abi = Function::new([]);
     abi.instruction(&W::I32Const(ABI_VERSION));
     abi.instruction(&W::End);
     code.function(&abi);
     module.section(&code);
+    if let Some(data) = strings.data_section() {
+        module.section(&data);
+    }
     Ok(module.finish())
 }
 
@@ -188,7 +193,11 @@ fn emit_function_exports(
     Ok(())
 }
 
-fn emit_function(function: &IrFunction, functions: &HashMap<String, u32>) -> AotResult<Function> {
+fn emit_function(
+    function: &IrFunction,
+    functions: &HashMap<String, u32>,
+    strings: &strings::StaticStrings,
+) -> AotResult<Function> {
     let layout = build_local_layout(function)?;
     let block_indices: HashMap<_, _> = function
         .blocks
@@ -213,6 +222,7 @@ fn emit_function(function: &IrFunction, functions: &HashMap<String, u32>) -> Aot
             &block_indices,
             &phi_edges,
             &layout,
+            strings,
         )?;
     }
     body.instruction(&W::Unreachable);
@@ -230,6 +240,7 @@ fn emit_dispatch_block(
     blocks: &HashMap<String, i32>,
     phi_edges: &PhiEdges,
     layout: &LocalLayout,
+    strings: &strings::StaticStrings,
 ) -> AotResult<()> {
     body.instruction(&W::Block(BlockType::Empty));
     body.instruction(&W::LocalGet(layout.pc));
@@ -237,7 +248,7 @@ fn emit_dispatch_block(
     body.instruction(&W::I32Ne);
     body.instruction(&W::BrIf(0));
     for instruction in &block.instructions {
-        emit_instruction(body, instruction, layout, functions)?;
+        emit_instruction(body, instruction, layout, functions, strings)?;
     }
     let terminator = block.terminator.as_ref().ok_or_else(|| {
         AotError::InvalidIR(format!("Wasm IR block `{}` has no terminator", block.label))

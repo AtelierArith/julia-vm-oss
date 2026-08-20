@@ -77,7 +77,9 @@ pub(super) fn value_type(ty: &StaticType) -> AotResult<Option<ValType>> {
         StaticType::I64 => Ok(Some(ValType::I64)),
         StaticType::F32 => Ok(Some(ValType::F32)),
         StaticType::F64 => Ok(Some(ValType::F64)),
-        StaticType::I32 | StaticType::Bool | StaticType::U8 => Ok(Some(ValType::I32)),
+        StaticType::I32 | StaticType::Bool | StaticType::U8 | StaticType::Str => {
+            Ok(Some(ValType::I32))
+        }
         StaticType::Array {
             element,
             ndims: Some(rank),

@@ -35,13 +35,18 @@ pub(super) fn set(
     Ok(())
 }
 
-pub(super) fn emit_const(body: &mut Function, value: &ConstValue) -> AotResult<()> {
+pub(super) fn emit_const(
+    body: &mut Function,
+    value: &ConstValue,
+    strings: &super::strings::StaticStrings,
+) -> AotResult<()> {
     match value {
         ConstValue::Int64(value) => body.instruction(&W::I64Const(*value)),
         ConstValue::Int32(value) => body.instruction(&W::I32Const(*value)),
         ConstValue::Float32(value) => body.instruction(&W::F32Const((*value).into())),
         ConstValue::Float64(value) => body.instruction(&W::F64Const((*value).into())),
         ConstValue::Bool(value) => body.instruction(&W::I32Const(i32::from(*value))),
+        ConstValue::String(value) => body.instruction(&W::I32Const(strings.descriptor(value)?)),
         other => {
             return Err(unsupported(format!(
                 "Wasm AoT cannot emit constant `{other:?}`"
