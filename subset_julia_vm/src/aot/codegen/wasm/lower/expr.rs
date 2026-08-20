@@ -1,6 +1,4 @@
-use crate::aot::ir::{
-    AotBuiltinOp, AotExpr, ConstValue, Instruction, IrFunction, StructFieldInit, VarRef,
-};
+use crate::aot::ir::{AotBuiltinOp, AotExpr, ConstValue, Instruction, IrFunction, VarRef};
 use crate::aot::types::StaticType;
 use crate::aot::AotResult;
 
@@ -175,32 +173,7 @@ impl Lowerer<'_, '_> {
                 indices,
                 elem_ty,
                 is_tuple: true,
-            } => {
-                let [AotExpr::LitI64(index)] = indices.as_slice() else {
-                    return Err(unsupported("Wasm tuple indexing requires a constant index"));
-                };
-                let aggregate_ty = array.get_type();
-                let layout = self.layouts.layout(&aggregate_ty)?;
-                let zero_based = usize::try_from(*index - 1)
-                    .map_err(|_| unsupported("Wasm tuple index is out of bounds"))?;
-                let field = layout
-                    .fields
-                    .get(zero_based)
-                    .ok_or_else(|| unsupported("Wasm tuple index is out of bounds"))?;
-                let offset = i32::try_from(field.offset)
-                    .map_err(|_| unsupported("Wasm aggregate field offset overflow"))?;
-                let layout_id = layout.id;
-                let object = self.expr(array, function)?;
-                let dest = self.temporary(elem_ty.clone());
-                self.current_block_mut(function)?
-                    .push(Instruction::GetFieldOffset {
-                        dest: dest.clone(),
-                        object,
-                        layout_id,
-                        offset,
-                    });
-                Ok(dest)
-            }
+            } => self.tuple_index(array, indices, elem_ty, function),
             AotExpr::TupleLit { elements } => {
                 let ty = expr.get_type();
                 self.aggregate(ty, elements, function)
@@ -217,21 +190,7 @@ impl Lowerer<'_, '_> {
                 object,
                 field,
                 field_ty,
-            } => {
-                let object_ty = object.get_type();
-                let (layout_id, offset) = self.layouts.field(&object_ty, field)?;
-                let object = self.expr(object, function)?;
-                let dest = self.temporary(field_ty.clone());
-                self.current_block_mut(function)?
-                    .push(Instruction::GetFieldOffset {
-                        dest: dest.clone(),
-                        object,
-                        layout_id,
-                        offset: i32::try_from(offset)
-                            .map_err(|_| unsupported("Wasm aggregate field offset overflow"))?,
-                    });
-                Ok(dest)
-            }
+            } => self.field_access(object, field, field_ty, function),
             AotExpr::Convert { value, target_ty }
                 if value.get_type() == *target_ty && *target_ty == StaticType::Str =>
             {
@@ -273,39 +232,6 @@ impl Lowerer<'_, '_> {
             .push(Instruction::LoadConst {
                 dest: dest.clone(),
                 value,
-            });
-        Ok(dest)
-    }
-
-    fn aggregate(
-        &mut self,
-        ty: StaticType,
-        values: &[AotExpr],
-        function: &mut IrFunction,
-    ) -> AotResult<VarRef> {
-        let layout = self.layouts.layout(&ty)?.clone();
-        if layout.fields.len() != values.len() {
-            return Err(unsupported("Wasm aggregate constructor arity mismatch"));
-        }
-        let fields = values
-            .iter()
-            .zip(&layout.fields)
-            .map(|(value, field)| {
-                Ok(StructFieldInit {
-                    offset: i32::try_from(field.offset)
-                        .map_err(|_| unsupported("Wasm aggregate field offset overflow"))?,
-                    value: self.expr(value, function)?,
-                })
-            })
-            .collect::<AotResult<Vec<_>>>()?;
-        let dest = self.temporary(ty);
-        self.current_block_mut(function)?
-            .push(Instruction::StructNew {
-                dest: dest.clone(),
-                layout_id: layout.id,
-                size: layout.size,
-                align: layout.align,
-                fields,
             });
         Ok(dest)
     }

@@ -1,3 +1,4 @@
+mod aggregate;
 mod control;
 mod expr;
 mod ops;
