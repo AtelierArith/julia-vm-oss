@@ -36,7 +36,7 @@ use subset_julia_vm::parser::{ParseOutcome, Parser, RustParsedSource};
 use subset_julia_vm::span::Span;
 
 #[cfg(feature = "aot-wasm")]
-#[path = "aot_wasm.rs"]
+#[path = "../aot_wasm_cli.rs"]
 mod aot_wasm;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
