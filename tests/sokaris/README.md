@@ -98,5 +98,6 @@ The initial `glyph-apply` executable fixture proves harness mechanics through an
 already-supported scalar compiler path and records `mechanics_passed`; it does
 not advance the coverage row from `planned` or claim that the generic closure
 body compiled. `glyph-compose` proves Julia-first ordering followed by a typed
-planned compiler diagnostic. Later parity Todos replace pending fixtures and
-add descriptor ABI v2 result decoding without changing the harness protocol.
+planned compiler diagnostic. The checked package and compiler result must both
+report generated-module ABI v2. Aggregate result decoding remains deferred to
+later parity Todos without changing the harness protocol.

@@ -214,6 +214,12 @@ async function runJulia(row, fixture, runChildImpl, timeoutMs, signal) {
 
 async function validateCompilerArtifact() {
   const manifest = JSON.parse(await readFile(artifactManifestPath, "utf8"));
+  if (manifest.compiler_abi_version !== 2) {
+    throw new HarnessError("compiler_abi_mismatch", `artifact manifest pins ABI ${manifest.compiler_abi_version}; generated-module ABI 2 is required`);
+  }
+  if (typeof manifest.source_commit !== "string" || !/^[0-9a-f]{40}$/u.test(manifest.source_commit)) {
+    throw new HarnessError("compiler_source_commit_invalid", "artifact manifest must pin the 40-character source commit used for the build");
+  }
   let compilerBytes;
   let compilerSource;
   for (const [name, path] of [["subset_julia_vm_web.js", compilerJavaScriptPath], ["subset_julia_vm_web_bg.wasm", compilerWasmPath]]) {
