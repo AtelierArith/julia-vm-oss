@@ -7170,6 +7170,57 @@ console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reus
     }
 
     #[test]
+    fn wasm_preserves_float32_constant_return_and_direct_call() {
+        // Given: Float32 constants flowing through a direct helper call.
+        let source = "f32_twice(x::Float32)::Float32 = x + x\nf32_constant()::Float32 = f32_twice(Float32(-0.0))";
+
+        // When: Node observes the exported scalar through its exact f32 bits.
+        let value = compile_and_run_node(
+            source,
+            "f32_constant",
+            Vec::new(),
+            "const bits = new Uint32Array(new Float32Array([instance.exports.f32_constant()]).buffer)[0]; console.log(bits.toString(16).padStart(8, '0'));",
+        );
+
+        // Then: Float32 is neither widened nor stripped of its signed zero.
+        assert_eq!(value, "80000000");
+    }
+
+    #[test]
+    fn wasm_float32_native_operations_match_boundary_matrix() {
+        // Given: Float32 arithmetic, unary negation, ordered comparisons, and overflow.
+        let source = "function f32_ops(x::Float32, y::Float32)::Float32\nif x != x\nreturn x\nelseif x < y\nreturn -(x * y)\nelse\nreturn x / y\nend\nend";
+
+        // When: Node drives finite values, signed zero, infinities, and distinct NaNs.
+        let value = compile_and_run_node(
+            source,
+            "f32_ops",
+            vec![StaticType::F32, StaticType::F32],
+            r#"
+const f = instance.exports.f32_ops;
+const fromBits = bits => new Float32Array(new Uint32Array([bits]).buffer)[0];
+const bits = value => new Uint32Array(new Float32Array([value]).buffer)[0].toString(16).padStart(8, "0");
+const values = [
+  bits(f(2, 0.5)),
+  bits(f(-0, -0)),
+  bits(f(3.4028234663852886e38, 0.5)),
+  bits(f(fromBits(1), 2)),
+  Number.isNaN(f(fromBits(0x7fc00001), 1)),
+  Number.isNaN(f(fromBits(0xffc12345), 1)),
+  f(-Infinity, Infinity) === Infinity,
+];
+console.log(JSON.stringify(values));
+"#,
+        );
+
+        // Then: native Wasm f32 behavior agrees with Julia's Float32 contract.
+        assert_eq!(
+            value,
+            r#"["40800000","7fc00000","7f800000","80000002",true,true,true]"#
+        );
+    }
+
+    #[test]
     fn wasm_executes_counted_loop_from_julia_source() {
         // Given: a counted while loop with mutable scalar locals.
         let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";

@@ -39,6 +39,7 @@ pub(super) fn emit_const(body: &mut Function, value: &ConstValue) -> AotResult<(
     match value {
         ConstValue::Int64(value) => body.instruction(&W::I64Const(*value)),
         ConstValue::Int32(value) => body.instruction(&W::I32Const(*value)),
+        ConstValue::Float32(value) => body.instruction(&W::F32Const((*value).into())),
         ConstValue::Float64(value) => body.instruction(&W::F64Const((*value).into())),
         ConstValue::Bool(value) => body.instruction(&W::I32Const(i32::from(*value))),
         other => {
@@ -122,6 +123,16 @@ pub(super) fn emit_binop(body: &mut Function, op: BinOpKind, ty: &StaticType) ->
         (StaticType::F64, BinOpKind::Le) => W::F64Le,
         (StaticType::F64, BinOpKind::Gt) => W::F64Gt,
         (StaticType::F64, BinOpKind::Ge) => W::F64Ge,
+        (StaticType::F32, BinOpKind::Add) => W::F32Add,
+        (StaticType::F32, BinOpKind::Sub) => W::F32Sub,
+        (StaticType::F32, BinOpKind::Mul) => W::F32Mul,
+        (StaticType::F32, BinOpKind::Div) => W::F32Div,
+        (StaticType::F32, BinOpKind::Eq) => W::F32Eq,
+        (StaticType::F32, BinOpKind::Ne) => W::F32Ne,
+        (StaticType::F32, BinOpKind::Lt) => W::F32Lt,
+        (StaticType::F32, BinOpKind::Le) => W::F32Le,
+        (StaticType::F32, BinOpKind::Gt) => W::F32Gt,
+        (StaticType::F32, BinOpKind::Ge) => W::F32Ge,
         (StaticType::Bool, BinOpKind::And) => W::I32And,
         (StaticType::Bool, BinOpKind::Or) => W::I32Or,
         (StaticType::I32 | StaticType::U8, BinOpKind::Add) => W::I32Add,
@@ -173,6 +184,10 @@ pub(super) fn emit_unary(
         (StaticType::F64, UnaryOpKind::Neg) => {
             get(body, locals, operand)?;
             body.instruction(&W::F64Neg);
+        }
+        (StaticType::F32, UnaryOpKind::Neg) => {
+            get(body, locals, operand)?;
+            body.instruction(&W::F32Neg);
         }
         (StaticType::Bool, UnaryOpKind::Not) => {
             get(body, locals, operand)?;
