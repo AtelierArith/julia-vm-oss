@@ -11,11 +11,12 @@ const HEAP_ALIGNMENT: usize = 8;
 pub(super) struct StaticStrings {
     offsets: HashMap<String, i32>,
     data: Vec<u8>,
+    data_base: i32,
     heap_base: i32,
 }
 
 impl StaticStrings {
-    pub(super) fn collect(module: &IrModule) -> AotResult<Self> {
+    pub(super) fn collect(module: &IrModule, static_data_base: i32) -> AotResult<Self> {
         let mut values = Vec::<&str>::new();
         let mut offsets = HashMap::new();
         for function in &module.functions {
@@ -47,8 +48,8 @@ impl StaticStrings {
         let mut payload_offset = descriptor_bytes;
         for (index, value) in values.into_iter().enumerate() {
             let descriptor_offset = index.checked_mul(VIEW_SIZE).ok_or_else(too_large)?;
-            let descriptor_address = address(descriptor_offset)?;
-            let payload_address = address(payload_offset)?;
+            let descriptor_address = address(static_data_base, descriptor_offset)?;
+            let payload_address = address(static_data_base, payload_offset)?;
             let byte_len = u32::try_from(value.len()).map_err(|_| too_large())?;
             data[descriptor_offset..descriptor_offset + 4]
                 .copy_from_slice(&payload_address.to_le_bytes());
@@ -61,7 +62,7 @@ impl StaticStrings {
             payload_offset = payload_end;
             offsets.insert(value.to_string(), descriptor_address);
         }
-        let static_end = usize::try_from(STATIC_DATA_BASE)
+        let static_end = usize::try_from(static_data_base)
             .map_err(|_| too_large())?
             .checked_add(total_bytes)
             .ok_or_else(too_large)?;
@@ -69,6 +70,7 @@ impl StaticStrings {
         Ok(Self {
             offsets,
             data,
+            data_base: static_data_base,
             heap_base,
         })
     }
@@ -89,17 +91,13 @@ impl StaticStrings {
             return None;
         }
         let mut section = DataSection::new();
-        section.active(
-            0,
-            &ConstExpr::i32_const(STATIC_DATA_BASE),
-            self.data.clone(),
-        );
+        section.active(0, &ConstExpr::i32_const(self.data_base), self.data.clone());
         Some(section)
     }
 }
 
-fn address(offset: usize) -> AotResult<i32> {
-    let base = usize::try_from(STATIC_DATA_BASE).map_err(|_| too_large())?;
+fn address(static_data_base: i32, offset: usize) -> AotResult<i32> {
+    let base = usize::try_from(static_data_base).map_err(|_| too_large())?;
     i32::try_from(base.checked_add(offset).ok_or_else(too_large)?).map_err(|_| too_large())
 }
 

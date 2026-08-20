@@ -7,6 +7,7 @@ mod descriptor_shape;
 mod drop;
 mod free;
 mod instruction;
+mod layouts;
 mod locals;
 mod math;
 mod memory;
@@ -31,12 +32,14 @@ use instruction::emit_instruction;
 use locals::{build_local_layout, collect_phi_edges, LocalLayout, PhiEdges};
 use ops::required_type;
 
-const RESERVED_EXPORT_NAMES: [&str; 5] = [
+const RESERVED_EXPORT_NAMES: [&str; 7] = [
     "memory",
     "__sjulia_wasm_abi_version",
     allocator::ALLOC_NAME,
     allocator::FREE_NAME,
     allocator::DROP_NAME,
+    "__sjulia_layout_table",
+    "__sjulia_layout_count",
 ];
 
 pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult<Vec<u8>> {
@@ -45,8 +48,12 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     let mut functions = FunctionSection::new();
     let mut exports = ExportSection::new();
     let mut code = CodeSection::new();
-    let strings = strings::StaticStrings::collect(ir)?;
-    let function_indices = function_indices(ir)?;
+    let layouts = layouts::StaticLayouts::collect(ir)?;
+    let strings = strings::StaticStrings::collect(ir, layouts.end()?)?;
+    let mut function_indices = function_indices(ir)?;
+    let alloc_index = u32::try_from(ir.functions.len())
+        .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
+    function_indices.insert(allocator::ALLOC_NAME.to_string(), alloc_index);
     for (index, function) in ir.functions.iter().enumerate() {
         let params = function
             .params
@@ -61,20 +68,24 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         functions.function(index);
         code.function(&emit_function(function, &function_indices, &strings)?);
     }
-    let alloc_index = u32::try_from(ir.functions.len())
-        .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
     let free_index = alloc_index + 1;
     let drop_index = alloc_index + 2;
-    let abi_index = alloc_index + 3;
+    let layout_table_index = alloc_index + 3;
+    let layout_count_index = alloc_index + 4;
+    let abi_index = alloc_index + 5;
     types
         .ty()
         .function([ValType::I64, ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I32], []);
     types.ty().function([ValType::I32], []);
     types.ty().function([], [ValType::I32]);
+    types.ty().function([], [ValType::I32]);
+    types.ty().function([], [ValType::I32]);
     functions.function(alloc_index);
     functions.function(free_index);
     functions.function(drop_index);
+    functions.function(layout_table_index);
+    functions.function(layout_count_index);
     functions.function(abi_index);
     module.section(&types);
     module.section(&functions);
@@ -98,20 +109,42 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     exports.export(allocator::ALLOC_NAME, ExportKind::Func, alloc_index);
     exports.export(allocator::FREE_NAME, ExportKind::Func, free_index);
     exports.export(allocator::DROP_NAME, ExportKind::Func, drop_index);
+    exports.export(
+        "__sjulia_layout_table",
+        ExportKind::Func,
+        layout_table_index,
+    );
+    exports.export(
+        "__sjulia_layout_count",
+        ExportKind::Func,
+        layout_count_index,
+    );
     exports.export("__sjulia_wasm_abi_version", ExportKind::Func, abi_index);
     module.section(&exports);
     code.function(&allocator::emit_alloc(0, strings.heap_base()));
     code.function(&free::emit_free(0, strings.heap_base()));
     code.function(&drop::emit_drop(free_index));
+    code.function(&constant_i32_function(layouts.table_address()));
+    code.function(&constant_i32_function(layouts.count()));
     let mut abi = Function::new([]);
     abi.instruction(&W::I32Const(ABI_VERSION));
     abi.instruction(&W::End);
     code.function(&abi);
     module.section(&code);
+    if let Some(data) = layouts.data_section() {
+        module.section(&data);
+    }
     if let Some(data) = strings.data_section() {
         module.section(&data);
     }
     Ok(module.finish())
+}
+
+fn constant_i32_function(value: i32) -> Function {
+    let mut body = Function::new([]);
+    body.instruction(&W::I32Const(value));
+    body.instruction(&W::End);
+    body
 }
 
 fn function_indices(ir: &IrModule) -> AotResult<HashMap<String, u32>> {

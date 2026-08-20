@@ -1,6 +1,7 @@
 //! Standalone WebAssembly code generation over the backend-neutral AoT IR.
 
 mod emit;
+mod layout;
 mod lower;
 mod types;
 
