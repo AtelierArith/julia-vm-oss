@@ -9,6 +9,7 @@ mod free;
 mod instruction;
 mod locals;
 mod memory;
+mod math;
 mod ops;
 
 use std::collections::HashMap;

@@ -117,6 +117,7 @@ fn destinations(instruction: &Instruction) -> Vec<&VarRef> {
         | Instruction::Copy { dest, .. }
         | Instruction::BinOp { dest, .. }
         | Instruction::UnaryOp { dest, .. }
+        | Instruction::Builtin { dest, .. }
         | Instruction::GetIndex { dest, .. }
         | Instruction::GetField { dest, .. }
         | Instruction::GetFieldOffset { dest, .. }

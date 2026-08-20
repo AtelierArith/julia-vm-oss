@@ -96,6 +96,38 @@ impl Lowerer<'_> {
                 });
                 Ok(dest)
             }
+            AotExpr::CallBuiltin {
+                builtin,
+                args,
+                return_ty,
+            } if matches!(
+                builtin,
+                AotBuiltinOp::Abs
+                    | AotBuiltinOp::Floor
+                    | AotBuiltinOp::Ceil
+                    | AotBuiltinOp::Trunc
+                    | AotBuiltinOp::Round
+                    | AotBuiltinOp::Sqrt
+                    | AotBuiltinOp::Min
+                    | AotBuiltinOp::Max
+                    | AotBuiltinOp::Clamp
+                    | AotBuiltinOp::Isnan
+                    | AotBuiltinOp::Isinf
+                    | AotBuiltinOp::Isfinite
+            ) => {
+                ensure_type(return_ty)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr(arg, function))
+                    .collect::<AotResult<Vec<_>>>()?;
+                let dest = self.temporary(return_ty.clone());
+                self.current_block_mut(function)?.push(Instruction::Builtin {
+                    dest: dest.clone(),
+                    op: *builtin,
+                    args,
+                });
+                Ok(dest)
+            }
             AotExpr::Index {
                 array,
                 indices,

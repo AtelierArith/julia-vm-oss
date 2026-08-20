@@ -7275,6 +7275,79 @@ console.log(JSON.stringify(values));
     }
 
     #[test]
+    fn wasm_scalar_math_and_float_predicates_match_julia_boundaries() {
+        // Given: structurally recognized scalar math builtins over both float widths.
+        let source = "f64_abs(x::Float64)::Float64 = abs(x)\nf64_floor(x::Float64)::Float64 = floor(x)\nf64_ceil(x::Float64)::Float64 = ceil(x)\nf64_trunc(x::Float64)::Float64 = trunc(x)\nf64_round(x::Float64)::Float64 = round(x)\nf64_sqrt(x::Float64)::Float64 = sqrt(x)\nf64_min(x::Float64, y::Float64)::Float64 = min(x, y)\nf64_max(x::Float64, y::Float64)::Float64 = max(x, y)\nf64_clamp(x::Float64, lo::Float64, hi::Float64)::Float64 = clamp(x, lo, hi)\nf64_isnan(x::Float64)::Bool = isnan(x)\nf64_isinf(x::Float64)::Bool = isinf(x)\nf64_isfinite(x::Float64)::Bool = isfinite(x)\nf32_abs(x::Float32)::Float32 = abs(x)\nf32_floor(x::Float32)::Float32 = floor(x)\nf32_ceil(x::Float32)::Float32 = ceil(x)\nf32_trunc(x::Float32)::Float32 = trunc(x)\nf32_round(x::Float32)::Float32 = round(x)\nf32_sqrt(x::Float32)::Float32 = sqrt(x)\nf32_min(x::Float32, y::Float32)::Float32 = min(x, y)\nf32_max(x::Float32, y::Float32)::Float32 = max(x, y)\nf32_clamp(x::Float32, lo::Float32, hi::Float32)::Float32 = clamp(x, lo, hi)\nf32_isnan(x::Float32)::Bool = isnan(x)\nf32_isinf(x::Float32)::Bool = isinf(x)\nf32_isfinite(x::Float32)::Bool = isfinite(x)";
+        let mut exports = Vec::new();
+        for name in ["abs", "floor", "ceil", "trunc", "round", "sqrt", "isnan", "isinf", "isfinite"] {
+            exports.push(CAbiExport::with_arg_types(
+                format!("f64_{name}"),
+                format!("f64_{name}"),
+                vec![StaticType::F64],
+            ));
+            exports.push(CAbiExport::with_arg_types(
+                format!("f32_{name}"),
+                format!("f32_{name}"),
+                vec![StaticType::F32],
+            ));
+        }
+        for name in ["min", "max"] {
+            exports.push(CAbiExport::with_arg_types(
+                format!("f64_{name}"),
+                format!("f64_{name}"),
+                vec![StaticType::F64, StaticType::F64],
+            ));
+            exports.push(CAbiExport::with_arg_types(
+                format!("f32_{name}"),
+                format!("f32_{name}"),
+                vec![StaticType::F32, StaticType::F32],
+            ));
+        }
+        exports.push(CAbiExport::with_arg_types(
+            "f64_clamp",
+            "f64_clamp",
+            vec![StaticType::F64; 3],
+        ));
+        exports.push(CAbiExport::with_arg_types(
+            "f32_clamp",
+            "f32_clamp",
+            vec![StaticType::F32; 3],
+        ));
+
+        // When: Node executes Julia-oracle edge cases and reports exact IEEE bits.
+        let output = compile_wasm_source(
+            source,
+            &CompileConfig {
+                backend: AotBackend::Wasm,
+                c_abi_exports: exports,
+                ..CompileConfig::default()
+            },
+        )
+        .expect("scalar math builtins should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const b64 = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString(16).padStart(16, "0");
+const b32 = x => new Uint32Array(new Float32Array([x]).buffer)[0].toString(16).padStart(8, "0");
+const sub64 = Number.MIN_VALUE;
+const sub32 = new Float32Array(new Uint32Array([1]).buffer)[0];
+const values = {
+  f64: [b64(e.f64_abs(-0)), b64(e.f64_floor(-0)), b64(e.f64_ceil(sub64)), b64(e.f64_trunc(-2.75)), b64(e.f64_round(2.5)), b64(e.f64_round(3.5)), b64(e.f64_sqrt(-0)), b64(e.f64_sqrt(sub64)), b64(e.f64_min(-0, 0)), b64(e.f64_max(0, -0)), Number.isNaN(e.f64_min(NaN, 1)), Number.isNaN(e.f64_max(1, NaN)), b64(e.f64_clamp(-0, 0, 1)), e.f64_isnan(NaN), e.f64_isinf(Infinity), e.f64_isfinite(Number.MAX_VALUE)],
+  f32: [b32(e.f32_abs(-0)), b32(e.f32_floor(-0)), b32(e.f32_ceil(sub32)), b32(e.f32_trunc(-2.75)), b32(e.f32_round(2.5)), b32(e.f32_round(3.5)), b32(e.f32_sqrt(-0)), b32(e.f32_sqrt(sub32)), b32(e.f32_min(-0, 0)), b32(e.f32_max(0, -0)), Number.isNaN(e.f32_min(NaN, 1)), Number.isNaN(e.f32_max(1, NaN)), b32(e.f32_clamp(-0, 0, 1)), e.f32_isnan(NaN), e.f32_isinf(Infinity), e.f32_isfinite(3.4028234663852886e38)],
+};
+console.log(JSON.stringify(values));
+"#,
+        );
+
+        // Then: native Wasm instructions match Julia 1.12.4, including ties-to-even and signed zero.
+        assert_eq!(
+            value,
+            r#"{"f64":["0000000000000000","8000000000000000","3ff0000000000000","c000000000000000","4000000000000000","4010000000000000","8000000000000000","1e60000000000000","8000000000000000","0000000000000000",true,true,"8000000000000000",1,1,1],"f32":["00000000","80000000","3f800000","c0000000","40000000","40800000","80000000","1a3504f3","80000000","00000000",true,true,"80000000",1,1,1]}"#
+        );
+    }
+
+    #[test]
     fn wasm_executes_counted_loop_from_julia_source() {
         // Given: a counted while loop with mutable scalar locals.
         let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";

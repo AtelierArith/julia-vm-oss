@@ -396,8 +396,7 @@ impl AotBuiltinOp {
     pub fn return_type(&self, arg_types: &[StaticType]) -> StaticType {
         match self {
             // Float-returning math functions
-            AotBuiltinOp::Sqrt
-            | AotBuiltinOp::Sin
+            AotBuiltinOp::Sin
             | AotBuiltinOp::Cos
             | AotBuiltinOp::Tan
             | AotBuiltinOp::Asin
@@ -406,6 +405,11 @@ impl AotBuiltinOp {
             | AotBuiltinOp::Atan2
             | AotBuiltinOp::Exp
             | AotBuiltinOp::Log => StaticType::F64,
+
+            AotBuiltinOp::Sqrt => match arg_types.first() {
+                Some(StaticType::F32) => StaticType::F32,
+                _ => StaticType::F64,
+            },
 
             AotBuiltinOp::Rand | AotBuiltinOp::Randn => {
                 if arg_types.is_empty() {

@@ -11,6 +11,7 @@ use super::descriptor::{
 };
 use super::locals::LocalLayout;
 use super::memory::{emit_u8_address, memarg};
+use super::math::emit_math_builtin;
 use super::ops::{emit_binop, emit_const, emit_conversion, emit_unary, get, normalize_u8, set};
 
 pub(super) fn emit_instruction(
@@ -57,6 +58,10 @@ pub(super) fn emit_instruction(
         }
         Instruction::UnaryOp { dest, op, operand } => {
             emit_unary(body, *op, operand, locals)?;
+            set(body, locals, dest)?;
+        }
+        Instruction::Builtin { dest, op, args } => {
+            emit_math_builtin(body, *op, args, locals)?;
             set(body, locals, dest)?;
         }
         Instruction::Call { dest, func, args } if func == "__sjulia_u8_len" => {
