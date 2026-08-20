@@ -136,6 +136,25 @@ error として拒否します。これらの将来 ABI は [ABI_AND_NUMERIC_CON
 - **Cranelift**: `subset_julia_vm/src/aot/codegen/cranelift/`（`cranelift` feature、実験的）
 - **Standalone Wasm**: `subset_julia_vm/src/aot/codegen/wasm/`（`aot-wasm` feature、実験的）。public `compile_wasm` API が既存 AoT pipeline と backend-neutral `IrModule` を再利用し、import/fallback のない core Wasm bytes を返します。初期対応範囲と descriptor ABI は root の `COMPILER_SPIKE.md` を参照してください。
 
+### Generated-module ABI v2 allocation and ownership
+
+Pure generated modules export `memory`, `__sjulia_alloc(size:i64, align:i32) -> i32`,
+`__sjulia_free(ptr:i32)`, and `__sjulia_drop(descriptor_ptr:i32)` without imports.
+Allocation size zero returns zero. Allocation failure also returns zero; invalid sizes,
+alignments, pointers, allocation headers, and repeated lifetime operations trap.
+Freed blocks are reused when their extent satisfies a later request.
+
+`__sjulia_drop` validates the complete ABI v2 descriptor before changing it. A
+`MODULE_OWNED` descriptor releases its data allocation and then clears its data pointer
+and ownership bit. A host-owned descriptor is validated and left unchanged. Descriptor
+metadata has separate ownership: its location never implies ownership, and drop does not
+free the descriptor allocation itself. `READONLY` continues to prohibit data writes but
+does not alter lifetime ownership.
+
+An allocating call can execute `memory.grow`. JavaScript hosts must recreate every
+`DataView` and typed-array view from `memory.buffer` after any `__sjulia_alloc` call;
+growth detaches views backed by the previous buffer.
+
 ## 対応サブセット / 既知の制限
 
 詳細な機能別マトリクスは [SUPPORT_MATRIX.md](./SUPPORT_MATRIX.md) を参照してください。Cranelift backend 固有の
