@@ -176,7 +176,7 @@ pub(super) fn emit_exp_builtin(
 ) -> AotResult<()> {
     get_as_f64(body, arg, locals)?;
     body.instruction(&W::LocalSet(scratch.x));
-    emit_exp(body, scratch);
+    emit_exp_classified(body, scratch);
     if arg.ty == StaticType::F32 {
         body.instruction(&W::F32DemoteF64);
     }
@@ -191,11 +191,78 @@ pub(super) fn emit_log_builtin(
 ) -> AotResult<()> {
     get_as_f64(body, arg, locals)?;
     body.instruction(&W::LocalSet(scratch.x));
-    emit_log(body, scratch);
+    emit_log_classified(body, scratch);
     if arg.ty == StaticType::F32 {
         body.instruction(&W::F32DemoteF64);
     }
     Ok(())
+}
+
+fn emit_exp_classified(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Ne);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::Else);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(709.782712893384.into()));
+    body.instruction(&W::F64Gt);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(f64::INFINITY.into()));
+    body.instruction(&W::Else);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const((-745.1332191019411).into()));
+    body.instruction(&W::F64Lt);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::Else);
+    emit_finite_exp(body, scratch);
+    body.instruction(&W::End);
+    body.instruction(&W::End);
+    body.instruction(&W::End);
+}
+
+fn emit_finite_exp(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(f64::MIN_POSITIVE.ln().into()));
+    body.instruction(&W::F64Lt);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const((600.0 * LN_2).into()));
+    body.instruction(&W::F64Add);
+    body.instruction(&W::LocalSet(scratch.x));
+    emit_exp(body, scratch);
+    body.instruction(&W::F64Const(f64::from_bits((1023 - 600) << 52).into()));
+    body.instruction(&W::F64Mul);
+    body.instruction(&W::Else);
+    emit_exp(body, scratch);
+    body.instruction(&W::End);
+}
+
+fn emit_log_classified(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Ne);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::Else);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(f64::NEG_INFINITY.into()));
+    body.instruction(&W::Else);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(f64::INFINITY.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(f64::INFINITY.into()));
+    body.instruction(&W::Else);
+    emit_log(body, scratch);
+    body.instruction(&W::End);
+    body.instruction(&W::End);
+    body.instruction(&W::End);
 }
 
 fn get_as_f64(body: &mut Function, value: &VarRef, locals: &HashMap<String, u32>) -> AotResult<()> {
@@ -279,7 +346,7 @@ fn emit_exp(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::F64Const(LN_2.into()));
     body.instruction(&W::F64Div);
-    body.instruction(&W::F64Nearest);
+    body.instruction(&W::F64Floor);
     body.instruction(&W::LocalSet(scratch.y));
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::LocalGet(scratch.y));

@@ -7478,6 +7478,59 @@ console.log(JSON.stringify({
     }
 
     #[test]
+    fn wasm_exp_log_special_values_and_thresholds_match_julia() {
+        // Given: Julia 1.12.4 special values and dense finite threshold probes.
+        let source = "f64_exp_edge(x::Float64)::Float64 = exp(x)\nf64_log_edge(x::Float64)::Float64 = log(x)\nf32_exp_edge(x::Float32)::Float32 = exp(x)\nf32_log_edge(x::Float32)::Float32 = log(x)\nf64_exp_log_repeat(x::Float64)::Float64 = exp(log(x)) + log(exp(x))";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types("f64_exp_edge", "f64_exp_edge", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f64_log_edge", "f64_log_edge", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f32_exp_edge", "f32_exp_edge", vec![StaticType::F32]),
+                CAbiExport::with_arg_types("f32_log_edge", "f32_log_edge", vec![StaticType::F32]),
+                CAbiExport::with_arg_types(
+                    "f64_exp_log_repeat",
+                    "f64_exp_log_repeat",
+                    vec![StaticType::F64],
+                ),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: Node compares exact special bits and finite results to Julia oracles.
+        let output = compile_wasm_source(source, &config).expect("exp/log edges should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const b64 = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString(16).padStart(16, "0");
+const b32 = x => new Uint32Array(new Float32Array([x]).buffer)[0].toString(16).padStart(8, "0");
+const close = (a,b,t) => Math.abs(a-b) <= t * Math.max(1,Math.abs(b));
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+const exp64 = [[709,8.218407461554972e307],[709.5,1.3549863193146328e308],[-744,1e-323],[-745,5e-324]];
+const log64 = [[Number.MIN_VALUE,-744.4400719213812],[Number.MAX_VALUE,709.782712893384]];
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  exp64Special: [Infinity,-Infinity,NaN,750,-750].map(x => b64(e.f64_exp_edge(x))),
+  exp32Special: [Infinity,-Infinity,NaN,100,-110].map(x => b32(e.f32_exp_edge(x))),
+  log64Special: [0,-0,Infinity,NaN].map(x => b64(e.f64_log_edge(x))),
+  log32Special: [0,-0,Infinity,NaN].map(x => b32(e.f32_log_edge(x))),
+  finite64: exp64.map(([x,y]) => close(e.f64_exp_edge(x),y,1e-12)).concat(log64.map(([x,y]) => close(e.f64_log_edge(x),y,1e-12))),
+  finite32: [close(e.f32_exp_edge(80),5.5406225e34,1e-5),close(e.f32_exp_edge(-100),3.8e-44,1e-5),close(e.f32_log_edge(1.401298464324817e-45),-103.27893,1e-5)],
+  traps: [traps(() => e.f64_log_edge(-1)),traps(() => e.f32_log_edge(-1))],
+  repeat: close(e.f64_exp_log_repeat(4),8,1e-12),
+}));
+"#,
+        );
+
+        // Then: classification precedes approximation and exponent construction never wraps.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"exp64Special":["7ff0000000000000","0000000000000000","7ff8000000000000","7ff0000000000000","0000000000000000"],"exp32Special":["7f800000","00000000","7fc00000","7f800000","00000000"],"log64Special":["fff0000000000000","fff0000000000000","7ff0000000000000","7ff8000000000000"],"log32Special":["ff800000","ff800000","7f800000","7fc00000"],"finite64":[true,true,true,true,true,true],"finite32":[true,true,true],"traps":[true,true],"repeat":true}"#
+        );
+    }
+
+    #[test]
     fn wasm_executes_counted_loop_from_julia_source() {
         // Given: a counted while loop with mutable scalar locals.
         let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";
