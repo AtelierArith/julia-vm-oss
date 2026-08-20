@@ -59,6 +59,13 @@ WebAssembly module を `wasm_bytes: Uint8Array` として返します。失敗�
 artifact hash は `../COMPILER_SPIKE.md` と `../pkg-compiler-final/ARTIFACT_MANIFEST.json`
 を参照してください。
 
+生成 module は descriptor ABI v2 のみを受け付けます。配列 descriptor は 40-byte
+header の直後に rank 個の 16-byte `{dim:u64, stride:i64}` metadata を inline で持ち、
+pure module は `memory`、`__sjulia_alloc`、`__sjulia_free`、`__sjulia_drop` を export
+します。allocation は `memory.grow` を実行できるため、host は `__sjulia_alloc` の
+呼び出し後に `memory.buffer` から `DataView` と typed-array view を作り直してください。
+この generated-module ABI は native C ABI とは独立した contract です。
+
 注意: 埋め込まれるのは Base bytecode cache と prelude Program cache です。
 `run_from_source` の初回には user source の parser/lowering、embedded Base cache
 deserialize/restore、user program compile がまだ残ります。Playground では Run button

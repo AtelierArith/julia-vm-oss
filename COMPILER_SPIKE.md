@@ -43,14 +43,13 @@ than panicking. Parser/lowering and unsupported-instruction spans retain byte
 and one-indexed line/column locations.
 
 The corrected distributable web-target package is `pkg-compiler-final/`. It was built with
-Rust 1.95.0, wasm-pack 0.15.0, and the workspace `web-release` profile. The
-compiler Wasm size and digest are recorded in
-`pkg-compiler-final/ARTIFACT_MANIFEST.json`, which records
-tool versions, generated-module ABI v1, artifact sizes, and SHA-256 hashes. The
-packaged artifact remains v1 until its separate regeneration slice; source-built
-generated modules now use ABI v2. This source snapshot has no Git metadata, so
-its `source_commit` is explicitly
-`unavailable_non_git_source_tree` rather than an invented commit.
+Rust 1.95.0, Cargo 1.95.0, wasm-pack 0.15.0, and the workspace `web-release`
+profile. The compiler Wasm size and digest are recorded in
+`pkg-compiler-final/ARTIFACT_MANIFEST.json`, which records tool versions,
+generated-module ABI v2, artifact sizes, and SHA-256 hashes. The package was
+built from compiler source commit `48fcad0c993e105f8271590f904370defda55d07`.
+The manifest pins that pre-artifact source commit because artifact and smoke
+commits cannot be known before package generation and do not change Rust source.
 
 AoT timing originally used `std::time::Instant`, which panics under
 `wasm32-unknown-unknown`. The shared AoT timer now uses native `Instant` on host
@@ -137,7 +136,8 @@ single-axis length remains a nonnegative Julia `Int64`; `2^31` is accepted and
 multiple logical indices address the same element. `MODULE_OWNED` controls data
 lifetime only and does not currently imply canonical strides. Negative strides
 and canonical-stride enforcement are deferred to the general array work in Todo
-5. The host owns allocation in this slice.
+5. Pure generated modules export checked allocation and lifetime helpers;
+callers may still use host-owned descriptor data.
 
 ## Coverage
 
@@ -176,10 +176,10 @@ Run the host benchmark with:
 node benchmarks/wasm_aot_rgba.mjs path/to/module.wasm
 ```
 
-The corrected compiler Wasm is 25,540,486 bytes. Compiler-in-Wasm smoke
-measurements from Node v23.7.0 were 20.52 ms total for aliased typed Int64
-arithmetic and 4.41 ms total for the UInt8 mutation loop. Generated modules were
-152 and 612 bytes respectively.
+The ABI v2 compiler Wasm size and digest are pinned in
+`pkg-compiler-final/ARTIFACT_MANIFEST.json`. Compiler-in-Wasm smoke measurements
+and generated-module sizes are emitted by `node scripts/compiler_wasm_smoke.mjs`
+for the current machine rather than copied from an older package.
 
 ## Validation commands
 
