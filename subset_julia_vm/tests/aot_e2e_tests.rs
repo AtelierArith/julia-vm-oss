@@ -7489,6 +7489,54 @@ console.log(JSON.stringify({
     }
 
     #[test]
+    fn wasm_negative_one_infinite_power_matches_julia() {
+        // Given: Julia 1.12.4's unit-magnitude precedence over infinite exponents.
+        let source = "f64_neg_one_pow(y::Float64)::Float64 = (-1.0) ^ y\nf32_neg_one_pow(y::Float32)::Float32 = Float32(-1.0) ^ y\nf64_one_pow(y::Float64)::Float64 = 1.0 ^ y\nf64_nan_pow(y::Float64)::Float64 = NaN ^ y";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types(
+                    "f64_neg_one_pow",
+                    "f64_neg_one_pow",
+                    vec![StaticType::F64],
+                ),
+                CAbiExport::with_arg_types(
+                    "f32_neg_one_pow",
+                    "f32_neg_one_pow",
+                    vec![StaticType::F32],
+                ),
+                CAbiExport::with_arg_types("f64_one_pow", "f64_one_pow", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f64_nan_pow", "f64_nan_pow", vec![StaticType::F64]),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: Node records exact special and finite parity bits.
+        let output =
+            compile_wasm_source(source, &config).expect("negative-one powers should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const b64 = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString(16).padStart(16, "0");
+const b32 = x => new Uint32Array(new Float32Array([x]).buffer)[0].toString(16).padStart(8, "0");
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  neg64: [Infinity,-Infinity,NaN,0,3,2].map(x => b64(e.f64_neg_one_pow(x))),
+  neg32: [Infinity,-Infinity,NaN,0,3,2].map(x => b32(e.f32_neg_one_pow(x))),
+  precedence: [b64(e.f64_one_pow(NaN)),b64(e.f64_nan_pow(0)),b64(e.f64_nan_pow(2))],
+}));
+"#,
+        );
+
+        // Then: only ±infinite exponents use abs(base)==1; NaN and finite rules remain intact.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"neg64":["3ff0000000000000","3ff0000000000000","7ff8000000000000","3ff0000000000000","bff0000000000000","3ff0000000000000"],"neg32":["3f800000","3f800000","7fc00000","3f800000","bf800000","3f800000"],"precedence":["3ff0000000000000","3ff0000000000000","7ff8000000000000"]}"#
+        );
+    }
+
+    #[test]
     fn wasm_import_free_exp_log_match_julia_scalar_matrix() {
         // Given: direct and composed exp/log functions for both floating widths.
         let source = "f64_exp(x::Float64)::Float64 = exp(x)\nf64_log(x::Float64)::Float64 = log(x)\nf64_roundtrip(x::Float64)::Float64 = exp(log(x))\nf32_exp(x::Float32)::Float32 = exp(x)\nf32_log(x::Float32)::Float32 = log(x)";

@@ -56,7 +56,14 @@ fn emit_pow_value(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::Else);
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::F64Ne);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::Else);
     emit_non_nan_pow(body, scratch);
+    body.instruction(&W::End);
     body.instruction(&W::End);
     body.instruction(&W::End);
     body.instruction(&W::End);
@@ -149,6 +156,23 @@ fn emit_negative_odd_factor(body: &mut Function, scratch: &MathLocals) {
 }
 
 fn emit_finite_pow(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Abs);
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::F64Abs);
+    body.instruction(&W::F64Const(f64::INFINITY.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::I32And);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::Else);
+    emit_non_unit_finite_pow(body, scratch);
+    body.instruction(&W::End);
+}
+
+fn emit_non_unit_finite_pow(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::F64Const(0.0.into()));
     body.instruction(&W::F64Lt);
