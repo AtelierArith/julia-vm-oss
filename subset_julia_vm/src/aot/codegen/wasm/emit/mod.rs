@@ -1,5 +1,6 @@
 mod aggregate;
 mod allocator;
+mod assembly;
 mod control;
 mod conversion;
 mod descriptor;
@@ -27,21 +28,12 @@ use wasm_encoder::{
     GlobalSection, Instruction as W, MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
-use super::types::{unsupported, value_type, ABI_VERSION};
+use super::types::{value_type, ABI_VERSION};
+use assembly::{emit_function_exports, function_indices};
 use control::emit_terminator;
 use instruction::emit_instruction;
 use locals::{build_local_layout, collect_phi_edges, LocalLayout, PhiEdges};
 use ops::required_type;
-
-const RESERVED_EXPORT_NAMES: [&str; 7] = [
-    "memory",
-    "__sjulia_wasm_abi_version",
-    allocator::ALLOC_NAME,
-    allocator::FREE_NAME,
-    allocator::DROP_NAME,
-    "__sjulia_layout_table",
-    "__sjulia_layout_count",
-];
 
 pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult<Vec<u8>> {
     let mut module = Module::new();
@@ -146,85 +138,6 @@ fn constant_i32_function(value: i32) -> Function {
     body.instruction(&W::I32Const(value));
     body.instruction(&W::End);
     body
-}
-
-fn function_indices(ir: &IrModule) -> AotResult<HashMap<String, u32>> {
-    let mut indices = HashMap::with_capacity(ir.functions.len());
-    for (index, function) in ir.functions.iter().enumerate() {
-        if RESERVED_EXPORT_NAMES.contains(&function.name.as_str()) {
-            return Err(unsupported(format!(
-                "Wasm function name `{}` is reserved by the generated-module ABI",
-                function.name
-            )));
-        }
-        let index = u32::try_from(index)
-            .map_err(|_| AotError::CodegenError("too many Wasm functions".to_string()))?;
-        if indices.insert(function.name.clone(), index).is_some() {
-            return Err(unsupported(format!(
-                "Wasm AoT does not support duplicate or overloaded function name `{}`",
-                function.name
-            )));
-        }
-    }
-    Ok(indices)
-}
-
-fn emit_function_exports(
-    exports: &mut ExportSection,
-    ir: &IrModule,
-    requested: &[CAbiExport],
-    indices: &HashMap<String, u32>,
-) -> AotResult<()> {
-    if requested.is_empty() {
-        for function in &ir.functions {
-            exports.export(&function.name, ExportKind::Func, indices[&function.name]);
-        }
-        return Ok(());
-    }
-
-    let mut public_names = std::collections::HashSet::with_capacity(requested.len());
-    for request in requested {
-        if RESERVED_EXPORT_NAMES.contains(&request.export_name.as_str()) {
-            return Err(unsupported(format!(
-                "Wasm export name `{}` is reserved by the generated-module ABI",
-                request.export_name
-            )));
-        }
-        if !public_names.insert(request.export_name.as_str()) {
-            return Err(unsupported(format!(
-                "duplicate Wasm export name `{}`",
-                request.export_name
-            )));
-        }
-        let candidates: Vec<_> = ir
-            .functions
-            .iter()
-            .filter(|function| {
-                function.name == request.function_name
-                    && request.arg_types.as_ref().is_none_or(|arg_types| {
-                        function
-                            .params
-                            .iter()
-                            .map(|(_, ty)| ty)
-                            .eq(arg_types.iter())
-                    })
-            })
-            .collect();
-        let [target] = candidates.as_slice() else {
-            return Err(unsupported(format!(
-                "Wasm export `{}` must resolve to exactly one function `{}`; found {}",
-                request.export_name,
-                request.function_name,
-                candidates.len()
-            )));
-        };
-        exports.export(
-            &request.export_name,
-            ExportKind::Func,
-            indices[&target.name],
-        );
-    }
-    Ok(())
 }
 
 fn emit_function(
