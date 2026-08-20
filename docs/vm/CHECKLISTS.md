@@ -803,6 +803,20 @@ When adding a new `BuiltinOp` variant to the VM IR:
 3. [ ] Add `return_type()`, `Display`, `from_name()`, and codegen entries for the new `AotBuiltinOp`
 4. [ ] If a dedicated variant is not feasible, add `// Workaround: ... (Issue #NNNN)` and create a tracking Issue
 
+## Adding Generated-Wasm Static Data
+
+Generated-Wasm string literals use a backend-only, typed string view. The view
+is two little-endian `i32` fields: `{utf8_byte_pointer, utf8_byte_length}`.
+Length is the number of UTF-8 bytes, not characters, and the view is distinct
+from generated-module array descriptors and the native C ABI.
+
+1. [ ] Intern literals in deterministic first-use order and emit one active data segment.
+2. [ ] Keep literal views and payload bytes outside allocator metadata; align the heap base after all static data.
+3. [ ] Treat literal data as immutable in Julia lowering. Do not lower mutation, concatenation, or interpolation as a static literal.
+4. [ ] Test ASCII, empty, embedded NUL, multibyte UTF-8, duplicate interning, direct calls, memory growth, and byte-identical repeated compilation.
+5. [ ] Validate with `wasm-tools`, instantiate with zero imports, and decode exact bytes in Node.
+6. [ ] Keep browser compiler artifacts source-stale unless the task explicitly includes a package rebuild.
+
 ## Adding an AoT Codegen Template (Issue #11202)
 
 Before adding or changing generated Rust for a call, builtin, assignment, or
