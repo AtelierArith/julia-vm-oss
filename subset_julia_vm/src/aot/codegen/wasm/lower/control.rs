@@ -52,6 +52,16 @@ impl Lowerer<'_, '_> {
                     });
                 Ok(())
             }
+            AotStmt::Assign {
+                target: AotExpr::Index { is_tuple: true, .. },
+                ..
+            }
+            | AotStmt::Assign {
+                target: AotExpr::FieldAccess { .. },
+                ..
+            } => Err(unsupported(
+                "Wasm tuple and isbits-struct values are immutable",
+            )),
             AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                 self.expr(expr, function).map(|_| ())
             }

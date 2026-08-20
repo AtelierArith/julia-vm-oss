@@ -7233,6 +7233,54 @@ console.log(JSON.stringify({
     }
 
     #[test]
+    fn wasm_rejects_unsupported_aggregate_shapes_and_mutation() {
+        // Given: mutable, reference-bearing, recursive, and mutation cases.
+        let cases = [
+            (
+                "mutable struct MutableValue\nvalue::Int64\nend\nmake()::MutableValue = MutableValue(1)",
+                "make",
+                Vec::new(),
+                "immutable non-parametric isbits struct",
+            ),
+            (
+                "struct NamedValue\nname::String\nend\nmake()::NamedValue = NamedValue(\"x\")",
+                "make",
+                Vec::new(),
+                "is not isbits",
+            ),
+            (
+                "struct ImmutableValue\nvalue::Int64\nend\nfunction mutate(value::ImmutableValue)::Int64\nvalue.value = 2\nreturn value.value\nend",
+                "mutate",
+                vec![StaticType::Struct {
+                    type_id: 0,
+                    name: "ImmutableValue".to_string(),
+                }],
+                "values are immutable",
+            ),
+        ];
+
+        for (source, name, arg_types, expected) in cases {
+            // When: generated-Wasm compilation validates the aggregate graph.
+            let error = compile_wasm_source(
+                source,
+                &CompileConfig {
+                    backend: AotBackend::Wasm,
+                    c_abi_exports: vec![CAbiExport::with_arg_types(name, name, arg_types)],
+                    ..CompileConfig::default()
+                },
+            )
+            .expect_err("unsupported aggregate must not compile");
+
+            // Then: the typed diagnostic identifies the rejected contract.
+            assert!(
+                matches!(error, AotError::UnsupportedInstruction(_)),
+                "{error}"
+            );
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
     fn wasm_rejects_dynamic_string_behavior_with_typed_diagnostics() {
         // Given: dynamic concatenation, interpolation, and mutation requests.
         let cases = [
