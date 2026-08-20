@@ -220,8 +220,8 @@ mod tests {
             ("x = (", None, exit_code::PARSE),
             ("1 = 2", None, exit_code::PARSE),
             (
-                "answer()::String = \"no Wasm strings\"",
-                Some("answer=answer"),
+                "interpolate(value::Int64)::String = \"value = $value\"",
+                Some("interpolate=interpolate(Int64)"),
                 exit_code::UNSUPPORTED,
             ),
         ];
