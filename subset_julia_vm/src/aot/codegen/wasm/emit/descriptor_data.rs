@@ -20,6 +20,12 @@ pub(super) fn emit_data_validation(
     body.instruction(&W::I64Eqz);
     body.instruction(&W::If(BlockType::Empty));
     body.instruction(&W::LocalGet(context.scratch.data_start));
+    body.instruction(&W::I64Eqz);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::Else);
+    body.instruction(&W::Unreachable);
+    body.instruction(&W::End);
+    body.instruction(&W::LocalGet(context.scratch.data_start));
     body.instruction(&W::LocalSet(context.scratch.data_end));
     body.instruction(&W::Else);
     body.instruction(&W::LocalGet(context.scratch.data_start));

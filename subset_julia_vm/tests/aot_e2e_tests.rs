@@ -6833,6 +6833,66 @@ new Uint8Array(memory.buffer)[hostData] = 77;
 drop(hostDescriptor);
 const hostPreserved = new Uint8Array(memory.buffer)[hostData] === 77;
 
+const zeroOwnedDescriptor = alloc(56n, 8);
+view.setUint32(zeroOwnedDescriptor, 2, true);
+view.setUint32(zeroOwnedDescriptor + 4, 1, true);
+view.setUint32(zeroOwnedDescriptor + 8, 1, true);
+view.setUint32(zeroOwnedDescriptor + 12, 1, true);
+view.setUint32(zeroOwnedDescriptor + 16, 0, true);
+view.setUint32(zeroOwnedDescriptor + 20, 1, true);
+view.setUint32(zeroOwnedDescriptor + 24, 0, true);
+view.setUint32(zeroOwnedDescriptor + 28, 0, true);
+view.setBigUint64(zeroOwnedDescriptor + 32, 0n, true);
+view.setBigUint64(zeroOwnedDescriptor + 40, 0n, true);
+view.setBigInt64(zeroOwnedDescriptor + 48, 1n, true);
+const zeroDropTrap = traps(() => drop(zeroOwnedDescriptor));
+view = new DataView(memory.buffer);
+const zeroOwnedCleared = view.getUint32(zeroOwnedDescriptor + 4, true) === 0 && view.getUint32(zeroOwnedDescriptor + 24, true) === 0;
+const zeroSecondDrop = traps(() => drop(zeroOwnedDescriptor));
+
+const zeroHostDescriptor = alloc(56n, 8);
+view.setUint32(zeroHostDescriptor, 2, true);
+view.setUint32(zeroHostDescriptor + 4, 0, true);
+view.setUint32(zeroHostDescriptor + 8, 1, true);
+view.setUint32(zeroHostDescriptor + 12, 1, true);
+view.setUint32(zeroHostDescriptor + 16, 0, true);
+view.setUint32(zeroHostDescriptor + 20, 1, true);
+view.setUint32(zeroHostDescriptor + 24, hostData, true);
+view.setUint32(zeroHostDescriptor + 28, 0, true);
+view.setBigUint64(zeroHostDescriptor + 32, 0n, true);
+view.setBigUint64(zeroHostDescriptor + 40, 0n, true);
+view.setBigInt64(zeroHostDescriptor + 48, 1n, true);
+const zeroHostDropTrap = traps(() => drop(zeroHostDescriptor));
+const zeroHostPreserved = view.getUint32(zeroHostDescriptor + 4, true) === 0 && view.getUint32(zeroHostDescriptor + 24, true) === hostData;
+
+const malformedZeroPointer = alloc(56n, 8);
+view.setUint32(malformedZeroPointer, 2, true);
+view.setUint32(malformedZeroPointer + 4, 1, true);
+view.setUint32(malformedZeroPointer + 8, 1, true);
+view.setUint32(malformedZeroPointer + 12, 1, true);
+view.setUint32(malformedZeroPointer + 16, 0, true);
+view.setUint32(malformedZeroPointer + 20, 1, true);
+view.setUint32(malformedZeroPointer + 24, 127, true);
+view.setUint32(malformedZeroPointer + 28, 1, true);
+view.setBigUint64(malformedZeroPointer + 32, 0n, true);
+view.setBigUint64(malformedZeroPointer + 40, 1n, true);
+view.setBigInt64(malformedZeroPointer + 48, 1n, true);
+const malformedZeroPointerTrap = traps(() => drop(malformedZeroPointer));
+
+const malformedZeroShape = alloc(56n, 8);
+view.setUint32(malformedZeroShape, 2, true);
+view.setUint32(malformedZeroShape + 4, 0, true);
+view.setUint32(malformedZeroShape + 8, 1, true);
+view.setUint32(malformedZeroShape + 12, 1, true);
+view.setUint32(malformedZeroShape + 16, 0, true);
+view.setUint32(malformedZeroShape + 20, 1, true);
+view.setUint32(malformedZeroShape + 24, 0, true);
+view.setUint32(malformedZeroShape + 28, 0, true);
+view.setBigUint64(malformedZeroShape + 32, 0n, true);
+view.setBigUint64(malformedZeroShape + 40, 1n, true);
+view.setBigInt64(malformedZeroShape + 48, 1n, true);
+const malformedZeroShapeTrap = traps(() => drop(malformedZeroShape));
+
 const beforeGrowth = memory.buffer.byteLength;
 const large = alloc(BigInt(beforeGrowth), 8);
 memoryBytes = new Uint8Array(memory.buffer);
@@ -6846,14 +6906,14 @@ for (;;) {
   exhaustion.push(pointer);
 }
 const oomIsZero = exhaustion.length > 0 && alloc(1048576n, 8) === 0;
-console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reused: reused === first, badFreeTraps, doubleFree, cleared, doubleDrop, hostPreserved, grew, oomIsZero }));
+console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reused: reused === first, badFreeTraps, doubleFree, cleared, doubleDrop, hostPreserved, zeroDropTrap, zeroOwnedCleared, zeroSecondDrop, zeroHostDropTrap, zeroHostPreserved, malformedZeroPointerTrap, malformedZeroShapeTrap, grew, oomIsZero }));
 "#,
         );
 
         // Then: OOM alone returns zero and every ownership violation traps.
         assert_eq!(
             value,
-            r#"{"invalidAllocations":[0,1,1,1,1],"aligned":true,"reused":true,"badFreeTraps":[1,1,1,1],"doubleFree":1,"cleared":true,"doubleDrop":1,"hostPreserved":true,"grew":true,"oomIsZero":true}"#
+            r#"{"invalidAllocations":[0,1,1,1,1],"aligned":true,"reused":true,"badFreeTraps":[1,1,1,1],"doubleFree":1,"cleared":true,"doubleDrop":1,"hostPreserved":true,"zeroDropTrap":0,"zeroOwnedCleared":true,"zeroSecondDrop":1,"zeroHostDropTrap":0,"zeroHostPreserved":true,"malformedZeroPointerTrap":1,"malformedZeroShapeTrap":1,"grew":true,"oomIsZero":true}"#
         );
     }
 

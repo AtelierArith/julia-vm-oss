@@ -7,6 +7,11 @@ const PAGE_SIZE: i64 = 65_536;
 
 pub(super) fn emit_drop(free_index: u32) -> Function {
     let mut body = Function::new([(5, ValType::I64), (5, ValType::I32)]);
+    body.instruction(&W::LocalGet(0));
+    body.instruction(&W::I32Load(memarg(28)));
+    body.instruction(&W::I32Const(1));
+    body.instruction(&W::I32Eq);
+    trap_on_stack(&mut body);
     validate_header(&mut body);
     validate_shape(&mut body);
     validate_data(&mut body);
@@ -15,10 +20,18 @@ pub(super) fn emit_drop(free_index: u32) -> Function {
     body.instruction(&W::I32And);
     body.instruction(&W::I32Eqz);
     body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::LocalGet(8));
+    body.instruction(&W::I32Eqz);
+    trap_on_stack(&mut body);
     body.instruction(&W::Return);
     body.instruction(&W::End);
+    body.instruction(&W::LocalGet(2));
+    body.instruction(&W::I64Eqz);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::Else);
     body.instruction(&W::LocalGet(8));
     body.instruction(&W::Call(free_index));
+    body.instruction(&W::End);
     body.instruction(&W::LocalGet(0));
     body.instruction(&W::I32Const(0));
     body.instruction(&W::I32Store(memarg(24)));
@@ -27,6 +40,9 @@ pub(super) fn emit_drop(free_index: u32) -> Function {
     body.instruction(&W::I32Const(!1));
     body.instruction(&W::I32And);
     body.instruction(&W::I32Store(memarg(4)));
+    body.instruction(&W::LocalGet(0));
+    body.instruction(&W::I32Const(1));
+    body.instruction(&W::I32Store(memarg(28)));
     body.instruction(&W::End);
     body
 }
