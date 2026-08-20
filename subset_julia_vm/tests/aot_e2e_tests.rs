@@ -7387,6 +7387,58 @@ console.log(JSON.stringify({
     }
 
     #[test]
+    fn wasm_pow_special_values_match_julia() {
+        // Given: Julia 1.12.4 power identities over zero, infinities, and NaN.
+        let source = "f64_pow_edge(x::Float64, y::Float64)::Float64 = x ^ y\nf32_pow_edge(x::Float32, y::Float32)::Float32 = x ^ y\nf64_pow_repeat(x::Float64)::Float64 = (x ^ 0.5) + (x ^ 2.0) + (x ^ -1.0)";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types(
+                    "f64_pow_edge",
+                    "f64_pow_edge",
+                    vec![StaticType::F64; 2],
+                ),
+                CAbiExport::with_arg_types(
+                    "f32_pow_edge",
+                    "f32_pow_edge",
+                    vec![StaticType::F32; 2],
+                ),
+                CAbiExport::with_arg_types(
+                    "f64_pow_repeat",
+                    "f64_pow_repeat",
+                    vec![StaticType::F64],
+                ),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: Node records exact result bits and typed domain traps.
+        let output = compile_wasm_source(source, &config).expect("pow edges should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const b64 = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString(16).padStart(16, "0");
+const b32 = x => new Uint32Array(new Float32Array([x]).buffer)[0].toString(16).padStart(8, "0");
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  f64: [[0,3],[0,0.5],[0,-3],[0,0],[-0,3],[-0,2],[-0,-3],[-0,-2],[Infinity,3],[Infinity,-3],[-Infinity,3],[-Infinity,2],[-Infinity,-3],[-Infinity,-2],[NaN,3],[NaN,0]].map(([x,y]) => b64(e.f64_pow_edge(x,y))),
+  f32: [[0,0.5],[0,-3],[-0,3],[-0,-3],[Infinity,-2],[-Infinity,3],[NaN,2],[NaN,0]].map(([x,y]) => b32(e.f32_pow_edge(x,y))),
+  traps: [traps(() => e.f64_pow_edge(-2,0.5)), traps(() => e.f64_pow_edge(-Infinity,0.5)), traps(() => e.f32_pow_edge(-Infinity,0.5))],
+  repeat: Math.abs(e.f64_pow_repeat(4) - 18.25) <= 1e-12,
+}));
+"#,
+        );
+
+        // Then: identities preserve Julia signed-zero/infinity bits and scratch isolation.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"f64":["0000000000000000","0000000000000000","7ff0000000000000","3ff0000000000000","8000000000000000","0000000000000000","fff0000000000000","7ff0000000000000","7ff0000000000000","0000000000000000","fff0000000000000","7ff0000000000000","0000000000000000","0000000000000000","7ff8000000000000","3ff0000000000000"],"f32":["00000000","7f800000","80000000","ff800000","00000000","ff800000","7fc00000","3f800000"],"traps":[true,true,true],"repeat":true}"#
+        );
+    }
+
+    #[test]
     fn wasm_import_free_exp_log_match_julia_scalar_matrix() {
         // Given: direct and composed exp/log functions for both floating widths.
         let source = "f64_exp(x::Float64)::Float64 = exp(x)\nf64_log(x::Float64)::Float64 = log(x)\nf64_roundtrip(x::Float64)::Float64 = exp(log(x))\nf32_exp(x::Float32)::Float32 = exp(x)\nf32_log(x::Float32)::Float32 = log(x)";
