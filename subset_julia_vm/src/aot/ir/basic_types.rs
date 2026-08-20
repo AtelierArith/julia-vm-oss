@@ -4,7 +4,8 @@
 //! constant value, and IR function/module types.
 
 use super::super::types::StaticType;
-use super::AotBuiltinOp;
+use super::aggregate_types::AggregateLayout;
+use super::{AotBuiltinOp, ConstValue};
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -139,21 +140,6 @@ pub struct StructFieldInit {
     pub value: VarRef,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AggregateLayout {
-    pub id: u32,
-    pub size: u32,
-    pub align: u8,
-    pub fields: Vec<AggregateField>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AggregateField {
-    pub offset: u32,
-    pub ty: StaticType,
-    pub layout_id: u32,
-}
-
 /// Block terminator instruction
 #[derive(Debug, Clone)]
 pub enum Terminator {
@@ -214,35 +200,6 @@ impl fmt::Display for VarRef {
             write!(f, "%{}", self.name)
         } else {
             write!(f, "%{}.{}", self.name, self.version)
-        }
-    }
-}
-
-/// Constant value
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConstValue {
-    Int64(i64),
-    Int32(i32),
-    Float64(f64),
-    Float32(f32),
-    Bool(bool),
-    Char(char),
-    String(String),
-    Nothing,
-}
-
-impl ConstValue {
-    /// Get the type of this constant
-    pub fn get_type(&self) -> StaticType {
-        match self {
-            ConstValue::Int64(_) => StaticType::I64,
-            ConstValue::Int32(_) => StaticType::I32,
-            ConstValue::Float64(_) => StaticType::F64,
-            ConstValue::Float32(_) => StaticType::F32,
-            ConstValue::Bool(_) => StaticType::Bool,
-            ConstValue::Char(_) => StaticType::Char,
-            ConstValue::String(_) => StaticType::Str,
-            ConstValue::Nothing => StaticType::Nothing,
         }
     }
 }
