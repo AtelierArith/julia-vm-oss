@@ -5,6 +5,7 @@ use crate::aot::AotResult;
 use wasm_encoder::{Function, Instruction as W};
 
 use super::super::types::{descriptor_layout, unsupported, DESCRIPTOR_ELEMENT_COUNT_OFFSET};
+use super::conversion::emit_checked_conversion;
 use super::descriptor::{
     emit_descriptor_validation, emit_i64_load, DescriptorAccess, DescriptorContext,
 };
@@ -25,8 +26,7 @@ pub(super) fn emit_instruction(
             set(body, locals, dest)?;
         }
         Instruction::Copy { dest, src } => {
-            get(body, locals, src)?;
-            emit_conversion(body, &src.ty, &dest.ty)?;
+            emit_checked_conversion(body, src, &dest.ty, locals)?;
             set(body, locals, dest)?;
         }
         Instruction::BinOp {

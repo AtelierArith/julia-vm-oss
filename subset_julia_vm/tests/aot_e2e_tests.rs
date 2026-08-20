@@ -7221,6 +7221,60 @@ console.log(JSON.stringify(values));
     }
 
     #[test]
+    fn wasm_float32_conversions_round_and_reject_inexact_inputs() {
+        // Given: conversions already represented by AoT Convert nodes.
+        let source = "to_f32(x::Float64)::Float32 = Float32(x)\nto_f64(x::Float32)::Float64 = Float64(x)\nto_i32(x::Float32)::Int32 = Int32(x)\nto_i64(x::Float32)::Int64 = Int64(x)\nto_u8(x::Float32)::UInt8 = UInt8(x)\nto_bool(x::Float32)::Bool = Bool(x)\nfrom_i32(x::Int32)::Float32 = Float32(x)\nfrom_i64(x::Int64)::Float32 = Float32(x)\nfrom_u8(x::UInt8)::Float32 = Float32(x)\nfrom_bool(x::Bool)::Float32 = Float32(x)";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: [
+                ("to_f32", vec![StaticType::F64]),
+                ("to_f64", vec![StaticType::F32]),
+                ("to_i32", vec![StaticType::F32]),
+                ("to_i64", vec![StaticType::F32]),
+                ("to_u8", vec![StaticType::F32]),
+                ("to_bool", vec![StaticType::F32]),
+                ("from_i32", vec![StaticType::I32]),
+                ("from_i64", vec![StaticType::I64]),
+                ("from_u8", vec![StaticType::U8]),
+                ("from_bool", vec![StaticType::Bool]),
+            ]
+            .into_iter()
+            .map(|(name, args)| CAbiExport::with_arg_types(name, name, args))
+            .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: Node probes exact rounding and malformed/inexact conversion inputs.
+        let output = compile_wasm_source(source, &config).expect("F32 conversions should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const bits = value => new Uint32Array(new Float32Array([value]).buffer)[0].toString(16).padStart(8, "0");
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+const values = {
+  tie: bits(e.to_f32(1 + 2 ** -24)),
+  aboveTie: bits(e.to_f32(1 + 3 * 2 ** -24)),
+  promoted: e.to_f64(new Float32Array([1.0000001192092896])[0]),
+  i32: e.to_i32(2147483520),
+  i64: e.to_i64(2 ** 62).toString(),
+  u8: e.to_u8(255),
+  bools: [e.to_bool(-0), e.to_bool(1)],
+  fromInts: [bits(e.from_i32(16777217)), bits(e.from_i64(9223372036854775807n)), bits(e.from_u8(255)), bits(e.from_bool(1))],
+  traps: [traps(() => e.to_i32(1.5)), traps(() => e.to_i32(NaN)), traps(() => e.to_i32(Infinity)), traps(() => e.to_i32(2147483648)), traps(() => e.to_i64(2 ** 63)), traps(() => e.to_u8(-1)), traps(() => e.to_u8(256)), traps(() => e.to_bool(2))],
+};
+console.log(JSON.stringify(values));
+"#,
+        );
+
+        // Then: representable values match Julia and every inexact case traps.
+        assert_eq!(
+            value,
+            r#"{"tie":"3f800000","aboveTie":"3f800002","promoted":1.0000001192092896,"i32":2147483520,"i64":"4611686018427387904","u8":255,"bools":[0,1],"fromInts":["4b800000","5f000000","437f0000","3f800000"],"traps":[true,true,true,true,true,true,true,true]}"#
+        );
+    }
+
+    #[test]
     fn wasm_executes_counted_loop_from_julia_source() {
         // Given: a counted while loop with mutable scalar locals.
         let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";
