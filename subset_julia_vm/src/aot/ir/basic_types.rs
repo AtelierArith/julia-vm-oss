@@ -4,6 +4,7 @@
 //! constant value, and IR function/module types.
 
 use super::super::types::StaticType;
+use super::AotBuiltinOp;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,11 @@ pub enum Instruction {
         dest: VarRef,
         op: UnaryOpKind,
         operand: VarRef,
+    },
+    Builtin {
+        dest: VarRef,
+        op: AotBuiltinOp,
+        args: Vec<VarRef>,
     },
     /// Function call
     Call {

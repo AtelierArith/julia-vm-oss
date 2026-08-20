@@ -339,7 +339,9 @@ impl DeadCodeElimination {
                     Instruction::UnaryOp { operand, .. } => {
                         uses.insert(format!("{}.{}", operand.name, operand.version));
                     }
-                    Instruction::Call { args, .. } | Instruction::CallMulti { args, .. } => {
+                    Instruction::Builtin { args, .. }
+                    | Instruction::Call { args, .. }
+                    | Instruction::CallMulti { args, .. } => {
                         for arg in args {
                             uses.insert(format!("{}.{}", arg.name, arg.version));
                         }
@@ -428,6 +430,7 @@ impl DeadCodeElimination {
                 Instruction::Copy { dest, .. } => Some(dest),
                 Instruction::BinOp { dest, .. } => Some(dest),
                 Instruction::UnaryOp { dest, .. } => Some(dest),
+                Instruction::Builtin { .. } => return true,
                 Instruction::GetIndex { dest, .. } => Some(dest),
                 Instruction::GetField { dest, .. } => Some(dest),
                 Instruction::StructNew { dest, .. } => Some(dest),
@@ -888,6 +891,7 @@ impl LoopInvariantCodeMotion {
             Instruction::Copy { dest, .. } => Some(dest),
             Instruction::BinOp { dest, .. } => Some(dest),
             Instruction::UnaryOp { dest, .. } => Some(dest),
+            Instruction::Builtin { dest, .. } => Some(dest),
             Instruction::Call { dest, .. } => dest.as_ref(),
             Instruction::CallMulti { .. } => None,
             Instruction::StructNew { dest, .. } => Some(dest),
@@ -932,6 +936,8 @@ impl LoopInvariantCodeMotion {
             // Unary ops are invariant if operand is invariant
             Instruction::UnaryOp { operand, .. } => is_operand_invariant(operand),
 
+            Instruction::Builtin { .. } => false,
+
             // Calls are generally not invariant (may have side effects)
             Instruction::Call { .. } | Instruction::CallMulti { .. } => false,
 
@@ -973,6 +979,7 @@ impl LoopInvariantCodeMotion {
 
             // These have side effects or depend on control flow
             Instruction::Call { .. }
+            | Instruction::Builtin { .. }
             | Instruction::CallMulti { .. }
             | Instruction::StructNew { .. }
             | Instruction::SetIndex { .. }

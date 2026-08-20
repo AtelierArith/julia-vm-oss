@@ -198,6 +198,16 @@ impl RustCodeGenerator {
                     dest_name, ty, op_str, operand_name
                 ));
             }
+            Instruction::Builtin { dest, op, args } => {
+                let dest_name = self.var_to_rust(dest);
+                let args = args
+                    .iter()
+                    .map(|arg| self.var_to_rust(arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ty = self.type_to_rust(&dest.ty);
+                self.write_line(&format!("let {dest_name}: {ty} = {op}({args});"));
+            }
             Instruction::Call { dest, func, args } => {
                 let args_str: Vec<_> = args.iter().map(|a| self.var_to_rust(a)).collect();
                 let call = format!("{}({})", func, args_str.join(", "));
