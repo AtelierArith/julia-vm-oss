@@ -11,6 +11,7 @@ pub(super) fn ensure_type(ty: &StaticType) -> AotResult<()> {
         | StaticType::F32
         | StaticType::F64
         | StaticType::Bool
+        | StaticType::Str
         | StaticType::U8 => Ok(()),
         StaticType::Array {
             element,

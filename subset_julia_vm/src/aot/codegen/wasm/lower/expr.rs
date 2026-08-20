@@ -24,6 +24,9 @@ impl Lowerer<'_> {
             AotExpr::LitBool(value) => {
                 self.constant(ConstValue::Bool(*value), StaticType::Bool, function)
             }
+            AotExpr::LitStr(value) => {
+                self.constant(ConstValue::String(value.clone()), StaticType::Str, function)
+            }
             AotExpr::Var { name, .. } => self.vars.get(name).cloned().ok_or_else(|| {
                 unsupported(format!("Wasm AoT could not resolve variable `{name}`"))
             }),
@@ -97,6 +100,12 @@ impl Lowerer<'_> {
                 Ok(dest)
             }
             AotExpr::CallBuiltin {
+                builtin: AotBuiltinOp::StringConcat,
+                ..
+            } => Err(unsupported(
+                "Wasm AoT does not support dynamic string concatenation or interpolation; only static UTF-8 literals are supported",
+            )),
+            AotExpr::CallBuiltin {
                 builtin,
                 args,
                 return_ty,
@@ -151,6 +160,11 @@ impl Lowerer<'_> {
                         indices,
                     });
                 Ok(dest)
+            }
+            AotExpr::Convert { value, target_ty }
+                if value.get_type() == *target_ty && *target_ty == StaticType::Str =>
+            {
+                self.expr(value, function)
             }
             AotExpr::Convert { value, target_ty }
                 if matches!(

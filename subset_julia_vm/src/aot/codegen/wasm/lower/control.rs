@@ -25,6 +25,18 @@ impl Lowerer<'_> {
                         ..
                     },
                 value,
+            } if array.get_type() == StaticType::Str => Err(unsupported(
+                "Wasm AoT string literals are immutable; dynamic string mutation is not supported",
+            )),
+            AotStmt::Assign {
+                target:
+                    AotExpr::Index {
+                        array,
+                        indices,
+                        is_tuple: false,
+                        ..
+                    },
+                value,
             } => {
                 let array = self.expr(array, function)?;
                 let indices = indices

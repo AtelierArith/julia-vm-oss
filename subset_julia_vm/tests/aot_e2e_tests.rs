@@ -6981,25 +6981,137 @@ console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reus
     }
 
     #[test]
-    fn wasm_backend_rejects_unsupported_types_without_fallback() {
-        // Given: a statically typed function outside the documented Wasm subset.
-        let source = "string_identity(value::String)::String = value";
+    fn wasm_returns_static_utf8_literal_through_direct_helper() {
+        // Given: static Julia literals covering UTF-8, embedded NUL, and an empty value.
+        let source = "string_identity(value::String)::String = value\nascii()::String = string_identity(\"hello\")\nempty()::String = \"\"\nnul()::String = \"a\\0b\"\nunicode()::String = \"café 漢字 🐱\"";
         let config = CompileConfig {
             backend: AotBackend::Wasm,
-            c_abi_exports: vec![CAbiExport::with_arg_types(
-                "string_identity",
-                "string_identity",
-                vec![StaticType::Str],
-            )],
+            c_abi_exports: ["ascii", "empty", "nul", "unicode"]
+                .into_iter()
+                .map(|name| CAbiExport::with_arg_types(name, name, Vec::new()))
+                .collect(),
             ..CompileConfig::default()
         };
 
-        // When: the canonical source-to-Wasm API reaches backend lowering.
-        let error = compile_wasm_source(source, &config)
-            .expect_err("String must remain outside the Wasm subset");
+        // When: Node reads each returned static string view as {ptr, byte_len}.
+        let output = compile_wasm_source(source, &config)
+            .expect("static UTF-8 literals should compile for generated Wasm");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const memory = instance.exports.memory;
+const decoder = new TextDecoder("utf-8", { fatal: true });
+const read = name => {
+  const descriptor = instance.exports[name]();
+  const view = new DataView(memory.buffer);
+  const pointer = view.getUint32(descriptor, true);
+  const byteLength = view.getUint32(descriptor + 4, true);
+  const bytes = Array.from(new Uint8Array(memory.buffer, pointer, byteLength));
+  return { text: decoder.decode(Uint8Array.from(bytes)), byteLength, bytes };
+};
+console.log(JSON.stringify([read("ascii"), read("empty"), read("nul"), read("unicode")]));
+"#,
+        );
 
-        // Then: compilation returns the typed unsupported diagnostic, never fallback code.
-        assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+        // Then: lengths are UTF-8 byte lengths, never character counts or C-string lengths.
+        assert_eq!(
+            value,
+            r#"[{"text":"hello","byteLength":5,"bytes":[104,101,108,108,111]},{"text":"","byteLength":0,"bytes":[]},{"text":"a\u0000b","byteLength":3,"bytes":[97,0,98]},{"text":"café 漢字 🐱","byteLength":17,"bytes":[99,97,102,195,169,32,230,188,162,229,173,151,32,240,159,144,177]}]"#
+        );
+    }
+
+    #[test]
+    fn wasm_interns_static_strings_deterministically_before_heap_allocations() {
+        // Given: duplicate literals and a distinct multibyte literal.
+        let source =
+            "first()::String = \"repeat\"\nsecond()::String = \"repeat\"\nthird()::String = \"𓀀\"";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: ["first", "second", "third"]
+                .into_iter()
+                .map(|name| CAbiExport::with_arg_types(name, name, Vec::new()))
+                .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: the same source is compiled three times and then grows memory.
+        let outputs = (0..3)
+            .map(|_| {
+                compile_wasm_source(source, &config)
+                    .expect("static literals should compile")
+                    .wasm_bytes
+            })
+            .collect::<Vec<_>>();
+        let value = run_wasm_bytes_node(
+            &outputs[0],
+            r#"
+const { memory, first, second, third, __sjulia_alloc: alloc } = instance.exports;
+const imports = WebAssembly.Module.imports(module).length;
+const firstView = first();
+const secondView = second();
+const thirdView = third();
+const view = new DataView(memory.buffer);
+const firstPtr = view.getUint32(firstView, true);
+const firstLen = view.getUint32(firstView + 4, true);
+const thirdPtr = view.getUint32(thirdView, true);
+const thirdLen = view.getUint32(thirdView + 4, true);
+const firstBytes = Array.from(new Uint8Array(memory.buffer, firstPtr, firstLen));
+const thirdBytes = Array.from(new Uint8Array(memory.buffer, thirdPtr, thirdLen));
+const allocated = alloc(BigInt(memory.buffer.byteLength), 8);
+const survivedGrowth = Array.from(new Uint8Array(memory.buffer, firstPtr, firstLen));
+console.log(JSON.stringify({ imports, interned: firstView === secondView, firstBytes, thirdBytes, allocationAfterData: allocated > thirdPtr + thirdLen, survivedGrowth }));
+"#,
+        );
+
+        // Then: interning and bytes are stable, import-free, and outside allocator storage.
+        assert_eq!(outputs[0], outputs[1]);
+        assert_eq!(outputs[1], outputs[2]);
+        assert_eq!(
+            value,
+            r#"{"imports":0,"interned":true,"firstBytes":[114,101,112,101,97,116],"thirdBytes":[240,147,128,128],"allocationAfterData":true,"survivedGrowth":[114,101,112,101,97,116]}"#
+        );
+    }
+
+    #[test]
+    fn wasm_rejects_dynamic_string_behavior_with_typed_diagnostics() {
+        // Given: dynamic concatenation, interpolation, and mutation requests.
+        let cases = [
+            (
+                "dynamic(value::String)::String = string(value, \"!\")",
+                "dynamic",
+                vec![StaticType::Str],
+                "dynamic string concatenation or interpolation",
+            ),
+            (
+                "interpolate(value::Int64)::String = \"value = $value\"",
+                "interpolate",
+                vec![StaticType::I64],
+                "dynamic string concatenation or interpolation",
+            ),
+            (
+                "function mutate(value::String)::String\nvalue[1] = 'x'\nreturn value\nend",
+                "mutate",
+                vec![StaticType::Str],
+                "string literals are immutable",
+            ),
+        ];
+
+        for (source, name, arg_types, diagnostic) in cases {
+            // When: generated-Wasm lowering reaches unsupported dynamic behavior.
+            let error = compile_wasm_source(
+                source,
+                &CompileConfig {
+                    backend: AotBackend::Wasm,
+                    c_abi_exports: vec![CAbiExport::with_arg_types(name, name, arg_types)],
+                    ..CompileConfig::default()
+                },
+            )
+            .expect_err("dynamic string behavior must not compile");
+
+            // Then: a typed diagnostic names the unsupported behavior exactly.
+            assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+            assert!(error.to_string().contains(diagnostic), "{error}");
+        }
     }
 
     #[test]
