@@ -51,7 +51,8 @@ pub(super) fn map_binop(op: AotBinOp) -> AotResult<BinOpKind> {
         AotBinOp::BitXor => BinOpKind::BitXor,
         AotBinOp::Shl => BinOpKind::Shl,
         AotBinOp::Shr => BinOpKind::Shr,
-        AotBinOp::Pow | AotBinOp::Subtype => {
+        AotBinOp::Pow => BinOpKind::Pow,
+        AotBinOp::Subtype => {
             return Err(unsupported(format!(
                 "Wasm AoT does not support binary operator `{op}`"
             )))

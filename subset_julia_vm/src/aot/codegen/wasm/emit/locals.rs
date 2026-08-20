@@ -14,6 +14,16 @@ pub(super) struct LocalLayout {
     pub(super) declarations: Vec<(u32, ValType)>,
     pub(super) pc: u32,
     pub(super) memory: MemoryLocals,
+    pub(super) math: MathLocals,
+}
+
+pub(super) struct MathLocals {
+    pub(super) x: u32,
+    pub(super) y: u32,
+    pub(super) term: u32,
+    pub(super) sum: u32,
+    pub(super) factor: u32,
+    pub(super) exponent: u32,
 }
 
 pub(super) struct MemoryLocals {
@@ -56,10 +66,20 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
         data_end: memory_start + 8,
     };
     let mut phi_scratch = HashMap::new();
+    let math_start = memory_start + 9;
+    declarations.push((6, ValType::F64));
+    let math = MathLocals {
+        x: math_start,
+        y: math_start + 1,
+        term: math_start + 2,
+        sum: math_start + 3,
+        factor: math_start + 4,
+        exponent: math_start + 5,
+    };
     for (offset, (name, ty)) in collect_phi_scratch(function)?.iter().enumerate() {
         phi_scratch.insert(
             name.clone(),
-            memory_start + 9 + checked_index(offset, "phi locals")?,
+            math_start + 6 + checked_index(offset, "phi locals")?,
         );
         declarations.push((1, *ty));
     }
@@ -69,6 +89,7 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
         declarations,
         pc,
         memory,
+        math,
     })
 }
 

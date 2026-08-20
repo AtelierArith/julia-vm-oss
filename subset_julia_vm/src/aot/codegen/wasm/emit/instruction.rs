@@ -11,7 +11,7 @@ use super::descriptor::{
 };
 use super::locals::LocalLayout;
 use super::memory::{emit_u8_address, memarg};
-use super::math::emit_math_builtin;
+use super::math::{emit_math_builtin, emit_pow};
 use super::ops::{emit_binop, emit_const, emit_conversion, emit_unary, get, normalize_u8, set};
 
 pub(super) fn emit_instruction(
@@ -50,6 +50,11 @@ pub(super) fn emit_instruction(
             emit_conversion(body, &left.ty, operand_type)?;
             get(body, locals, right)?;
             emit_conversion(body, &right.ty, operand_type)?;
+            if *op == BinOpKind::Pow {
+                emit_pow(body, left, right, locals, &layout.math)?;
+                set(body, locals, dest)?;
+                return Ok(());
+            }
             emit_binop(body, *op, operand_type)?;
             if !comparisons && *operand_type == crate::aot::types::StaticType::U8 {
                 normalize_u8(body);

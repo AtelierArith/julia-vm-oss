@@ -7348,6 +7348,43 @@ console.log(JSON.stringify(values));
     }
 
     #[test]
+    fn wasm_import_free_pow_matches_julia_scalar_matrix() {
+        // Given: direct and composed powers for both floating widths.
+        let source = "f64_pow(x::Float64, y::Float64)::Float64 = x ^ y\nf64_gamma(x::Float64)::Float64 = clamp(x, 0.0, 1.0) ^ 2.2\nf32_pow(x::Float32, y::Float32)::Float32 = x ^ y";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types("f64_pow", "f64_pow", vec![StaticType::F64; 2]),
+                CAbiExport::with_arg_types("f64_gamma", "f64_gamma", vec![StaticType::F64]),
+                CAbiExport::with_arg_types("f32_pow", "f32_pow", vec![StaticType::F32; 2]),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: the generated module is inspected and executed over representative domains.
+        let output = compile_wasm_source(source, &config).expect("pow should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const close = (actual, expected, tolerance) => Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected));
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  f64: [close(e.f64_pow(2, 10), 1024, 1e-12), close(e.f64_pow(9, 0.5), 3, 1e-12), close(e.f64_pow(2, -3), 0.125, 1e-12), close(e.f64_pow(-2, 3), -8, 1e-12), close(e.f64_gamma(0.5), 0.217637640824031, 1e-12), e.f64_pow(0, 0) === 1, traps(() => e.f64_pow(-2, 0.5))],
+  f32: [close(e.f32_pow(2, 10), 1024, 1e-5), close(e.f32_pow(9, 0.5), 3, 1e-5), close(e.f32_pow(2, -3), 0.125, 1e-5), close(e.f32_pow(-2, 3), -8, 1e-5), traps(() => e.f32_pow(-2, 0.5))],
+}));
+"#,
+        );
+
+        // Then: helpers remain import-free and values satisfy the explicit tolerance manifest.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"f64":[true,true,true,true,true,true,true],"f32":[true,true,true,true,true]}"#
+        );
+    }
+
+    #[test]
     fn wasm_executes_counted_loop_from_julia_source() {
         // Given: a counted while loop with mutable scalar locals.
         let source = "function triangular(n::Int64)::Int64\ni = 1\ns = 0\nwhile i <= n\ns = s + i\ni = i + 1\nend\nreturn s\nend";

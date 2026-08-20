@@ -7,6 +7,183 @@ use wasm_encoder::{BlockType, Function, Instruction as W};
 
 use super::super::types::unsupported;
 use super::ops::get;
+use super::locals::MathLocals;
+
+const LN_2: f64 = std::f64::consts::LN_2;
+
+pub(super) fn emit_pow(
+    body: &mut Function,
+    base: &VarRef,
+    exponent: &VarRef,
+    locals: &HashMap<String, u32>,
+    scratch: &MathLocals,
+) -> AotResult<()> {
+    if base.ty != exponent.ty || !matches!(base.ty, StaticType::F32 | StaticType::F64) {
+        return Err(unsupported("Wasm power requires homogeneous Float32 or Float64 arguments"));
+    }
+    get_as_f64(body, base, locals)?;
+    body.instruction(&W::LocalSet(scratch.x));
+    get_as_f64(body, exponent, locals)?;
+    body.instruction(&W::LocalSet(scratch.y));
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::LocalSet(scratch.exponent));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::I32And);
+    body.instruction(&W::Select);
+    body.instruction(&W::LocalSet(scratch.x));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::LocalSet(scratch.factor));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::F64Lt);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::F64Trunc);
+    body.instruction(&W::F64Ne);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::Unreachable);
+    body.instruction(&W::End);
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::F64Const(2.0.into()));
+    body.instruction(&W::F64Div);
+    body.instruction(&W::F64Trunc);
+    body.instruction(&W::F64Const(2.0.into()));
+    body.instruction(&W::F64Mul);
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::F64Ne);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::F64Const((-1.0).into()));
+    body.instruction(&W::LocalSet(scratch.factor));
+    body.instruction(&W::End);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Abs);
+    body.instruction(&W::LocalSet(scratch.x));
+    body.instruction(&W::End);
+    emit_log(body, scratch);
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::F64Mul);
+    body.instruction(&W::LocalSet(scratch.x));
+    emit_exp(body, scratch);
+    body.instruction(&W::LocalGet(scratch.factor));
+    body.instruction(&W::F64Mul);
+    if base.ty == StaticType::F32 {
+        body.instruction(&W::F32DemoteF64);
+    }
+    Ok(())
+}
+
+fn get_as_f64(
+    body: &mut Function,
+    value: &VarRef,
+    locals: &HashMap<String, u32>,
+) -> AotResult<()> {
+    get(body, locals, value)?;
+    if value.ty == StaticType::F32 {
+        body.instruction(&W::F64PromoteF32);
+    }
+    Ok(())
+}
+
+fn emit_log(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::F64Le);
+    body.instruction(&W::If(BlockType::Empty));
+    body.instruction(&W::Unreachable);
+    body.instruction(&W::End);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::I64ReinterpretF64);
+    body.instruction(&W::I64Const(52));
+    body.instruction(&W::I64ShrU);
+    body.instruction(&W::I64Const(0x7ff));
+    body.instruction(&W::I64And);
+    body.instruction(&W::I64Const(1023));
+    body.instruction(&W::I64Sub);
+    body.instruction(&W::F64ConvertI64S);
+    body.instruction(&W::F64Const(LN_2.into()));
+    body.instruction(&W::F64Mul);
+    body.instruction(&W::LocalSet(scratch.sum));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::I64ReinterpretF64);
+    body.instruction(&W::I64Const(0x000f_ffff_ffff_ffff));
+    body.instruction(&W::I64And);
+    body.instruction(&W::I64Const(0x3ff0_0000_0000_0000));
+    body.instruction(&W::I64Or);
+    body.instruction(&W::F64ReinterpretI64);
+    body.instruction(&W::LocalSet(scratch.x));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::F64Sub);
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::F64Add);
+    body.instruction(&W::F64Div);
+    body.instruction(&W::LocalSet(scratch.y));
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::LocalSet(scratch.term));
+    for denominator in (1..=39).step_by(2) {
+        body.instruction(&W::LocalGet(scratch.sum));
+        body.instruction(&W::LocalGet(scratch.term));
+        body.instruction(&W::F64Const((2.0 / f64::from(denominator)).into()));
+        body.instruction(&W::F64Mul);
+        body.instruction(&W::F64Add);
+        body.instruction(&W::LocalSet(scratch.sum));
+        body.instruction(&W::LocalGet(scratch.term));
+        body.instruction(&W::LocalGet(scratch.y));
+        body.instruction(&W::F64Mul);
+        body.instruction(&W::LocalGet(scratch.y));
+        body.instruction(&W::F64Mul);
+        body.instruction(&W::LocalSet(scratch.term));
+    }
+    body.instruction(&W::LocalGet(scratch.sum));
+}
+
+fn emit_exp(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(LN_2.into()));
+    body.instruction(&W::F64Div);
+    body.instruction(&W::F64Nearest);
+    body.instruction(&W::LocalSet(scratch.y));
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::F64Const(LN_2.into()));
+    body.instruction(&W::F64Mul);
+    body.instruction(&W::F64Sub);
+    body.instruction(&W::LocalSet(scratch.x));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::LocalSet(scratch.sum));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::LocalSet(scratch.term));
+    for divisor in 1..=20 {
+        body.instruction(&W::LocalGet(scratch.term));
+        body.instruction(&W::LocalGet(scratch.x));
+        body.instruction(&W::F64Mul);
+        body.instruction(&W::F64Const(f64::from(divisor).into()));
+        body.instruction(&W::F64Div);
+        body.instruction(&W::LocalSet(scratch.term));
+        body.instruction(&W::LocalGet(scratch.sum));
+        body.instruction(&W::LocalGet(scratch.term));
+        body.instruction(&W::F64Add);
+        body.instruction(&W::LocalSet(scratch.sum));
+    }
+    body.instruction(&W::LocalGet(scratch.sum));
+    body.instruction(&W::LocalGet(scratch.y));
+    body.instruction(&W::I64TruncSatF64S);
+    body.instruction(&W::I64Const(1023));
+    body.instruction(&W::I64Add);
+    body.instruction(&W::I64Const(52));
+    body.instruction(&W::I64Shl);
+    body.instruction(&W::F64ReinterpretI64);
+    body.instruction(&W::F64Mul);
+}
 
 pub(super) fn emit_math_builtin(
     body: &mut Function,
