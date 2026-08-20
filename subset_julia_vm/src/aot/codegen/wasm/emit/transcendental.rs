@@ -7,7 +7,7 @@ use wasm_encoder::{BlockType, Function, Instruction as W};
 
 use super::super::types::unsupported;
 use super::locals::MathLocals;
-use super::transcendental_approx::{emit_exp, emit_log, get_as_f64};
+use super::transcendental_approx::{emit_exp_classified, emit_log, get_as_f64};
 
 pub(super) fn emit_pow(
     body: &mut Function,
@@ -45,12 +45,19 @@ fn emit_pow_value(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::F64Const(1.0.into()));
     body.instruction(&W::Else);
     body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::Else);
+    body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::F64Ne);
     body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::Else);
     emit_non_nan_pow(body, scratch);
+    body.instruction(&W::End);
     body.instruction(&W::End);
     body.instruction(&W::End);
 }
@@ -157,11 +164,39 @@ fn emit_finite_pow(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::F64Abs);
     body.instruction(&W::LocalSet(scratch.x));
     body.instruction(&W::End);
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::F64Abs);
+    body.instruction(&W::F64Const(f64::INFINITY.into()));
+    body.instruction(&W::F64Eq);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    emit_infinite_exponent_pow(body, scratch);
+    body.instruction(&W::Else);
+    emit_finite_exponent_pow(body, scratch);
+    body.instruction(&W::End);
+}
+
+fn emit_infinite_exponent_pow(body: &mut Function, scratch: &MathLocals) {
+    body.instruction(&W::LocalGet(scratch.x));
+    body.instruction(&W::F64Abs);
+    body.instruction(&W::F64Const(1.0.into()));
+    body.instruction(&W::F64Gt);
+    body.instruction(&W::LocalGet(scratch.exponent));
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::F64Gt);
+    body.instruction(&W::I32Eq);
+    body.instruction(&W::If(BlockType::Result(wasm_encoder::ValType::F64)));
+    body.instruction(&W::F64Const(f64::INFINITY.into()));
+    body.instruction(&W::Else);
+    body.instruction(&W::F64Const(0.0.into()));
+    body.instruction(&W::End);
+}
+
+fn emit_finite_exponent_pow(body: &mut Function, scratch: &MathLocals) {
     emit_log(body, scratch);
     body.instruction(&W::LocalGet(scratch.exponent));
     body.instruction(&W::F64Mul);
     body.instruction(&W::LocalSet(scratch.x));
-    emit_exp(body, scratch);
+    emit_exp_classified(body, scratch);
     body.instruction(&W::LocalGet(scratch.factor));
     body.instruction(&W::F64Mul);
 }

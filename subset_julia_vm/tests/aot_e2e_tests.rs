@@ -7439,6 +7439,56 @@ console.log(JSON.stringify({
     }
 
     #[test]
+    fn wasm_pow_infinite_exponents_and_extremes_match_julia() {
+        // Given: Julia 1.12.4 identities for NaN, infinite exponents, and extreme finite bases.
+        let source = "f64_pow_final(x::Float64, y::Float64)::Float64 = x ^ y\nf32_pow_final(x::Float32, y::Float32)::Float32 = x ^ y\nf64_pow_nested(x::Float64)::Float64 = ((x ^ 2.0) ^ -1.0) + (x ^ 3.0)";
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types(
+                    "f64_pow_final",
+                    "f64_pow_final",
+                    vec![StaticType::F64; 2],
+                ),
+                CAbiExport::with_arg_types(
+                    "f32_pow_final",
+                    "f32_pow_final",
+                    vec![StaticType::F32; 2],
+                ),
+                CAbiExport::with_arg_types(
+                    "f64_pow_nested",
+                    "f64_pow_nested",
+                    vec![StaticType::F64],
+                ),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: Node records exact classifications and repeated-call scratch behavior.
+        let output = compile_wasm_source(source, &config).expect("final pow edges should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const b64 = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString(16).padStart(16, "0");
+const b32 = x => new Uint32Array(new Float32Array([x]).buffer)[0].toString(16).padStart(8, "0");
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  f64: [[1,NaN],[NaN,0],[NaN,2],[2,Infinity],[2,-Infinity],[0.5,Infinity],[0.5,-Infinity],[1,Infinity],[1,-Infinity],[-2,Infinity],[-2,-Infinity],[-0.5,Infinity],[-0.5,-Infinity],[Number.MIN_VALUE,2],[Number.MIN_VALUE,-2],[Number.MAX_VALUE,2],[Number.MAX_VALUE,-2]].map(([x,y]) => b64(e.f64_pow_final(x,y))),
+  f32: [[1,NaN],[NaN,0],[2,Infinity],[2,-Infinity],[0.5,Infinity],[0.5,-Infinity],[-2,Infinity],[-0.5,-Infinity],[1.401298464324817e-45,2],[3.4028234663852886e38,2]].map(([x,y]) => b32(e.f32_pow_final(x,y))),
+  nested: Math.abs(e.f64_pow_nested(2) - 8.25) <= 1e-12,
+}));
+"#,
+        );
+
+        // Then: exponent classification and bounded exp preserve Julia results without imports.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"f64":["3ff0000000000000","3ff0000000000000","7ff8000000000000","7ff0000000000000","0000000000000000","0000000000000000","7ff0000000000000","3ff0000000000000","3ff0000000000000","7ff0000000000000","0000000000000000","0000000000000000","7ff0000000000000","0000000000000000","7ff0000000000000","7ff0000000000000","0000000000000000"],"f32":["3f800000","3f800000","7f800000","00000000","00000000","7f800000","7f800000","7f800000","00000000","7f800000"],"nested":true}"#
+        );
+    }
+
+    #[test]
     fn wasm_import_free_exp_log_match_julia_scalar_matrix() {
         // Given: direct and composed exp/log functions for both floating widths.
         let source = "f64_exp(x::Float64)::Float64 = exp(x)\nf64_log(x::Float64)::Float64 = log(x)\nf64_roundtrip(x::Float64)::Float64 = exp(log(x))\nf32_exp(x::Float32)::Float32 = exp(x)\nf32_log(x::Float32)::Float32 = log(x)";

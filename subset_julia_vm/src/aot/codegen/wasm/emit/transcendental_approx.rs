@@ -40,7 +40,7 @@ pub(super) fn emit_log_builtin(
     Ok(())
 }
 
-fn emit_exp_classified(body: &mut Function, scratch: &MathLocals) {
+pub(super) fn emit_exp_classified(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::F64Ne);
