@@ -116,18 +116,20 @@ impl Lowerer<'_> {
                     | AotBuiltinOp::Isnan
                     | AotBuiltinOp::Isinf
                     | AotBuiltinOp::Isfinite
-            ) => {
+            ) =>
+            {
                 ensure_type(return_ty)?;
                 let args = args
                     .iter()
                     .map(|arg| self.expr(arg, function))
                     .collect::<AotResult<Vec<_>>>()?;
                 let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?.push(Instruction::Builtin {
-                    dest: dest.clone(),
-                    op: *builtin,
-                    args,
-                });
+                self.current_block_mut(function)?
+                    .push(Instruction::Builtin {
+                        dest: dest.clone(),
+                        op: *builtin,
+                        args,
+                    });
                 Ok(dest)
             }
             AotExpr::Index {

@@ -7279,7 +7279,9 @@ console.log(JSON.stringify(values));
         // Given: structurally recognized scalar math builtins over both float widths.
         let source = "f64_abs(x::Float64)::Float64 = abs(x)\nf64_floor(x::Float64)::Float64 = floor(x)\nf64_ceil(x::Float64)::Float64 = ceil(x)\nf64_trunc(x::Float64)::Float64 = trunc(x)\nf64_round(x::Float64)::Float64 = round(x)\nf64_sqrt(x::Float64)::Float64 = sqrt(x)\nf64_min(x::Float64, y::Float64)::Float64 = min(x, y)\nf64_max(x::Float64, y::Float64)::Float64 = max(x, y)\nf64_clamp(x::Float64, lo::Float64, hi::Float64)::Float64 = clamp(x, lo, hi)\nf64_isnan(x::Float64)::Bool = isnan(x)\nf64_isinf(x::Float64)::Bool = isinf(x)\nf64_isfinite(x::Float64)::Bool = isfinite(x)\nf32_abs(x::Float32)::Float32 = abs(x)\nf32_floor(x::Float32)::Float32 = floor(x)\nf32_ceil(x::Float32)::Float32 = ceil(x)\nf32_trunc(x::Float32)::Float32 = trunc(x)\nf32_round(x::Float32)::Float32 = round(x)\nf32_sqrt(x::Float32)::Float32 = sqrt(x)\nf32_min(x::Float32, y::Float32)::Float32 = min(x, y)\nf32_max(x::Float32, y::Float32)::Float32 = max(x, y)\nf32_clamp(x::Float32, lo::Float32, hi::Float32)::Float32 = clamp(x, lo, hi)\nf32_isnan(x::Float32)::Bool = isnan(x)\nf32_isinf(x::Float32)::Bool = isinf(x)\nf32_isfinite(x::Float32)::Bool = isfinite(x)";
         let mut exports = Vec::new();
-        for name in ["abs", "floor", "ceil", "trunc", "round", "sqrt", "isnan", "isinf", "isfinite"] {
+        for name in [
+            "abs", "floor", "ceil", "trunc", "round", "sqrt", "isnan", "isinf", "isfinite",
+        ] {
             exports.push(CAbiExport::with_arg_types(
                 format!("f64_{name}"),
                 format!("f64_{name}"),

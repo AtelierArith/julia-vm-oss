@@ -24,6 +24,7 @@ pub(super) struct MathLocals {
     pub(super) sum: u32,
     pub(super) factor: u32,
     pub(super) exponent: u32,
+    pub(super) log_adjust: u32,
 }
 
 pub(super) struct MemoryLocals {
@@ -67,7 +68,7 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
     };
     let mut phi_scratch = HashMap::new();
     let math_start = memory_start + 9;
-    declarations.push((6, ValType::F64));
+    declarations.push((7, ValType::F64));
     let math = MathLocals {
         x: math_start,
         y: math_start + 1,
@@ -75,11 +76,12 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
         sum: math_start + 3,
         factor: math_start + 4,
         exponent: math_start + 5,
+        log_adjust: math_start + 6,
     };
     for (offset, (name, ty)) in collect_phi_scratch(function)?.iter().enumerate() {
         phi_scratch.insert(
             name.clone(),
-            math_start + 6 + checked_index(offset, "phi locals")?,
+            math_start + 7 + checked_index(offset, "phi locals")?,
         );
         declarations.push((1, *ty));
     }

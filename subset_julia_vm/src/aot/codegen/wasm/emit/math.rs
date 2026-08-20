@@ -6,8 +6,8 @@ use crate::aot::AotResult;
 use wasm_encoder::{BlockType, Function, Instruction as W};
 
 use super::super::types::unsupported;
-use super::ops::get;
 use super::locals::MathLocals;
+use super::ops::get;
 
 const LN_2: f64 = std::f64::consts::LN_2;
 
@@ -19,7 +19,9 @@ pub(super) fn emit_pow(
     scratch: &MathLocals,
 ) -> AotResult<()> {
     if base.ty != exponent.ty || !matches!(base.ty, StaticType::F32 | StaticType::F64) {
-        return Err(unsupported("Wasm power requires homogeneous Float32 or Float64 arguments"));
+        return Err(unsupported(
+            "Wasm power requires homogeneous Float32 or Float64 arguments",
+        ));
     }
     get_as_f64(body, base, locals)?;
     body.instruction(&W::LocalSet(scratch.x));
@@ -80,11 +82,7 @@ pub(super) fn emit_pow(
     Ok(())
 }
 
-fn get_as_f64(
-    body: &mut Function,
-    value: &VarRef,
-    locals: &HashMap<String, u32>,
-) -> AotResult<()> {
+fn get_as_f64(body: &mut Function, value: &VarRef, locals: &HashMap<String, u32>) -> AotResult<()> {
     get(body, locals, value)?;
     if value.ty == StaticType::F32 {
         body.instruction(&W::F64PromoteF32);
@@ -100,7 +98,7 @@ fn emit_log(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::Unreachable);
     body.instruction(&W::End);
     body.instruction(&W::F64Const(0.0.into()));
-    body.instruction(&W::LocalSet(scratch.factor));
+    body.instruction(&W::LocalSet(scratch.log_adjust));
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::F64Const(f64::MIN_POSITIVE.into()));
     body.instruction(&W::F64Lt);
@@ -110,7 +108,7 @@ fn emit_log(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::F64Mul);
     body.instruction(&W::LocalSet(scratch.x));
     body.instruction(&W::F64Const((-52.0).into()));
-    body.instruction(&W::LocalSet(scratch.factor));
+    body.instruction(&W::LocalSet(scratch.log_adjust));
     body.instruction(&W::End);
     body.instruction(&W::LocalGet(scratch.x));
     body.instruction(&W::I64ReinterpretF64);
@@ -121,7 +119,7 @@ fn emit_log(body: &mut Function, scratch: &MathLocals) {
     body.instruction(&W::I64Const(1023));
     body.instruction(&W::I64Sub);
     body.instruction(&W::F64ConvertI64S);
-    body.instruction(&W::LocalGet(scratch.factor));
+    body.instruction(&W::LocalGet(scratch.log_adjust));
     body.instruction(&W::F64Add);
     body.instruction(&W::F64Const(LN_2.into()));
     body.instruction(&W::F64Mul);
@@ -207,9 +205,10 @@ pub(super) fn emit_math_builtin(
     locals: &HashMap<String, u32>,
     scratch: &MathLocals,
 ) -> AotResult<()> {
-    let ty = args.first().map(|arg| &arg.ty).ok_or_else(|| {
-        unsupported(format!("Wasm scalar builtin `{op}` requires an argument"))
-    })?;
+    let ty = args
+        .first()
+        .map(|arg| &arg.ty)
+        .ok_or_else(|| unsupported(format!("Wasm scalar builtin `{op}` requires an argument")))?;
     match op {
         AotBuiltinOp::Abs
         | AotBuiltinOp::Floor
@@ -219,9 +218,7 @@ pub(super) fn emit_math_builtin(
         AotBuiltinOp::Sqrt => emit_sqrt(body, &args[0], locals),
         AotBuiltinOp::Exp => emit_exp_builtin(body, &args[0], locals, scratch),
         AotBuiltinOp::Log => emit_log_builtin(body, &args[0], locals, scratch),
-        AotBuiltinOp::Min | AotBuiltinOp::Max => {
-            emit_native_binary(body, op, args, locals)
-        }
+        AotBuiltinOp::Min | AotBuiltinOp::Max => emit_native_binary(body, op, args, locals),
         AotBuiltinOp::Clamp => emit_clamp(body, args, locals),
         AotBuiltinOp::Isnan => emit_isnan(body, &args[0], locals),
         AotBuiltinOp::Isinf => emit_isinf(body, &args[0], locals),
@@ -287,11 +284,7 @@ fn emit_native_unary(
     Ok(())
 }
 
-fn emit_sqrt(
-    body: &mut Function,
-    arg: &VarRef,
-    locals: &HashMap<String, u32>,
-) -> AotResult<()> {
+fn emit_sqrt(body: &mut Function, arg: &VarRef, locals: &HashMap<String, u32>) -> AotResult<()> {
     get(body, locals, arg)?;
     match arg.ty {
         StaticType::F32 => body.instruction(&W::F32Const(0.0.into())),
@@ -324,10 +317,14 @@ fn emit_native_binary(
     locals: &HashMap<String, u32>,
 ) -> AotResult<()> {
     let [left, right] = args else {
-        return Err(unsupported(format!("Wasm scalar builtin `{op}` requires two arguments")));
+        return Err(unsupported(format!(
+            "Wasm scalar builtin `{op}` requires two arguments"
+        )));
     };
     if left.ty != right.ty {
-        return Err(unsupported(format!("Wasm scalar builtin `{op}` requires homogeneous arguments")));
+        return Err(unsupported(format!(
+            "Wasm scalar builtin `{op}` requires homogeneous arguments"
+        )));
     }
     get(body, locals, left)?;
     get(body, locals, right)?;
@@ -348,10 +345,14 @@ fn emit_clamp(
     locals: &HashMap<String, u32>,
 ) -> AotResult<()> {
     let [value, lower, upper] = args else {
-        return Err(unsupported("Wasm scalar builtin `clamp` requires three arguments"));
+        return Err(unsupported(
+            "Wasm scalar builtin `clamp` requires three arguments",
+        ));
     };
     if value.ty != lower.ty || value.ty != upper.ty {
-        return Err(unsupported("Wasm scalar builtin `clamp` requires homogeneous arguments"));
+        return Err(unsupported(
+            "Wasm scalar builtin `clamp` requires homogeneous arguments",
+        ));
     }
     get(body, locals, lower)?;
     get(body, locals, upper)?;
@@ -384,7 +385,11 @@ fn emit_isinf(body: &mut Function, arg: &VarRef, locals: &HashMap<String, u32>) 
     emit_compare_eq(body, &arg.ty)
 }
 
-fn emit_isfinite(body: &mut Function, arg: &VarRef, locals: &HashMap<String, u32>) -> AotResult<()> {
+fn emit_isfinite(
+    body: &mut Function,
+    arg: &VarRef,
+    locals: &HashMap<String, u32>,
+) -> AotResult<()> {
     get(body, locals, arg)?;
     body.instruction(&match arg.ty {
         StaticType::F32 => W::F32Abs,
