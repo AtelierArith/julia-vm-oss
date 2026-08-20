@@ -116,7 +116,7 @@ The module exports `memory` and `__sjulia_wasm_abi_version`. A descriptor has a
 | 4 | `flags:u32` | `MODULE_OWNED=1`, `READONLY=2`; no other bits |
 | 8 | `element_tag:u32` | stable append-only table; UInt8 is `1` |
 | 12 | `element_size:u32` | mirror of tag-derived size; UInt8 is `1` |
-| 16 | `layout_id:u32` | `0` until generic isbits layouts land |
+| 16 | `layout_id:u32` | `0` for primitive elements; nonzero generated structural layout ID for composite elements |
 | 20 | `rank:u32` | expected static rank, at most `8` |
 | 24 | `data_ptr:u32` | tag-aligned; zero only for zero elements |
 | 28 | `reserved:u32` | `0` |
@@ -138,6 +138,29 @@ lifetime only and does not currently imply canonical strides. Negative strides
 and canonical-stride enforcement are deferred to the general array work in Todo
 5. Pure generated modules export checked allocation and lifetime helpers;
 callers may still use host-owned descriptor data.
+
+## Immutable aggregate handles
+
+Generated Wasm represents immutable tuples and non-parametric isbits structs as
+module-owned `i32` handles. A handle addresses `{layout_id:u32, payload...}` and
+is valid only while its allocator record remains live. Every field read checks
+four-byte alignment, current-memory extent, and the exact nonzero layout ID
+before loading. Aggregate parameters and returns use this handle contract;
+native subset_vm C ABI signatures are unchanged.
+
+The module exports `__sjulia_layout_table() -> i32` and
+`__sjulia_layout_count() -> i32`. The table is append-only in first structural
+use order. Each entry is `{id:u32,size:u32,align:u32,field_count:u32}` followed
+by `field_count` records `{offset:u32,primitive_tag:u32,layout_id:u32}`.
+Primitive fields have `layout_id=0` and use the descriptor element-tag table;
+composite fields use `primitive_tag=0` and a validated nonzero layout ID.
+Nominally distinct Julia structs with identical ordered field layouts share an
+ID. Field names never participate in layout identity, which lets later array
+descriptors reference the same type graph without host-invented IDs.
+
+Aggregate layout data precedes static string data at `0x1000`; the checked heap
+starts after both regions. Dynamic/reference fields, mutable or parametric
+structs, and aggregate mutation produce typed unsupported diagnostics.
 
 ## Coverage
 

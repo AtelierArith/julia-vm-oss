@@ -450,7 +450,10 @@ Issue #9089 以降、スタック VM とレジスタ VM の両方のロワリン
 
 Wasm AoT の linear-memory descriptor ABI v2 は 40-byte aligned header と
 inline `{dim:u64,stride:i64}` rank pair を使う。UInt8 tag は stable value 1、rank
-上限は 8、layout_id は 0。静的 tag/rank、checked product/extent、metadata/data
+上限は 8、primitive の layout_id は 0。generated Wasm の immutable tuple と
+non-parametric isbits struct は module-owned handle と nonzero structural layout ID を使い、
+`__sjulia_layout_table` / `__sjulia_layout_count` から host が field offset/type graph を
+discover できる。静的 tag/rank、checked product/extent、metadata/data
 disjointness と Julia one-based axis bounds を全て検証してから load/store する。
 負 stride は Todo 5 まで trap する。詳細は root の `COMPILER_SPIKE.md` を参照。
 
