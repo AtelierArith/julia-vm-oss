@@ -8,7 +8,7 @@ use wasm_encoder::{BlockType, Function, Instruction as W};
 use super::super::types::unsupported;
 use super::locals::MathLocals;
 use super::ops::get;
-use super::transcendental::{emit_exp_builtin, emit_log_builtin};
+use super::transcendental_approx::{emit_exp_builtin, emit_log_builtin};
 
 pub(super) fn emit_math_builtin(
     body: &mut Function,

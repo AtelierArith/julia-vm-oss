@@ -12,6 +12,7 @@ mod math;
 mod memory;
 mod ops;
 mod transcendental;
+mod transcendental_approx;
 
 use std::collections::HashMap;
 
