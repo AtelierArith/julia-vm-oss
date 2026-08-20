@@ -10,8 +10,8 @@ const artifactManifest = JSON.parse(
 );
 assert.equal(
   artifactManifest.compiler_abi_version,
-  1,
-  "pkg-compiler-final smoke descriptor writer must migrate with the Todo 3d artifact rebuild",
+  2,
+  "pkg-compiler-final must emit generated-module ABI v2",
 );
 const compiler = await import(new URL("subset_julia_vm_web.js", packageUrl));
 const compilerBytes = await readFile(fileURLToPath(new URL("subset_julia_vm_web_bg.wasm", packageUrl)));
@@ -33,7 +33,31 @@ function compile(source, exportName, argTypes, functionName = exportName) {
 async function instantiate(result) {
   const module = await WebAssembly.compile(result.wasm_bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), []);
-  return WebAssembly.instantiate(module, {});
+  const instance = await WebAssembly.instantiate(module, {});
+  assert.equal(instance.exports.__sjulia_wasm_abi_version(), 2);
+  for (const name of ["__sjulia_alloc", "__sjulia_free", "__sjulia_drop"]) {
+    assert.equal(typeof instance.exports[name], "function", `missing generated export ${name}`);
+  }
+  return instance;
+}
+
+function assertTrap(action, message) {
+  assert.throws(action, WebAssembly.RuntimeError, message);
+}
+
+function writeRankOneUint8Descriptor(memory, descriptor, pointer, length, flags = 0) {
+  const view = new DataView(memory.buffer);
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, flags, true);
+  view.setUint32(descriptor + 8, 1, true);
+  view.setUint32(descriptor + 12, 1, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, 1, true);
+  view.setUint32(descriptor + 24, pointer, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, BigInt(length), true);
+  view.setBigUint64(descriptor + 40, BigInt(length), true);
+  view.setBigInt64(descriptor + 48, 1n, true);
 }
 
 const arithmetic = compile(
@@ -65,19 +89,44 @@ const mutation = compile(
 );
 const mutationInstance = await instantiate(mutation);
 const memory = mutationInstance.exports.memory;
-const descriptor = 32;
-const pointer = 64;
-const input = new Uint8Array(memory.buffer, pointer, 4);
-const descriptorView = new DataView(memory.buffer);
+const { __sjulia_alloc: allocate, __sjulia_free: free, __sjulia_drop: drop } = mutationInstance.exports;
+const pointer = allocate(4n, 1);
+assert.notEqual(pointer, 0);
+let input = new Uint8Array(memory.buffer, pointer, 4);
 input.set([1, 2, 254, 0]);
-descriptorView.setInt32(descriptor, 1, true);
-descriptorView.setInt32(descriptor + 4, pointer, true);
-descriptorView.setInt32(descriptor + 8, input.length, true);
-descriptorView.setInt32(descriptor + 12, 1, true);
-descriptorView.setInt32(descriptor + 16, 1, true);
+const descriptor = allocate(56n, 8);
+assert.notEqual(descriptor, 0);
+writeRankOneUint8Descriptor(memory, descriptor, pointer, input.length);
 assert.equal(mutationInstance.exports["increment!"](descriptor), 4n);
+input = new Uint8Array(memory.buffer, pointer, 4);
 assert.deepEqual(Array.from(input), [2, 3, 255, 1]);
 assert.equal(mutationInstance.exports.__sjulia_wasm_abi_version(), mutation.abi_version);
+
+const malformed = new DataView(memory.buffer);
+malformed.setUint32(descriptor, 1, true);
+assertTrap(() => mutationInstance.exports["increment!"](descriptor), "ABI1 descriptors must trap");
+writeRankOneUint8Descriptor(memory, descriptor, pointer, input.length);
+malformed.setUint32(descriptor + 20, 2, true);
+assertTrap(() => mutationInstance.exports["increment!"](descriptor), "rank mismatch must trap");
+writeRankOneUint8Descriptor(memory, descriptor, pointer, input.length);
+malformed.setUint32(descriptor + 28, 1, true);
+assertTrap(() => mutationInstance.exports["increment!"](descriptor), "reserved fields must trap");
+writeRankOneUint8Descriptor(memory, descriptor, pointer, input.length, 1);
+drop(descriptor);
+const dropped = new DataView(memory.buffer);
+assert.equal(dropped.getUint32(descriptor + 4, true), 0);
+assert.equal(dropped.getUint32(descriptor + 24, true), 0);
+assertTrap(() => drop(descriptor), "repeated descriptor drop must trap");
+free(descriptor);
+
+const staleView = new Uint8Array(memory.buffer);
+const growthAllocation = allocate(BigInt(memory.buffer.byteLength + 65_536), 8);
+assert.notEqual(growthAllocation, 0);
+assert.equal(staleView.byteLength, 0, "memory growth must detach stale JavaScript views");
+const refreshedView = new Uint8Array(memory.buffer, growthAllocation, 1);
+refreshedView[0] = 7;
+assert.equal(refreshedView[0], 7);
+free(growthAllocation);
 
 const invalid = compiler.compile_to_wasm("x = 1\ny = )\n", undefined);
 assert.equal(invalid.success, false);
