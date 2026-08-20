@@ -1,7 +1,10 @@
+mod allocator;
 mod control;
 mod descriptor;
 mod descriptor_data;
 mod descriptor_shape;
+mod drop;
+mod free;
 mod instruction;
 mod locals;
 mod memory;
@@ -13,8 +16,8 @@ use crate::aot::codegen::CAbiExport;
 use crate::aot::ir::{BasicBlock, IrFunction, IrModule};
 use crate::aot::{AotError, AotResult};
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction as W,
-    MemorySection, MemoryType, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
+    GlobalSection, Instruction as W, MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
 use super::types::{unsupported, value_type, ABI_VERSION};
@@ -23,7 +26,13 @@ use instruction::emit_instruction;
 use locals::{build_local_layout, collect_phi_edges, LocalLayout, PhiEdges};
 use ops::required_type;
 
-const RESERVED_EXPORT_NAMES: [&str; 2] = ["memory", "__sjulia_wasm_abi_version"];
+const RESERVED_EXPORT_NAMES: [&str; 5] = [
+    "memory",
+    "__sjulia_wasm_abi_version",
+    allocator::ALLOC_NAME,
+    allocator::FREE_NAME,
+    allocator::DROP_NAME,
+];
 
 pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult<Vec<u8>> {
     let mut module = Module::new();
@@ -46,25 +55,48 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         functions.function(index);
         code.function(&emit_function(function, &function_indices)?);
     }
-    let abi_index = u32::try_from(ir.functions.len())
+    let alloc_index = u32::try_from(ir.functions.len())
         .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
+    let free_index = alloc_index + 1;
+    let drop_index = alloc_index + 2;
+    let abi_index = alloc_index + 3;
+    types
+        .ty()
+        .function([ValType::I64, ValType::I32], [ValType::I32]);
+    types.ty().function([ValType::I32], []);
+    types.ty().function([ValType::I32], []);
     types.ty().function([], [ValType::I32]);
+    functions.function(alloc_index);
+    functions.function(free_index);
+    functions.function(drop_index);
     functions.function(abi_index);
     module.section(&types);
     module.section(&functions);
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
         minimum: 64,
-        maximum: None,
+        maximum: Some(allocator::MAX_MEMORY_PAGES),
         memory64: false,
         shared: false,
         page_size_log2: None,
     });
     module.section(&memories);
+    let mut globals = GlobalSection::new();
+    globals.global(
+        allocator::heap_global_type(),
+        &ConstExpr::i32_const(allocator::HEAP_BASE),
+    );
+    module.section(&globals);
     emit_function_exports(&mut exports, ir, requested_exports, &function_indices)?;
     exports.export("memory", ExportKind::Memory, 0);
+    exports.export(allocator::ALLOC_NAME, ExportKind::Func, alloc_index);
+    exports.export(allocator::FREE_NAME, ExportKind::Func, free_index);
+    exports.export(allocator::DROP_NAME, ExportKind::Func, drop_index);
     exports.export("__sjulia_wasm_abi_version", ExportKind::Func, abi_index);
     module.section(&exports);
+    code.function(&allocator::emit_alloc(0));
+    code.function(&free::emit_free(0));
+    code.function(&drop::emit_drop(free_index));
     let mut abi = Function::new([]);
     abi.instruction(&W::I32Const(ABI_VERSION));
     abi.instruction(&W::End);

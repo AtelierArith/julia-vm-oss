@@ -6774,6 +6774,112 @@ mod wasm_backend_tests {
     }
 
     #[test]
+    fn wasm_descriptor_v2_exports_checked_allocation_lifetimes() {
+        // Given: any pure generated Wasm module.
+        let source = "answer()::Int64 = 42";
+
+        // When: Node exercises allocation, reuse, malformed frees, and descriptor drops.
+        let value = compile_and_run_node(
+            source,
+            "answer",
+            Vec::new(),
+            r#"
+const { memory, __sjulia_alloc: alloc, __sjulia_free: free, __sjulia_drop: drop } = instance.exports;
+if (![alloc, free, drop].every(value => typeof value === "function")) throw new Error("missing lifetime exports");
+const traps = action => { try { action(); return 0; } catch (error) { return Number(error instanceof WebAssembly.RuntimeError); } };
+const invalidAllocations = [alloc(0n, 8), traps(() => alloc(-1n, 8)), traps(() => alloc(1n, 0)), traps(() => alloc(1n, 3)), traps(() => alloc(1n, -8))];
+const first = alloc(32n, 16);
+let memoryBytes = new Uint8Array(memory.buffer);
+memoryBytes[first] = 0x5a;
+free(first);
+const reused = alloc(16n, 16);
+const badFreeTraps = [traps(() => free(reused + 1)), traps(() => free(32)), traps(() => free(memory.buffer.byteLength)), traps(() => free(0))];
+free(reused);
+const doubleFree = traps(() => free(reused));
+
+const descriptor = alloc(56n, 8);
+const data = alloc(4n, 1);
+let view = new DataView(memory.buffer);
+view.setUint32(descriptor, 2, true);
+view.setUint32(descriptor + 4, 1, true);
+view.setUint32(descriptor + 8, 1, true);
+view.setUint32(descriptor + 12, 1, true);
+view.setUint32(descriptor + 16, 0, true);
+view.setUint32(descriptor + 20, 1, true);
+view.setUint32(descriptor + 24, data, true);
+view.setUint32(descriptor + 28, 0, true);
+view.setBigUint64(descriptor + 32, 4n, true);
+view.setBigUint64(descriptor + 40, 4n, true);
+view.setBigInt64(descriptor + 48, 1n, true);
+drop(descriptor);
+view = new DataView(memory.buffer);
+const cleared = view.getUint32(descriptor + 4, true) === 0 && view.getUint32(descriptor + 24, true) === 0;
+const doubleDrop = traps(() => drop(descriptor));
+
+const hostDescriptor = 32;
+const hostData = 128;
+view.setUint32(hostDescriptor, 2, true);
+view.setUint32(hostDescriptor + 4, 0, true);
+view.setUint32(hostDescriptor + 8, 1, true);
+view.setUint32(hostDescriptor + 12, 1, true);
+view.setUint32(hostDescriptor + 16, 0, true);
+view.setUint32(hostDescriptor + 20, 1, true);
+view.setUint32(hostDescriptor + 24, hostData, true);
+view.setUint32(hostDescriptor + 28, 0, true);
+view.setBigUint64(hostDescriptor + 32, 1n, true);
+view.setBigUint64(hostDescriptor + 40, 1n, true);
+view.setBigInt64(hostDescriptor + 48, 1n, true);
+new Uint8Array(memory.buffer)[hostData] = 77;
+drop(hostDescriptor);
+const hostPreserved = new Uint8Array(memory.buffer)[hostData] === 77;
+
+const beforeGrowth = memory.buffer.byteLength;
+const large = alloc(BigInt(beforeGrowth), 8);
+memoryBytes = new Uint8Array(memory.buffer);
+memoryBytes[large + beforeGrowth - 1] = 0xa5;
+const grew = memory.buffer.byteLength > beforeGrowth && memoryBytes[large + beforeGrowth - 1] === 0xa5;
+free(large);
+const exhaustion = [];
+for (;;) {
+  const pointer = alloc(1048576n, 8);
+  if (pointer === 0) break;
+  exhaustion.push(pointer);
+}
+const oomIsZero = exhaustion.length > 0 && alloc(1048576n, 8) === 0;
+console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reused: reused === first, badFreeTraps, doubleFree, cleared, doubleDrop, hostPreserved, grew, oomIsZero }));
+"#,
+        );
+
+        // Then: OOM alone returns zero and every ownership violation traps.
+        assert_eq!(
+            value,
+            r#"{"invalidAllocations":[0,1,1,1,1],"aligned":true,"reused":true,"badFreeTraps":[1,1,1,1],"doubleFree":1,"cleared":true,"doubleDrop":1,"hostPreserved":true,"grew":true,"oomIsZero":true}"#
+        );
+    }
+
+    #[test]
+    fn wasm_rejects_all_lifetime_helper_name_collisions() {
+        // Given: each generated-module lifetime helper name used by Julia source.
+        for name in ["__sjulia_alloc", "__sjulia_free", "__sjulia_drop"] {
+            let source = format!("{name}()::Int64 = 1");
+
+            // When: the canonical backend validates the generated namespace.
+            let error = compile_wasm_source(
+                &source,
+                &CompileConfig {
+                    backend: AotBackend::Wasm,
+                    c_abi_exports: vec![CAbiExport::with_arg_types(name, name, Vec::new())],
+                    ..CompileConfig::default()
+                },
+            )
+            .expect_err("lifetime helper collisions must be rejected");
+
+            // Then: collision is a typed unsupported diagnostic.
+            assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+        }
+    }
+
+    #[test]
     fn wasm_descriptor_v2_reads_rank_two_uint8_with_inline_metadata() {
         // Given: a rank-2 UInt8 function and non-square column-major host storage.
         let source = "function update_matrix!(bytes::Matrix{UInt8}, row::Int64, column::Int64)::Int64\nbytes[row, column] = UInt8(99)\nreturn Int64(bytes[row, column]) + length(bytes)\nend";
