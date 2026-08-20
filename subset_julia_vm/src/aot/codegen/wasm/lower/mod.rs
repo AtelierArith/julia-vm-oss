@@ -10,18 +10,18 @@ use crate::aot::ir::{
 use crate::aot::types::StaticType;
 use crate::aot::{AotError, AotResult};
 
+use super::layout::LayoutRegistry;
 use super::types::unsupported;
 use ops::{ensure_return_type, ensure_type};
 
 pub(super) fn lower_program(program: &AotProgram) -> AotResult<IrModule> {
-    if !program.globals.is_empty() || !program.structs.is_empty() || !program.enums.is_empty() {
-        return Err(unsupported(
-            "Wasm AoT does not support globals, structs, or enums",
-        ));
+    if !program.globals.is_empty() || !program.enums.is_empty() {
+        return Err(unsupported("Wasm AoT does not support globals or enums"));
     }
+    let mut layouts = LayoutRegistry::collect(program)?;
     let mut module = IrModule::new("subset_julia_wasm".to_string());
     for function in &program.functions {
-        module.add_function(Lowerer::new(function).lower()?);
+        module.add_function(Lowerer::new(function, &mut layouts).lower()?);
     }
     if !program.main.is_empty() {
         let main = AotFunction {
@@ -32,21 +32,23 @@ pub(super) fn lower_program(program: &AotProgram) -> AotResult<IrModule> {
             is_generic: false,
             inline_policy: crate::aot::ir::AotInlinePolicy::Auto,
         };
-        module.add_function(Lowerer::new(&main).lower()?);
+        module.add_function(Lowerer::new(&main, &mut layouts).lower()?);
     }
+    module.layouts = layouts.finish();
     Ok(module)
 }
 
-pub(super) struct Lowerer<'a> {
-    source: &'a AotFunction,
+pub(super) struct Lowerer<'source, 'layouts> {
+    source: &'source AotFunction,
     vars: HashMap<String, VarRef>,
     current: String,
     temp: usize,
     block: usize,
+    layouts: &'layouts mut LayoutRegistry,
 }
 
-impl<'a> Lowerer<'a> {
-    fn new(source: &'a AotFunction) -> Self {
+impl<'source, 'layouts> Lowerer<'source, 'layouts> {
+    fn new(source: &'source AotFunction, layouts: &'layouts mut LayoutRegistry) -> Self {
         let vars = source
             .params
             .iter()
@@ -58,6 +60,7 @@ impl<'a> Lowerer<'a> {
             current: "entry".to_string(),
             temp: 0,
             block: 0,
+            layouts,
         }
     }
 

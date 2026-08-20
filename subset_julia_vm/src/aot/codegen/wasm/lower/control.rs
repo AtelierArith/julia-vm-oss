@@ -6,7 +6,7 @@ use super::super::types::unsupported;
 use super::ops::ensure_type;
 use super::Lowerer;
 
-impl Lowerer<'_> {
+impl Lowerer<'_, '_> {
     pub(super) fn stmt(&mut self, stmt: &AotStmt, function: &mut IrFunction) -> AotResult<()> {
         match stmt {
             AotStmt::Let {

@@ -1,4 +1,6 @@
-use crate::aot::ir::{AotBuiltinOp, AotExpr, ConstValue, Instruction, IrFunction, VarRef};
+use crate::aot::ir::{
+    AotBuiltinOp, AotExpr, ConstValue, Instruction, IrFunction, StructFieldInit, VarRef,
+};
 use crate::aot::types::StaticType;
 use crate::aot::AotResult;
 
@@ -6,7 +8,7 @@ use super::super::types::unsupported;
 use super::ops::{ensure_type, map_binop, map_unary};
 use super::Lowerer;
 
-impl Lowerer<'_> {
+impl Lowerer<'_, '_> {
     pub(super) fn expr(&mut self, expr: &AotExpr, function: &mut IrFunction) -> AotResult<VarRef> {
         match expr {
             AotExpr::LitI64(value) => {
@@ -85,6 +87,13 @@ impl Lowerer<'_> {
                 });
                 dest.ok_or_else(|| unsupported("Nothing-returning call cannot be used as a value"))
             }
+            AotExpr::CallDynamic {
+                function: callee,
+                args,
+            } if callee == "convert" && args.len() == 2 =>
+            {
+                self.expr(&args[1], function)
+            }
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Length,
                 args,
@@ -161,6 +170,68 @@ impl Lowerer<'_> {
                     });
                 Ok(dest)
             }
+            AotExpr::Index {
+                array,
+                indices,
+                elem_ty,
+                is_tuple: true,
+            } => {
+                let [AotExpr::LitI64(index)] = indices.as_slice() else {
+                    return Err(unsupported("Wasm tuple indexing requires a constant index"));
+                };
+                let aggregate_ty = array.get_type();
+                let layout = self.layouts.layout(&aggregate_ty)?;
+                let zero_based = usize::try_from(*index - 1)
+                    .map_err(|_| unsupported("Wasm tuple index is out of bounds"))?;
+                let field = layout
+                    .fields
+                    .get(zero_based)
+                    .ok_or_else(|| unsupported("Wasm tuple index is out of bounds"))?;
+                let offset = i32::try_from(field.offset)
+                    .map_err(|_| unsupported("Wasm aggregate field offset overflow"))?;
+                let layout_id = layout.id;
+                let object = self.expr(array, function)?;
+                let dest = self.temporary(elem_ty.clone());
+                self.current_block_mut(function)?
+                    .push(Instruction::GetFieldOffset {
+                        dest: dest.clone(),
+                        object,
+                        layout_id,
+                        offset,
+                    });
+                Ok(dest)
+            }
+            AotExpr::TupleLit { elements } => {
+                let ty = expr.get_type();
+                self.aggregate(ty, elements, function)
+            }
+            AotExpr::StructNew { name, fields } => self.aggregate(
+                StaticType::Struct {
+                    type_id: 0,
+                    name: name.clone(),
+                },
+                fields,
+                function,
+            ),
+            AotExpr::FieldAccess {
+                object,
+                field,
+                field_ty,
+            } => {
+                let object_ty = object.get_type();
+                let (layout_id, offset) = self.layouts.field(&object_ty, field)?;
+                let object = self.expr(object, function)?;
+                let dest = self.temporary(field_ty.clone());
+                self.current_block_mut(function)?
+                    .push(Instruction::GetFieldOffset {
+                        dest: dest.clone(),
+                        object,
+                        layout_id,
+                        offset: i32::try_from(offset)
+                            .map_err(|_| unsupported("Wasm aggregate field offset overflow"))?,
+                    });
+                Ok(dest)
+            }
             AotExpr::Convert { value, target_ty }
                 if value.get_type() == *target_ty && *target_ty == StaticType::Str =>
             {
@@ -202,6 +273,39 @@ impl Lowerer<'_> {
             .push(Instruction::LoadConst {
                 dest: dest.clone(),
                 value,
+            });
+        Ok(dest)
+    }
+
+    fn aggregate(
+        &mut self,
+        ty: StaticType,
+        values: &[AotExpr],
+        function: &mut IrFunction,
+    ) -> AotResult<VarRef> {
+        let layout = self.layouts.layout(&ty)?.clone();
+        if layout.fields.len() != values.len() {
+            return Err(unsupported("Wasm aggregate constructor arity mismatch"));
+        }
+        let fields = values
+            .iter()
+            .zip(&layout.fields)
+            .map(|(value, field)| {
+                Ok(StructFieldInit {
+                    offset: i32::try_from(field.offset)
+                        .map_err(|_| unsupported("Wasm aggregate field offset overflow"))?,
+                    value: self.expr(value, function)?,
+                })
+            })
+            .collect::<AotResult<Vec<_>>>()?;
+        let dest = self.temporary(ty);
+        self.current_block_mut(function)?
+            .push(Instruction::StructNew {
+                dest: dest.clone(),
+                layout_id: layout.id,
+                size: layout.size,
+                align: layout.align,
+                fields,
             });
         Ok(dest)
     }

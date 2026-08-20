@@ -13,6 +13,7 @@ pub(super) fn ensure_type(ty: &StaticType) -> AotResult<()> {
         | StaticType::Bool
         | StaticType::Str
         | StaticType::U8 => Ok(()),
+        StaticType::Tuple(_) | StaticType::NamedTuple(_) | StaticType::Struct { .. } => Ok(()),
         StaticType::Array {
             element,
             ndims: Some(rank),

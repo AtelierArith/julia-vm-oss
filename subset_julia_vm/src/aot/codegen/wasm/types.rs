@@ -80,6 +80,9 @@ pub(super) fn value_type(ty: &StaticType) -> AotResult<Option<ValType>> {
         StaticType::I32 | StaticType::Bool | StaticType::U8 | StaticType::Str => {
             Ok(Some(ValType::I32))
         }
+        StaticType::Tuple(_) | StaticType::NamedTuple(_) | StaticType::Struct { .. } => {
+            Ok(Some(ValType::I32))
+        }
         StaticType::Array {
             element,
             ndims: Some(rank),

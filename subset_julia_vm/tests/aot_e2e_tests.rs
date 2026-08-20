@@ -7073,6 +7073,166 @@ console.log(JSON.stringify({ imports, interned: firstView === secondView, firstB
     }
 
     #[test]
+    fn wasm_aggregate_oracle_matches_structural_layout_handles() {
+        // Given: immutable tuples and unrelated isbits structs accepted by Julia.
+        let source = r#"
+struct RGBLike
+    r::Float32
+    g::Float32
+    b::Float32
+end
+struct Unrelated
+    first::Float32
+    second::Float32
+    third::Float32
+end
+struct Mixed
+    count::Int64
+    weight::Float64
+end
+struct Nested
+    color::RGBLike
+    mixed::Mixed
+end
+tuple_helper()::Tuple{Int64,Float64} = (7, 2.5)
+tuple_direct()::Tuple{Int64,Float64} = tuple_helper()
+tuple_field()::Float64 = tuple_direct()[2]
+nested_tuple()::Tuple{Int64,Tuple{Float32,Float64}} = (9, (Float32(1.25), 3.5))
+rgb_value()::RGBLike = RGBLike(Float32(0.25), Float32(0.5), Float32(0.75))
+unrelated_value()::Unrelated = Unrelated(Float32(1), Float32(2), Float32(3))
+mixed_value()::Mixed = Mixed(11, 4.5)
+nested_value()::Nested = Nested(rgb_value(), mixed_value())
+rgb_green(value::RGBLike)::Float32 = value.g
+nested_count(value::Nested)::Int64 = value.mixed.count
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nprintln(tuple_direct()); println(tuple_field()); println(nested_tuple()); println(rgb_green(rgb_value())); println(nested_count(nested_value()))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia aggregate oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "(7, 2.5)\n2.5\n(9, (1.25f0, 3.5))\n0.5\n11"
+        );
+
+        // When: the same program is compiled repeatedly and Node decodes only
+        // the generated layout table plus each returned handle.
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: [
+                "tuple_direct",
+                "tuple_field",
+                "nested_tuple",
+                "rgb_value",
+                "unrelated_value",
+                "mixed_value",
+                "nested_value",
+            ]
+            .into_iter()
+            .map(|name| CAbiExport::with_arg_types(name, name, Vec::new()))
+            .chain([
+                CAbiExport::with_arg_types(
+                    "rgb_green",
+                    "rgb_green",
+                    vec![StaticType::Struct {
+                        type_id: 0,
+                        name: "RGBLike".to_string(),
+                    }],
+                ),
+                CAbiExport::with_arg_types(
+                    "nested_count",
+                    "nested_count",
+                    vec![StaticType::Struct {
+                        type_id: 0,
+                        name: "Nested".to_string(),
+                    }],
+                ),
+            ])
+            .collect(),
+            ..CompileConfig::default()
+        };
+        let outputs = (0..3)
+            .map(|_| compile_wasm_source(source, &config).expect("aggregate Wasm should compile"))
+            .collect::<Vec<_>>();
+        assert_eq!(outputs[0].wasm_bytes, outputs[1].wasm_bytes);
+        assert_eq!(outputs[1].wasm_bytes, outputs[2].wasm_bytes);
+        let value = run_wasm_bytes_node(
+            &outputs[0].wasm_bytes,
+            r#"
+const e = instance.exports;
+const view = () => new DataView(e.memory.buffer);
+const table = e.__sjulia_layout_table();
+const count = e.__sjulia_layout_count();
+const layouts = new Map();
+let cursor = table;
+for (let index = 0; index < count; index += 1) {
+  const data = view();
+  const id = data.getUint32(cursor, true);
+  const size = data.getUint32(cursor + 4, true);
+  const align = data.getUint32(cursor + 8, true);
+  const fields = data.getUint32(cursor + 12, true);
+  const entries = [];
+  for (let field = 0; field < fields; field += 1) {
+    const offset = cursor + 16 + field * 12;
+    entries.push([data.getUint32(offset, true), data.getUint32(offset + 4, true), data.getUint32(offset + 8, true)]);
+  }
+  layouts.set(id, { size, align, fields: entries });
+  cursor += 16 + fields * 12;
+}
+const decode = handle => {
+  const data = view();
+  const id = data.getUint32(handle, true);
+  const layout = layouts.get(id);
+  if (!layout || id === 0) throw new Error("forged aggregate handle");
+  return { id, layout, handle };
+};
+const tuple = decode(e.tuple_direct());
+const nestedTuple = decode(e.nested_tuple());
+const rgb = decode(e.rgb_value());
+const unrelated = decode(e.unrelated_value());
+const mixed = decode(e.mixed_value());
+const nested = decode(e.nested_value());
+const data = view();
+const readF32 = (aggregate, field) => data.getFloat32(aggregate.handle + 4 + aggregate.layout.fields[field][0], true);
+const readI64 = (aggregate, field) => data.getBigInt64(aggregate.handle + 4 + aggregate.layout.fields[field][0], true).toString();
+const tupleValues = [readI64(tuple, 0), data.getFloat64(tuple.handle + 4 + tuple.layout.fields[1][0], true)];
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  count,
+  tupleValues,
+  tupleField: e.tuple_field(),
+  rgb: [readF32(rgb, 0), readF32(rgb, 1), readF32(rgb, 2)],
+  green: e.rgb_green(rgb.handle),
+  nestedCount: e.nested_count(nested.handle).toString(),
+  structuralDedup: rgb.id === unrelated.id,
+  distinctMixed: rgb.id !== mixed.id,
+  nestedLayouts: nestedTuple.layout.fields.some(field => field[2] !== 0) && nested.layout.fields.every(field => field[2] !== 0),
+  forged: traps(() => e.rgb_green(mixed.handle)),
+  misaligned: traps(() => e.rgb_green(rgb.handle + 1)),
+}));
+"#,
+        );
+
+        // Then: values, structural IDs, nested field IDs, and forged-handle
+        // rejection are observable without type-name or color-name knowledge.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"count":5,"tupleValues":["7",2.5],"tupleField":2.5,"rgb":[0.25,0.5,0.75],"green":0.5,"nestedCount":"11","structuralDedup":true,"distinctMixed":true,"nestedLayouts":true,"forged":true,"misaligned":true}"#
+        );
+    }
+
+    #[test]
     fn wasm_rejects_dynamic_string_behavior_with_typed_diagnostics() {
         // Given: dynamic concatenation, interpolation, and mutation requests.
         let cases = [
