@@ -7267,6 +7267,97 @@ console.log(JSON.stringify({ imports, grew: beforeGrowth.byteLength === 0, modul
     }
 
     #[test]
+    fn wasm_copies_inclusive_primitive_array_slices() {
+        // Given: crop-like and mixed scalar/range indexing over a rank-two array.
+        let source = r#"
+crop(value::Matrix{Int32})::Matrix{Int32} = value[1:2, 2:3]
+row(value::Matrix{Int32})::Vector{Int32} = value[2, 1:3]
+empty(value::Matrix{Int32})::Matrix{Int32} = value[2:1, 1:3]
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nA=reshape(Int32.(1:6), 2, 3); println((size(crop(A)), vec(crop(A)), size(row(A)), row(A), size(empty(A))))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia slicing oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "((2, 2), Int32[3, 4, 5, 6], (3,), Int32[2, 4, 6], (0, 3))"
+        );
+        let matrix = StaticType::Array {
+            element: Box::new(StaticType::I32),
+            ndims: Some(2),
+        };
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: ["crop", "row", "empty"]
+                .into_iter()
+                .map(|name| CAbiExport::with_arg_types(name, name, vec![matrix.clone()]))
+                .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: generated Wasm copies each result into module-owned ABI v2 storage.
+        let output = compile_wasm_source(source, &config)
+            .expect("inclusive primitive array slices should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const e = instance.exports;
+const view = new DataView(e.memory.buffer);
+const descriptor = 32;
+const data = 160;
+view.setUint32(descriptor, 2, true);
+view.setUint32(descriptor + 4, 0, true);
+view.setUint32(descriptor + 8, 6, true);
+view.setUint32(descriptor + 12, 4, true);
+view.setUint32(descriptor + 16, 0, true);
+view.setUint32(descriptor + 20, 2, true);
+view.setUint32(descriptor + 24, data, true);
+view.setUint32(descriptor + 28, 0, true);
+view.setBigUint64(descriptor + 32, 6n, true);
+view.setBigUint64(descriptor + 40, 2n, true);
+view.setBigInt64(descriptor + 48, 1n, true);
+view.setBigUint64(descriptor + 56, 3n, true);
+view.setBigInt64(descriptor + 64, 2n, true);
+new Int32Array(e.memory.buffer, data, 6).set([1, 2, 3, 4, 5, 6]);
+const decode = pointer => {
+  const current = new DataView(e.memory.buffer);
+  const rank = current.getUint32(pointer + 20, true);
+  const count = Number(current.getBigUint64(pointer + 32, true));
+  const start = current.getUint32(pointer + 24, true);
+  return {
+    flags: current.getUint32(pointer + 4, true),
+    rank,
+    dims: Array.from({length: rank}, (_, axis) => Number(current.getBigUint64(pointer + 40 + axis * 16, true))),
+    strides: Array.from({length: rank}, (_, axis) => Number(current.getBigInt64(pointer + 48 + axis * 16, true))),
+    values: Array.from(new Int32Array(e.memory.buffer, start, count)),
+  };
+};
+const results = [e.crop(descriptor), e.row(descriptor), e.empty(descriptor)];
+const decoded = results.map(decode);
+results.forEach(e.__sjulia_drop);
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, decoded }));
+"#,
+        );
+
+        // Then: range axes are preserved, scalar axes drop, and empty ranges stay empty.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"decoded":[{"flags":1,"rank":2,"dims":[2,2],"strides":[1,2],"values":[3,4,5,6]},{"flags":1,"rank":1,"dims":[3],"strides":[1],"values":[2,4,6]},{"flags":1,"rank":2,"dims":[0,3],"strides":[1,0],"values":[]}]}"#
+        );
+    }
+
+    #[test]
     fn wasm_allocates_primitive_arrays_and_reports_julia_shapes() {
         // Given: Julia's rank-0 through rank-8 primitive allocation and shape contract.
         let source = r#"
