@@ -9157,4 +9157,77 @@ console.log(`${boundary}:${trapped}:${input[0]}`);
         }
         eprintln!("{}", node_timings.trim());
     }
+
+    #[test]
+    fn wasm_builds_primitive_rectangular_comprehensions() {
+        // Given: one-dimensional, nested rectangular, and empty-axis comprehensions.
+        let source = r#"
+line()::Vector{Int64} = [i * i for i in 1:4]
+grid()::Matrix{Int64} = [i + j for i in 1:2, j in 1:3]
+empty_axis()::Vector{Int64} = [i for i in 1:0]
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nprintln((size(line()), line(), size(grid()), vec(grid()), size(empty_axis()), empty_axis()))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia comprehension oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "((4,), [1, 4, 9, 16], (2, 3), [2, 3, 3, 4, 4, 5], (0,), Int64[])"
+        );
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: ["line", "grid", "empty_axis"]
+                .into_iter()
+                .map(|name| CAbiExport::with_arg_types(name, name, Vec::new()))
+                .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: generated Wasm allocates each result once and fills it in place.
+        let output = compile_wasm_source(source, &config)
+            .expect("primitive rectangular comprehensions should compile");
+        let javascript = r#"
+const e = instance.exports;
+const decode = pointer => {
+  const view = new DataView(e.memory.buffer);
+  const rank = view.getUint32(pointer + 20, true);
+  const count = Number(view.getBigUint64(pointer + 32, true));
+  const start = view.getUint32(pointer + 24, true);
+  return {
+    flags: view.getUint32(pointer + 4, true),
+    rank,
+    dims: Array.from({length: rank}, (_, axis) => Number(view.getBigUint64(pointer + 40 + axis * 16, true))),
+    strides: Array.from({length: rank}, (_, axis) => Number(view.getBigInt64(pointer + 48 + axis * 16, true))),
+    values: Array.from(new BigInt64Array(e.memory.buffer, start, count), Number),
+  };
+};
+const results = [e.line(), e.grid(), e.empty_axis()];
+const decoded = results.map(decode);
+results.forEach(e.__sjulia_drop);
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, decoded }));
+"#;
+        let values = (0..3)
+            .map(|_| run_wasm_bytes_node(&output.wasm_bytes, javascript))
+            .collect::<Vec<_>>();
+
+        // Then: results are module-owned, column-major, and match Julia exactly.
+        assert_eq!(
+            values,
+            vec![
+                r#"{"imports":0,"decoded":[{"flags":1,"rank":1,"dims":[4],"strides":[1],"values":[1,4,9,16]},{"flags":1,"rank":2,"dims":[2,3],"strides":[1,2],"values":[2,3,3,4,4,5]},{"flags":1,"rank":1,"dims":[0],"strides":[1],"values":[]}]}"#;
+                3
+            ]
+        );
+    }
 }
