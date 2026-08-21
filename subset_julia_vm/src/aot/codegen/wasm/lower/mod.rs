@@ -4,6 +4,7 @@ mod control;
 mod expr;
 mod ops;
 mod slice_assign;
+mod slice_read;
 
 use std::collections::HashMap;
 

@@ -214,7 +214,10 @@ pub(super) fn emit_instruction(
     Ok(())
 }
 
-pub(super) fn emit_array_load(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
+pub(super) fn emit_array_load(
+    body: &mut Function,
+    ty: &crate::aot::types::StaticType,
+) -> AotResult<()> {
     match ty {
         crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
             body.instruction(&W::I32Load8U(memarg(0)));
@@ -240,7 +243,10 @@ pub(super) fn emit_array_load(body: &mut Function, ty: &crate::aot::types::Stati
     Ok(())
 }
 
-pub(super) fn emit_array_store(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
+pub(super) fn emit_array_store(
+    body: &mut Function,
+    ty: &crate::aot::types::StaticType,
+) -> AotResult<()> {
     match ty {
         crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
             body.instruction(&W::I32Store8(memarg(0)));

@@ -5,8 +5,8 @@ use crate::aot::{AotError, AotResult};
 use wasm_encoder::{BlockType, Function, Instruction as W};
 
 use super::super::types::{
-    descriptor_layout, DESCRIPTOR_AXIS_SIZE, DESCRIPTOR_DATA_PTR_OFFSET,
-    DESCRIPTOR_DIM_OFFSET, DESCRIPTOR_ELEMENT_COUNT_OFFSET, DESCRIPTOR_STRIDE_OFFSET,
+    descriptor_layout, DESCRIPTOR_AXIS_SIZE, DESCRIPTOR_DATA_PTR_OFFSET, DESCRIPTOR_DIM_OFFSET,
+    DESCRIPTOR_ELEMENT_COUNT_OFFSET, DESCRIPTOR_STRIDE_OFFSET,
 };
 use super::descriptor::{
     emit_descriptor_validation, emit_i64_load, trap_if, DescriptorAccess, DescriptorContext,
@@ -185,9 +185,10 @@ fn axis_offset(base: u64, axis: usize) -> AotResult<u64> {
     let axis = u64::try_from(axis)
         .map_err(|_| AotError::CodegenError("array slice axis overflow".to_string()))?;
     let bytes = axis
-        .checked_mul(u64::try_from(DESCRIPTOR_AXIS_SIZE).map_err(|_| {
-            AotError::CodegenError("negative descriptor axis size".to_string())
-        })?)
+        .checked_mul(
+            u64::try_from(DESCRIPTOR_AXIS_SIZE)
+                .map_err(|_| AotError::CodegenError("negative descriptor axis size".to_string()))?,
+        )
         .ok_or_else(|| AotError::CodegenError("array slice axis overflow".to_string()))?;
     base.checked_add(bytes)
         .ok_or_else(|| AotError::CodegenError("array slice offset overflow".to_string()))
@@ -196,6 +197,8 @@ fn axis_offset(base: u64, axis: usize) -> AotResult<u64> {
 fn element_type(ty: &crate::aot::types::StaticType) -> AotResult<&crate::aot::types::StaticType> {
     match ty {
         crate::aot::types::StaticType::Array { element, .. } => Ok(element),
-        _ => Err(AotError::InvalidIR("array slice value is not an array".to_string())),
+        _ => Err(AotError::InvalidIR(
+            "array slice value is not an array".to_string(),
+        )),
     }
 }

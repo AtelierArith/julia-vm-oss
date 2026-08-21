@@ -7309,9 +7309,7 @@ empty(value::Matrix{Int32})::Matrix{Int32} = value[2:1, 1:3]
         // When: generated Wasm copies each result into module-owned ABI v2 storage.
         let output = compile_wasm_source(source, &config)
             .expect("inclusive primitive array slices should compile");
-        let value = run_wasm_bytes_node(
-            &output.wasm_bytes,
-            r#"
+        let javascript = r#"
 const e = instance.exports;
 const view = new DataView(e.memory.buffer);
 const descriptor = 32;
@@ -7344,16 +7342,23 @@ const decode = pointer => {
   };
 };
 const results = [e.crop(descriptor), e.row(descriptor), e.empty(descriptor)];
+const beforeGrowth = e.memory.buffer;
+e.__sjulia_alloc(BigInt(beforeGrowth.byteLength), 8);
 const decoded = results.map(decode);
 results.forEach(e.__sjulia_drop);
-console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, decoded }));
-"#,
-        );
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, grew: beforeGrowth.byteLength === 0, decoded }));
+"#;
+        let values = (0..3)
+            .map(|_| run_wasm_bytes_node(&output.wasm_bytes, javascript))
+            .collect::<Vec<_>>();
 
         // Then: range axes are preserved, scalar axes drop, and empty ranges stay empty.
         assert_eq!(
-            value,
-            r#"{"imports":0,"decoded":[{"flags":1,"rank":2,"dims":[2,2],"strides":[1,2],"values":[3,4,5,6]},{"flags":1,"rank":1,"dims":[3],"strides":[1],"values":[2,4,6]},{"flags":1,"rank":2,"dims":[0,3],"strides":[1,0],"values":[]}]}"#
+            values,
+            vec![
+                r#"{"imports":0,"grew":true,"decoded":[{"flags":1,"rank":2,"dims":[2,2],"strides":[1,2],"values":[3,4,5,6]},{"flags":1,"rank":1,"dims":[3],"strides":[1],"values":[2,4,6]},{"flags":1,"rank":2,"dims":[0,3],"strides":[1,0],"values":[]}]}"#;
+                3
+            ]
         );
     }
 
@@ -7403,7 +7408,11 @@ end
                     vec![vector.clone(), StaticType::I32],
                 ),
                 CAbiExport::with_arg_types("copy_forward!", "copy_forward!", vec![vector.clone()]),
-                CAbiExport::with_arg_types("copy_backward!", "copy_backward!", vec![vector.clone()]),
+                CAbiExport::with_arg_types(
+                    "copy_backward!",
+                    "copy_backward!",
+                    vec![vector.clone()],
+                ),
                 CAbiExport::with_arg_types("copy_alias!", "copy_alias!", vec![vector.clone()]),
                 CAbiExport::with_arg_types(
                     "shape_mismatch!",
@@ -7454,14 +7463,18 @@ reset(32, 1024); const oobTrap = traps(() => e["oob!"](32, 9)); const oob = valu
 write(160, 1200, [2n,2n]); new Int32Array(e.memory.buffer, 1200, 4).set([7,8,9,10]);
 write(232, 1300, [3n]); new Int32Array(e.memory.buffer, 1300, 3).set([1,2,3]);
 const shapeTrap = traps(() => e["shape_mismatch!"](160, 232)); const shape = values(160);
-console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, fill, forward, backward, alias, readonlyTrap, readonly, oobTrap, oob, shapeTrap, shape }));
+reset(32, 1024);
+for (;;) { if (e.__sjulia_alloc(1048576n, 8) === 0) break; }
+for (;;) { if (e.__sjulia_alloc(16n, 8) === 0) break; }
+const oomTrap = traps(() => e["copy_forward!"](32)); const oom = values(32);
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, fill, forward, backward, alias, readonlyTrap, readonly, oobTrap, oob, shapeTrap, shape, oomTrap, oom }));
 "#;
         let values = (0..3)
             .map(|_| run_wasm_bytes_node(&output.wasm_bytes, javascript))
             .collect::<Vec<_>>();
 
         // Then: all failures preserve sentinels and overlap behaves like a temporary copy.
-        let expected = r#"{"imports":0,"fill":[1,9,9,9,5],"forward":[1,1,2,3,4],"backward":[2,3,4,5,5],"alias":[1,2,3,4,5],"readonlyTrap":1,"readonly":[1,2,3,4,5],"oobTrap":1,"oob":[1,2,3,4,5],"shapeTrap":1,"shape":[7,8,9,10]}"#;
+        let expected = r#"{"imports":0,"fill":[1,9,9,9,5],"forward":[1,1,2,3,4],"backward":[2,3,4,5,5],"alias":[1,2,3,4,5],"readonlyTrap":1,"readonly":[1,2,3,4,5],"oobTrap":1,"oob":[1,2,3,4,5],"shapeTrap":1,"shape":[7,8,9,10],"oomTrap":1,"oom":[1,2,3,4,5]}"#;
         assert_eq!(values, vec![expected, expected, expected]);
     }
 

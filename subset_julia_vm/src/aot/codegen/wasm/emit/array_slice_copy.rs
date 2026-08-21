@@ -80,11 +80,21 @@ fn linear_address(body: &mut Function, array: &VarRef, layout: &LocalLayout) -> 
     body.instruction(&W::LocalSet(layout.memory.max_offset));
     for axis in 0..descriptor.rank {
         body.instruction(&W::LocalGet(layout.memory.term));
-        emit_i64_load(body, array, &layout.locals, axis_offset(DESCRIPTOR_DIM_OFFSET, axis)?)?;
+        emit_i64_load(
+            body,
+            array,
+            &layout.locals,
+            axis_offset(DESCRIPTOR_DIM_OFFSET, axis)?,
+        )?;
         body.instruction(&W::I64RemU);
         add_stride(body, array, axis, layout)?;
         body.instruction(&W::LocalGet(layout.memory.term));
-        emit_i64_load(body, array, &layout.locals, axis_offset(DESCRIPTOR_DIM_OFFSET, axis)?)?;
+        emit_i64_load(
+            body,
+            array,
+            &layout.locals,
+            axis_offset(DESCRIPTOR_DIM_OFFSET, axis)?,
+        )?;
         body.instruction(&W::I64DivU);
         body.instruction(&W::LocalSet(layout.memory.term));
     }
@@ -120,7 +130,12 @@ fn selection_address(
         body.instruction(&W::I64Sub);
         add_stride(body, array, axis, layout)?;
     }
-    data_address(body, array, descriptor_layout(&array.ty)?.element_size, layout)
+    data_address(
+        body,
+        array,
+        descriptor_layout(&array.ty)?.element_size,
+        layout,
+    )
 }
 
 fn range_length(
@@ -143,7 +158,12 @@ fn add_stride(
     axis: usize,
     layout: &LocalLayout,
 ) -> AotResult<()> {
-    emit_i64_load(body, array, &layout.locals, axis_offset(DESCRIPTOR_STRIDE_OFFSET, axis)?)?;
+    emit_i64_load(
+        body,
+        array,
+        &layout.locals,
+        axis_offset(DESCRIPTOR_STRIDE_OFFSET, axis)?,
+    )?;
     body.instruction(&W::I64Mul);
     body.instruction(&W::LocalGet(layout.memory.max_offset));
     body.instruction(&W::I64Add);
@@ -172,15 +192,18 @@ fn axis_offset(base: u64, axis: usize) -> AotResult<u64> {
         .map_err(|_| AotError::CodegenError("slice assignment axis overflow".to_string()))?;
     let width = u64::try_from(DESCRIPTOR_AXIS_SIZE)
         .map_err(|_| AotError::CodegenError("negative descriptor axis size".to_string()))?;
-    base.checked_add(axis.checked_mul(width).ok_or_else(|| {
-        AotError::CodegenError("slice assignment axis overflow".to_string())
-    })?)
+    base.checked_add(
+        axis.checked_mul(width)
+            .ok_or_else(|| AotError::CodegenError("slice assignment axis overflow".to_string()))?,
+    )
     .ok_or_else(|| AotError::CodegenError("slice assignment offset overflow".to_string()))
 }
 
 fn element_type(ty: &StaticType) -> AotResult<&StaticType> {
     match ty {
         StaticType::Array { element, .. } => Ok(element),
-        _ => Err(AotError::InvalidIR("slice assignment value is not an array".to_string())),
+        _ => Err(AotError::InvalidIR(
+            "slice assignment value is not an array".to_string(),
+        )),
     }
 }

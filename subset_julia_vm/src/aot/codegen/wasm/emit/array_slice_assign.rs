@@ -43,7 +43,6 @@ pub(super) fn emit(
     Ok(())
 }
 
-
 fn copy_source_to_temporary(
     body: &mut Function,
     source: &VarRef,
@@ -77,7 +76,9 @@ fn copy_temporary_to_destination(
     super::array_slice_copy::destination_loop(body, array, selectors, layout, |body| {
         body.instruction(&W::LocalGet(layout.slice.temporary));
         body.instruction(&W::LocalGet(layout.memory.product));
-        body.instruction(&W::I64Const(i64::from(descriptor_layout(&array.ty)?.element_size)));
+        body.instruction(&W::I64Const(i64::from(
+            descriptor_layout(&array.ty)?.element_size,
+        )));
         body.instruction(&W::I64Mul);
         body.instruction(&W::I64Add);
         body.instruction(&W::I32WrapI64);
@@ -97,10 +98,11 @@ fn fill_destination(
     })
 }
 
-
 fn element_type(ty: &StaticType) -> AotResult<&StaticType> {
     match ty {
         StaticType::Array { element, .. } => Ok(element),
-        _ => Err(AotError::InvalidIR("slice assignment value is not an array".to_string())),
+        _ => Err(AotError::InvalidIR(
+            "slice assignment value is not an array".to_string(),
+        )),
     }
 }

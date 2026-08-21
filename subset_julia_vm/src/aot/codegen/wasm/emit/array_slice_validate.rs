@@ -3,8 +3,7 @@ use crate::aot::{AotError, AotResult};
 use wasm_encoder::{BlockType, Function, Instruction as W};
 
 use super::super::types::{
-    descriptor_layout, DESCRIPTOR_AXIS_SIZE, DESCRIPTOR_DIM_OFFSET,
-    DESCRIPTOR_ELEMENT_COUNT_OFFSET,
+    descriptor_layout, DESCRIPTOR_AXIS_SIZE, DESCRIPTOR_DIM_OFFSET, DESCRIPTOR_ELEMENT_COUNT_OFFSET,
 };
 use super::descriptor::{
     emit_descriptor_validation, emit_i64_load, trap_if, DescriptorAccess, DescriptorContext,
@@ -20,7 +19,9 @@ pub(super) fn destination(
 ) -> AotResult<()> {
     let descriptor = descriptor_layout(&array.ty)?;
     if selectors.len() != descriptor.rank {
-        return Err(AotError::InvalidIR("slice assignment rank mismatch".to_string()));
+        return Err(AotError::InvalidIR(
+            "slice assignment rank mismatch".to_string(),
+        ));
     }
     descriptor_check(body, array, descriptor, layout, DescriptorAccess::Write)?;
     for (axis, selector) in selectors.iter().enumerate() {
@@ -58,7 +59,12 @@ pub(super) fn source(
         body.instruction(&W::Unreachable);
         return Ok(());
     }
-    emit_i64_load(body, source, &layout.locals, DESCRIPTOR_ELEMENT_COUNT_OFFSET)?;
+    emit_i64_load(
+        body,
+        source,
+        &layout.locals,
+        DESCRIPTOR_ELEMENT_COUNT_OFFSET,
+    )?;
     body.instruction(&W::LocalGet(layout.slice.count));
     trap_if(body, W::I64Ne);
     let mut source_axis = 0;
@@ -159,8 +165,9 @@ fn axis_offset(base: u64, axis: usize) -> AotResult<u64> {
         .map_err(|_| AotError::CodegenError("slice assignment axis overflow".to_string()))?;
     let width = u64::try_from(DESCRIPTOR_AXIS_SIZE)
         .map_err(|_| AotError::CodegenError("negative descriptor axis size".to_string()))?;
-    base.checked_add(axis.checked_mul(width).ok_or_else(|| {
-        AotError::CodegenError("slice assignment axis overflow".to_string())
-    })?)
+    base.checked_add(
+        axis.checked_mul(width)
+            .ok_or_else(|| AotError::CodegenError("slice assignment axis overflow".to_string()))?,
+    )
     .ok_or_else(|| AotError::CodegenError("slice assignment offset overflow".to_string()))
 }

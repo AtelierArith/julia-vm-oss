@@ -15,11 +15,15 @@ impl Lowerer<'_, '_> {
     ) -> AotResult<()> {
         let array = self.expr(array, function)?;
         let rank = match &array.ty {
-            StaticType::Array { ndims: Some(rank), .. } => *rank,
+            StaticType::Array {
+                ndims: Some(rank), ..
+            } => *rank,
             _ => return Err(unsupported("slice assignment requires a static array rank")),
         };
         if indices.len() != rank {
-            return Err(unsupported("slice assignment index count must match array rank"));
+            return Err(unsupported(
+                "slice assignment index count must match array rank",
+            ));
         }
         let mut selectors = Vec::with_capacity(rank);
         for index in indices {
@@ -33,10 +37,12 @@ impl Lowerer<'_, '_> {
                     start: self.expr(start, function)?,
                     stop: self.expr(stop, function)?,
                 },
-                AotExpr::Range { step: Some(step), .. } => {
+                AotExpr::Range {
+                    step: Some(step), ..
+                } => {
                     return Err(unsupported(format!(
-                        "Wasm slice assignment requires unit-step ranges; unsupported step `{step:?}`"
-                    )))
+                    "Wasm slice assignment requires unit-step ranges; unsupported step `{step:?}`"
+                )))
                 }
                 AotExpr::Range { .. } => {
                     return Err(unsupported("Wasm slice ranges require Int64 bounds"))

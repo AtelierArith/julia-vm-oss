@@ -19,8 +19,14 @@ impl Lowerer<'_, '_> {
         };
         let source = self.expr(array, function)?;
         let source_rank = match &source.ty {
-            StaticType::Array { ndims: Some(rank), .. } => *rank,
-            _ => return Err(unsupported("array slice requires a statically ranked array")),
+            StaticType::Array {
+                ndims: Some(rank), ..
+            } => *rank,
+            _ => {
+                return Err(unsupported(
+                    "array slice requires a statically ranked array",
+                ))
+            }
         };
         if indices.len() != source_rank {
             return Err(unsupported("array slice index count must match array rank"));
@@ -41,7 +47,9 @@ impl Lowerer<'_, '_> {
                     selectors.push(ArraySelector::UnitRange { start, stop });
                     dims.push(length);
                 }
-                AotExpr::Range { step: Some(step), .. } => {
+                AotExpr::Range {
+                    step: Some(step), ..
+                } => {
                     return Err(unsupported(format!(
                         "Wasm array slices require unit-step ranges; unsupported step `{step:?}`"
                     )))
@@ -53,36 +61,27 @@ impl Lowerer<'_, '_> {
             }
         }
         let result_rank = match result_ty {
-            StaticType::Array { ndims: Some(rank), .. } => *rank,
+            StaticType::Array {
+                ndims: Some(rank), ..
+            } => *rank,
             _ => return Err(unsupported("array slice result requires a static rank")),
         };
         if dims.len() != result_rank {
-            return Err(unsupported("array slice result rank does not match range axes"));
+            return Err(unsupported(
+                "array slice result rank does not match range axes",
+            ));
         }
         let dest = self.temporary(result_ty.clone());
-        self.current_block_mut(function)?.push(Instruction::ArraySlice {
-            dest: dest.clone(),
-            source,
-            selectors,
-            dims,
-        });
+        self.current_block_mut(function)?
+            .push(Instruction::ArraySlice {
+                dest: dest.clone(),
+                source,
+                selectors,
+                dims,
+            });
         Ok(dest)
     }
 
-    fn unit_range_length(
-        &mut self,
-        start: &VarRef,
-        stop: &VarRef,
-        function: &mut IrFunction,
-    ) -> AotResult<VarRef> {
-        let length = self.temporary(StaticType::I64);
-        self.current_block_mut(function)?.push(Instruction::UnitRangeLength {
-            dest: length.clone(),
-            start: start.clone(),
-            stop: stop.clone(),
-        });
-        Ok(length)
-    }
     pub(super) fn array_index(
         &mut self,
         array: &AotExpr,

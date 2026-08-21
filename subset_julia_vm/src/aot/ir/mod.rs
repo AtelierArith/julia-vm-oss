@@ -22,8 +22,8 @@ pub use aot_types::{
     DynamicOpDiagnostic,
 };
 pub use basic_types::{
-    ArrayInit, ArraySelector, BasicBlock, BinOpKind, Instruction, IrFunction, IrModule, StructFieldInit,
-    Terminator, UnaryOpKind, VarRef,
+    ArrayInit, ArraySelector, BasicBlock, BinOpKind, Instruction, IrFunction, IrModule,
+    StructFieldInit, Terminator, UnaryOpKind, VarRef,
 };
 pub use ops::{AotBinOp, AotBuiltinOp, AotUnaryOp, CompoundAssignOp};
 pub use values::ConstValue;
