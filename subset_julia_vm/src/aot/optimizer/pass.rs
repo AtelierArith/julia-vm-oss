@@ -440,7 +440,7 @@ impl DeadCodeElimination {
                             uses.insert(format!("{}.{}", var.name, var.version));
                         }
                     }
-                    Instruction::LoadConst { .. } => {}
+                    Instruction::LoadConst { .. } | Instruction::Rand { .. } => {}
                 }
             }
 
@@ -481,7 +481,7 @@ impl DeadCodeElimination {
                 Instruction::BinOp { dest, .. } => Some(dest),
                 Instruction::UnaryOp { dest, .. } => Some(dest),
                 Instruction::UnitRangeLength { dest, .. } => Some(dest),
-                Instruction::Builtin { .. } => return true,
+                Instruction::Builtin { .. } | Instruction::Rand { .. } => return true,
                 Instruction::GetIndex { dest, .. } => Some(dest),
                 Instruction::GetField { dest, .. } => Some(dest),
                 Instruction::StructNew { dest, .. } => Some(dest),
@@ -946,6 +946,7 @@ impl LoopInvariantCodeMotion {
             Instruction::UnaryOp { dest, .. } => Some(dest),
             Instruction::UnitRangeLength { dest, .. } => Some(dest),
             Instruction::Builtin { dest, .. } => Some(dest),
+            Instruction::Rand { dest } => Some(dest),
             Instruction::Call { dest, .. } => dest.as_ref(),
             Instruction::CallMulti { .. } => None,
             Instruction::StructNew { dest, .. } => Some(dest),
@@ -996,7 +997,7 @@ impl LoopInvariantCodeMotion {
                 is_operand_invariant(start) && is_operand_invariant(stop)
             }
 
-            Instruction::Builtin { .. } => false,
+            Instruction::Builtin { .. } | Instruction::Rand { .. } => false,
 
             // Calls are generally not invariant (may have side effects)
             Instruction::Call { .. } | Instruction::CallMulti { .. } => false,
@@ -1044,6 +1045,7 @@ impl LoopInvariantCodeMotion {
             // These have side effects or depend on control flow
             Instruction::Call { .. }
             | Instruction::Builtin { .. }
+            | Instruction::Rand { .. }
             | Instruction::CallMulti { .. }
             | Instruction::StructNew { .. }
             | Instruction::ArrayNew { .. }

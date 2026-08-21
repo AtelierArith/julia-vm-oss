@@ -43,9 +43,15 @@ impl BasicBlock {
 #[derive(Debug, Clone)]
 pub enum Instruction {
     /// Load a constant value
-    LoadConst { dest: VarRef, value: ConstValue },
+    LoadConst {
+        dest: VarRef,
+        value: ConstValue,
+    },
     /// Copy a value
-    Copy { dest: VarRef, src: VarRef },
+    Copy {
+        dest: VarRef,
+        src: VarRef,
+    },
     /// Binary operation
     BinOp {
         dest: VarRef,
@@ -63,6 +69,9 @@ pub enum Instruction {
         dest: VarRef,
         op: AotBuiltinOp,
         args: Vec<VarRef>,
+    },
+    Rand {
+        dest: VarRef,
     },
     /// Function call
     Call {
