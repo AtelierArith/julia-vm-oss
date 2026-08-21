@@ -87,14 +87,16 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     types.ty().function([ValType::I64], []);
     types.ty().function([ValType::I32], []);
     types.ty().function([], [ValType::I32]);
+    types.ty().function([], [ValType::I32]);
+    types.ty().function([], [ValType::I32]);
     functions.function(alloc_index);
     functions.function(free_index);
     functions.function(rng_next_index);
     functions.function(rng_seed_index);
     functions.function(drop_index);
     functions.function(layout_table_index);
-    functions.function(layout_table_index);
-    functions.function(layout_table_index);
+    functions.function(layout_count_index);
+    functions.function(abi_index);
     module.section(&types);
     module.section(&functions);
     let mut memories = MemorySection::new();
