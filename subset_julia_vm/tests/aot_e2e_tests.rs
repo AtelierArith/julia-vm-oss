@@ -6754,6 +6754,9 @@ println(rem(Int16(7), Int16(3)))
     );
 }
 
+#[path = "aot_e2e_tests/wasm_rng.rs"]
+mod wasm_rng_tests;
+
 mod wasm_backend_tests {
     use std::fs;
     use std::process::{Command, Stdio};
