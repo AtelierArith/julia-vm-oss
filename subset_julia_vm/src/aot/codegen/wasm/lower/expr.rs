@@ -1,4 +1,6 @@
-use crate::aot::ir::{AotBuiltinOp, AotExpr, ConstValue, Instruction, IrFunction, VarRef};
+use crate::aot::ir::{
+    AotBuiltinOp, AotExpr, ArrayInit, ConstValue, Instruction, IrFunction, StructFieldInit, VarRef,
+};
 use crate::aot::types::StaticType;
 use crate::aot::AotResult;
 
@@ -101,8 +103,101 @@ impl Lowerer<'_, '_> {
                 let dest = self.temporary(return_ty.clone());
                 self.current_block_mut(function)?.push(Instruction::Call {
                     dest: Some(dest.clone()),
-                    func: "__sjulia_u8_len".to_string(),
+                    func: "__sjulia_array_len".to_string(),
                     args,
+                });
+                Ok(dest)
+            }
+            AotExpr::CallBuiltin {
+                builtin: AotBuiltinOp::Ndims,
+                args,
+                return_ty,
+            } if args.len() == 1 => {
+                let array = self.expr(&args[0], function)?;
+                let rank = match &array.ty {
+                    StaticType::Array { ndims: Some(rank), .. } => *rank,
+                    _ => return Err(unsupported("ndims requires a statically ranked array")),
+                };
+                let rank = i64::try_from(rank)
+                    .map_err(|_| unsupported("array rank exceeds Julia Int64"))?;
+                self.constant(ConstValue::Int64(rank), return_ty.clone(), function)
+            }
+            AotExpr::CallBuiltin {
+                builtin: AotBuiltinOp::Size,
+                args,
+                return_ty,
+            } if args.len() == 2 => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr(arg, function))
+                    .collect::<AotResult<Vec<_>>>()?;
+                let dest = self.temporary(return_ty.clone());
+                self.current_block_mut(function)?.push(Instruction::Call {
+                    dest: Some(dest.clone()),
+                    func: "__sjulia_array_size_axis".to_string(),
+                    args,
+                });
+                Ok(dest)
+            }
+            AotExpr::CallBuiltin {
+                builtin: AotBuiltinOp::Size,
+                args,
+                return_ty,
+            } if args.len() == 1 => {
+                let array = self.expr(&args[0], function)?;
+                let rank = match &array.ty {
+                    StaticType::Array { ndims: Some(rank), .. } => *rank,
+                    _ => return Err(unsupported("size requires a statically ranked array")),
+                };
+                let layout = self.layouts.layout(return_ty)?.clone();
+                if layout.fields.len() != rank {
+                    return Err(unsupported("size tuple arity does not match array rank"));
+                }
+                let mut fields = Vec::with_capacity(rank);
+                for (axis, field) in layout.fields.iter().enumerate() {
+                    let axis = i64::try_from(axis + 1)
+                        .map_err(|_| unsupported("array axis exceeds Julia Int64"))?;
+                    let axis = self.constant(ConstValue::Int64(axis), StaticType::I64, function)?;
+                    let value = self.temporary(StaticType::I64);
+                    self.current_block_mut(function)?.push(Instruction::Call {
+                        dest: Some(value.clone()),
+                        func: "__sjulia_array_size_axis".to_string(),
+                        args: vec![array.clone(), axis],
+                    });
+                    fields.push(StructFieldInit {
+                        offset: i32::try_from(field.offset)
+                            .map_err(|_| unsupported("size tuple field offset overflow"))?,
+                        value,
+                    });
+                }
+                let dest = self.temporary(return_ty.clone());
+                self.current_block_mut(function)?.push(Instruction::StructNew {
+                    dest: dest.clone(),
+                    layout_id: layout.id,
+                    size: layout.size,
+                    align: layout.align,
+                    fields,
+                });
+                Ok(dest)
+            }
+            AotExpr::CallBuiltin {
+                builtin: builtin @ (AotBuiltinOp::Zeros | AotBuiltinOp::Ones),
+                args,
+                return_ty,
+            } => {
+                let dims = args
+                    .iter()
+                    .map(|arg| self.expr(arg, function))
+                    .collect::<AotResult<Vec<_>>>()?;
+                let dest = self.temporary(return_ty.clone());
+                self.current_block_mut(function)?.push(Instruction::ArrayNew {
+                    dest: dest.clone(),
+                    dims,
+                    init: match builtin {
+                        AotBuiltinOp::Zeros => ArrayInit::Zero,
+                        AotBuiltinOp::Ones => ArrayInit::One,
+                        _ => unreachable!(),
+                    },
                 });
                 Ok(dest)
             }
@@ -195,6 +290,22 @@ impl Lowerer<'_, '_> {
                 if value.get_type() == *target_ty && *target_ty == StaticType::Str =>
             {
                 self.expr(value, function)
+            }
+            AotExpr::Convert { value, target_ty }
+                if matches!(value.as_ref(), AotExpr::CallBuiltin { builtin: AotBuiltinOp::Size, args, .. } if args.len() == 1)
+                    && matches!(target_ty, StaticType::Tuple(_)) =>
+            {
+                let AotExpr::CallBuiltin { builtin, args, .. } = value.as_ref() else {
+                    unreachable!()
+                };
+                self.expr(
+                    &AotExpr::CallBuiltin {
+                        builtin: *builtin,
+                        args: args.clone(),
+                        return_ty: target_ty.clone(),
+                    },
+                    function,
+                )
             }
             AotExpr::Convert { value, target_ty }
                 if matches!(

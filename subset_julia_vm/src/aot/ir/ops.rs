@@ -503,7 +503,7 @@ impl AotBuiltinOp {
                 _ => StaticType::F64,
             },
 
-            // Size returns tuple
+            AotBuiltinOp::Size if arg_types.len() == 2 => StaticType::I64,
             AotBuiltinOp::Size => StaticType::Tuple(vec![StaticType::I64]),
 
             // Push/Pop return array or element
