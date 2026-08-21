@@ -1,5 +1,7 @@
 mod aggregate;
 mod array;
+mod broadcast;
+mod broadcast_loops;
 mod comprehension;
 mod comprehension_loops;
 mod control;
@@ -179,7 +181,10 @@ impl<'source, 'layouts> Lowerer<'source, 'layouts> {
         if let Some(value) = self.slice_read(expr, function)? {
             return Ok(Some(value));
         }
-        self.comprehension(expr, function)
+        if let Some(value) = self.comprehension(expr, function)? {
+            return Ok(Some(value));
+        }
+        self.broadcast(expr, function)
     }
 }
 
