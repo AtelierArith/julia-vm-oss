@@ -153,6 +153,9 @@ pub(super) fn emit_instruction(
         } => {
             emit_array_address(body, array, indices, layout, DescriptorAccess::Read)?;
             emit_array_load(body, &dest.ty)?;
+            if dest.ty == crate::aot::types::StaticType::Bool {
+                normalize_bool(body);
+            }
             set(body, locals, dest)?;
         }
         Instruction::SetIndex {
@@ -238,4 +241,9 @@ fn emit_array_store(body: &mut Function, ty: &crate::aot::types::StaticType) -> 
         }
     };
     Ok(())
+}
+
+fn normalize_bool(body: &mut Function) {
+    body.instruction(&W::I32Eqz);
+    body.instruction(&W::I32Eqz);
 }

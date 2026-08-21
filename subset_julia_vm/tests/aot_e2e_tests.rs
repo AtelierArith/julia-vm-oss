@@ -6964,6 +6964,112 @@ console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reus
     }
 
     #[test]
+    fn wasm_primitive_array_assignment_converts_to_element_type() {
+        // Given: Julia assignments whose RHS types differ from the array element types.
+        let source = r#"
+function write_u8!(value::Vector{UInt8}, input::Int64)::UInt8
+    assigned = (value[1] = input)
+    return assigned
+end
+function write_bool!(value::Vector{Bool}, input::Int64)::Bool
+    assigned = (value[1] = input)
+    return assigned
+end
+read_bool(value::Vector{Bool})::Bool = value[1]
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nu=UInt8[0]; b=Bool[false]; println((write_u8!(u, 255), u[1], write_bool!(b, 1), b[1]))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia assignment conversion oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "(0xff, 0xff, true, true)"
+        );
+
+        // When: generated Wasm stores through host-provided ABI v2 descriptors.
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types(
+                    "write_u8!",
+                    "write_u8!",
+                    vec![
+                        StaticType::Array {
+                            element: Box::new(StaticType::U8),
+                            ndims: Some(1),
+                        },
+                        StaticType::I64,
+                    ],
+                ),
+                CAbiExport::with_arg_types(
+                    "write_bool!",
+                    "write_bool!",
+                    vec![
+                        StaticType::Array {
+                            element: Box::new(StaticType::Bool),
+                            ndims: Some(1),
+                        },
+                        StaticType::I64,
+                    ],
+                ),
+                CAbiExport::with_arg_types(
+                    "read_bool",
+                    "read_bool",
+                    vec![StaticType::Array {
+                        element: Box::new(StaticType::Bool),
+                        ndims: Some(1),
+                    }],
+                ),
+            ],
+            ..CompileConfig::default()
+        };
+        let output = compile_wasm_source(source, &config)
+            .expect("primitive assignment conversions should compile");
+        let value = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const { memory } = instance.exports;
+const view = new DataView(memory.buffer);
+const write = (descriptor, pointer, tag) => {
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, 0, true);
+  view.setUint32(descriptor + 8, tag, true);
+  view.setUint32(descriptor + 12, 1, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, 1, true);
+  view.setUint32(descriptor + 24, pointer, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, 1n, true);
+  view.setBigUint64(descriptor + 40, 1n, true);
+  view.setBigInt64(descriptor + 48, 1n, true);
+};
+write(32, 160, 1);
+write(88, 168, 11);
+const u8 = instance.exports["write_u8!"](32, 255n);
+const bool = instance.exports["write_bool!"](88, 1n);
+const dataBytes = new Uint8Array(memory.buffer);
+dataBytes[168] = 255;
+const normalizedBool = instance.exports.read_bool(88);
+console.log(`${u8}:${dataBytes[160]}:${bool}:${normalizedBool}`);
+"#,
+        );
+
+        // Then: stores use the static element type and assignments return converted values.
+        assert_eq!(value, "255:255:1:1");
+    }
+
+    #[test]
     fn wasm_allocates_primitive_arrays_and_reports_julia_shapes() {
         // Given: Julia's rank-0 through rank-8 primitive allocation and shape contract.
         let source = r#"

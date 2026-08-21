@@ -38,12 +38,31 @@ impl Lowerer<'_, '_> {
                     },
                 value,
             } => {
+                let element_type = match array.get_type() {
+                    StaticType::Array { element, .. } => *element,
+                    other => {
+                        return Err(unsupported(format!(
+                            "Wasm indexed assignment requires an array, got `{}`",
+                            other.julia_type_name()
+                        )))
+                    }
+                };
                 let array = self.expr(array, function)?;
                 let indices = indices
                     .iter()
                     .map(|index| self.expr(index, function))
                     .collect::<AotResult<Vec<_>>>()?;
-                let value = self.expr(value, function)?;
+                let source = self.expr(value, function)?;
+                let value = if source.ty == element_type {
+                    source
+                } else {
+                    let converted = self.temporary(element_type);
+                    self.current_block_mut(function)?.push(Instruction::Copy {
+                        dest: converted.clone(),
+                        src: source,
+                    });
+                    converted
+                };
                 self.current_block_mut(function)?
                     .push(Instruction::SetIndex {
                         array,
