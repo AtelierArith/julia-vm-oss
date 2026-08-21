@@ -178,6 +178,12 @@ impl Lowerer<'_, '_> {
                 elem_ty,
                 is_tuple: true,
             } => self.tuple_index(array, indices, elem_ty, function),
+            AotExpr::Convert { value, target_ty }
+                if matches!(value.as_ref(), AotExpr::Index { is_tuple: false, .. })
+                    && matches!(target_ty, StaticType::Array { .. }) =>
+            {
+                self.array_slice(value, target_ty, function)
+            }
             AotExpr::TupleLit { elements } => {
                 let ty = expr.get_type();
                 self.aggregate(ty, elements, function)
