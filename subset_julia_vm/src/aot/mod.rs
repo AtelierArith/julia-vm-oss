@@ -84,7 +84,6 @@ pub mod pass_pipeline;
 pub mod rooting;
 pub mod specialization;
 pub mod types;
-mod validation;
 
 /// Code-generation backend selected for the AoT pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -1,7 +1,6 @@
 //! Named AoT pass stages, diagnostics, and verification hooks.
 
 use crate::aot::ir::AotProgram;
-use crate::aot::validation;
 use crate::aot::AotResult;
 use std::fmt;
 use std::str::FromStr;
@@ -202,6 +201,8 @@ impl AotPassDiagnostics {
 pub fn verify_aot_program(stage: AotPassStage, program: &AotProgram) -> AotResult<()> {
     validation::verify_aot_program(stage, program)
 }
+
+mod validation;
 
 #[cfg(test)]
 mod tests;
