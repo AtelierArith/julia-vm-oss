@@ -7358,6 +7358,114 @@ console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length,
     }
 
     #[test]
+    fn wasm_assigns_primitive_array_slices_transactionally() {
+        // Given: scalar fill, overlapping array sources, exact aliasing, and invalid writes.
+        let source = r#"
+function fill_slice!(value::Vector{Int32}, input::Int32)::Int32
+    value[2:4] = input
+    return value[2]
+end
+function copy_forward!(value::Vector{Int32})::Int32
+    value[2:5] = value[1:4]
+    return value[4]
+end
+function copy_backward!(value::Vector{Int32})::Int32
+    value[1:4] = value[2:5]
+    return value[1]
+end
+function copy_alias!(value::Vector{Int32})::Int32
+    value[1:5] = value[1:5]
+    return value[5]
+end
+function shape_mismatch!(value::Matrix{Int32}, input::Vector{Int32})::Int32
+    value[1:2, 1:2] = input
+    return value[1,1]
+end
+function oob!(value::Vector{Int32}, input::Int32)::Int32
+    value[0:2] = input
+    return value[1]
+end
+"#;
+        let vector = StaticType::Array {
+            element: Box::new(StaticType::I32),
+            ndims: Some(1),
+        };
+        let matrix = StaticType::Array {
+            element: Box::new(StaticType::I32),
+            ndims: Some(2),
+        };
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![
+                CAbiExport::with_arg_types(
+                    "fill_slice!",
+                    "fill_slice!",
+                    vec![vector.clone(), StaticType::I32],
+                ),
+                CAbiExport::with_arg_types("copy_forward!", "copy_forward!", vec![vector.clone()]),
+                CAbiExport::with_arg_types("copy_backward!", "copy_backward!", vec![vector.clone()]),
+                CAbiExport::with_arg_types("copy_alias!", "copy_alias!", vec![vector.clone()]),
+                CAbiExport::with_arg_types(
+                    "shape_mismatch!",
+                    "shape_mismatch!",
+                    vec![matrix, vector.clone()],
+                ),
+                CAbiExport::with_arg_types("oob!", "oob!", vec![vector, StaticType::I32]),
+            ],
+            ..CompileConfig::default()
+        };
+
+        // When: Node executes valid and trapping assignments over host descriptors.
+        let output = compile_wasm_source(source, &config)
+            .expect("primitive slice assignment should compile");
+        let javascript = r#"
+const e = instance.exports;
+const write = (descriptor, data, dims, flags = 0) => {
+  const view = new DataView(e.memory.buffer);
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, flags, true);
+  view.setUint32(descriptor + 8, 6, true);
+  view.setUint32(descriptor + 12, 4, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, dims.length, true);
+  view.setUint32(descriptor + 24, data, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, dims.reduce((a, b) => a * b, 1n), true);
+  let stride = 1n;
+  dims.forEach((dim, axis) => {
+    view.setBigUint64(descriptor + 40 + axis * 16, dim, true);
+    view.setBigInt64(descriptor + 48 + axis * 16, stride, true);
+    stride *= dim;
+  });
+};
+const values = descriptor => {
+  const view = new DataView(e.memory.buffer);
+  return Array.from(new Int32Array(e.memory.buffer, view.getUint32(descriptor + 24, true), Number(view.getBigUint64(descriptor + 32, true))));
+};
+const reset = (descriptor, data) => { write(descriptor, data, [5n]); new Int32Array(e.memory.buffer, data, 5).set([1,2,3,4,5]); };
+const traps = action => { try { action(); return 0; } catch (error) { return Number(error instanceof WebAssembly.RuntimeError); } };
+reset(32, 1024); e["fill_slice!"](32, 9); const fill = values(32);
+reset(32, 1024); e["copy_forward!"](32); const forward = values(32);
+reset(32, 1024); e["copy_backward!"](32); const backward = values(32);
+reset(32, 1024); e["copy_alias!"](32); const alias = values(32);
+reset(32, 1024); write(96, 1100, [5n], 2); new Int32Array(e.memory.buffer, 1100, 5).set([1,2,3,4,5]);
+const readonlyTrap = traps(() => e["fill_slice!"](96, 9)); const readonly = values(96);
+reset(32, 1024); const oobTrap = traps(() => e["oob!"](32, 9)); const oob = values(32);
+write(160, 1200, [2n,2n]); new Int32Array(e.memory.buffer, 1200, 4).set([7,8,9,10]);
+write(232, 1300, [3n]); new Int32Array(e.memory.buffer, 1300, 3).set([1,2,3]);
+const shapeTrap = traps(() => e["shape_mismatch!"](160, 232)); const shape = values(160);
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, fill, forward, backward, alias, readonlyTrap, readonly, oobTrap, oob, shapeTrap, shape }));
+"#;
+        let values = (0..3)
+            .map(|_| run_wasm_bytes_node(&output.wasm_bytes, javascript))
+            .collect::<Vec<_>>();
+
+        // Then: all failures preserve sentinels and overlap behaves like a temporary copy.
+        let expected = r#"{"imports":0,"fill":[1,9,9,9,5],"forward":[1,1,2,3,4],"backward":[2,3,4,5,5],"alias":[1,2,3,4,5],"readonlyTrap":1,"readonly":[1,2,3,4,5],"oobTrap":1,"oob":[1,2,3,4,5],"shapeTrap":1,"shape":[7,8,9,10]}"#;
+        assert_eq!(values, vec![expected, expected, expected]);
+    }
+
+    #[test]
     fn wasm_allocates_primitive_arrays_and_reports_julia_shapes() {
         // Given: Julia's rank-0 through rank-8 primitive allocation and shape contract.
         let source = r#"
