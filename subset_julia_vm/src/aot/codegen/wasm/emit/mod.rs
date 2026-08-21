@@ -1,5 +1,7 @@
 mod aggregate;
 mod allocator;
+mod array;
+mod array_init;
 mod assembly;
 mod control;
 mod conversion;
@@ -46,7 +48,9 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     let mut function_indices = function_indices(ir)?;
     let alloc_index = u32::try_from(ir.functions.len())
         .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
+    let free_index = alloc_index + 1;
     function_indices.insert(allocator::ALLOC_NAME.to_string(), alloc_index);
+    function_indices.insert(allocator::FREE_NAME.to_string(), free_index);
     for (index, function) in ir.functions.iter().enumerate() {
         let params = function
             .params
@@ -61,7 +65,6 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         functions.function(index);
         code.function(&emit_function(function, &function_indices, &strings)?);
     }
-    let free_index = alloc_index + 1;
     let drop_index = alloc_index + 2;
     let layout_table_index = alloc_index + 3;
     let layout_count_index = alloc_index + 4;

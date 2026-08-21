@@ -147,6 +147,7 @@ fn destinations(instruction: &Instruction) -> Vec<&VarRef> {
         | Instruction::TypeAssert { dest, .. }
         | Instruction::Phi { dest, .. }
         | Instruction::StructNew { dest, .. } => vec![dest],
+        Instruction::ArrayNew { dest, .. } => vec![dest],
         Instruction::Call { dest, .. } => dest.iter().collect(),
         Instruction::CallMulti { dests, .. } => dests.iter().collect(),
         Instruction::SetIndex { .. }
