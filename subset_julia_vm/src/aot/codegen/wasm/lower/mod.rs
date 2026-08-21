@@ -1,4 +1,5 @@
 mod aggregate;
+mod array;
 mod control;
 mod expr;
 mod ops;

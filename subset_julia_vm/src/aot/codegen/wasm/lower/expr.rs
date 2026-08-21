@@ -1,5 +1,5 @@
 use crate::aot::ir::{
-    AotBuiltinOp, AotExpr, ArrayInit, ConstValue, Instruction, IrFunction, StructFieldInit, VarRef,
+    AotBuiltinOp, AotExpr, ArrayInit, ConstValue, Instruction, IrFunction, VarRef,
 };
 use crate::aot::types::StaticType;
 use crate::aot::AotResult;
@@ -98,109 +98,32 @@ impl Lowerer<'_, '_> {
                 builtin: AotBuiltinOp::Length,
                 args,
                 return_ty,
-            } if args.len() == 1 => {
-                let args = vec![self.expr(&args[0], function)?];
-                let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?.push(Instruction::Call {
-                    dest: Some(dest.clone()),
-                    func: "__sjulia_array_len".to_string(),
-                    args,
-                });
-                Ok(dest)
-            }
+            } if args.len() == 1 => self.array_length(&args[0], return_ty, function),
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Ndims,
                 args,
                 return_ty,
-            } if args.len() == 1 => {
-                let array = self.expr(&args[0], function)?;
-                let rank = match &array.ty {
-                    StaticType::Array { ndims: Some(rank), .. } => *rank,
-                    _ => return Err(unsupported("ndims requires a statically ranked array")),
-                };
-                let rank = i64::try_from(rank)
-                    .map_err(|_| unsupported("array rank exceeds Julia Int64"))?;
-                self.constant(ConstValue::Int64(rank), return_ty.clone(), function)
-            }
+            } if args.len() == 1 => self.array_ndims(&args[0], return_ty, function),
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Size,
                 args,
                 return_ty,
-            } if args.len() == 2 => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.expr(arg, function))
-                    .collect::<AotResult<Vec<_>>>()?;
-                let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?.push(Instruction::Call {
-                    dest: Some(dest.clone()),
-                    func: "__sjulia_array_size_axis".to_string(),
-                    args,
-                });
-                Ok(dest)
-            }
+            } if args.len() == 2 => self.array_size_axis(args, return_ty, function),
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Size,
                 args,
                 return_ty,
-            } if args.len() == 1 => {
-                let array = self.expr(&args[0], function)?;
-                let rank = match &array.ty {
-                    StaticType::Array { ndims: Some(rank), .. } => *rank,
-                    _ => return Err(unsupported("size requires a statically ranked array")),
-                };
-                let layout = self.layouts.layout(return_ty)?.clone();
-                if layout.fields.len() != rank {
-                    return Err(unsupported("size tuple arity does not match array rank"));
-                }
-                let mut fields = Vec::with_capacity(rank);
-                for (axis, field) in layout.fields.iter().enumerate() {
-                    let axis = i64::try_from(axis + 1)
-                        .map_err(|_| unsupported("array axis exceeds Julia Int64"))?;
-                    let axis = self.constant(ConstValue::Int64(axis), StaticType::I64, function)?;
-                    let value = self.temporary(StaticType::I64);
-                    self.current_block_mut(function)?.push(Instruction::Call {
-                        dest: Some(value.clone()),
-                        func: "__sjulia_array_size_axis".to_string(),
-                        args: vec![array.clone(), axis],
-                    });
-                    fields.push(StructFieldInit {
-                        offset: i32::try_from(field.offset)
-                            .map_err(|_| unsupported("size tuple field offset overflow"))?,
-                        value,
-                    });
-                }
-                let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?.push(Instruction::StructNew {
-                    dest: dest.clone(),
-                    layout_id: layout.id,
-                    size: layout.size,
-                    align: layout.align,
-                    fields,
-                });
-                Ok(dest)
-            }
+            } if args.len() == 1 => self.array_size(&args[0], return_ty, function),
             AotExpr::CallBuiltin {
-                builtin: builtin @ (AotBuiltinOp::Zeros | AotBuiltinOp::Ones),
+                builtin: AotBuiltinOp::Zeros,
                 args,
                 return_ty,
-            } => {
-                let dims = args
-                    .iter()
-                    .map(|arg| self.expr(arg, function))
-                    .collect::<AotResult<Vec<_>>>()?;
-                let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?.push(Instruction::ArrayNew {
-                    dest: dest.clone(),
-                    dims,
-                    init: match builtin {
-                        AotBuiltinOp::Zeros => ArrayInit::Zero,
-                        AotBuiltinOp::Ones => ArrayInit::One,
-                        _ => unreachable!(),
-                    },
-                });
-                Ok(dest)
-            }
+            } => self.array_new(args, return_ty, ArrayInit::Zero, function),
+            AotExpr::CallBuiltin {
+                builtin: AotBuiltinOp::Ones,
+                args,
+                return_ty,
+            } => self.array_new(args, return_ty, ArrayInit::One, function),
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::StringConcat,
                 ..
@@ -248,21 +171,7 @@ impl Lowerer<'_, '_> {
                 indices,
                 elem_ty,
                 is_tuple: false,
-            } => {
-                let array = self.expr(array, function)?;
-                let indices = indices
-                    .iter()
-                    .map(|index| self.expr(index, function))
-                    .collect::<AotResult<Vec<_>>>()?;
-                let dest = self.temporary(elem_ty.clone());
-                self.current_block_mut(function)?
-                    .push(Instruction::GetIndex {
-                        dest: dest.clone(),
-                        array,
-                        indices,
-                    });
-                Ok(dest)
-            }
+            } => self.array_index(array, indices, elem_ty, function),
             AotExpr::Index {
                 array,
                 indices,
@@ -332,7 +241,7 @@ impl Lowerer<'_, '_> {
         }
     }
 
-    fn constant(
+    pub(super) fn constant(
         &mut self,
         value: ConstValue,
         ty: StaticType,
