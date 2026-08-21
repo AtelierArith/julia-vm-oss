@@ -21,6 +21,8 @@ mod locals;
 mod math;
 mod memory;
 mod ops;
+mod rng;
+mod rng_seed;
 mod strings;
 mod transcendental;
 mod transcendental_approx;
@@ -54,8 +56,11 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     let alloc_index = u32::try_from(ir.functions.len())
         .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
     let free_index = alloc_index + 1;
+    let rng_next_index = alloc_index + 2;
+    let rng_seed_index = alloc_index + 3;
     function_indices.insert(allocator::ALLOC_NAME.to_string(), alloc_index);
     function_indices.insert(allocator::FREE_NAME.to_string(), free_index);
+    function_indices.insert(rng::NEXT_NAME.to_string(), rng_next_index);
     for (index, function) in ir.functions.iter().enumerate() {
         let params = function
             .params
@@ -70,24 +75,26 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         functions.function(index);
         code.function(&emit_function(function, &function_indices, &strings)?);
     }
-    let drop_index = alloc_index + 2;
-    let layout_table_index = alloc_index + 3;
-    let layout_count_index = alloc_index + 4;
-    let abi_index = alloc_index + 5;
+    let drop_index = alloc_index + 4;
+    let layout_table_index = alloc_index + 5;
+    let layout_count_index = alloc_index + 6;
+    let abi_index = alloc_index + 7;
     types
         .ty()
         .function([ValType::I64, ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I32], []);
+    types.ty().function([], [ValType::I64]);
+    types.ty().function([ValType::I64], []);
     types.ty().function([ValType::I32], []);
-    types.ty().function([], [ValType::I32]);
-    types.ty().function([], [ValType::I32]);
     types.ty().function([], [ValType::I32]);
     functions.function(alloc_index);
     functions.function(free_index);
+    functions.function(rng_next_index);
+    functions.function(rng_seed_index);
     functions.function(drop_index);
     functions.function(layout_table_index);
-    functions.function(layout_count_index);
-    functions.function(abi_index);
+    functions.function(layout_table_index);
+    functions.function(layout_table_index);
     module.section(&types);
     module.section(&functions);
     let mut memories = MemorySection::new();
@@ -104,11 +111,18 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         allocator::heap_global_type(),
         &ConstExpr::i32_const(strings.heap_base()),
     );
+    for state in rng_seed::initial_state() {
+        globals.global(
+            rng::state_global_type(),
+            &ConstExpr::i64_const(state as i64),
+        );
+    }
     module.section(&globals);
     emit_function_exports(&mut exports, ir, requested_exports, &function_indices)?;
     exports.export("memory", ExportKind::Memory, 0);
     exports.export(allocator::ALLOC_NAME, ExportKind::Func, alloc_index);
     exports.export(allocator::FREE_NAME, ExportKind::Func, free_index);
+    exports.export(rng_seed::SEED_NAME, ExportKind::Func, rng_seed_index);
     exports.export(allocator::DROP_NAME, ExportKind::Func, drop_index);
     exports.export(
         "__sjulia_layout_table",
@@ -124,6 +138,8 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     module.section(&exports);
     code.function(&allocator::emit_alloc(0, strings.heap_base()));
     code.function(&free::emit_free(0, strings.heap_base()));
+    code.function(&rng::emit_next([1, 2, 3, 4]));
+    code.function(&rng_seed::emit_seed([1, 2, 3, 4]));
     code.function(&drop::emit_drop(free_index));
     code.function(&constant_i32_function(layouts.table_address()));
     code.function(&constant_i32_function(layouts.count()));

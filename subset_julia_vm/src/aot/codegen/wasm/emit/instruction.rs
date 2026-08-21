@@ -72,6 +72,10 @@ pub(super) fn emit_instruction(
             emit_math_builtin(body, *op, args, locals, &layout.math)?;
             set(body, locals, dest)?;
         }
+        Instruction::Rand { dest } => {
+            super::rng::emit_uniform(body, dest, functions)?;
+            set(body, locals, dest)?;
+        }
         Instruction::Call { dest, func, args } if func == "__sjulia_array_len" => {
             let descriptor = &args[0];
             let descriptor_layout = descriptor_layout(&descriptor.ty)?;

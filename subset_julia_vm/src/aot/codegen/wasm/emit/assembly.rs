@@ -8,7 +8,7 @@ use wasm_encoder::{ExportKind, ExportSection};
 use super::super::types::unsupported;
 use super::allocator;
 
-const RESERVED_EXPORT_NAMES: [&str; 7] = [
+const RESERVED_EXPORT_NAMES: [&str; 8] = [
     "memory",
     "__sjulia_wasm_abi_version",
     allocator::ALLOC_NAME,
@@ -16,6 +16,7 @@ const RESERVED_EXPORT_NAMES: [&str; 7] = [
     allocator::DROP_NAME,
     "__sjulia_layout_table",
     "__sjulia_layout_count",
+    super::rng_seed::SEED_NAME,
 ];
 
 pub(super) fn function_indices(ir: &IrModule) -> AotResult<HashMap<String, u32>> {
