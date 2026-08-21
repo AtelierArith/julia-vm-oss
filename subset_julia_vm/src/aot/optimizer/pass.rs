@@ -351,6 +351,11 @@ impl DeadCodeElimination {
                             uses.insert(format!("{}.{}", field.value.name, field.value.version));
                         }
                     }
+                    Instruction::ArrayNew { dims, .. } => {
+                        for dim in dims {
+                            uses.insert(format!("{}.{}", dim.name, dim.version));
+                        }
+                    }
                     Instruction::GetIndex { array, indices, .. } => {
                         uses.insert(format!("{}.{}", array.name, array.version));
                         for index in indices {
@@ -434,6 +439,7 @@ impl DeadCodeElimination {
                 Instruction::GetIndex { dest, .. } => Some(dest),
                 Instruction::GetField { dest, .. } => Some(dest),
                 Instruction::StructNew { dest, .. } => Some(dest),
+                Instruction::ArrayNew { .. } => return true,
                 Instruction::GetFieldOffset { dest, .. } => Some(dest),
                 Instruction::TypeAssert { dest, .. } => Some(dest),
                 Instruction::Phi { dest, .. } => Some(dest),
@@ -895,6 +901,7 @@ impl LoopInvariantCodeMotion {
             Instruction::Call { dest, .. } => dest.as_ref(),
             Instruction::CallMulti { .. } => None,
             Instruction::StructNew { dest, .. } => Some(dest),
+            Instruction::ArrayNew { dest, .. } => Some(dest),
             Instruction::GetIndex { dest, .. } => Some(dest),
             Instruction::GetField { dest, .. } => Some(dest),
             Instruction::GetFieldOffset { dest, .. } => Some(dest),
@@ -949,6 +956,7 @@ impl LoopInvariantCodeMotion {
             Instruction::GetField { object, .. } => is_operand_invariant(object),
             Instruction::GetFieldOffset { object, .. } => is_operand_invariant(object),
             Instruction::StructNew { .. } => false,
+            Instruction::ArrayNew { .. } => false,
 
             // These instructions have side effects
             Instruction::SetIndex { .. }
@@ -982,6 +990,7 @@ impl LoopInvariantCodeMotion {
             | Instruction::Builtin { .. }
             | Instruction::CallMulti { .. }
             | Instruction::StructNew { .. }
+            | Instruction::ArrayNew { .. }
             | Instruction::SetIndex { .. }
             | Instruction::SetField { .. }
             | Instruction::SetFieldOffset { .. }

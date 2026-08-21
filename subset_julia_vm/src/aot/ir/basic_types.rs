@@ -76,6 +76,11 @@ pub enum Instruction {
         func: String,
         args: Vec<VarRef>,
     },
+    ArrayNew {
+        dest: VarRef,
+        dims: Vec<VarRef>,
+        init: ArrayInit,
+    },
     /// Stack-allocated isbits struct construction.
     StructNew {
         dest: VarRef,
@@ -132,6 +137,12 @@ pub enum Instruction {
         dest: VarRef,
         incoming: Vec<(String, VarRef)>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrayInit {
+    Zero,
+    One,
 }
 
 #[derive(Debug, Clone)]

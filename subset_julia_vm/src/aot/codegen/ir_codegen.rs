@@ -245,6 +245,15 @@ impl RustCodeGenerator {
                     fields.len()
                 ));
             }
+            Instruction::ArrayNew { dest, dims, init } => {
+                let dest_name = self.var_to_rust(dest);
+                self.write_line(&format!(
+                    "// array {} allocation: rank={}, init={:?}",
+                    dest_name,
+                    dims.len(),
+                    init
+                ));
+            }
             Instruction::GetIndex {
                 dest,
                 array,
