@@ -1,5 +1,7 @@
 mod aggregate;
 mod array;
+mod comprehension;
+mod comprehension_loops;
 mod control;
 mod expr;
 mod ops;
@@ -9,7 +11,7 @@ mod slice_read;
 use std::collections::HashMap;
 
 use crate::aot::ir::{
-    AotFunction, AotProgram, AotStmt, BasicBlock, IrFunction, IrModule, Terminator, VarRef,
+    AotExpr, AotFunction, AotProgram, AotStmt, BasicBlock, IrFunction, IrModule, Terminator, VarRef,
 };
 use crate::aot::types::StaticType;
 use crate::aot::{AotError, AotResult};
@@ -167,6 +169,17 @@ impl<'source, 'layouts> Lowerer<'source, 'layouts> {
                 .set_terminator(Terminator::Jump(target.to_string()));
         }
         Ok(())
+    }
+
+    pub(super) fn focused(
+        &mut self,
+        expr: &AotExpr,
+        function: &mut IrFunction,
+    ) -> AotResult<Option<VarRef>> {
+        if let Some(value) = self.slice_read(expr, function)? {
+            return Ok(Some(value));
+        }
+        self.comprehension(expr, function)
     }
 }
 

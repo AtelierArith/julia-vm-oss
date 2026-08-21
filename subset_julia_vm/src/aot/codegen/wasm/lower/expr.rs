@@ -10,8 +10,8 @@ use super::Lowerer;
 
 impl Lowerer<'_, '_> {
     pub(super) fn expr(&mut self, expr: &AotExpr, function: &mut IrFunction) -> AotResult<VarRef> {
-        if let Some(slice) = self.slice_read(expr, function)? {
-            return Ok(slice);
+        if let Some(value) = self.focused(expr, function)? {
+            return Ok(value);
         }
         match expr {
             AotExpr::LitI64(value) => {
