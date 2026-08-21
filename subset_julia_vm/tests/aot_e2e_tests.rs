@@ -7070,6 +7070,203 @@ console.log(`${u8}:${dataBytes[160]}:${bool}:${normalizedBool}`);
     }
 
     #[test]
+    fn wasm_indexes_primitive_arrays_across_supported_ranks_and_strides() {
+        // Given: every primitive element type and representative ranks through eight.
+        let source = r#"
+function u8_scalar()::Array{UInt8,0}
+    value = zeros(UInt8)
+    value[] = UInt8(0xa5)
+    return value
+end
+function f32_rank3()::Array{Float32,3}
+    value = zeros(Float32, 2, 1, 2)
+    value[2, 1, 2] = Float32(3.5)
+    return value
+end
+function f64_matrix()::Matrix{Float64}
+    value = zeros(Float64, 2, 3)
+    value[1, 3] = 6.25
+    return value
+end
+function i32_vector()::Vector{Int32}
+    value = zeros(Int32, 3)
+    value[3] = Int32(-17)
+    return value
+end
+function i64_rank5()::Array{Int64,5}
+    value = zeros(Int64, 1, 2, 1, 2, 1)
+    value[1, 2, 1, 2, 1] = Int64(72623859790382856)
+    return value
+end
+function bool_rank8()::Array{Bool,8}
+    value = zeros(Bool, 1, 1, 1, 1, 1, 1, 1, 2)
+    value[1, 1, 1, 1, 1, 1, 1, 2] = true
+    return value
+end
+u8_read(value::Array{UInt8,0})::UInt8 = value[]
+function f32_write!(value::Array{Float32,3}, input::Float32)::Float32
+    assigned = (value[2, 1, 2] = input)
+    return assigned
+end
+function f64_write!(value::Matrix{Float64}, input::Float64)::Float64
+    assigned = (value[2, 3] = input)
+    return assigned
+end
+function i32_write!(value::Vector{Int32}, input::Int32)::Int32
+    assigned = (value[3] = input)
+    return assigned
+end
+function i64_write!(value::Array{Int64,5}, input::Int64)::Int64
+    assigned = (value[1, 2, 1, 2, 1] = input)
+    return assigned
+end
+function bool_write!(value::Array{Bool,8}, input::Bool)::Bool
+    assigned = (value[1, 1, 1, 1, 1, 1, 1, 2] = input)
+    return assigned
+end
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nprintln((u8_scalar()[], f32_rank3()[2,1,2], f64_matrix()[1,3], i32_vector()[3], i64_rank5()[1,2,1,2,1], bool_rank8()[1,1,1,1,1,1,1,2]))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia arbitrary-rank indexing oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "(0xa5, 3.5f0, 6.25, -17, 72623859790382856, true)"
+        );
+        let array = |element, rank| StaticType::Array {
+            element: Box::new(element),
+            ndims: Some(rank),
+        };
+        let exports = [
+            ("u8_scalar", vec![]),
+            ("f32_rank3", vec![]),
+            ("f64_matrix", vec![]),
+            ("i32_vector", vec![]),
+            ("i64_rank5", vec![]),
+            ("bool_rank8", vec![]),
+            ("u8_read", vec![array(StaticType::U8, 0)]),
+            (
+                "f32_write!",
+                vec![array(StaticType::F32, 3), StaticType::F32],
+            ),
+            (
+                "f64_write!",
+                vec![array(StaticType::F64, 2), StaticType::F64],
+            ),
+            (
+                "i32_write!",
+                vec![array(StaticType::I32, 1), StaticType::I32],
+            ),
+            (
+                "i64_write!",
+                vec![array(StaticType::I64, 5), StaticType::I64],
+            ),
+            (
+                "bool_write!",
+                vec![array(StaticType::Bool, 8), StaticType::Bool],
+            ),
+        ];
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: exports
+                .into_iter()
+                .map(|(name, args)| CAbiExport::with_arg_types(name, name, args))
+                .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: Node reads module allocations, grows memory, and mutates strided host views.
+        let output = compile_wasm_source(source, &config)
+            .expect("arbitrary-rank primitive indexing should compile");
+        let javascript = r#"
+const e = instance.exports;
+const imports = WebAssembly.Module.imports(module).length;
+const decode = pointer => {
+  const view = new DataView(e.memory.buffer);
+  const rank = view.getUint32(pointer + 20, true);
+  return {
+    pointer,
+    data: view.getUint32(pointer + 24, true),
+    rank,
+    dims: Array.from({ length: rank }, (_, axis) => view.getBigUint64(pointer + 40 + axis * 16, true)),
+    strides: Array.from({ length: rank }, (_, axis) => view.getBigInt64(pointer + 48 + axis * 16, true)),
+  };
+};
+const made = [e.u8_scalar(), e.f32_rank3(), e.f64_matrix(), e.i32_vector(), e.i64_rank5(), e.bool_rank8()];
+const beforeGrowth = e.memory.buffer;
+e.__sjulia_alloc(BigInt(beforeGrowth.byteLength), 8);
+const refreshed = made.map(decode);
+const moduleBytes = [
+  new DataView(e.memory.buffer).getUint8(refreshed[0].data),
+  new DataView(e.memory.buffer).getFloat32(refreshed[1].data + 12, true),
+  new DataView(e.memory.buffer).getFloat64(refreshed[2].data + 32, true),
+  new DataView(e.memory.buffer).getInt32(refreshed[3].data + 8, true),
+  new DataView(e.memory.buffer).getBigInt64(refreshed[4].data + 24, true).toString(),
+  new DataView(e.memory.buffer).getUint8(refreshed[5].data + 1),
+];
+let nextDescriptor = 32;
+let nextData = 2048;
+const host = (tag, bytes, dims, strides) => {
+  const descriptor = nextDescriptor;
+  const data = nextData;
+  nextDescriptor += 176;
+  nextData += 256;
+  const view = new DataView(e.memory.buffer);
+  view.setUint32(descriptor, 2, true);
+  view.setUint32(descriptor + 4, 0, true);
+  view.setUint32(descriptor + 8, tag, true);
+  view.setUint32(descriptor + 12, bytes, true);
+  view.setUint32(descriptor + 16, 0, true);
+  view.setUint32(descriptor + 20, dims.length, true);
+  view.setUint32(descriptor + 24, data, true);
+  view.setUint32(descriptor + 28, 0, true);
+  view.setBigUint64(descriptor + 32, dims.reduce((product, dim) => product * dim, 1n), true);
+  dims.forEach((dim, axis) => {
+    view.setBigUint64(descriptor + 40 + axis * 16, dim, true);
+    view.setBigInt64(descriptor + 48 + axis * 16, strides[axis], true);
+  });
+  return { descriptor, data };
+};
+const f32 = host(9, 4, [2n, 1n, 2n], [1n, 2n, 3n]);
+const f64 = host(10, 8, [2n, 3n], [1n, 3n]);
+const i32 = host(6, 4, [3n], [2n]);
+const i64 = host(8, 8, [1n, 2n, 1n, 2n, 1n], [0n, 1n, 0n, 2n, 0n]);
+const bool = host(11, 1, [1n, 1n, 1n, 1n, 1n, 1n, 1n, 2n], [0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n]);
+e["f32_write!"](f32.descriptor, 9.5);
+e["f64_write!"](f64.descriptor, -12.25);
+e["i32_write!"](i32.descriptor, -123);
+e["i64_write!"](i64.descriptor, 0x102030405060708n);
+e["bool_write!"](bool.descriptor, 1);
+const hostBytes = [
+  new DataView(e.memory.buffer).getFloat32(f32.data + 16, true),
+  new DataView(e.memory.buffer).getFloat64(f64.data + 56, true),
+  new DataView(e.memory.buffer).getInt32(i32.data + 16, true),
+  new DataView(e.memory.buffer).getBigInt64(i64.data + 24, true).toString(),
+  new DataView(e.memory.buffer).getUint8(bool.data),
+];
+console.log(JSON.stringify({ imports, grew: beforeGrowth.byteLength === 0, moduleBytes, hostBytes, scalar: e.u8_read(made[0]) }));
+"#;
+        let values = (0..3)
+            .map(|_| run_wasm_bytes_node(&output.wasm_bytes, javascript))
+            .collect::<Vec<_>>();
+
+        // Then: one-based checked strides select exact bytes for module and host arrays.
+        let expected = r#"{"imports":0,"grew":true,"moduleBytes":[165,3.5,6.25,-17,"72623859790382856",1],"hostBytes":[9.5,-12.25,-123,"72623859790382856",1],"scalar":165}"#;
+        assert_eq!(values, vec![expected, expected, expected]);
+    }
+
+    #[test]
     fn wasm_allocates_primitive_arrays_and_reports_julia_shapes() {
         // Given: Julia's rank-0 through rank-8 primitive allocation and shape contract.
         let source = r#"

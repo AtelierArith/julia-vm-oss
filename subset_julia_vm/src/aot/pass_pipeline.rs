@@ -3,6 +3,7 @@
 use crate::aot::ir::{AotExpr, AotFunction, AotProgram, AotStmt};
 use crate::aot::native_calls::is_native_call_target;
 use crate::aot::rooting::verify_aot_rooting_obligations;
+use crate::aot::types::StaticType;
 use crate::aot::{AotError, AotResult};
 use std::fmt;
 use std::str::FromStr;
@@ -433,8 +434,16 @@ fn verify_expr(stage: AotPassStage, function: &str, expr: &AotExpr) -> AotResult
             }
             verify_expr(stage, function, body)
         }
-        AotExpr::Index { array, indices, .. } => {
-            if indices.is_empty() {
+        AotExpr::Index {
+            array,
+            indices,
+            is_tuple,
+            ..
+        } => {
+            if indices.is_empty()
+                && (*is_tuple
+                    || !matches!(array.get_type(), StaticType::Array { ndims: Some(0), .. }))
+            {
                 return verifier_error(stage, function, "index expression has no indices");
             }
             verify_expr(stage, function, array)?;
@@ -574,6 +583,37 @@ mod tests {
         assert!(err
             .to_string()
             .contains("BeforeBackendCodegen verifier failed"));
+    }
+
+    #[test]
+    fn verifier_accepts_only_rank_zero_empty_index_lists() {
+        let scalar = StaticType::Array {
+            element: Box::new(StaticType::U8),
+            ndims: Some(0),
+        };
+        let vector = StaticType::Array {
+            element: Box::new(StaticType::U8),
+            ndims: Some(1),
+        };
+        let index = |ty| AotExpr::Index {
+            array: Box::new(AotExpr::Var {
+                name: "value".to_string(),
+                ty,
+            }),
+            indices: Vec::new(),
+            elem_ty: StaticType::U8,
+            is_tuple: false,
+        };
+        let mut valid = AotProgram::new();
+        valid.main.push(AotStmt::Expr(index(scalar)));
+        assert!(verify_aot_program(AotPassStage::AfterAotIrConversion, &valid).is_ok());
+
+        let mut invalid = AotProgram::new();
+        invalid.main.push(AotStmt::Expr(index(vector)));
+        let error = verify_aot_program(AotPassStage::AfterAotIrConversion, &invalid).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("index expression has no indices"));
     }
 
     #[test]
