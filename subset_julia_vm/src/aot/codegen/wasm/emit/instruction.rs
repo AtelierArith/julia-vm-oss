@@ -152,9 +152,9 @@ pub(super) fn emit_instruction(
             indices,
         } => {
             emit_array_address(body, array, indices, layout, DescriptorAccess::Read)?;
-            emit_array_load(body, &dest.ty)?;
+            super::array_slice_dispatch::emit_array_load(body, &dest.ty)?;
             if dest.ty == crate::aot::types::StaticType::Bool {
-                normalize_bool(body);
+                super::array_slice_dispatch::normalize_bool(body);
             }
             set(body, locals, dest)?;
         }
@@ -165,7 +165,7 @@ pub(super) fn emit_instruction(
         } => {
             emit_array_address(body, array, indices, layout, DescriptorAccess::Write)?;
             get(body, locals, value)?;
-            emit_array_store(body, &value.ty)?;
+            super::array_slice_dispatch::emit_array_store(body, &value.ty)?;
         }
         Instruction::StructNew { .. } => {
             super::aggregate::emit_new(body, instruction, locals, functions)?;
@@ -174,27 +174,10 @@ pub(super) fn emit_instruction(
             super::array::emit_new(body, instruction, layout, functions)?;
         }
         Instruction::ArraySlice { .. } => {
-            super::array_slice::emit(body, instruction, layout, functions)?;
+            super::array_slice_dispatch::emit(body, instruction, layout, functions)?;
         }
-        Instruction::ArraySliceAssign { .. } => {
-            super::array_slice_assign::emit(body, instruction, layout, functions)?;
-        }
-        Instruction::UnitRangeLength { dest, start, stop } => {
-            get(body, locals, stop)?;
-            get(body, locals, start)?;
-            body.instruction(&W::I64LtS);
-            body.instruction(&W::If(wasm_encoder::BlockType::Result(
-                wasm_encoder::ValType::I64,
-            )));
-            body.instruction(&W::I64Const(0));
-            body.instruction(&W::Else);
-            get(body, locals, stop)?;
-            get(body, locals, start)?;
-            body.instruction(&W::I64Sub);
-            body.instruction(&W::I64Const(1));
-            body.instruction(&W::I64Add);
-            body.instruction(&W::End);
-            set(body, locals, dest)?;
+        Instruction::ArraySliceAssign { .. } | Instruction::UnitRangeLength { .. } => {
+            super::array_slice_dispatch::emit(body, instruction, layout, functions)?;
         }
         Instruction::GetFieldOffset {
             dest,
@@ -212,67 +195,4 @@ pub(super) fn emit_instruction(
         }
     }
     Ok(())
-}
-
-pub(super) fn emit_array_load(
-    body: &mut Function,
-    ty: &crate::aot::types::StaticType,
-) -> AotResult<()> {
-    match ty {
-        crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
-            body.instruction(&W::I32Load8U(memarg(0)));
-        }
-        crate::aot::types::StaticType::I32 => {
-            body.instruction(&W::I32Load(memarg(0)));
-        }
-        crate::aot::types::StaticType::I64 => {
-            body.instruction(&W::I64Load(memarg(0)));
-        }
-        crate::aot::types::StaticType::F32 => {
-            body.instruction(&W::F32Load(memarg(0)));
-        }
-        crate::aot::types::StaticType::F64 => {
-            body.instruction(&W::F64Load(memarg(0)));
-        }
-        other => {
-            return Err(unsupported(format!(
-                "unsupported Wasm array load `{other}`"
-            )))
-        }
-    };
-    Ok(())
-}
-
-pub(super) fn emit_array_store(
-    body: &mut Function,
-    ty: &crate::aot::types::StaticType,
-) -> AotResult<()> {
-    match ty {
-        crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
-            body.instruction(&W::I32Store8(memarg(0)));
-        }
-        crate::aot::types::StaticType::I32 => {
-            body.instruction(&W::I32Store(memarg(0)));
-        }
-        crate::aot::types::StaticType::I64 => {
-            body.instruction(&W::I64Store(memarg(0)));
-        }
-        crate::aot::types::StaticType::F32 => {
-            body.instruction(&W::F32Store(memarg(0)));
-        }
-        crate::aot::types::StaticType::F64 => {
-            body.instruction(&W::F64Store(memarg(0)));
-        }
-        other => {
-            return Err(unsupported(format!(
-                "unsupported Wasm array store `{other}`"
-            )))
-        }
-    };
-    Ok(())
-}
-
-fn normalize_bool(body: &mut Function) {
-    body.instruction(&W::I32Eqz);
-    body.instruction(&W::I32Eqz);
 }

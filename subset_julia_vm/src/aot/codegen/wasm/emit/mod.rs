@@ -5,6 +5,7 @@ mod array_init;
 mod array_slice;
 mod array_slice_assign;
 mod array_slice_copy;
+mod array_slice_dispatch;
 mod array_slice_validate;
 mod assembly;
 mod control;
