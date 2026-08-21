@@ -399,6 +399,25 @@ impl DeadCodeElimination {
                         }
                         uses.insert(format!("{}.{}", value.name, value.version));
                     }
+                    Instruction::ArraySliceAssign {
+                        array,
+                        selectors,
+                        value,
+                    } => {
+                        uses.insert(format!("{}.{}", array.name, array.version));
+                        uses.insert(format!("{}.{}", value.name, value.version));
+                        for selector in selectors {
+                            match selector {
+                                crate::aot::ir::ArraySelector::Scalar(index) => {
+                                    uses.insert(format!("{}.{}", index.name, index.version));
+                                }
+                                crate::aot::ir::ArraySelector::UnitRange { start, stop } => {
+                                    uses.insert(format!("{}.{}", start.name, start.version));
+                                    uses.insert(format!("{}.{}", stop.name, stop.version));
+                                }
+                            }
+                        }
+                    }
                     Instruction::GetField { object, .. } => {
                         uses.insert(format!("{}.{}", object.name, object.version));
                     }
@@ -476,6 +495,7 @@ impl DeadCodeElimination {
                     return true;
                 }
                 Instruction::SetIndex { .. }
+                | Instruction::ArraySliceAssign { .. }
                 | Instruction::SetField { .. }
                 | Instruction::SetFieldOffset { .. } => {
                     // Always keep mutations
@@ -937,6 +957,7 @@ impl LoopInvariantCodeMotion {
             Instruction::TypeAssert { dest, .. } => Some(dest),
             Instruction::Phi { dest, .. } => Some(dest),
             Instruction::SetIndex { .. }
+            | Instruction::ArraySliceAssign { .. }
             | Instruction::SetField { .. }
             | Instruction::SetFieldOffset { .. } => None,
         }
@@ -993,6 +1014,7 @@ impl LoopInvariantCodeMotion {
 
             // These instructions have side effects
             Instruction::SetIndex { .. }
+            | Instruction::ArraySliceAssign { .. }
             | Instruction::SetField { .. }
             | Instruction::SetFieldOffset { .. } => false,
 
@@ -1027,6 +1049,7 @@ impl LoopInvariantCodeMotion {
             | Instruction::ArrayNew { .. }
             | Instruction::ArraySlice { .. }
             | Instruction::SetIndex { .. }
+            | Instruction::ArraySliceAssign { .. }
             | Instruction::SetField { .. }
             | Instruction::SetFieldOffset { .. }
             | Instruction::Phi { .. } => false,

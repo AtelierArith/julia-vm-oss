@@ -390,6 +390,16 @@ impl<'a> IrConverter<'a> {
             }
             Expr::Index { array, indices, .. } => {
                 let arr_ty = self.infer_expr_type_with_locals(array, locals);
+                let range_rank = indices
+                    .iter()
+                    .filter(|index| matches!(index, Expr::Range { .. }))
+                    .count();
+                if range_rank > 0 {
+                    return StaticType::Array {
+                        element: Box::new(self.engine.element_type(&arr_ty)),
+                        ndims: Some(range_rank),
+                    };
+                }
                 if arr_ty.is_tuple() && indices.len() == 1 {
                     if let Expr::Literal(Literal::Int(idx), _) = &indices[0] {
                         return self.engine.tuple_element_type_at(&arr_ty, *idx as usize);
@@ -756,7 +766,16 @@ impl<'a> IrConverter<'a> {
                     .iter()
                     .map(|idx| self.convert_expr_with_locals(idx, locals))
                     .collect::<AotResult<_>>()?;
-                let elem_ty = if arr_ty.is_tuple() && indices.len() == 1 {
+                let range_rank = indices
+                    .iter()
+                    .filter(|index| matches!(index, Expr::Range { .. }))
+                    .count();
+                let elem_ty = if range_rank > 0 {
+                    StaticType::Array {
+                        element: Box::new(self.engine.element_type(&arr_ty)),
+                        ndims: Some(range_rank),
+                    }
+                } else if arr_ty.is_tuple() && indices.len() == 1 {
                     if let Expr::Literal(Literal::Int(idx), _) = &indices[0] {
                         self.engine.tuple_element_type_at(&arr_ty, *idx as usize)
                     } else {
@@ -2206,7 +2225,16 @@ impl<'a> IrConverter<'a> {
                     .collect::<AotResult<_>>()?;
 
                 // Determine element type based on container and index
-                let elem_ty = if arr_ty.is_tuple() && indices.len() == 1 {
+                let range_rank = indices
+                    .iter()
+                    .filter(|index| matches!(index, Expr::Range { .. }))
+                    .count();
+                let elem_ty = if range_rank > 0 {
+                    StaticType::Array {
+                        element: Box::new(self.engine.element_type(&arr_ty)),
+                        ndims: Some(range_rank),
+                    }
+                } else if arr_ty.is_tuple() && indices.len() == 1 {
                     // For tuple indexing with a constant index, get the specific element type
                     if let Expr::Literal(Literal::Int(idx), _) = &indices[0] {
                         self.engine.tuple_element_type_at(&arr_ty, *idx as usize)

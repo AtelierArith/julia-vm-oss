@@ -1131,10 +1131,7 @@ fn lower_index_assignment_impl<'a>(
     for idx_node in index_nodes {
         match walker.kind(&idx_node) {
             NodeKind::RangeExpression => {
-                return Err(UnsupportedFeature::new(
-                    UnsupportedFeatureKind::ArraySlicing,
-                    walker.span(&idx_node),
-                ))
+                indices.push(lower_expr_maybe_ctx(walker, idx_node, lambda_ctx)?)
             }
             NodeKind::Operator => {
                 let text = walker.text(&idx_node);

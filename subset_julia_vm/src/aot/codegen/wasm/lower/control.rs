@@ -47,6 +47,9 @@ impl Lowerer<'_, '_> {
                         )))
                     }
                 };
+                if indices.iter().any(|index| matches!(index, AotExpr::Range { .. })) {
+                    return self.array_slice_assign(array, indices, value, function);
+                }
                 let array = self.expr(array, function)?;
                 let indices = indices
                     .iter()

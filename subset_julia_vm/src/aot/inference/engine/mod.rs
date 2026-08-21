@@ -1432,6 +1432,16 @@ impl TypeInferenceEngine {
             }
             Expr::Index { array, indices, .. } => {
                 let arr_ty = self.infer_expr_type_with_env(array, env);
+                let range_rank = indices
+                    .iter()
+                    .filter(|index| matches!(index, Expr::Range { .. }))
+                    .count();
+                if range_rank > 0 {
+                    return StaticType::Array {
+                        element: Box::new(self.element_type(&arr_ty)),
+                        ndims: Some(range_rank),
+                    };
+                }
                 // For tuple with constant index, get specific element type
                 if matches!(arr_ty, StaticType::Tuple(_)) && indices.len() == 1 {
                     if let Expr::Literal(Literal::Int(idx), _) = &indices[0] {

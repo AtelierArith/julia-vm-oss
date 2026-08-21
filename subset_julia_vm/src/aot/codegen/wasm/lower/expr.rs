@@ -167,6 +167,13 @@ impl Lowerer<'_, '_> {
                 Ok(dest)
             }
             AotExpr::Index {
+                elem_ty,
+                is_tuple: false,
+                ..
+            } if matches!(elem_ty, StaticType::Array { .. }) => {
+                self.array_slice(expr, elem_ty, function)
+            }
+            AotExpr::Index {
                 array,
                 indices,
                 elem_ty,

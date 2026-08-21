@@ -92,6 +92,11 @@ pub enum Instruction {
         start: VarRef,
         stop: VarRef,
     },
+    ArraySliceAssign {
+        array: VarRef,
+        selectors: Vec<ArraySelector>,
+        value: VarRef,
+    },
     /// Stack-allocated isbits struct construction.
     StructNew {
         dest: VarRef,

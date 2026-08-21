@@ -3,6 +3,7 @@ mod array;
 mod control;
 mod expr;
 mod ops;
+mod slice_assign;
 
 use std::collections::HashMap;
 

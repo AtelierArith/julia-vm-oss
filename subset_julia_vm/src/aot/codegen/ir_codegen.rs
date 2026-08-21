@@ -258,6 +258,9 @@ impl RustCodeGenerator {
                 let dest_name = self.var_to_rust(dest);
                 self.write_line(&format!("// array {} slice copy", dest_name));
             }
+            Instruction::ArraySliceAssign { .. } => {
+                self.write_line("// array slice assignment");
+            }
             Instruction::UnitRangeLength { dest, start, stop } => {
                 let dest_name = self.var_to_rust(dest);
                 let start_name = self.var_to_rust(start);
