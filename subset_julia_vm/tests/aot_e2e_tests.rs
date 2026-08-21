@@ -7101,7 +7101,7 @@ const grownDecoded = decode(grown);
 const first = new Uint8Array(e.memory.buffer, grownDecoded.data, grownDecoded.count)[0];
 const last = new Uint8Array(e.memory.buffer, grownDecoded.data, grownDecoded.count)[grownDecoded.count - 1];
 const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
-const malformed = [traps(() => e.dynamic_matrix(-1n, 2n)), traps(() => e.dynamic_matrix(2147483648n, 2147483648n)), traps(() => e.array_axis(rank5, 0n))];
+const malformed = [traps(() => e.dynamic_matrix(-1n, 2n)), traps(() => e.dynamic_matrix(2147483648n, 2147483648n)), traps(() => e.array_axis(rank5, 0n)), traps(() => e.growth_array(20000000n))];
 e.__sjulia_drop(grown);
 const dropped = traps(() => e.__sjulia_drop(grown));
 console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, decoded, f32Bits, queries: [Number(e.array_length(rank5)), Number(e.array_ndims(rank5)), Number(e.array_axis(rank5, 4n)), Number(e.array_axis(rank5, 8n))], sizeTuple, growth: [staleView, grownDecoded.count, first, last], malformed, dropped }));
@@ -7111,7 +7111,7 @@ console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length,
         // Then: tags, widths, canonical column-major strides, emptiness, and queries agree.
         assert_eq!(
             value,
-            r#"{"imports":0,"decoded":[{"flags":1,"tag":1,"bytes":1,"rank":0,"data":4208,"count":1,"dims":[],"strides":[]},{"flags":1,"tag":9,"bytes":4,"rank":3,"data":0,"count":0,"dims":[2,0,3],"strides":[1,2,0]},{"flags":1,"tag":10,"bytes":8,"rank":2,"data":4440,"count":6,"dims":[2,3],"strides":[1,2]},{"flags":1,"tag":6,"bytes":4,"rank":1,"data":4624,"count":5,"dims":[5],"strides":[1]},{"flags":1,"tag":8,"bytes":8,"rank":5,"data":4768,"count":6,"dims":[1,2,1,3,1],"strides":[1,1,2,2,6]},{"flags":1,"tag":11,"bytes":1,"rank":8,"data":5000,"count":2,"dims":[1,1,1,1,1,1,1,2],"strides":[1,1,1,1,1,1,1,1]}],"f32Bits":"3f800000","queries":[6,5,3,1],"sizeTuple":[1,2,1,3,1],"growth":[true,5000000,1,1],"malformed":[true,true,true],"dropped":true}"#
+            r#"{"imports":0,"decoded":[{"flags":1,"tag":1,"bytes":1,"rank":0,"data":4208,"count":1,"dims":[],"strides":[]},{"flags":1,"tag":9,"bytes":4,"rank":3,"data":0,"count":0,"dims":[2,0,3],"strides":[1,2,0]},{"flags":1,"tag":10,"bytes":8,"rank":2,"data":4440,"count":6,"dims":[2,3],"strides":[1,2]},{"flags":1,"tag":6,"bytes":4,"rank":1,"data":4624,"count":5,"dims":[5],"strides":[1]},{"flags":1,"tag":8,"bytes":8,"rank":5,"data":4768,"count":6,"dims":[1,2,1,3,1],"strides":[1,1,2,2,6]},{"flags":1,"tag":11,"bytes":1,"rank":8,"data":5000,"count":2,"dims":[1,1,1,1,1,1,1,2],"strides":[1,1,1,1,1,1,1,1]}],"f32Bits":"3f800000","queries":[6,5,3,1],"sizeTuple":[1,2,1,3,1],"growth":[true,5000000,1,1],"malformed":[true,true,true,true],"dropped":true}"#
         );
     }
 
