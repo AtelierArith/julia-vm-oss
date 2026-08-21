@@ -2642,6 +2642,110 @@ doubled
 }
 
 // ============================================================================
+// Closure Capture and Invocation Tests (Julia 1.12.4 Oracle Coverage)
+// ============================================================================
+// These tests verify AoT compilation and execution of closures with various
+// capture patterns, following the Julia 1.12.4 oracle baseline. Each test
+// compiles to Rust and verifies the generated binary produces the expected
+// output matching upstream Julia 1.12.4.
+
+#[test]
+fn test_aot_closure_execution_noncapturing_lambda() {
+    // Execution: noncapturing lambda returns correct result.
+    let source = r#"
+function noncapturing_lambda_exec()::Int64
+    f = x -> x + 1
+    f(41)
+end
+println(noncapturing_lambda_exec())
+"#;
+    let rust_code = compile_to_rust(source).expect("noncapturing lambda execution must compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_closure_noncapturing", "42");
+}
+
+#[test]
+fn test_aot_closure_execution_immutable_scalar() {
+    // Execution: immutable scalar capture returns correct value.
+    let source = r#"
+function immutable_scalar_exec()::Int64
+    x = 10
+    f = () -> x
+    f()
+end
+println(immutable_scalar_exec())
+"#;
+    let rust_code = compile_to_rust(source).expect("immutable scalar execution must compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_closure_immutable_scalar", "10");
+}
+
+#[test]
+fn test_aot_closure_execution_distinct_captures() {
+    // Execution: two closures with distinct captures return correct values.
+    let source = r#"
+function distinct_captures_exec()::Tuple{Int64, Int64}
+    x = 5
+    y = 10
+    f1 = () -> x
+    f2 = () -> y
+    (f1(), f2())
+end
+r1, r2 = distinct_captures_exec()
+println("$r1 $r2")
+"#;
+    let rust_code = compile_to_rust(source).expect("distinct captures execution must compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_closure_distinct_captures", "5 10");
+}
+
+#[test]
+fn test_aot_closure_execution_curried() {
+    // Execution: curried closure returns correct result.
+    let source = r#"
+function curried_exec()::Int64
+    make_adder = x -> (y -> x + y)
+    add5 = make_adder(5)
+    add5(37)
+end
+println(curried_exec())
+"#;
+    let rust_code = compile_to_rust(source).expect("curried closure execution must compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_closure_curried", "42");
+}
+
+#[test]
+fn test_aot_closure_execution_nested_return() {
+    // Execution: nested closure return and invoke returns correct result.
+    let source = r#"
+function nested_return_exec()::Int64
+    outer = x -> begin
+        inner = y -> x + y
+        inner
+    end
+    f = outer(100)
+    f(23)
+end
+println(nested_return_exec())
+"#;
+    let rust_code = compile_to_rust(source).expect("nested closure return execution must compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_closure_nested_return", "123");
+}
+
+#[test]
+fn test_aot_closure_execution_calling_helper() {
+    // Execution: closure calling helper returns correct result.
+    let source = r#"
+function helper_call_exec()::Int64
+    helper(a, b) = a * b
+    x = 7
+    f = () -> helper(x, 6)
+    f()
+end
+println(helper_call_exec())
+"#;
+    let rust_code = compile_to_rust(source).expect("closure calling helper execution must compile");
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_closure_helper_call", "42");
+}
+
+// ============================================================================
 // Typed Array Tests (Phase 4)
 // ============================================================================
 
