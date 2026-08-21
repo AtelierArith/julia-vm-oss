@@ -184,6 +184,18 @@ fn write_shape(
 ) -> AotResult<()> {
     body.instruction(&W::I64Const(1));
     body.instruction(&W::LocalSet(locals.memory.term));
+    for dim in dims {
+        get(body, &locals.locals, dim)?;
+        body.instruction(&W::LocalSet(locals.memory.data_end));
+        checked_mul_local(
+            body,
+            locals.memory.term,
+            locals.memory.data_end,
+            locals.memory.element_count,
+        );
+    }
+    body.instruction(&W::I64Const(1));
+    body.instruction(&W::LocalSet(locals.memory.term));
     for (axis, dim) in dims.iter().enumerate() {
         let axis =
             u64::try_from(axis).map_err(|_| AotError::CodegenError("axis overflow".into()))?;
@@ -193,10 +205,14 @@ fn write_shape(
         get(body, &locals.locals, dest)?;
         body.instruction(&W::LocalGet(locals.memory.term));
         body.instruction(&W::I64Store(memarg(DESCRIPTOR_STRIDE_OFFSET + axis * 16)));
-        body.instruction(&W::LocalGet(locals.memory.term));
         get(body, &locals.locals, dim)?;
-        body.instruction(&W::I64Mul);
-        body.instruction(&W::LocalSet(locals.memory.term));
+        body.instruction(&W::LocalSet(locals.memory.data_end));
+        checked_mul_local(
+            body,
+            locals.memory.term,
+            locals.memory.data_end,
+            locals.memory.element_count,
+        );
     }
     Ok(())
 }

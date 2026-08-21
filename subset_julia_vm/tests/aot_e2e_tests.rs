@@ -7116,6 +7116,27 @@ console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length,
     }
 
     #[test]
+    fn wasm_array_stride_overflow_check_precedes_descriptor_writes() {
+        // Given: the generated Wasm array descriptor writer source.
+        let source = include_str!("../src/aot/codegen/wasm/emit/array.rs");
+        let writer = source
+            .split_once("fn write_shape(")
+            .expect("array shape writer should exist")
+            .1;
+
+        // When: the stride preflight and first descriptor mutation are located.
+        let overflow_check = writer
+            .find("checked_mul_local(")
+            .expect("stride accumulation should use checked multiplication");
+        let descriptor_write = writer
+            .find("W::I64Store")
+            .expect("shape writer should mutate the descriptor");
+
+        // Then: every stride partial product is checked before descriptor mutation begins.
+        assert!(overflow_check < descriptor_write);
+    }
+
+    #[test]
     fn wasm_backend_emits_a_standalone_module_from_julia_source() {
         // Given: Julia source lowered through the real parser/lowering pipeline.
         let source = "add_i64(x::Int64, y::Int64) = x + y\nadd_i64(20, 22)";
