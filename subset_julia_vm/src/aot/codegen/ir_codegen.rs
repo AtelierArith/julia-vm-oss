@@ -208,6 +208,11 @@ impl RustCodeGenerator {
                 let ty = self.type_to_rust(&dest.ty);
                 self.write_line(&format!("let {dest_name}: {ty} = {op}({args});"));
             }
+            Instruction::Rand { dest } => {
+                let dest_name = self.var_to_rust(dest);
+                let ty = self.type_to_rust(&dest.ty);
+                self.write_line(&format!("let {dest_name}: {ty} = __sjulia_aot_rand();"));
+            }
             Instruction::Call { dest, func, args } => {
                 let args_str: Vec<_> = args.iter().map(|a| self.var_to_rust(a)).collect();
                 let call = format!("{}({})", func, args_str.join(", "));
@@ -559,5 +564,24 @@ mod tests {
         assert!(result.contains("Auto-generated"));
         assert!(result.contains("use subset_julia_vm_runtime::prelude::*;"));
         assert!(result.contains("fn main() -> ()"));
+    }
+
+    #[test]
+    fn rust_codegen_rand_uses_runtime_rng() {
+        let mut codegen = RustCodeGenerator::default_config();
+        let mut function = IrFunction::new("sample".to_string(), vec![], StaticType::F64);
+        let destination = VarRef::new("sampled".to_string(), StaticType::F64);
+        function.entry_block_mut().unwrap().push(Instruction::Rand {
+            dest: destination.clone(),
+        });
+        function
+            .entry_block_mut()
+            .unwrap()
+            .set_terminator(Terminator::Return(Some(destination)));
+
+        let generated = codegen.generate_function(&function).unwrap();
+
+        assert!(generated.contains("let sampled: f64 = __sjulia_aot_rand();"));
+        assert!(!generated.contains("Default::default()"));
     }
 }
