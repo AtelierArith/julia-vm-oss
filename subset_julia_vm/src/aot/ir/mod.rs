@@ -10,6 +10,7 @@
 mod aggregate_types;
 mod aot_types;
 mod basic_types;
+mod broadcast;
 mod ops;
 #[cfg(test)]
 mod tests;
@@ -24,6 +25,10 @@ pub use aot_types::{
 pub use basic_types::{
     ArrayInit, ArraySelector, BasicBlock, BinOpKind, Instruction, IrFunction, IrModule,
     StructFieldInit, Terminator, UnaryOpKind, VarRef,
+};
+pub use broadcast::{
+    node_ty as broadcast_node_ty, plan as broadcast_plan, BroadcastNode, BroadcastOp,
+    BroadcastPlan, BroadcastReject,
 };
 pub use ops::{AotBinOp, AotBuiltinOp, AotUnaryOp, CompoundAssignOp};
 pub use values::ConstValue;
