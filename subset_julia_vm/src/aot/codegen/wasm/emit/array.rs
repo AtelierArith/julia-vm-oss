@@ -216,3 +216,26 @@ fn write_shape(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stride_overflow_check_precedes_descriptor_writes() {
+        // Given: the generated Wasm array descriptor writer source.
+        let writer = include_str!("array.rs")
+            .split_once("fn write_shape(")
+            .expect("array shape writer should exist")
+            .1;
+
+        // When: the stride preflight and first descriptor mutation are located.
+        let overflow_check = writer
+            .find("checked_mul_local(")
+            .expect("stride accumulation should use checked multiplication");
+        let descriptor_write = writer
+            .find("W::I64Store")
+            .expect("shape writer should mutate the descriptor");
+
+        // Then: every stride partial product is checked before descriptor mutation begins.
+        assert!(overflow_check < descriptor_write);
+    }
+}

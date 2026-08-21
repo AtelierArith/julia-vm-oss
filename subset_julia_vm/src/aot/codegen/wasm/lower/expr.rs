@@ -204,17 +204,7 @@ impl Lowerer<'_, '_> {
                 if matches!(value.as_ref(), AotExpr::CallBuiltin { builtin: AotBuiltinOp::Size, args, .. } if args.len() == 1)
                     && matches!(target_ty, StaticType::Tuple(_)) =>
             {
-                let AotExpr::CallBuiltin { builtin, args, .. } = value.as_ref() else {
-                    unreachable!()
-                };
-                self.expr(
-                    &AotExpr::CallBuiltin {
-                        builtin: *builtin,
-                        args: args.clone(),
-                        return_ty: target_ty.clone(),
-                    },
-                    function,
-                )
+                self.array_size_conversion(value, target_ty, function)
             }
             AotExpr::Convert { value, target_ty }
                 if matches!(

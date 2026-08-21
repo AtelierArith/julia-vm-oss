@@ -149,4 +149,23 @@ impl Lowerer<'_, '_> {
             });
         Ok(dest)
     }
+
+    pub(super) fn array_size_conversion(
+        &mut self,
+        value: &AotExpr,
+        target_ty: &StaticType,
+        function: &mut IrFunction,
+    ) -> AotResult<VarRef> {
+        let AotExpr::CallBuiltin { builtin, args, .. } = value else {
+            unreachable!()
+        };
+        self.expr(
+            &AotExpr::CallBuiltin {
+                builtin: *builtin,
+                args: args.clone(),
+                return_ty: target_ty.clone(),
+            },
+            function,
+        )
+    }
 }
