@@ -9290,4 +9290,144 @@ console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length,
             ]
         );
     }
+
+    #[test]
+    fn wasm_broadcasts_scalar_array_trees_over_one_array_operand() {
+        // Given: scalar-array arithmetic, a comparison, a promoting division, a fused
+        // chain and a two-scalar tree over a single rank-one array operand.
+        let source = r#"
+shift(v::Vector{Int32})::Vector{Int32} = v .+ Int32(10)
+compare(v::Vector{Int32})::Vector{Bool} = v .< Int32(3)
+halve(v::Vector{Int32})::Vector{Float64} = v ./ 2
+fused(v::Vector{Int32})::Vector{Float64} = clamp.(v ./ 2 .+ 1.0, 1.5, 3.0)
+two(v::Vector{Int32})::Vector{Int32} = v .+ Int32(2) .* Int32(3)
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nv = Int32[1,2,3,4]\nprintln(join([string(eltype(x), \" \", x) for x in (shift(v), compare(v), halve(v), fused(v), two(v))], \" | \"))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia broadcast oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "Int32 Int32[11, 12, 13, 14] | Bool Bool[1, 1, 0, 0] | Float64 [0.5, 1.0, 1.5, 2.0] | Float64 [1.5, 2.0, 2.5, 3.0] | Int32 Int32[7, 8, 9, 10]"
+        );
+        let vector = StaticType::Array {
+            element: Box::new(StaticType::I32),
+            ndims: Some(1),
+        };
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: ["shift", "compare", "halve", "fused", "two"]
+                .into_iter()
+                .map(|name| CAbiExport::with_arg_types(name, name, vec![vector.clone()]))
+                .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: Node drives contiguous, empty, and noncontiguous read-only inputs.
+        let output = compile_wasm_source(source, &config)
+            .expect("single-array broadcast trees should compile");
+        let javascript = r#"
+const e = instance.exports;
+const view = new DataView(e.memory.buffer);
+const describe = (at, flags, data, count, dim, stride) => {
+  view.setUint32(at, 2, true);
+  view.setUint32(at + 4, flags, true);
+  view.setUint32(at + 8, 6, true);
+  view.setUint32(at + 12, 4, true);
+  view.setUint32(at + 16, 0, true);
+  view.setUint32(at + 20, 1, true);
+  view.setUint32(at + 24, data, true);
+  view.setUint32(at + 28, 0, true);
+  view.setBigUint64(at + 32, BigInt(count), true);
+  view.setBigUint64(at + 40, BigInt(dim), true);
+  view.setBigInt64(at + 48, BigInt(stride), true);
+  return at;
+};
+const dense = describe(32, 0, 256, 4, 4, 1);
+const empty = describe(96, 0, 0, 0, 0, 1);
+const strided = describe(160, 2, 384, 3, 3, 2);
+new Int32Array(e.memory.buffer, 256, 4).set([1, 2, 3, 4]);
+new Int32Array(e.memory.buffer, 384, 6).set([1, 2, 3, 4, 5, 6]);
+const decode = pointer => {
+  const current = new DataView(e.memory.buffer);
+  const tag = current.getUint32(pointer + 8, true);
+  const rank = current.getUint32(pointer + 20, true);
+  const count = Number(current.getBigUint64(pointer + 32, true));
+  const start = current.getUint32(pointer + 24, true);
+  const buffer = e.memory.buffer;
+  const values = tag === 6 ? Array.from(new Int32Array(buffer, start, count))
+    : tag === 10 ? Array.from(new Float64Array(buffer, start, count))
+    : Array.from(new Uint8Array(buffer, start, count));
+  return {
+    tag,
+    flags: current.getUint32(pointer + 4, true),
+    dims: Array.from({length: rank}, (_, axis) => Number(current.getBigUint64(pointer + 40 + axis * 16, true))),
+    strides: Array.from({length: rank}, (_, axis) => Number(current.getBigInt64(pointer + 48 + axis * 16, true))),
+    values,
+  };
+};
+const results = [
+  e.shift(dense), e.compare(dense), e.halve(dense), e.fused(dense), e.two(dense),
+  e.shift(empty), e.shift(strided),
+];
+const decoded = results.map(decode);
+const inputs = [
+  Array.from(new Int32Array(e.memory.buffer, 256, 4)),
+  Array.from(new Int32Array(e.memory.buffer, 384, 6)),
+];
+results.forEach(e.__sjulia_drop);
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, inputs, decoded }));
+"#;
+        let values = (0..3)
+            .map(|_| run_wasm_bytes_node(&output.wasm_bytes, javascript))
+            .collect::<Vec<_>>();
+
+        // Then: every result is a module-owned contiguous array carrying Julia's
+        // element type, empty and strided sources are honoured, and no input changes.
+        assert_eq!(
+            values,
+            vec![
+                r#"{"imports":0,"inputs":[[1,2,3,4],[1,2,3,4,5,6]],"decoded":[{"tag":6,"flags":1,"dims":[4],"strides":[1],"values":[11,12,13,14]},{"tag":11,"flags":1,"dims":[4],"strides":[1],"values":[1,1,0,0]},{"tag":10,"flags":1,"dims":[4],"strides":[1],"values":[0.5,1,1.5,2]},{"tag":10,"flags":1,"dims":[4],"strides":[1],"values":[1.5,2,2.5,3]},{"tag":6,"flags":1,"dims":[4],"strides":[1],"values":[7,8,9,10]},{"tag":6,"flags":1,"dims":[0],"strides":[1],"values":[]},{"tag":6,"flags":1,"dims":[3],"strides":[1],"values":[11,13,15]}]}"#;
+                3
+            ]
+        );
+    }
+
+    #[test]
+    fn wasm_rejects_multi_array_broadcast_before_codegen() {
+        // Given: same-shape two-array broadcast, which shared AoT specialization
+        // rewrites away before the Wasm backend can plan a shape for it.
+        let source = "add(v::Vector{Int32}, w::Vector{Int32})::Vector{Int32} = v .+ w";
+        let vector = StaticType::Array {
+            element: Box::new(StaticType::I32),
+            ndims: Some(1),
+        };
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "add",
+                "add",
+                vec![vector.clone(), vector],
+            )],
+            ..CompileConfig::default()
+        };
+
+        // When: the Wasm backend compiles it.
+        let error = compile_wasm_source(source, &config)
+            .expect_err("multi-array broadcast must not be miscompiled");
+
+        // Then: it is a typed unsupported diagnostic rather than a wrong result.
+        assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+    }
 }
