@@ -176,6 +176,9 @@ pub(super) fn emit_instruction(
         Instruction::ArraySlice { .. } => {
             super::array_slice::emit(body, instruction, layout, functions)?;
         }
+        Instruction::ArraySliceAssign { .. } => {
+            super::array_slice_assign::emit(body, instruction, layout, functions)?;
+        }
         Instruction::UnitRangeLength { dest, start, stop } => {
             get(body, locals, stop)?;
             get(body, locals, start)?;

@@ -15,6 +15,12 @@ pub(super) struct LocalLayout {
     pub(super) pc: u32,
     pub(super) memory: MemoryLocals,
     pub(super) math: MathLocals,
+    pub(super) slice: SliceLocals,
+}
+
+pub(super) struct SliceLocals {
+    pub(super) count: u32,
+    pub(super) temporary: u32,
 }
 
 pub(super) struct MathLocals {
@@ -78,10 +84,16 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
         exponent: math_start + 5,
         log_adjust: math_start + 6,
     };
+    let slice_start = math_start + 7;
+    declarations.push((2, ValType::I64));
+    let slice = SliceLocals {
+        count: slice_start,
+        temporary: slice_start + 1,
+    };
     for (offset, (name, ty)) in collect_phi_scratch(function)?.iter().enumerate() {
         phi_scratch.insert(
             name.clone(),
-            math_start + 7 + checked_index(offset, "phi locals")?,
+            slice_start + 2 + checked_index(offset, "phi locals")?,
         );
         declarations.push((1, *ty));
     }
@@ -92,6 +104,7 @@ pub(super) fn build_local_layout(function: &IrFunction) -> AotResult<LocalLayout
         pc,
         memory,
         math,
+        slice,
     })
 }
 
@@ -152,6 +165,7 @@ fn destinations(instruction: &Instruction) -> Vec<&VarRef> {
         Instruction::Call { dest, .. } => dest.iter().collect(),
         Instruction::CallMulti { dests, .. } => dests.iter().collect(),
         Instruction::SetIndex { .. }
+        | Instruction::ArraySliceAssign { .. }
         | Instruction::SetField { .. }
         | Instruction::SetFieldOffset { .. } => Vec::new(),
     }
