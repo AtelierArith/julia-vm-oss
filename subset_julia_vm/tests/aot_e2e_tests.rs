@@ -6964,6 +6964,158 @@ console.log(JSON.stringify({ invalidAllocations, aligned: first % 16 === 0, reus
     }
 
     #[test]
+    fn wasm_allocates_primitive_arrays_and_reports_julia_shapes() {
+        // Given: Julia's rank-0 through rank-8 primitive allocation and shape contract.
+        let source = r#"
+u8_scalar()::Array{UInt8,0} = ones(UInt8)
+f32_empty()::Array{Float32,3} = zeros(Float32, 2, 0, 3)
+f32_scalar()::Array{Float32,0} = ones(Float32)
+f64_matrix()::Matrix{Float64} = ones(Float64, 2, 3)
+i32_vector()::Vector{Int32} = zeros(Int32, 5)
+i64_rank5()::Array{Int64,5} = ones(Int64, 1, 2, 1, 3, 1)
+bool_rank8()::Array{Bool,8} = ones(Bool, 1, 1, 1, 1, 1, 1, 1, 2)
+growth_array(n::Int64)::Vector{UInt8} = ones(UInt8, n)
+dynamic_matrix(rows::Int64, columns::Int64)::Matrix{Float64} = zeros(Float64, rows, columns)
+array_length(value::Array{Int64,5})::Int64 = length(value)
+array_ndims(value::Array{Int64,5})::Int64 = ndims(value)
+array_axis(value::Array{Int64,5}, axis::Int64)::Int64 = size(value, axis)
+array_size(value::Array{Int64,5})::NTuple{5,Int64} = size(value)
+"#;
+        let oracle = Command::new("julia")
+            .args([
+                "--startup-file=no",
+                "-e",
+                &format!(
+                    "{source}\nA=i64_rank5(); println((size(u8_scalar()), size(f32_empty()), size(f64_matrix()), size(i32_vector()), size(A), size(bool_rank8()), length(A), ndims(A), size(A, 4), size(A, 8)))"
+                ),
+            ])
+            .output()
+            .expect("run upstream Julia array oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&oracle.stdout).trim(),
+            "((), (2, 0, 3), (2, 3), (5,), (1, 2, 1, 3, 1), (1, 1, 1, 1, 1, 1, 1, 2), 6, 5, 3, 1)"
+        );
+        let exports = [
+            ("u8_scalar", Vec::new()),
+            ("f32_empty", Vec::new()),
+            ("f32_scalar", Vec::new()),
+            ("f64_matrix", Vec::new()),
+            ("i32_vector", Vec::new()),
+            ("i64_rank5", Vec::new()),
+            ("bool_rank8", Vec::new()),
+            ("growth_array", vec![StaticType::I64]),
+            ("dynamic_matrix", vec![StaticType::I64, StaticType::I64]),
+            (
+                "array_length",
+                vec![StaticType::Array {
+                    element: Box::new(StaticType::I64),
+                    ndims: Some(5),
+                }],
+            ),
+            (
+                "array_ndims",
+                vec![StaticType::Array {
+                    element: Box::new(StaticType::I64),
+                    ndims: Some(5),
+                }],
+            ),
+            (
+                "array_axis",
+                vec![
+                    StaticType::Array {
+                        element: Box::new(StaticType::I64),
+                        ndims: Some(5),
+                    },
+                    StaticType::I64,
+                ],
+            ),
+            (
+                "array_size",
+                vec![StaticType::Array {
+                    element: Box::new(StaticType::I64),
+                    ndims: Some(5),
+                }],
+            ),
+        ];
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: exports
+                .into_iter()
+                .map(|(name, args)| CAbiExport::with_arg_types(name, name, args))
+                .collect(),
+            ..CompileConfig::default()
+        };
+
+        // When: generated Wasm allocates each array and Node decodes ABI v2 directly.
+        let outputs = (0..3)
+            .map(|_| {
+                compile_wasm_source(source, &config)
+                    .expect("primitive array allocation and shape queries should compile")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(outputs[0].wasm_bytes, outputs[1].wasm_bytes);
+        assert_eq!(outputs[1].wasm_bytes, outputs[2].wasm_bytes);
+        let dir = tempfile::tempdir().expect("create array validation directory");
+        let wasm_path = dir.path().join("arrays.wasm");
+        fs::write(&wasm_path, &outputs[0].wasm_bytes).expect("write array Wasm");
+        let validation = Command::new("wasm-tools")
+            .arg("validate")
+            .arg(&wasm_path)
+            .output()
+            .expect("validate array Wasm");
+        assert!(
+            validation.status.success(),
+            "{}",
+            String::from_utf8_lossy(&validation.stderr)
+        );
+        let value = run_wasm_bytes_node(
+            &outputs[0].wasm_bytes,
+            r#"
+const e = instance.exports;
+const decode = pointer => {
+  const view = new DataView(e.memory.buffer);
+  const rank = view.getUint32(pointer + 20, true);
+  const dims = Array.from({ length: rank }, (_, axis) => Number(view.getBigUint64(pointer + 40 + axis * 16, true)));
+  const strides = Array.from({ length: rank }, (_, axis) => Number(view.getBigInt64(pointer + 48 + axis * 16, true)));
+  return { flags: view.getUint32(pointer + 4, true), tag: view.getUint32(pointer + 8, true), bytes: view.getUint32(pointer + 12, true), rank, data: view.getUint32(pointer + 24, true), count: Number(view.getBigUint64(pointer + 32, true)), dims, strides };
+};
+const arrays = [e.u8_scalar(), e.f32_empty(), e.f64_matrix(), e.i32_vector(), e.i64_rank5(), e.bool_rank8()];
+const decoded = arrays.map(decode);
+const f32Scalar = e.f32_scalar();
+const f32Descriptor = decode(f32Scalar);
+const f32Bits = new DataView(e.memory.buffer).getUint32(f32Descriptor.data, true).toString(16).padStart(8, "0");
+const rank5 = arrays[4];
+const sizeHandle = e.array_size(rank5);
+let view = new DataView(e.memory.buffer);
+const sizeTuple = Array.from({ length: 5 }, (_, axis) => Number(view.getBigInt64(sizeHandle + 4 + axis * 8, true)));
+const initialBuffer = e.memory.buffer;
+const grown = e.growth_array(5000000n);
+const staleView = initialBuffer.byteLength === 0;
+view = new DataView(e.memory.buffer);
+const grownDecoded = decode(grown);
+const first = new Uint8Array(e.memory.buffer, grownDecoded.data, grownDecoded.count)[0];
+const last = new Uint8Array(e.memory.buffer, grownDecoded.data, grownDecoded.count)[grownDecoded.count - 1];
+const traps = action => { try { action(); return false; } catch (error) { return error instanceof WebAssembly.RuntimeError; } };
+const malformed = [traps(() => e.dynamic_matrix(-1n, 2n)), traps(() => e.dynamic_matrix(2147483648n, 2147483648n)), traps(() => e.array_axis(rank5, 0n))];
+e.__sjulia_drop(grown);
+const dropped = traps(() => e.__sjulia_drop(grown));
+console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length, decoded, f32Bits, queries: [Number(e.array_length(rank5)), Number(e.array_ndims(rank5)), Number(e.array_axis(rank5, 4n)), Number(e.array_axis(rank5, 8n))], sizeTuple, growth: [staleView, grownDecoded.count, first, last], malformed, dropped }));
+"#,
+        );
+
+        // Then: tags, widths, canonical column-major strides, emptiness, and queries agree.
+        assert_eq!(
+            value,
+            r#"{"imports":0,"decoded":[{"flags":1,"tag":1,"bytes":1,"rank":0,"data":4208,"count":1,"dims":[],"strides":[]},{"flags":1,"tag":9,"bytes":4,"rank":3,"data":0,"count":0,"dims":[2,0,3],"strides":[1,2,0]},{"flags":1,"tag":10,"bytes":8,"rank":2,"data":4440,"count":6,"dims":[2,3],"strides":[1,2]},{"flags":1,"tag":6,"bytes":4,"rank":1,"data":4624,"count":5,"dims":[5],"strides":[1]},{"flags":1,"tag":8,"bytes":8,"rank":5,"data":4768,"count":6,"dims":[1,2,1,3,1],"strides":[1,1,2,2,6]},{"flags":1,"tag":11,"bytes":1,"rank":8,"data":5000,"count":2,"dims":[1,1,1,1,1,1,1,2],"strides":[1,1,1,1,1,1,1,1]}],"f32Bits":"3f800000","queries":[6,5,3,1],"sizeTuple":[1,2,1,3,1],"growth":[true,5000000,1,1],"malformed":[true,true,true],"dropped":true}"#
+        );
+    }
+
+    #[test]
     fn wasm_backend_emits_a_standalone_module_from_julia_source() {
         // Given: Julia source lowered through the real parser/lowering pipeline.
         let source = "add_i64(x::Int64, y::Int64) = x + y\nadd_i64(20, 22)";
