@@ -173,6 +173,26 @@ pub(super) fn emit_instruction(
         Instruction::ArrayNew { .. } => {
             super::array::emit_new(body, instruction, layout, functions)?;
         }
+        Instruction::ArraySlice { .. } => {
+            super::array_slice::emit(body, instruction, layout, functions)?;
+        }
+        Instruction::UnitRangeLength { dest, start, stop } => {
+            get(body, locals, stop)?;
+            get(body, locals, start)?;
+            body.instruction(&W::I64LtS);
+            body.instruction(&W::If(wasm_encoder::BlockType::Result(
+                wasm_encoder::ValType::I64,
+            )));
+            body.instruction(&W::I64Const(0));
+            body.instruction(&W::Else);
+            get(body, locals, stop)?;
+            get(body, locals, start)?;
+            body.instruction(&W::I64Sub);
+            body.instruction(&W::I64Const(1));
+            body.instruction(&W::I64Add);
+            body.instruction(&W::End);
+            set(body, locals, dest)?;
+        }
         Instruction::GetFieldOffset {
             dest,
             object,
@@ -191,7 +211,7 @@ pub(super) fn emit_instruction(
     Ok(())
 }
 
-fn emit_array_load(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
+pub(super) fn emit_array_load(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
     match ty {
         crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
             body.instruction(&W::I32Load8U(memarg(0)));
@@ -217,7 +237,7 @@ fn emit_array_load(body: &mut Function, ty: &crate::aot::types::StaticType) -> A
     Ok(())
 }
 
-fn emit_array_store(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
+pub(super) fn emit_array_store(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
     match ty {
         crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
             body.instruction(&W::I32Store8(memarg(0)));

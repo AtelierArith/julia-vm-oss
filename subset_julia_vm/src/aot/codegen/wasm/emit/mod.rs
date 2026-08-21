@@ -2,6 +2,7 @@ mod aggregate;
 mod allocator;
 mod array;
 mod array_init;
+mod array_slice;
 mod assembly;
 mod control;
 mod conversion;
