@@ -7,9 +7,9 @@ use wasm_encoder::{Function, Instruction as W};
 
 use super::super::types::descriptor_layout;
 use super::allocator::{ALLOC_NAME, FREE_NAME};
+use super::array_slice_dispatch::emit_array_load;
 use super::conversion::emit_checked_conversion;
 use super::descriptor::trap_on_stack;
-use super::instruction::emit_array_load;
 use super::locals::LocalLayout;
 
 pub(super) fn emit(

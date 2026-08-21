@@ -8,10 +8,10 @@ use super::super::types::{
     descriptor_layout, DESCRIPTOR_AXIS_SIZE, DESCRIPTOR_DATA_PTR_OFFSET, DESCRIPTOR_DIM_OFFSET,
     DESCRIPTOR_ELEMENT_COUNT_OFFSET, DESCRIPTOR_STRIDE_OFFSET,
 };
+use super::array_slice_dispatch::{emit_array_load, emit_array_store};
 use super::descriptor::{
     emit_descriptor_validation, emit_i64_load, trap_if, DescriptorAccess, DescriptorContext,
 };
-use super::instruction::{emit_array_load, emit_array_store};
 use super::locals::LocalLayout;
 use super::memory::memarg;
 use super::ops::get;

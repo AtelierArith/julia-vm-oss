@@ -10,6 +10,9 @@ use super::Lowerer;
 
 impl Lowerer<'_, '_> {
     pub(super) fn expr(&mut self, expr: &AotExpr, function: &mut IrFunction) -> AotResult<VarRef> {
+        if let Some(slice) = self.slice_read(expr, function)? {
+            return Ok(slice);
+        }
         match expr {
             AotExpr::LitI64(value) => {
                 self.constant(ConstValue::Int64(*value), StaticType::I64, function)
@@ -167,13 +170,6 @@ impl Lowerer<'_, '_> {
                 Ok(dest)
             }
             AotExpr::Index {
-                elem_ty,
-                is_tuple: false,
-                ..
-            } if matches!(elem_ty, StaticType::Array { .. }) => {
-                self.array_slice(expr, elem_ty, function)
-            }
-            AotExpr::Index {
                 array,
                 indices,
                 elem_ty,
@@ -185,12 +181,6 @@ impl Lowerer<'_, '_> {
                 elem_ty,
                 is_tuple: true,
             } => self.tuple_index(array, indices, elem_ty, function),
-            AotExpr::Convert { value, target_ty }
-                if matches!(value.as_ref(), AotExpr::Index { is_tuple: false, .. })
-                    && matches!(target_ty, StaticType::Array { .. }) =>
-            {
-                self.array_slice(value, target_ty, function)
-            }
             AotExpr::TupleLit { elements } => {
                 let ty = expr.get_type();
                 self.aggregate(ty, elements, function)
