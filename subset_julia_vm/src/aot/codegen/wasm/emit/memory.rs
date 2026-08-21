@@ -19,7 +19,7 @@ pub(super) fn memarg(offset: u64) -> MemArg {
     }
 }
 
-pub(super) fn emit_u8_address(
+pub(super) fn emit_array_address(
     body: &mut Function,
     descriptor: &VarRef,
     indices: &[VarRef],

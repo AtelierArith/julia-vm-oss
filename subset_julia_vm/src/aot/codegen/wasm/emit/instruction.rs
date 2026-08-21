@@ -11,7 +11,7 @@ use super::descriptor::{
 };
 use super::locals::LocalLayout;
 use super::math::emit_math_builtin;
-use super::memory::{emit_u8_address, memarg};
+use super::memory::{emit_array_address, memarg};
 use super::ops::{emit_binop, emit_const, emit_conversion, emit_unary, get, normalize_u8, set};
 use super::strings::StaticStrings;
 use super::transcendental::emit_pow;
@@ -72,7 +72,7 @@ pub(super) fn emit_instruction(
             emit_math_builtin(body, *op, args, locals, &layout.math)?;
             set(body, locals, dest)?;
         }
-        Instruction::Call { dest, func, args } if func == "__sjulia_u8_len" => {
+        Instruction::Call { dest, func, args } if func == "__sjulia_array_len" => {
             let descriptor = &args[0];
             let descriptor_layout = descriptor_layout(&descriptor.ty)?;
             emit_descriptor_validation(
@@ -86,6 +86,50 @@ pub(super) fn emit_instruction(
                 DescriptorAccess::Read,
             )?;
             emit_i64_load(body, descriptor, locals, DESCRIPTOR_ELEMENT_COUNT_OFFSET)?;
+            if let Some(dest) = dest {
+                set(body, locals, dest)?;
+            }
+        }
+        Instruction::Call { dest, func, args } if func == "__sjulia_array_size_axis" => {
+            let descriptor = &args[0];
+            let axis = &args[1];
+            let descriptor_layout = descriptor_layout(&descriptor.ty)?;
+            emit_descriptor_validation(
+                body,
+                descriptor,
+                descriptor_layout,
+                &DescriptorContext {
+                    locals,
+                    scratch: &layout.memory,
+                },
+                DescriptorAccess::Read,
+            )?;
+            get(body, locals, axis)?;
+            body.instruction(&W::I64Const(1));
+            body.instruction(&W::I64LtS);
+            super::descriptor::trap_on_stack(body);
+            get(body, locals, axis)?;
+            body.instruction(&W::I64Const(
+                i64::try_from(descriptor_layout.rank).map_err(|_| unsupported("rank overflow"))?,
+            ));
+            body.instruction(&W::I64GtU);
+            body.instruction(&W::If(wasm_encoder::BlockType::Result(
+                wasm_encoder::ValType::I64,
+            )));
+            body.instruction(&W::I64Const(1));
+            body.instruction(&W::Else);
+            get(body, locals, descriptor)?;
+            get(body, locals, axis)?;
+            body.instruction(&W::I64Const(1));
+            body.instruction(&W::I64Sub);
+            body.instruction(&W::I64Const(super::super::types::DESCRIPTOR_AXIS_SIZE));
+            body.instruction(&W::I64Mul);
+            body.instruction(&W::I32WrapI64);
+            body.instruction(&W::I32Add);
+            body.instruction(&W::I64Load(memarg(
+                super::super::types::DESCRIPTOR_DIM_OFFSET,
+            )));
+            body.instruction(&W::End);
             if let Some(dest) = dest {
                 set(body, locals, dest)?;
             }
@@ -107,8 +151,8 @@ pub(super) fn emit_instruction(
             array,
             indices,
         } => {
-            emit_u8_address(body, array, indices, layout, DescriptorAccess::Read)?;
-            body.instruction(&W::I32Load8U(memarg(0)));
+            emit_array_address(body, array, indices, layout, DescriptorAccess::Read)?;
+            emit_array_load(body, &dest.ty)?;
             set(body, locals, dest)?;
         }
         Instruction::SetIndex {
@@ -116,12 +160,15 @@ pub(super) fn emit_instruction(
             indices,
             value,
         } => {
-            emit_u8_address(body, array, indices, layout, DescriptorAccess::Write)?;
+            emit_array_address(body, array, indices, layout, DescriptorAccess::Write)?;
             get(body, locals, value)?;
-            body.instruction(&W::I32Store8(memarg(0)));
+            emit_array_store(body, &value.ty)?;
         }
         Instruction::StructNew { .. } => {
             super::aggregate::emit_new(body, instruction, locals, functions)?;
+        }
+        Instruction::ArrayNew { .. } => {
+            super::array::emit_new(body, instruction, layout, functions)?;
         }
         Instruction::GetFieldOffset {
             dest,
@@ -138,5 +185,57 @@ pub(super) fn emit_instruction(
             )))
         }
     }
+    Ok(())
+}
+
+fn emit_array_load(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
+    match ty {
+        crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
+            body.instruction(&W::I32Load8U(memarg(0)));
+        }
+        crate::aot::types::StaticType::I32 => {
+            body.instruction(&W::I32Load(memarg(0)));
+        }
+        crate::aot::types::StaticType::I64 => {
+            body.instruction(&W::I64Load(memarg(0)));
+        }
+        crate::aot::types::StaticType::F32 => {
+            body.instruction(&W::F32Load(memarg(0)));
+        }
+        crate::aot::types::StaticType::F64 => {
+            body.instruction(&W::F64Load(memarg(0)));
+        }
+        other => {
+            return Err(unsupported(format!(
+                "unsupported Wasm array load `{other}`"
+            )))
+        }
+    };
+    Ok(())
+}
+
+fn emit_array_store(body: &mut Function, ty: &crate::aot::types::StaticType) -> AotResult<()> {
+    match ty {
+        crate::aot::types::StaticType::U8 | crate::aot::types::StaticType::Bool => {
+            body.instruction(&W::I32Store8(memarg(0)));
+        }
+        crate::aot::types::StaticType::I32 => {
+            body.instruction(&W::I32Store(memarg(0)));
+        }
+        crate::aot::types::StaticType::I64 => {
+            body.instruction(&W::I64Store(memarg(0)));
+        }
+        crate::aot::types::StaticType::F32 => {
+            body.instruction(&W::F32Store(memarg(0)));
+        }
+        crate::aot::types::StaticType::F64 => {
+            body.instruction(&W::F64Store(memarg(0)));
+        }
+        other => {
+            return Err(unsupported(format!(
+                "unsupported Wasm array store `{other}`"
+            )))
+        }
+    };
     Ok(())
 }

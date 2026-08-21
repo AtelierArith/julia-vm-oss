@@ -59,12 +59,15 @@ pub(super) fn descriptor_layout(ty: &StaticType) -> AotResult<DescriptorLayout> 
         StaticType::Array {
             element,
             ndims: Some(rank),
-        } if **element == StaticType::U8 && *rank <= MAX_RANK => Ok(DescriptorLayout {
-            element_tag: ELEMENT_TAG_UINT8,
-            element_size: 1,
-            element_alignment: 1,
-            rank: *rank,
-        }),
+        } if *rank <= MAX_RANK => {
+            let (element_tag, element_size) = primitive_element(element)?;
+            Ok(DescriptorLayout {
+                element_tag,
+                element_size,
+                element_alignment: i64::from(element_size),
+                rank: *rank,
+            })
+        }
         other => Err(unsupported(format!(
             "Wasm AoT cannot represent descriptor type `{}`",
             other.julia_type_name()
@@ -86,10 +89,25 @@ pub(super) fn value_type(ty: &StaticType) -> AotResult<Option<ValType>> {
         StaticType::Array {
             element,
             ndims: Some(rank),
-        } if **element == StaticType::U8 && *rank <= MAX_RANK => Ok(Some(ValType::I32)),
+        } if *rank <= MAX_RANK && primitive_element(element).is_ok() => Ok(Some(ValType::I32)),
         StaticType::Nothing => Ok(None),
         other => Err(unsupported(format!(
             "Wasm AoT cannot represent type `{}`",
+            other.julia_type_name()
+        ))),
+    }
+}
+
+fn primitive_element(ty: &StaticType) -> AotResult<(u32, i32)> {
+    match ty {
+        StaticType::U8 => Ok((ELEMENT_TAG_UINT8, 1)),
+        StaticType::I32 => Ok((ELEMENT_TAG_INT32, 4)),
+        StaticType::I64 => Ok((ELEMENT_TAG_INT64, 8)),
+        StaticType::F32 => Ok((ELEMENT_TAG_FLOAT32, 4)),
+        StaticType::F64 => Ok((ELEMENT_TAG_FLOAT64, 8)),
+        StaticType::Bool => Ok((ELEMENT_TAG_BOOL, 1)),
+        other => Err(unsupported(format!(
+            "Wasm AoT cannot represent primitive array element `{}`",
             other.julia_type_name()
         ))),
     }
