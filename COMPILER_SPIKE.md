@@ -88,7 +88,9 @@ and pass diagnostics before lowering to backend-neutral `IrModule`.
 Supported: i64/f64/bool/u8 constants and locals; copy/conversion; unary negate,
 not, bit-not; integer/float arithmetic and comparisons; bitwise/shift; IR blocks,
 jump/branch/return, phi edge copies; direct calls; arbitrary-rank statically typed
-UInt8 descriptor length, load, and store. Unsupported high-level expressions and
+primitive descriptors for UInt8, Float32, Float64, Int32, Int64, and Bool;
+module-owned rank-0 through rank-8 `zeros`/`ones` allocation; `length`, `size`,
+`size(A,d)`, and `ndims`; and primitive load/store. Unsupported high-level expressions and
 low-level instructions
 return `UnsupportedInstructionDiagnostic`; source spans are retained where the
 upstream AoT conversion still provides them, while backend-only IR has no span.
@@ -138,6 +140,15 @@ lifetime only and does not currently imply canonical strides. Negative strides
 and canonical-stride enforcement are deferred to the general array work in Todo
 5. Pure generated modules export checked allocation and lifetime helpers;
 callers may still use host-owned descriptor data.
+
+Module-owned primitive allocations are contiguous and column-major. Their inline
+strides start at one and multiply by each preceding dimension with checked
+arithmetic. Rank zero owns one scalar element and has no axis metadata. Any zero
+dimension yields `element_count=0` and `data_ptr=0`. Allocation validates every
+dimension, element product, byte extent, and metadata extent before committing a
+descriptor; descriptor-allocation failure frees a previously allocated data
+buffer before trapping. ABI v2 defines no `CONTIGUOUS` flag, so generated arrays
+set only `MODULE_OWNED` rather than inventing a new bit.
 
 ## Immutable aggregate handles
 
