@@ -254,6 +254,19 @@ impl RustCodeGenerator {
                     init
                 ));
             }
+            Instruction::ArraySlice { dest, .. } => {
+                let dest_name = self.var_to_rust(dest);
+                self.write_line(&format!("// array {} slice copy", dest_name));
+            }
+            Instruction::UnitRangeLength { dest, start, stop } => {
+                let dest_name = self.var_to_rust(dest);
+                let start_name = self.var_to_rust(start);
+                let stop_name = self.var_to_rust(stop);
+                self.write_line(&format!(
+                    "let {}: i64 = if {} < {} {{ 0 }} else {{ {} - {} + 1 }};",
+                    dest_name, stop_name, start_name, stop_name, start_name
+                ));
+            }
             Instruction::GetIndex {
                 dest,
                 array,

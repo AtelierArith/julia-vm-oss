@@ -81,6 +81,17 @@ pub enum Instruction {
         dims: Vec<VarRef>,
         init: ArrayInit,
     },
+    ArraySlice {
+        dest: VarRef,
+        source: VarRef,
+        selectors: Vec<ArraySelector>,
+        dims: Vec<VarRef>,
+    },
+    UnitRangeLength {
+        dest: VarRef,
+        start: VarRef,
+        stop: VarRef,
+    },
     /// Stack-allocated isbits struct construction.
     StructNew {
         dest: VarRef,
@@ -143,6 +154,12 @@ pub enum Instruction {
 pub enum ArrayInit {
     Zero,
     One,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArraySelector {
+    Scalar(VarRef),
+    UnitRange { start: VarRef, stop: VarRef },
 }
 
 #[derive(Debug, Clone)]

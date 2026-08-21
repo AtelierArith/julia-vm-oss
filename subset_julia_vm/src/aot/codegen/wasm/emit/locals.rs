@@ -141,13 +141,14 @@ fn destinations(instruction: &Instruction) -> Vec<&VarRef> {
         | Instruction::BinOp { dest, .. }
         | Instruction::UnaryOp { dest, .. }
         | Instruction::Builtin { dest, .. }
+        | Instruction::UnitRangeLength { dest, .. }
         | Instruction::GetIndex { dest, .. }
         | Instruction::GetField { dest, .. }
         | Instruction::GetFieldOffset { dest, .. }
         | Instruction::TypeAssert { dest, .. }
         | Instruction::Phi { dest, .. }
         | Instruction::StructNew { dest, .. } => vec![dest],
-        Instruction::ArrayNew { dest, .. } => vec![dest],
+        Instruction::ArrayNew { dest, .. } | Instruction::ArraySlice { dest, .. } => vec![dest],
         Instruction::Call { dest, .. } => dest.iter().collect(),
         Instruction::CallMulti { dests, .. } => dests.iter().collect(),
         Instruction::SetIndex { .. }

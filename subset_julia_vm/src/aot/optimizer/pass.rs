@@ -339,6 +339,10 @@ impl DeadCodeElimination {
                     Instruction::UnaryOp { operand, .. } => {
                         uses.insert(format!("{}.{}", operand.name, operand.version));
                     }
+                    Instruction::UnitRangeLength { start, stop, .. } => {
+                        uses.insert(format!("{}.{}", start.name, start.version));
+                        uses.insert(format!("{}.{}", stop.name, stop.version));
+                    }
                     Instruction::Builtin { args, .. }
                     | Instruction::Call { args, .. }
                     | Instruction::CallMulti { args, .. } => {
@@ -354,6 +358,28 @@ impl DeadCodeElimination {
                     Instruction::ArrayNew { dims, .. } => {
                         for dim in dims {
                             uses.insert(format!("{}.{}", dim.name, dim.version));
+                        }
+                    }
+                    Instruction::ArraySlice {
+                        source,
+                        selectors,
+                        dims,
+                        ..
+                    } => {
+                        uses.insert(format!("{}.{}", source.name, source.version));
+                        for dim in dims {
+                            uses.insert(format!("{}.{}", dim.name, dim.version));
+                        }
+                        for selector in selectors {
+                            match selector {
+                                crate::aot::ir::ArraySelector::Scalar(value) => {
+                                    uses.insert(format!("{}.{}", value.name, value.version));
+                                }
+                                crate::aot::ir::ArraySelector::UnitRange { start, stop } => {
+                                    uses.insert(format!("{}.{}", start.name, start.version));
+                                    uses.insert(format!("{}.{}", stop.name, stop.version));
+                                }
+                            }
                         }
                     }
                     Instruction::GetIndex { array, indices, .. } => {
@@ -435,11 +461,12 @@ impl DeadCodeElimination {
                 Instruction::Copy { dest, .. } => Some(dest),
                 Instruction::BinOp { dest, .. } => Some(dest),
                 Instruction::UnaryOp { dest, .. } => Some(dest),
+                Instruction::UnitRangeLength { dest, .. } => Some(dest),
                 Instruction::Builtin { .. } => return true,
                 Instruction::GetIndex { dest, .. } => Some(dest),
                 Instruction::GetField { dest, .. } => Some(dest),
                 Instruction::StructNew { dest, .. } => Some(dest),
-                Instruction::ArrayNew { .. } => return true,
+                Instruction::ArrayNew { .. } | Instruction::ArraySlice { .. } => return true,
                 Instruction::GetFieldOffset { dest, .. } => Some(dest),
                 Instruction::TypeAssert { dest, .. } => Some(dest),
                 Instruction::Phi { dest, .. } => Some(dest),
@@ -897,11 +924,13 @@ impl LoopInvariantCodeMotion {
             Instruction::Copy { dest, .. } => Some(dest),
             Instruction::BinOp { dest, .. } => Some(dest),
             Instruction::UnaryOp { dest, .. } => Some(dest),
+            Instruction::UnitRangeLength { dest, .. } => Some(dest),
             Instruction::Builtin { dest, .. } => Some(dest),
             Instruction::Call { dest, .. } => dest.as_ref(),
             Instruction::CallMulti { .. } => None,
             Instruction::StructNew { dest, .. } => Some(dest),
             Instruction::ArrayNew { dest, .. } => Some(dest),
+            Instruction::ArraySlice { dest, .. } => Some(dest),
             Instruction::GetIndex { dest, .. } => Some(dest),
             Instruction::GetField { dest, .. } => Some(dest),
             Instruction::GetFieldOffset { dest, .. } => Some(dest),
@@ -942,6 +971,9 @@ impl LoopInvariantCodeMotion {
 
             // Unary ops are invariant if operand is invariant
             Instruction::UnaryOp { operand, .. } => is_operand_invariant(operand),
+            Instruction::UnitRangeLength { start, stop, .. } => {
+                is_operand_invariant(start) && is_operand_invariant(stop)
+            }
 
             Instruction::Builtin { .. } => false,
 
@@ -957,6 +989,7 @@ impl LoopInvariantCodeMotion {
             Instruction::GetFieldOffset { object, .. } => is_operand_invariant(object),
             Instruction::StructNew { .. } => false,
             Instruction::ArrayNew { .. } => false,
+            Instruction::ArraySlice { .. } => false,
 
             // These instructions have side effects
             Instruction::SetIndex { .. }
@@ -978,6 +1011,7 @@ impl LoopInvariantCodeMotion {
             | Instruction::Copy { .. }
             | Instruction::BinOp { .. }
             | Instruction::UnaryOp { .. }
+            | Instruction::UnitRangeLength { .. }
             | Instruction::GetField { .. }
             | Instruction::GetFieldOffset { .. }
             | Instruction::TypeAssert { .. } => true,
@@ -991,6 +1025,7 @@ impl LoopInvariantCodeMotion {
             | Instruction::CallMulti { .. }
             | Instruction::StructNew { .. }
             | Instruction::ArrayNew { .. }
+            | Instruction::ArraySlice { .. }
             | Instruction::SetIndex { .. }
             | Instruction::SetField { .. }
             | Instruction::SetFieldOffset { .. }
