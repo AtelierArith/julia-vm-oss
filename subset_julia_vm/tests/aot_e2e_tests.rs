@@ -6757,6 +6757,66 @@ mod wasm_backend_tests {
     }
 
     #[test]
+    fn wasm_comprehensions_restore_shadowed_and_nested_bindings() {
+        let source = r#"
+function shadowed()::Int64
+    i = 40
+    xs = [i for i in 1:2]
+    return i
+end
+
+function nested_same_name()::Int64
+    i = 70
+    [i for i in 1:2, i in 3:4]
+    return i
+end
+"#;
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: ["shadowed", "nested_same_name"]
+                .into_iter()
+                .map(|name| CAbiExport::with_arg_types(name, name, Vec::new()))
+                .collect(),
+            ..CompileConfig::default()
+        };
+        let output = subset_julia_vm::aot::compile_wasm_source(source, &config)
+            .expect("scoped comprehension bindings should compile");
+        let shadowed = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            "console.log(instance.exports.shadowed());",
+        );
+        assert_eq!(shadowed, "40n");
+        let nested = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            "console.log(instance.exports.nested_same_name());",
+        );
+        assert_eq!(nested, "70n");
+    }
+
+    #[test]
+    fn wasm_comprehension_fresh_binding_is_unavailable_afterward() {
+        let source = r#"
+function fresh()::Int64
+    [j for j in 1:2]
+    return j
+end
+"#;
+        let error = subset_julia_vm::aot::compile_wasm_source(
+            source,
+            &CompileConfig {
+                backend: AotBackend::Wasm,
+                c_abi_exports: vec![CAbiExport::with_arg_types("fresh", "fresh", Vec::new())],
+                ..CompileConfig::default()
+            },
+        )
+        .expect_err("a fresh comprehension binding must not escape its scope");
+        assert!(
+            format!("{error:?}").contains("could not resolve variable `j`"),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
     fn wasm_descriptor_v2_reports_generated_module_abi_two() {
         // Given: a generated scalar module with the ABI version export.
         let source = "answer()::Int64 = 42";

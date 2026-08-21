@@ -87,7 +87,7 @@ impl Lowerer<'_, '_> {
             left: axis.counter.clone(),
             right: one.clone(),
         });
-        let value = VarRef::new(axis.var.clone(), StaticType::I64);
+        let value = self.temporary(StaticType::I64);
         self.current_block_mut(function)?.push(Instruction::BinOp {
             dest: value.clone(),
             op: BinOpKind::Add,

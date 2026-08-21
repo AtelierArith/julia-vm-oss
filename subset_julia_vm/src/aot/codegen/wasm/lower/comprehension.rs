@@ -96,7 +96,22 @@ impl Lowerer<'_, '_> {
             });
         // Outermost loop is the last axis so that axis zero advances fastest.
         let order = (0..axes.len()).rev().collect::<Vec<_>>();
-        self.axis_loops(&order, &axes, body, elem_ty, &result, function)?;
+        let prior_bindings = axes
+            .iter()
+            .map(|axis| (axis.var.clone(), self.vars.get(&axis.var).cloned()))
+            .collect::<Vec<_>>();
+        let loop_result = self.axis_loops(&order, &axes, body, elem_ty, &result, function);
+        for (name, prior) in prior_bindings {
+            match prior {
+                Some(value) => {
+                    self.vars.insert(name, value);
+                }
+                None => {
+                    self.vars.remove(&name);
+                }
+            }
+        }
+        loop_result?;
         Ok(result)
     }
 
