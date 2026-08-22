@@ -4,9 +4,11 @@
 export interface CompilerSpan { start: number; end: number; start_line: number; start_column: number; end_line: number; end_column: number; }
 export interface CompilerDiagnostic { code: string; kind: string; message: string; span?: CompilerSpan; workaround?: string; }
 export interface CompileExport { export_name: string; function_name: string; arg_types?: string[]; }
-export interface CompileOptions { source_name?: string; opt_level?: 0 | 1 | 2 | 3; exports?: CompileExport[]; }
+export interface CompileImport { module: string; name: string; function_name: string; params?: string[]; result?: string; }
+export interface ResolvedWasmImport { module: string; name: string; function_name: string; params: string[]; result?: string; }
+export interface CompileOptions { source_name?: string; opt_level?: 0 | 1 | 2 | 3; exports?: CompileExport[]; imports?: CompileImport[]; }
 export interface PhaseTimings { source_parse_lower_ms: number; dead_code_elimination_ms: number; type_inference_ms: number; ir_conversion_ms: number; optimization_ms: number; wasm_ir_lowering_ms: number; wasm_codegen_ms: number; total_ms: number; }
-export interface CompileToWasmResult { success: boolean; wasm_bytes: Uint8Array; diagnostics: CompilerDiagnostic[]; compiler_version: string; abi_version: number; phase_timings: PhaseTimings; }
+export interface CompileToWasmResult { success: boolean; wasm_bytes: Uint8Array; diagnostics: CompilerDiagnostic[]; compiler_version: string; abi_version: number; imports: ResolvedWasmImport[]; phase_timings: PhaseTimings; }
 export function compile_to_wasm(source: string, options?: CompileOptions): CompileToWasmResult;
 
 
