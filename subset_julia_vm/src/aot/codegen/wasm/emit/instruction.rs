@@ -72,13 +72,26 @@ pub(super) fn emit_instruction(
             emit_math_builtin(body, *op, args, locals, &layout.math)?;
             set(body, locals, dest)?;
         }
-        Instruction::Rand { dest } => {
-            super::rng::emit_uniform(body, dest, functions)?;
-            set(body, locals, dest)?;
+        Instruction::Rand { dest, dims } => {
+            if dims.is_empty() {
+                // Scalar rand
+                super::rng::emit_uniform(body, dest, functions)?;
+                set(body, locals, dest)?;
+            } else {
+                // Array rand
+                super::rng_array::emit_array_uniform(body, dest, dims, layout, functions)?;
+            }
         }
-        Instruction::Randn { dest } => {
-            super::rng_normal::emit_normal(body, dest, functions)?;
-            set(body, locals, dest)?;
+        Instruction::Randn { dest, dims } => {
+            if dims.is_empty() {
+                // Scalar randn
+                super::rng_normal::emit_normal(body, dest, functions)?;
+                set(body, locals, dest)?;
+            } else {
+                // Array randn
+                super::rng_array::emit_array_normal(body, dest, dims, layout, functions)?;
+            }
+        }
         }
         Instruction::Call { dest, func, args } if func == "__sjulia_array_len" => {
             let descriptor = &args[0];

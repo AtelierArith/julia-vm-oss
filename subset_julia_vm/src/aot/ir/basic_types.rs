@@ -72,9 +72,11 @@ pub enum Instruction {
     },
     Rand {
         dest: VarRef,
+        dims: Vec<VarRef>,
     },
     Randn {
         dest: VarRef,
+        dims: Vec<VarRef>,
     },
     /// Function call
     Call {

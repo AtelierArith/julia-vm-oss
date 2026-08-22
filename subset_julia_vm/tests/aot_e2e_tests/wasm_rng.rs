@@ -8,3 +8,6 @@ mod normal_tail_tests;
 
 #[path = "wasm_rng_helpers.rs"]
 mod helper_tests;
+
+#[path = "wasm_rng_arrays.rs"]
+mod array_tests;

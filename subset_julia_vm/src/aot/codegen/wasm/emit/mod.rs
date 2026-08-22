@@ -25,6 +25,7 @@ mod rng;
 mod rng_normal;
 mod rng_seed;
 mod rng_tables;
+mod rng_array;
 mod strings;
 mod transcendental;
 mod transcendental_approx;
