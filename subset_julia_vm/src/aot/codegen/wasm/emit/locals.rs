@@ -155,6 +155,7 @@ fn destinations(instruction: &Instruction) -> Vec<&VarRef> {
         | Instruction::UnaryOp { dest, .. }
         | Instruction::Builtin { dest, .. }
         | Instruction::Rand { dest }
+        | Instruction::Randn { dest }
         | Instruction::UnitRangeLength { dest, .. }
         | Instruction::GetIndex { dest, .. }
         | Instruction::GetField { dest, .. }

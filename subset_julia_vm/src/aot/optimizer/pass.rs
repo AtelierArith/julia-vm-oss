@@ -440,7 +440,9 @@ impl DeadCodeElimination {
                             uses.insert(format!("{}.{}", var.name, var.version));
                         }
                     }
-                    Instruction::LoadConst { .. } | Instruction::Rand { .. } => {}
+                    Instruction::LoadConst { .. }
+                    | Instruction::Rand { .. }
+                    | Instruction::Randn { .. } => {}
                 }
             }
 
@@ -481,7 +483,9 @@ impl DeadCodeElimination {
                 Instruction::BinOp { dest, .. } => Some(dest),
                 Instruction::UnaryOp { dest, .. } => Some(dest),
                 Instruction::UnitRangeLength { dest, .. } => Some(dest),
-                Instruction::Builtin { .. } | Instruction::Rand { .. } => return true,
+                Instruction::Builtin { .. }
+                | Instruction::Rand { .. }
+                | Instruction::Randn { .. } => return true,
                 Instruction::GetIndex { dest, .. } => Some(dest),
                 Instruction::GetField { dest, .. } => Some(dest),
                 Instruction::StructNew { dest, .. } => Some(dest),
@@ -947,6 +951,7 @@ impl LoopInvariantCodeMotion {
             Instruction::UnitRangeLength { dest, .. } => Some(dest),
             Instruction::Builtin { dest, .. } => Some(dest),
             Instruction::Rand { dest } => Some(dest),
+            Instruction::Randn { dest } => Some(dest),
             Instruction::Call { dest, .. } => dest.as_ref(),
             Instruction::CallMulti { .. } => None,
             Instruction::StructNew { dest, .. } => Some(dest),
@@ -997,7 +1002,9 @@ impl LoopInvariantCodeMotion {
                 is_operand_invariant(start) && is_operand_invariant(stop)
             }
 
-            Instruction::Builtin { .. } | Instruction::Rand { .. } => false,
+            Instruction::Builtin { .. } | Instruction::Rand { .. } | Instruction::Randn { .. } => {
+                false
+            }
 
             // Calls are generally not invariant (may have side effects)
             Instruction::Call { .. } | Instruction::CallMulti { .. } => false,
@@ -1046,6 +1053,7 @@ impl LoopInvariantCodeMotion {
             Instruction::Call { .. }
             | Instruction::Builtin { .. }
             | Instruction::Rand { .. }
+            | Instruction::Randn { .. }
             | Instruction::CallMulti { .. }
             | Instruction::StructNew { .. }
             | Instruction::ArrayNew { .. }

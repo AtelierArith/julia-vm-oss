@@ -108,6 +108,16 @@ impl Lowerer<'_, '_> {
                 Ok(dest)
             }
             AotExpr::CallBuiltin {
+                builtin: AotBuiltinOp::Randn,
+                args,
+                return_ty,
+            } if args.is_empty() && matches!(return_ty, StaticType::F32 | StaticType::F64) => {
+                let dest = self.temporary(return_ty.clone());
+                self.current_block_mut(function)?
+                    .push(Instruction::Randn { dest: dest.clone() });
+                Ok(dest)
+            }
+            AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Length,
                 args,
                 return_ty,

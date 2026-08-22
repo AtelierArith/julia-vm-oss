@@ -213,6 +213,11 @@ impl RustCodeGenerator {
                 let ty = self.type_to_rust(&dest.ty);
                 self.write_line(&format!("let {dest_name}: {ty} = __sjulia_aot_rand();"));
             }
+            Instruction::Randn { dest } => {
+                let dest_name = self.var_to_rust(dest);
+                let ty = self.type_to_rust(&dest.ty);
+                self.write_line(&format!("let {dest_name}: {ty} = __sjulia_aot_randn();"));
+            }
             Instruction::Call { dest, func, args } => {
                 let args_str: Vec<_> = args.iter().map(|a| self.var_to_rust(a)).collect();
                 let call = format!("{}({})", func, args_str.join(", "));

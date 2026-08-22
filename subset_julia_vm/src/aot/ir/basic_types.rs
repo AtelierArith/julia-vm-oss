@@ -73,6 +73,9 @@ pub enum Instruction {
     Rand {
         dest: VarRef,
     },
+    Randn {
+        dest: VarRef,
+    },
     /// Function call
     Call {
         dest: Option<VarRef>,
