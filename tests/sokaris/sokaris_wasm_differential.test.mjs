@@ -94,6 +94,44 @@ test("Node runner types validation, import, instantiation, and trap failures", a
   await assert.rejects(runNodeRequest(request, { ...base, compile: async () => ({}), instantiate: async () => ({ exports: { f: () => { throw new WebAssembly.RuntimeError("trap"); } } }) }), { code: "node_trap" });
 });
 
+test("Node runner wires declared Sokaris host imports", async () => {
+  const request = {
+    wasmPath: "unused",
+    exportName: "f",
+    requiredImports: [{ module: "sjulia_host", name: "load" }],
+    arguments: [],
+    result: { elementType: "i64", rank: 0 },
+  };
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let linkedImports;
+  const result = await runNodeRequest(request, {
+    readBytes: async () => new Uint8Array(),
+    compile: async () => ({}),
+    moduleImports: () => [{ module: "sjulia_host", name: "load" }],
+    hostFactory: ({ memory: lazyMemory, allocate }) => ({
+      sjulia_host: {
+        load: () => {
+          assert.equal(lazyMemory.buffer, memory.buffer);
+          assert.equal(allocate(1n, 1), 64);
+          return 0;
+        },
+      },
+    }),
+    instantiate: async (_module, imports) => {
+      linkedImports = imports;
+      return {
+        exports: {
+          memory,
+          __sjulia_alloc: () => 64,
+          f: () => BigInt(imports.sjulia_host.load()),
+        },
+      };
+    },
+  });
+  assert.equal(typeof linkedImports.sjulia_host.load, "function");
+  assert.deepEqual(result.result, { kind: "i64", value: "0" });
+});
+
 test("missing Julia executable stops before compile", () => {
   const run = runHarness(["--case", "glyph-apply"], { SOKARIS_JULIA: "/definitely/missing/julia" });
   assert.equal(run.status, 1);

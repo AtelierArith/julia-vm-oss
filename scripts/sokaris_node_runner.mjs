@@ -2,6 +2,8 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
+import { createSokarisHostImports } from "./sokaris_host_imports.mjs";
+
 export class NodeRunnerError extends Error {
   constructor(code, message, details = undefined) {
     super(message);
@@ -71,19 +73,27 @@ export async function runNodeRequest(request, dependencies = {}) {
   if (JSON.stringify(actualImports) !== JSON.stringify(requiredImports)) {
     throw new NodeRunnerError("node_import_mismatch", "generated Wasm imports do not match the coverage manifest", { actualImports, requiredImports });
   }
-  const imports = {};
-  for (const entry of request.requiredImports ?? []) {
-    imports[entry.module] ??= {};
-    imports[entry.module][entry.name] = () => {
-      throw new NodeRunnerError("host_import_not_implemented", `${entry.module}.${entry.name} belongs to a later parity Todo`);
-    };
-  }
+  let instanceExports;
+  const hostFactory = dependencies.hostFactory ?? ((options) => createSokarisHostImports(options));
+  const hostDependencies = dependencies.hostDependencies ?? {
+    loadImage: () => { throw new NodeRunnerError("host_import_not_configured", "loadImage is not configured"); },
+    saveImage: () => { throw new NodeRunnerError("host_import_not_configured", "saveImage is not configured"); },
+    renderText: () => { throw new NodeRunnerError("host_import_not_configured", "renderText is not configured"); },
+  };
+  const imports = actualImports.length === 0
+    ? {}
+    : hostFactory({
+        memory: { get buffer() { return instanceExports?.memory?.buffer ?? new ArrayBuffer(0); } },
+        allocate: (...args) => instanceExports.__sjulia_alloc(...args),
+        ...hostDependencies,
+      });
   let instance;
   try {
     instance = await instantiate(module, imports);
   } catch (error) {
     throw new NodeRunnerError("node_instantiation_failure", `generated Wasm could not instantiate: ${error.message}`);
   }
+  instanceExports = instance.exports;
   const target = instance.exports[request.exportName];
   if (typeof target !== "function") throw new NodeRunnerError("missing_wasm_export", `missing export '${request.exportName}'`);
   let rawResult;
