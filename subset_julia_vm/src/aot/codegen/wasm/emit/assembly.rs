@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::aot::codegen::CAbiExport;
 use crate::aot::ir::IrModule;
-use crate::aot::{AotError, AotResult};
+use crate::aot::{AotError, AotResult, WasmImport};
 use wasm_encoder::{ExportKind, ExportSection};
 
 use super::super::types::unsupported;
@@ -19,23 +19,67 @@ const RESERVED_EXPORT_NAMES: [&str; 8] = [
     super::rng_seed::SEED_NAME,
 ];
 
-pub(super) fn function_indices(ir: &IrModule) -> AotResult<HashMap<String, u32>> {
-    let mut indices = HashMap::with_capacity(ir.functions.len());
-    for (index, function) in ir.functions.iter().enumerate() {
+pub(super) fn function_indices(
+    ir: &IrModule,
+    imports: &[WasmImport],
+) -> AotResult<HashMap<String, u32>> {
+    let mut indices = HashMap::with_capacity(ir.functions.len() + imports.len());
+    let mut public_imports = HashSet::with_capacity(imports.len());
+    for (index, import) in imports.iter().enumerate() {
+        if import.module.is_empty() || import.name.is_empty() || import.function_name.is_empty() {
+            return Err(unsupported(
+                "Wasm import module, name, and function name must be non-empty",
+            ));
+        }
+        if !public_imports.insert((&import.module, &import.name)) {
+            return Err(unsupported(format!(
+                "duplicate Wasm import `{}.{}`",
+                import.module, import.name
+            )));
+        }
+        if RESERVED_EXPORT_NAMES.contains(&import.function_name.as_str()) {
+            return Err(unsupported(format!(
+                "Wasm import replacement `{}` is reserved by the generated-module ABI",
+                import.function_name
+            )));
+        }
+        let index = u32::try_from(index)
+            .map_err(|_| AotError::CodegenError("too many Wasm imports".to_string()))?;
+        if indices
+            .insert(import.function_name.clone(), index)
+            .is_some()
+        {
+            return Err(unsupported(format!(
+                "duplicate Wasm import replacement `{}`",
+                import.function_name
+            )));
+        }
+    }
+    let mut defined_index = u32::try_from(imports.len())
+        .map_err(|_| AotError::CodegenError("too many Wasm imports".to_string()))?;
+    for function in &ir.functions {
+        if imports
+            .iter()
+            .any(|import| import.function_name == function.name)
+        {
+            continue;
+        }
         if RESERVED_EXPORT_NAMES.contains(&function.name.as_str()) {
             return Err(unsupported(format!(
                 "Wasm function name `{}` is reserved by the generated-module ABI",
                 function.name
             )));
         }
-        let index = u32::try_from(index)
-            .map_err(|_| AotError::CodegenError("too many Wasm functions".to_string()))?;
-        if indices.insert(function.name.clone(), index).is_some() {
+        if indices
+            .insert(function.name.clone(), defined_index)
+            .is_some()
+        {
             return Err(unsupported(format!(
                 "Wasm AoT does not support duplicate or overloaded function name `{}`",
                 function.name
             )));
         }
+        defined_index += 1;
     }
     Ok(indices)
 }

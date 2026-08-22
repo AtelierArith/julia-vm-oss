@@ -35,20 +35,26 @@ use std::collections::HashMap;
 
 use crate::aot::codegen::CAbiExport;
 use crate::aot::ir::{BasicBlock, IrFunction, IrModule};
-use crate::aot::{AotError, AotResult};
+use crate::aot::types::StaticType;
+use crate::aot::{AotError, AotResult, WasmImport};
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
-    GlobalSection, Instruction as W, MemorySection, MemoryType, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
+    FunctionSection, GlobalSection, ImportSection, Instruction as W, MemorySection, MemoryType,
+    Module, TypeSection, ValType,
 };
 
-use super::types::{value_type, ABI_VERSION};
+use super::types::{unsupported, value_type, ABI_VERSION};
 use assembly::{emit_function_exports, function_indices};
 use control::emit_terminator;
 use instruction::emit_instruction;
 use locals::{build_local_layout, collect_phi_edges, LocalLayout, PhiEdges};
 use ops::required_type;
 
-pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult<Vec<u8>> {
+pub fn emit_module(
+    ir: &IrModule,
+    requested_exports: &[CAbiExport],
+    requested_imports: &[WasmImport],
+) -> AotResult<Vec<u8>> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
@@ -57,9 +63,46 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     let layouts = layouts::StaticLayouts::collect(ir)?;
     let rng_tables = rng_tables::RngTables::collect(layouts.end()?)?;
     let strings = strings::StaticStrings::collect(ir, rng_tables.end()?)?;
-    let mut function_indices = function_indices(ir)?;
-    let alloc_index = u32::try_from(ir.functions.len())
-        .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
+    let mut function_indices = function_indices(ir, requested_imports)?;
+    for import in requested_imports {
+        let function = ir
+            .functions
+            .iter()
+            .find(|function| function.name == import.function_name)
+            .ok_or_else(|| {
+                unsupported(format!(
+                    "Wasm import `{}.{}` cannot resolve generated function `{}`",
+                    import.module, import.name, import.function_name
+                ))
+            })?;
+        let expected_result = import.result.clone().unwrap_or(StaticType::Nothing);
+        if function
+            .params
+            .iter()
+            .map(|(_, ty)| ty)
+            .ne(import.params.iter())
+            || function.return_type != expected_result
+        {
+            return Err(unsupported(format!(
+                "Wasm import `{}.{}` does not match generated function `{}`",
+                import.module, import.name, import.function_name
+            )));
+        }
+    }
+    let imported_count = u32::try_from(requested_imports.len())
+        .map_err(|_| AotError::CodegenError("too many Wasm imports".to_string()))?;
+    let defined_functions: Vec<_> = ir
+        .functions
+        .iter()
+        .filter(|function| {
+            !requested_imports
+                .iter()
+                .any(|import| import.function_name == function.name)
+        })
+        .collect();
+    let alloc_index = imported_count
+        + u32::try_from(defined_functions.len())
+            .map_err(|_| AotError::CodegenError("too many Wasm types".to_string()))?;
     let free_index = alloc_index + 1;
     let rng_next_index = alloc_index + 2;
     let rng_randn_index = alloc_index + 3;
@@ -68,7 +111,24 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     function_indices.insert(allocator::FREE_NAME.to_string(), free_index);
     function_indices.insert(rng::NEXT_NAME.to_string(), rng_next_index);
     function_indices.insert(rng_normal::RANDN_NAME.to_string(), rng_randn_index);
-    for (index, function) in ir.functions.iter().enumerate() {
+    for import in requested_imports {
+        let params = import
+            .params
+            .iter()
+            .map(required_type)
+            .collect::<AotResult<Vec<_>>>()?;
+        let results: Vec<_> = import
+            .result
+            .as_ref()
+            .map(value_type)
+            .transpose()?
+            .into_iter()
+            .flatten()
+            .collect();
+        types.ty().function(params, results);
+    }
+    let mut defined_type_index = imported_count;
+    for function in &defined_functions {
         let params = function
             .params
             .iter()
@@ -77,10 +137,9 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
         types
             .ty()
             .function(params, value_type(&function.return_type)?.into_iter());
-        let index = u32::try_from(index)
-            .map_err(|_| AotError::CodegenError("too many Wasm functions".to_string()))?;
-        functions.function(index);
+        functions.function(defined_type_index);
         code.function(&emit_function(function, &function_indices, &strings)?);
+        defined_type_index += 1;
     }
     let drop_index = alloc_index + 5;
     let layout_table_index = alloc_index + 6;
@@ -107,6 +166,19 @@ pub fn emit_module(ir: &IrModule, requested_exports: &[CAbiExport]) -> AotResult
     functions.function(layout_count_index);
     functions.function(abi_index);
     module.section(&types);
+    if !requested_imports.is_empty() {
+        let mut imports = ImportSection::new();
+        for (type_index, import) in requested_imports.iter().enumerate() {
+            imports.import(
+                &import.module,
+                &import.name,
+                EntityType::Function(u32::try_from(type_index).map_err(|_| {
+                    AotError::CodegenError("too many Wasm function types".to_string())
+                })?),
+            );
+        }
+        module.section(&imports);
+    }
     module.section(&functions);
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {

@@ -6768,7 +6768,9 @@ mod wasm_backend_tests {
         BasicBlock, BinOpKind, ConstValue, Instruction, IrFunction, IrModule, Terminator, VarRef,
     };
     use subset_julia_vm::aot::types::StaticType;
-    use subset_julia_vm::aot::{compile_wasm_source, AotBackend, AotError, CompileConfig};
+    use subset_julia_vm::aot::{
+        compile_wasm_source, AotBackend, AotError, CompileConfig, WasmImport,
+    };
 
     fn run_wasm_bytes_node(wasm_bytes: &[u8], javascript: &str) -> String {
         let dir = tempfile::tempdir().expect("create Wasm test directory");
@@ -7812,6 +7814,76 @@ console.log(JSON.stringify({ imports: WebAssembly.Module.imports(module).length,
 
         // Then: the result is a standalone core WebAssembly module.
         assert_eq!(&output.wasm_bytes[..4], b"\0asm");
+    }
+
+    #[test]
+    fn wasm_explicit_import_replaces_a_typed_generated_function() {
+        let source = r#"
+host_scale(value::Int64)::Int64 = value
+answer(value::Int64)::Int64 = host_scale(value) + 2
+"#;
+        let config = CompileConfig {
+            backend: AotBackend::Wasm,
+            c_abi_exports: vec![CAbiExport::with_arg_types(
+                "answer",
+                "answer",
+                vec![StaticType::I64],
+            )],
+            wasm_imports: vec![WasmImport {
+                module: "sjulia_host".to_string(),
+                name: "scale".to_string(),
+                function_name: "host_scale".to_string(),
+                params: vec![StaticType::I64],
+                result: Some(StaticType::I64),
+            }],
+            ..CompileConfig::default()
+        };
+        let output =
+            compile_wasm_source(source, &config).expect("typed host import should compile");
+        let stdout = run_wasm_bytes_node(
+            &output.wasm_bytes,
+            r#"
+const imports = WebAssembly.Module.imports(module);
+const instance = await WebAssembly.instantiate(module, {sjulia_host:{scale:value => value * 3n}});
+console.log(JSON.stringify({imports, answer: instance.exports.answer(10n).toString()}));
+"#,
+        );
+        assert!(stdout.contains(r#""module":"sjulia_host""#));
+        assert!(stdout.contains(r#""name":"scale""#));
+        assert!(stdout.contains(r#""answer":"32""#));
+    }
+
+    #[test]
+    fn wasm_explicit_import_rejects_invalid_contracts() {
+        let source = "host_scale(value::Int64)::Int64 = value";
+        let invalid = [
+            WasmImport {
+                module: "sjulia_host".to_string(),
+                name: "scale".to_string(),
+                function_name: "host_scale".to_string(),
+                params: vec![StaticType::F64],
+                result: Some(StaticType::I64),
+            },
+            WasmImport {
+                module: "sjulia_host".to_string(),
+                name: "missing".to_string(),
+                function_name: "missing".to_string(),
+                params: vec![],
+                result: None,
+            },
+        ];
+        for import in invalid {
+            let error = compile_wasm_source(
+                source,
+                &CompileConfig {
+                    backend: AotBackend::Wasm,
+                    wasm_imports: vec![import],
+                    ..CompileConfig::default()
+                },
+            )
+            .expect_err("invalid host import must fail");
+            assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+        }
     }
 
     #[test]
@@ -8902,7 +8974,7 @@ console.log(JSON.stringify({
         module.add_function(function);
 
         // When: the backend emits and Node executes the cyclic phi edge.
-        let bytes = emit_module(&module, &[]).expect("phi module should emit");
+        let bytes = emit_module(&module, &[], &[]).expect("phi module should emit");
         let value = run_wasm_bytes_node(
             &bytes,
             "console.log(instance.exports.phi_swap().toString());",

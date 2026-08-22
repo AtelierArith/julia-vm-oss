@@ -1470,6 +1470,7 @@ fn run() -> i32 {
         opt_level: args.opt_level,
         dump_stage: args.dump_aot_stage.clone(),
         c_abi_exports: args.c_abi_exports.clone(),
+        wasm_imports: Vec::new(),
     };
 
     if let Some(object_target) = &args.emit_object {

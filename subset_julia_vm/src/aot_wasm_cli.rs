@@ -68,6 +68,7 @@ fn wasm_compile_config(args: &Args, source_name: &str) -> CompileConfig {
         opt_level: args.opt_level,
         dump_stage: args.dump_aot_stage.clone(),
         c_abi_exports: args.c_abi_exports.clone(),
+        wasm_imports: Vec::new(),
     }
 }
 

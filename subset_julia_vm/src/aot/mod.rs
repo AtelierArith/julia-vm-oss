@@ -98,6 +98,16 @@ pub enum AotBackend {
     Wasm,
 }
 
+/// Explicit host function imported by a generated WebAssembly module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmImport {
+    pub module: String,
+    pub name: String,
+    pub function_name: String,
+    pub params: Vec<types::StaticType>,
+    pub result: Option<types::StaticType>,
+}
+
 /// User-facing detail for unsupported AoT instructions or semantic boundaries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedInstructionDiagnostic {
@@ -309,6 +319,8 @@ pub struct CompileConfig {
     pub dump_stage: Option<String>,
     /// Explicit C ABI entry points to export from generated Rust.
     pub c_abi_exports: Vec<codegen::CAbiExport>,
+    /// Explicit function replacements imported by the Wasm backend.
+    pub wasm_imports: Vec<WasmImport>,
 }
 
 impl Default for CompileConfig {
@@ -322,6 +334,7 @@ impl Default for CompileConfig {
             opt_level: optimizer::OptLevel::default(),
             dump_stage: None,
             c_abi_exports: Vec::new(),
+            wasm_imports: Vec::new(),
         }
     }
 }
@@ -561,7 +574,8 @@ pub fn compile_wasm(
         .timings
         .push(("wasm-ir-lowering", started.elapsed()));
     let started = AotTimer::start();
-    let wasm_bytes = codegen::wasm::emit_module(&module, &config.c_abi_exports)?;
+    let wasm_bytes =
+        codegen::wasm::emit_module(&module, &config.c_abi_exports, &config.wasm_imports)?;
     prepared.timings.push(("wasm-codegen", started.elapsed()));
     Ok(WasmCompileResult {
         wasm_bytes,
