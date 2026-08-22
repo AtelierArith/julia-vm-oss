@@ -269,3 +269,213 @@ console.log(JSON.stringify({
     assert_eq!(decoded["imports"], 0);
     assert_ne!(decoded["vec1"], decoded["vec2"]);
 }
+
+#[test]
+fn wasm_rng_array_rank_3_uniform() {
+    let source = "uniform_3d()::Array{Float64,3} = rand(2, 3, 4)";
+    let wasm = compile_rng_module(source, &[("uniform_3d", vec![])]);
+    let mut oracle = Xoshiro::new(42);
+    // Column-major order: 2*3*4 = 24 elements
+    let expected = (0..24)
+        .map(|_| oracle.next_f64().to_bits().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
+const result = array(e, e.uniform_3d(), 8, 3);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  values: Array.from(result, bits).join(','),
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode rank 3 QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["values"], expected);
+}
+
+#[test]
+fn wasm_rng_array_rank_5_uniform() {
+    let source = "uniform_5d()::Array{Float64,5} = rand(2, 2, 2, 2, 2)";
+    let wasm = compile_rng_module(source, &[("uniform_5d", vec![])]);
+    let mut oracle = Xoshiro::new(42);
+    // Column-major order: 2^5 = 32 elements
+    let expected = (0..32)
+        .map(|_| oracle.next_f64().to_bits().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
+const result = array(e, e.uniform_5d(), 8, 5);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  values: Array.from(result, bits).join(','),
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode rank 5 QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["values"], expected);
+}
+
+#[test]
+fn wasm_rng_array_rank_8_uniform() {
+    let source = "uniform_8d()::Array{Float64,8} = rand(2, 2, 2, 2, 2, 2, 2, 2)";
+    let wasm = compile_rng_module(source, &[("uniform_8d", vec![])]);
+    let mut oracle = Xoshiro::new(42);
+    // Column-major order: 2^8 = 256 elements
+    let expected = (0..256)
+        .map(|_| oracle.next_f64().to_bits().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
+const result = array(e, e.uniform_8d(), 8, 8);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  values: Array.from(result, bits).join(','),
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode rank 8 QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["values"], expected);
+}
+
+#[test]
+fn wasm_rng_array_rank_3_normal() {
+    let source = "normal_3d()::Array{Float64,3} = randn(2, 3, 4)";
+    let wasm = compile_rng_module(source, &[("normal_3d", vec![])]);
+    let mut oracle = Xoshiro::new(42);
+    // Column-major order: 2*3*4 = 24 elements
+    let expected = (0..24)
+        .map(|_| randn(&mut oracle).to_bits().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
+const result = array(e, e.normal_3d(), 8, 3);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  values: Array.from(result, bits).join(','),
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode rank 3 QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["values"], expected);
+}
+
+#[test]
+fn wasm_rng_array_zero_dimensions_f64() {
+    let source = "empty()::Vector{Float64} = rand(0)";
+    let wasm = compile_rng_module(source, &[("empty", vec![])]);
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const result = array(e, e.empty(), 8, 1);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  length: result.length,
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode empty QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["length"], 0);
+}
+
+#[test]
+fn wasm_rng_array_zero_dimensions_f32() {
+    let source = "empty32()::Vector{Float32} = rand(Float32, 0)";
+    let wasm = compile_rng_module(source, &[("empty32", vec![])]);
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const result = array(e, e.empty32(), 4, 1);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  length: result.length,
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode empty32 QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["length"], 0);
+}
+
+#[test]
+fn wasm_rng_array_first_1024_elements_oracle() {
+    let source = "large()::Vector{Float64} = rand(1024)";
+    let wasm = compile_rng_module(source, &[("large", vec![])]);
+    let mut oracle = Xoshiro::new(42);
+    let expected = (0..1024)
+        .map(|_| oracle.next_f64().to_bits().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
+const result = array(e, e.large(), 8, 1);
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  values: Array.from(result, bits).join(','),
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode 1024 QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["values"], expected);
+}
+
+#[test]
+fn wasm_rng_array_descriptor_abi_v2() {
+    let source = "vec()::Vector{Float64} = rand(5)";
+    let wasm = compile_rng_module(source, &[("vec", vec![])]);
+    let actual = run_node_array(
+        &wasm,
+        r#"
+const e = (await WebAssembly.instantiate(module, {})).exports;
+e.__sjulia_rng_seed(42n);
+const descriptor = e.vec();
+const view = new DataView(e.memory.buffer);
+const abi_version = view.getUint32(Number(descriptor), true);
+const rank = view.getUint32(Number(descriptor) + 20, true);
+const count = Number(view.getBigUint64(Number(descriptor) + 32, true));
+console.log(JSON.stringify({
+  imports: WebAssembly.Module.imports(module).length,
+  abi_version,
+  rank,
+  count,
+}));
+"#,
+    );
+    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode descriptor QA JSON");
+    assert_eq!(decoded["imports"], 0);
+    assert_eq!(decoded["abi_version"], 2);
+    assert_eq!(decoded["rank"], 1);
+    assert_eq!(decoded["count"], 5);
+}
