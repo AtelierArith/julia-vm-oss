@@ -8,6 +8,17 @@ use super::super::types::unsupported;
 use super::ops::{ensure_type, map_binop, map_unary};
 use super::Lowerer;
 
+/// Check if a type is F32/F64 or an array of F32/F64
+fn is_float_or_float_array(ty: &StaticType) -> bool {
+    match ty {
+        StaticType::F32 | StaticType::F64 => true,
+        StaticType::Array { element, .. } => {
+            matches!(**element, StaticType::F32 | StaticType::F64)
+        }
+        _ => false,
+    }
+}
+
 impl Lowerer<'_, '_> {
     pub(super) fn expr(&mut self, expr: &AotExpr, function: &mut IrFunction) -> AotResult<VarRef> {
         if let Some(value) = self.focused(expr, function)? {
@@ -101,7 +112,7 @@ impl Lowerer<'_, '_> {
                 builtin: AotBuiltinOp::Rand,
                 args,
                 return_ty,
-            } if matches!(return_ty, StaticType::F32 | StaticType::F64) => {
+            } if is_float_or_float_array(return_ty) => {
                 if args.is_empty() {
                     // Scalar rand
                     let dest = self.temporary(return_ty.clone());
@@ -124,7 +135,7 @@ impl Lowerer<'_, '_> {
                 builtin: AotBuiltinOp::Randn,
                 args,
                 return_ty,
-            } if matches!(return_ty, StaticType::F32 | StaticType::F64) => {
+            } if is_float_or_float_array(return_ty) => {
                 if args.is_empty() {
                     // Scalar randn
                     let dest = self.temporary(return_ty.clone());
