@@ -578,6 +578,7 @@ mod tests {
         let destination = VarRef::new("sampled".to_string(), StaticType::F64);
         function.entry_block_mut().unwrap().push(Instruction::Rand {
             dest: destination.clone(),
+            dims: vec![],
         });
         function
             .entry_block_mut()
