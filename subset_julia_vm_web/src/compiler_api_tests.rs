@@ -65,15 +65,33 @@ fn compile_to_wasm_reports_source_located_parse_diagnostic() {
 }
 
 #[test]
-fn compile_to_wasm_reports_unsupported_diagnostic_without_panicking() {
-    // Given: a statically typed function outside the Wasm backend subset.
+fn compile_to_wasm_supports_string_views() {
+    // Given: a statically typed String identity exported through the Wasm ABI.
     let source = "string_identity(value::String)::String = value";
     let options = CompileOptions::for_test_export("string_identity", &["String"]);
 
-    // When: backend lowering rejects the unsupported type.
+    // When: browser compilation lowers the immutable String view.
     let result = compile_to_wasm_internal(source, options);
 
-    // Then: the rejection is a typed diagnostic, not a panic or fallback module.
+    // Then: the generated module is valid instead of reporting String as unsupported.
+    assert!(
+        result.success,
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(&result.wasm_bytes[..4], b"\0asm");
+}
+
+#[test]
+fn compile_to_wasm_rejects_dynamic_string_interpolation() {
+    // Given: interpolation that requires unsupported dynamic String construction.
+    let source = "interpolate(value::Int64)::String = \"value = $value\"";
+    let options = CompileOptions::for_test_export("interpolate", &["Int64"]);
+
+    // When: browser compilation reaches dynamic String lowering.
+    let result = compile_to_wasm_internal(source, options);
+
+    // Then: the rejection remains a typed diagnostic, not a panic or fallback module.
     assert!(!result.success);
     assert!(result.wasm_bytes.is_empty());
     assert_eq!(result.diagnostics[0].kind, "unsupported");

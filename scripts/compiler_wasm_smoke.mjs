@@ -153,14 +153,40 @@ const invalidArgumentType = compiler.compile_to_wasm("identity(x) = x", {
 assert.equal(invalidArgumentType.success, false);
 assert.equal(invalidArgumentType.diagnostics[0].code, "invalid_argument_type");
 
-const unsupported = compiler.compile_to_wasm(
+const stringIdentity = compile(
   "string_identity(value::String)::String = value",
+  "string_identity",
+  ["String"],
+);
+const stringInstance = await instantiate(stringIdentity);
+const stringMemory = stringInstance.exports.memory;
+const stringBytes = new TextEncoder().encode("héllo 🐱");
+const stringPointer = stringInstance.exports.__sjulia_alloc(BigInt(stringBytes.length), 1);
+new Uint8Array(stringMemory.buffer, stringPointer, stringBytes.length).set(stringBytes);
+const stringView = stringInstance.exports.__sjulia_alloc(8n, 4);
+const inputView = new DataView(stringMemory.buffer);
+inputView.setUint32(stringView, stringPointer, true);
+inputView.setUint32(stringView + 4, stringBytes.length, true);
+const resultViewPointer = stringInstance.exports.string_identity(stringView);
+const resultView = new DataView(stringMemory.buffer);
+const resultPointer = resultView.getUint32(resultViewPointer, true);
+const resultByteLength = resultView.getUint32(resultViewPointer + 4, true);
+const resultText = new TextDecoder("utf-8", { fatal: true }).decode(
+  new Uint8Array(stringMemory.buffer, resultPointer, resultByteLength),
+);
+assert.equal(resultText, "héllo 🐱");
+assert.equal(resultByteLength, stringBytes.length);
+stringInstance.exports.__sjulia_free(stringView);
+stringInstance.exports.__sjulia_free(stringPointer);
+
+const unsupported = compiler.compile_to_wasm(
+  'interpolate(value::Int64)::String = "value = $value"',
   {
     exports: [
       {
-        export_name: "string_identity",
-        function_name: "string_identity",
-        arg_types: ["String"],
+        export_name: "interpolate",
+        function_name: "interpolate",
+        arg_types: ["Int64"],
       },
     ],
   },
