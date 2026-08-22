@@ -63,41 +63,55 @@ fn emit_fill_uniform(
     
     body.instruction(&W::Loop(BlockType::Empty));
     
-    // Check if i < element_count
+    // Check if i >= element_count
     body.instruction(&W::LocalGet(layout.memory.term));
     body.instruction(&W::LocalGet(layout.memory.product));
     body.instruction(&W::I64GeU);
     body.instruction(&W::BrIf(1));
     
-    // Generate random value
-    body.instruction(&W::Call(functions[NEXT_NAME]));
-    body.instruction(&W::I64Const(11));
-    body.instruction(&W::I64ShrU);
-    body.instruction(&W::F64ConvertI64U);
-    body.instruction(&W::F64Const((1.0 / 9_007_199_254_740_992.0).into()));
-    body.instruction(&W::F64Mul);
-    
-    // Store value based on element type
+    // Generate random value and store it
     match &array.ty {
         StaticType::Array { element, .. } => {
             match **element {
                 StaticType::F32 => {
-                    body.instruction(&W::F32DemoteF64);
+                    // Compute address: data_start + (i * 4)
                     body.instruction(&W::LocalGet(layout.memory.data_start));
                     body.instruction(&W::LocalGet(layout.memory.term));
                     body.instruction(&W::I64Const(4));
                     body.instruction(&W::I64Mul);
                     body.instruction(&W::I64Add);
                     body.instruction(&W::I32WrapI64);
+                    
+                    // Generate random value
+                    body.instruction(&W::Call(functions[NEXT_NAME]));
+                    body.instruction(&W::I64Const(11));
+                    body.instruction(&W::I64ShrU);
+                    body.instruction(&W::F64ConvertI64U);
+                    body.instruction(&W::F64Const((1.0 / 9_007_199_254_740_992.0).into()));
+                    body.instruction(&W::F64Mul);
+                    
+                    // Demote to F32 and store
+                    body.instruction(&W::F32DemoteF64);
                     body.instruction(&W::F32Store(memarg(0)));
                 }
                 StaticType::F64 => {
+                    // Compute address: data_start + (i * 8)
                     body.instruction(&W::LocalGet(layout.memory.data_start));
                     body.instruction(&W::LocalGet(layout.memory.term));
                     body.instruction(&W::I64Const(8));
                     body.instruction(&W::I64Mul);
                     body.instruction(&W::I64Add);
                     body.instruction(&W::I32WrapI64);
+                    
+                    // Generate random value
+                    body.instruction(&W::Call(functions[NEXT_NAME]));
+                    body.instruction(&W::I64Const(11));
+                    body.instruction(&W::I64ShrU);
+                    body.instruction(&W::F64ConvertI64U);
+                    body.instruction(&W::F64Const((1.0 / 9_007_199_254_740_992.0).into()));
+                    body.instruction(&W::F64Mul);
+                    
+                    // Store
                     body.instruction(&W::F64Store(memarg(0)));
                 }
                 _ => return Err(unsupported("Array rand requires Float32 or Float64 elements")),
@@ -168,36 +182,45 @@ fn emit_fill_normal(
     
     body.instruction(&W::Loop(BlockType::Empty));
     
-    // Check if i < element_count
+    // Check if i >= element_count
     body.instruction(&W::LocalGet(layout.memory.term));
     body.instruction(&W::LocalGet(layout.memory.product));
     body.instruction(&W::I64GeU);
     body.instruction(&W::BrIf(1));
     
-    // Generate random normal value
-    body.instruction(&W::Call(functions["__sjulia_rng_randn"]));
-    
-    // Store value based on element type
+    // Generate random normal value and store it
     match &array.ty {
         StaticType::Array { element, .. } => {
             match **element {
                 StaticType::F32 => {
-                    body.instruction(&W::F32DemoteF64);
+                    // Compute address: data_start + (i * 4)
                     body.instruction(&W::LocalGet(layout.memory.data_start));
                     body.instruction(&W::LocalGet(layout.memory.term));
                     body.instruction(&W::I64Const(4));
                     body.instruction(&W::I64Mul);
                     body.instruction(&W::I64Add);
                     body.instruction(&W::I32WrapI64);
+                    
+                    // Generate random normal value
+                    body.instruction(&W::Call(functions["__sjulia_rng_randn"]));
+                    
+                    // Demote to F32 and store
+                    body.instruction(&W::F32DemoteF64);
                     body.instruction(&W::F32Store(memarg(0)));
                 }
                 StaticType::F64 => {
+                    // Compute address: data_start + (i * 8)
                     body.instruction(&W::LocalGet(layout.memory.data_start));
                     body.instruction(&W::LocalGet(layout.memory.term));
                     body.instruction(&W::I64Const(8));
                     body.instruction(&W::I64Mul);
                     body.instruction(&W::I64Add);
                     body.instruction(&W::I32WrapI64);
+                    
+                    // Generate random normal value
+                    body.instruction(&W::Call(functions["__sjulia_rng_randn"]));
+                    
+                    // Store
                     body.instruction(&W::F64Store(memarg(0)));
                 }
                 _ => return Err(unsupported("Array randn requires Float32 or Float64 elements")),
