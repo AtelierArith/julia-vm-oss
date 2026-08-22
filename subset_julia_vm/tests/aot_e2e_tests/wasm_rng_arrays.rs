@@ -154,13 +154,16 @@ fn wasm_rng_array_scalar_interleave() {
         .collect::<Vec<_>>()
         .join(",");
     let mut oracle2 = Xoshiro::new(42);
-    let expected_vecs = (0..4)
-        .flat_map(|_| {
+    let expected_vecs = {
+        let mut results = Vec::new();
+        for _ in 0..4 {
             let _ = oracle2.next_f64();
-            (0..3).map(|_| oracle2.next_f64().to_bits().to_string())
-        })
-        .collect::<Vec<_>>()
-        .join(",");
+            for _ in 0..3 {
+                results.push(oracle2.next_f64().to_bits().to_string());
+            }
+        }
+        results.join(",")
+    };
     let actual = run_node(
         &wasm,
         r#"

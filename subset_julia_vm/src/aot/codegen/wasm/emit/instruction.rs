@@ -92,7 +92,6 @@ pub(super) fn emit_instruction(
                 super::rng_array::emit_array_normal(body, dest, dims, layout, functions)?;
             }
         }
-        }
         Instruction::Call { dest, func, args } if func == "__sjulia_array_len" => {
             let descriptor = &args[0];
             let descriptor_layout = descriptor_layout(&descriptor.ty)?;

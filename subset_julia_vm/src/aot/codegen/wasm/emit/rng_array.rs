@@ -43,7 +43,7 @@ fn emit_fill_uniform(
     layout: &LocalLayout,
     functions: &HashMap<String, u32>,
 ) -> AotResult<()> {
-    let descriptor_layout = super::super::types::descriptor_layout(&array.ty)?;
+    let _descriptor_layout = super::super::types::descriptor_layout(&array.ty)?;
     
     // Get data pointer
     get(body, &layout.locals, array)?;
@@ -66,7 +66,7 @@ fn emit_fill_uniform(
     // Check if i < element_count
     body.instruction(&W::LocalGet(layout.memory.term));
     body.instruction(&W::LocalGet(layout.memory.product));
-    body.instruction(&W::I64Ge);
+    body.instruction(&W::I64GeU);
     body.instruction(&W::BrIf(1));
     
     // Generate random value
@@ -79,8 +79,8 @@ fn emit_fill_uniform(
     
     // Store value based on element type
     match &array.ty {
-        StaticType::Array { element_type, .. } => {
-            match **element_type {
+        StaticType::Array { element, .. } => {
+            match **element {
                 StaticType::F32 => {
                     body.instruction(&W::F32DemoteF64);
                     body.instruction(&W::LocalGet(layout.memory.data_start));
@@ -148,7 +148,7 @@ fn emit_fill_normal(
     layout: &LocalLayout,
     functions: &HashMap<String, u32>,
 ) -> AotResult<()> {
-    let descriptor_layout = super::super::types::descriptor_layout(&array.ty)?;
+    let _descriptor_layout = super::super::types::descriptor_layout(&array.ty)?;
     
     // Get data pointer
     get(body, &layout.locals, array)?;
@@ -171,7 +171,7 @@ fn emit_fill_normal(
     // Check if i < element_count
     body.instruction(&W::LocalGet(layout.memory.term));
     body.instruction(&W::LocalGet(layout.memory.product));
-    body.instruction(&W::I64Ge);
+    body.instruction(&W::I64GeU);
     body.instruction(&W::BrIf(1));
     
     // Generate random normal value
@@ -179,8 +179,8 @@ fn emit_fill_normal(
     
     // Store value based on element type
     match &array.ty {
-        StaticType::Array { element_type, .. } => {
-            match **element_type {
+        StaticType::Array { element, .. } => {
+            match **element {
                 StaticType::F32 => {
                     body.instruction(&W::F32DemoteF64);
                     body.instruction(&W::LocalGet(layout.memory.data_start));
