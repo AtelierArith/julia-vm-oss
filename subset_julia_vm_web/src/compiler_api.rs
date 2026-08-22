@@ -2,13 +2,13 @@ mod result;
 
 use self::result::{
     diagnostic, diagnostic_from_error, failure, failure_with, CompileToWasmResult,
-    CompilerDiagnostic, PhaseTimings,
+    CompilerDiagnostic, PhaseTimings, ResolvedWasmImport,
 };
 use serde::Deserialize;
 use subset_julia_vm::aot::codegen::CAbiExport;
 use subset_julia_vm::aot::optimizer::OptLevel;
 use subset_julia_vm::aot::types::StaticType;
-use subset_julia_vm::aot::{compile_wasm_source, AotBackend, CompileConfig};
+use subset_julia_vm::aot::{compile_wasm_source, AotBackend, CompileConfig, WasmImport};
 use wasm_bindgen::prelude::*;
 
 pub const MAX_SOURCE_BYTES: usize = 1_048_576;
@@ -20,6 +20,8 @@ pub struct CompileOptions {
     opt_level: Option<u8>,
     #[serde(default)]
     exports: Vec<CompileExport>,
+    #[serde(default)]
+    imports: Vec<CompileImport>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,14 +32,26 @@ struct CompileExport {
     arg_types: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CompileImport {
+    module: String,
+    name: String,
+    function_name: String,
+    #[serde(default)]
+    params: Vec<String>,
+    result: Option<String>,
+}
+
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_TYPES: &str = r#"
 export interface CompilerSpan { start: number; end: number; start_line: number; start_column: number; end_line: number; end_column: number; }
 export interface CompilerDiagnostic { code: string; kind: string; message: string; span?: CompilerSpan; workaround?: string; }
 export interface CompileExport { export_name: string; function_name: string; arg_types?: string[]; }
-export interface CompileOptions { source_name?: string; opt_level?: 0 | 1 | 2 | 3; exports?: CompileExport[]; }
+export interface CompileImport { module: string; name: string; function_name: string; params?: string[]; result?: string; }
+export interface ResolvedWasmImport { module: string; name: string; function_name: string; params: string[]; result?: string; }
+export interface CompileOptions { source_name?: string; opt_level?: 0 | 1 | 2 | 3; exports?: CompileExport[]; imports?: CompileImport[]; }
 export interface PhaseTimings { source_parse_lower_ms: number; dead_code_elimination_ms: number; type_inference_ms: number; ir_conversion_ms: number; optimization_ms: number; wasm_ir_lowering_ms: number; wasm_codegen_ms: number; total_ms: number; }
-export interface CompileToWasmResult { success: boolean; wasm_bytes: Uint8Array; diagnostics: CompilerDiagnostic[]; compiler_version: string; abi_version: number; phase_timings: PhaseTimings; }
+export interface CompileToWasmResult { success: boolean; wasm_bytes: Uint8Array; diagnostics: CompilerDiagnostic[]; compiler_version: string; abi_version: number; imports: ResolvedWasmImport[]; phase_timings: PhaseTimings; }
 export function compile_to_wasm(source: string, options?: CompileOptions): CompileToWasmResult;
 "#;
 
@@ -70,6 +84,21 @@ pub fn compile_to_wasm_internal(source: &str, options: CompileOptions) -> Compil
         Ok(config) => config,
         Err(diagnostic) => return failure_with(diagnostic),
     };
+    let imports = config
+        .wasm_imports
+        .iter()
+        .map(|import| ResolvedWasmImport {
+            module: import.module.clone(),
+            name: import.name.clone(),
+            function_name: import.function_name.clone(),
+            params: import
+                .params
+                .iter()
+                .map(StaticType::julia_type_name)
+                .collect(),
+            result: import.result.as_ref().map(StaticType::julia_type_name),
+        })
+        .collect();
     match compile_wasm_source(source, &config) {
         Ok(output) if output.wasm_bytes.len() <= MAX_MODULE_BYTES => CompileToWasmResult {
             success: true,
@@ -77,6 +106,7 @@ pub fn compile_to_wasm_internal(source: &str, options: CompileOptions) -> Compil
             diagnostics: Vec::new(),
             compiler_version: result::COMPILER_VERSION,
             abi_version: result::WASM_ABI_VERSION,
+            imports,
             phase_timings: PhaseTimings::from_raw(&output.timings),
         },
         Ok(output) => failure(
@@ -124,6 +154,46 @@ fn compile_config(options: CompileOptions) -> Result<CompileConfig, CompilerDiag
             arg_types,
         ));
     }
+    let mut imports = Vec::with_capacity(options.imports.len());
+    for import in options.imports {
+        if import.module.is_empty() || import.name.is_empty() || import.function_name.is_empty() {
+            return Err(diagnostic(
+                "invalid_import",
+                "options",
+                "import module, name, and function_name must be non-empty".to_string(),
+            ));
+        }
+        let mut params = Vec::with_capacity(import.params.len());
+        for name in import.params {
+            let Some(param) = StaticType::from_julia_name_lossy(&name) else {
+                return Err(diagnostic(
+                    "invalid_import_type",
+                    "options",
+                    format!("unsupported import parameter type: {name}"),
+                ));
+            };
+            params.push(param);
+        }
+        let result = import
+            .result
+            .map(|name| {
+                StaticType::from_julia_name_lossy(&name).ok_or_else(|| {
+                    diagnostic(
+                        "invalid_import_type",
+                        "options",
+                        format!("unsupported import result type: {name}"),
+                    )
+                })
+            })
+            .transpose()?;
+        imports.push(WasmImport {
+            module: import.module,
+            name: import.name,
+            function_name: import.function_name,
+            params,
+            result,
+        });
+    }
     Ok(CompileConfig {
         source_name: options
             .source_name
@@ -131,6 +201,7 @@ fn compile_config(options: CompileOptions) -> Result<CompileConfig, CompilerDiag
         backend: AotBackend::Wasm,
         opt_level,
         c_abi_exports: exports,
+        wasm_imports: imports,
         ..CompileConfig::default()
     })
 }
@@ -149,6 +220,25 @@ impl CompileOptions {
                 arg_types: arg_types.iter().map(|name| (*name).to_string()).collect(),
             }],
             ..Self::default()
+        }
+    }
+
+    pub fn for_test_import(
+        function_name: &str,
+        module: &str,
+        name: &str,
+        params: &[&str],
+        result: Option<&str>,
+    ) -> Self {
+        Self {
+            imports: vec![CompileImport {
+                module: module.to_string(),
+                name: name.to_string(),
+                function_name: function_name.to_string(),
+                params: params.iter().map(|value| (*value).to_string()).collect(),
+                result: result.map(str::to_string),
+            }],
+            ..Self::for_test_export("answer", &["Int64"])
         }
     }
 }

@@ -78,3 +78,30 @@ fn compile_to_wasm_reports_unsupported_diagnostic_without_panicking() {
     assert!(result.wasm_bytes.is_empty());
     assert_eq!(result.diagnostics[0].kind, "unsupported");
 }
+
+#[test]
+fn compile_to_wasm_returns_resolved_import_metadata() {
+    let source = r#"
+host_scale(value::Int64)::Int64 = value
+answer(value::Int64)::Int64 = host_scale(value) + 2
+"#;
+    let options = CompileOptions::for_test_import(
+        "host_scale",
+        "sjulia_host",
+        "scale",
+        &["Int64"],
+        Some("Int64"),
+    );
+    let result = compile_to_wasm_internal(source, options);
+    assert!(
+        result.success,
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.imports.len(), 1);
+    assert_eq!(result.imports[0].module, "sjulia_host");
+    assert_eq!(result.imports[0].name, "scale");
+    assert_eq!(result.imports[0].function_name, "host_scale");
+    assert_eq!(result.imports[0].params, ["Int64"]);
+    assert_eq!(result.imports[0].result.as_deref(), Some("Int64"));
+}

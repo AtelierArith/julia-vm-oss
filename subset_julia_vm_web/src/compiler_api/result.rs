@@ -44,7 +44,17 @@ pub struct CompileToWasmResult {
     pub diagnostics: Vec<CompilerDiagnostic>,
     pub compiler_version: &'static str,
     pub abi_version: i32,
+    pub imports: Vec<ResolvedWasmImport>,
     pub phase_timings: PhaseTimings,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResolvedWasmImport {
+    pub module: String,
+    pub name: String,
+    pub function_name: String,
+    pub params: Vec<String>,
+    pub result: Option<String>,
 }
 
 pub fn diagnostic_from_error(error: AotError) -> CompilerDiagnostic {
@@ -99,6 +109,7 @@ pub fn failure_with(diagnostic: CompilerDiagnostic) -> CompileToWasmResult {
         diagnostics: vec![diagnostic],
         compiler_version: COMPILER_VERSION,
         abi_version: WASM_ABI_VERSION,
+        imports: Vec::new(),
         phase_timings: PhaseTimings::default(),
     }
 }
