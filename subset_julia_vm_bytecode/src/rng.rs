@@ -350,12 +350,15 @@ impl RngLike for RngInstance {
 // From julia/stdlib/Random/src/normal.jl
 
 /// Ziggurat constant: r = 3.6541528853610087963519472518
-const ZIGGURAT_NOR_R: f64 = 3.654_152_885_361_009;
+#[doc(hidden)]
+pub const ZIGGURAT_NOR_R: f64 = 3.654_152_885_361_009;
 /// Ziggurat constant: 1/r
-const ZIGGURAT_NOR_INV_R: f64 = 1.0 / ZIGGURAT_NOR_R;
+#[doc(hidden)]
+pub const ZIGGURAT_NOR_INV_R: f64 = 1.0 / ZIGGURAT_NOR_R;
 
 /// Ziggurat ki table from Julia
-const KI: [u64; 256] = [
+#[doc(hidden)]
+pub const KI: [u64; 256] = [
     0x0007799ec012f7b2,
     0x0000000000000000,
     0x0006045f4c7de363,
@@ -615,7 +618,8 @@ const KI: [u64; 256] = [
 ];
 
 /// Ziggurat wi table from Julia
-const WI: [f64; 256] = [
+#[doc(hidden)]
+pub const WI: [f64; 256] = [
     1.736_725_412_160_263e-15,
     9.558_660_351_455_634e-17,
     1.2708704834810623e-16,
@@ -875,7 +879,8 @@ const WI: [f64; 256] = [
 ];
 
 /// Ziggurat fi table from Julia
-const FI: [f64; 256] = [
+#[doc(hidden)]
+pub const FI: [f64; 256] = [
     1.0,
     9.771_017_012_676_708e-1,
     9.598_790_918_001_06e-1,
