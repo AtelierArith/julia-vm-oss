@@ -268,6 +268,49 @@ impl Lowerer<'_, '_> {
             }
             AotExpr::Convert { value, target_ty }
                 if matches!(
+                    (value.as_ref(), target_ty),
+                    (
+                        AotExpr::CallBuiltin {
+                            builtin: AotBuiltinOp::Rand | AotBuiltinOp::Randn,
+                            return_ty: StaticType::Array {
+                                element: source_element,
+                                ndims: source_rank,
+                            },
+                            ..
+                        },
+                        StaticType::Array {
+                            element: target_element,
+                            ndims: target_rank,
+                        }
+                    ) if **source_element == StaticType::F64
+                        && **target_element == StaticType::F32
+                        && source_rank == target_rank
+                ) =>
+            {
+                let AotExpr::CallBuiltin { builtin, args, .. } = value.as_ref() else {
+                    return Err(unsupported("expected typed RNG array conversion"));
+                };
+                let dims = args
+                    .iter()
+                    .map(|arg| self.expr(arg, function))
+                    .collect::<AotResult<Vec<_>>>()?;
+                let dest = self.temporary(target_ty.clone());
+                let instruction = match builtin {
+                    AotBuiltinOp::Rand => Instruction::Rand {
+                        dest: dest.clone(),
+                        dims,
+                    },
+                    AotBuiltinOp::Randn => Instruction::Randn {
+                        dest: dest.clone(),
+                        dims,
+                    },
+                    _ => return Err(unsupported("expected typed RNG array conversion")),
+                };
+                self.current_block_mut(function)?.push(instruction);
+                Ok(dest)
+            }
+            AotExpr::Convert { value, target_ty }
+                if matches!(
                     target_ty,
                     StaticType::U8
                         | StaticType::I64
