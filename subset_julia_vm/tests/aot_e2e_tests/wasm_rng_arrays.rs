@@ -473,7 +473,8 @@ console.log(JSON.stringify({
 }));
 "#,
     );
-    let decoded: serde_json::Value = serde_json::from_str(&actual).expect("decode descriptor QA JSON");
+    let decoded: serde_json::Value =
+        serde_json::from_str(&actual).expect("decode descriptor QA JSON");
     assert_eq!(decoded["imports"], 0);
     assert_eq!(decoded["abi_version"], 2);
     assert_eq!(decoded["rank"], 1);

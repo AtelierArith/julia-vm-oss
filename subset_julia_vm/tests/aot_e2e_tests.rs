@@ -6773,6 +6773,14 @@ mod wasm_backend_tests {
     };
 
     fn run_wasm_bytes_node(wasm_bytes: &[u8], javascript: &str) -> String {
+        run_wasm_bytes_node_with_imports(wasm_bytes, "{}", javascript)
+    }
+
+    fn run_wasm_bytes_node_with_imports(
+        wasm_bytes: &[u8],
+        imports: &str,
+        javascript: &str,
+    ) -> String {
         let dir = tempfile::tempdir().expect("create Wasm test directory");
         let wasm_path = dir.path().join("module.wasm");
         let script_path = dir.path().join("run.mjs");
@@ -6780,8 +6788,8 @@ mod wasm_backend_tests {
         fs::write(
             &script_path,
             format!(
-                "const bytes = await import('node:fs').then(fs => fs.readFileSync({:?}));\nconst module = await WebAssembly.compile(bytes);\nconst instance = await WebAssembly.instantiate(module, {{}});\n{}",
-                wasm_path, javascript
+                "const bytes = await import('node:fs').then(fs => fs.readFileSync({:?}));\nconst module = await WebAssembly.compile(bytes);\nconst instance = await WebAssembly.instantiate(module, {});\n{}",
+                wasm_path, imports, javascript
             ),
         )
         .expect("write Node Wasm runner");
@@ -7840,11 +7848,11 @@ answer(value::Int64)::Int64 = host_scale(value) + 2
         };
         let output =
             compile_wasm_source(source, &config).expect("typed host import should compile");
-        let stdout = run_wasm_bytes_node(
+        let stdout = run_wasm_bytes_node_with_imports(
             &output.wasm_bytes,
+            "{sjulia_host:{scale:value => value * 3n}}",
             r#"
 const imports = WebAssembly.Module.imports(module);
-const instance = await WebAssembly.instantiate(module, {sjulia_host:{scale:value => value * 3n}});
 console.log(JSON.stringify({imports, answer: instance.exports.answer(10n).toString()}));
 "#,
         );
