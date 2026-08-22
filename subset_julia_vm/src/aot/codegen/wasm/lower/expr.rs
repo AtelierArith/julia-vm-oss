@@ -101,21 +101,47 @@ impl Lowerer<'_, '_> {
                 builtin: AotBuiltinOp::Rand,
                 args,
                 return_ty,
-            } if args.is_empty() && matches!(return_ty, StaticType::F32 | StaticType::F64) => {
-                let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?
-                    .push(Instruction::Rand { dest: dest.clone() });
-                Ok(dest)
+            } if matches!(return_ty, StaticType::F32 | StaticType::F64) => {
+                if args.is_empty() {
+                    // Scalar rand
+                    let dest = self.temporary(return_ty.clone());
+                    self.current_block_mut(function)?
+                        .push(Instruction::Rand { dest: dest.clone(), dims: vec![] });
+                    Ok(dest)
+                } else {
+                    // Array rand(dims...)
+                    let dims = args
+                        .iter()
+                        .map(|arg| self.expr(arg, function))
+                        .collect::<AotResult<Vec<_>>>()?;
+                    let dest = self.temporary(return_ty.clone());
+                    self.current_block_mut(function)?
+                        .push(Instruction::Rand { dest: dest.clone(), dims });
+                    Ok(dest)
+                }
             }
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Randn,
                 args,
                 return_ty,
-            } if args.is_empty() && matches!(return_ty, StaticType::F32 | StaticType::F64) => {
-                let dest = self.temporary(return_ty.clone());
-                self.current_block_mut(function)?
-                    .push(Instruction::Randn { dest: dest.clone() });
-                Ok(dest)
+            } if matches!(return_ty, StaticType::F32 | StaticType::F64) => {
+                if args.is_empty() {
+                    // Scalar randn
+                    let dest = self.temporary(return_ty.clone());
+                    self.current_block_mut(function)?
+                        .push(Instruction::Randn { dest: dest.clone(), dims: vec![] });
+                    Ok(dest)
+                } else {
+                    // Array randn(dims...)
+                    let dims = args
+                        .iter()
+                        .map(|arg| self.expr(arg, function))
+                        .collect::<AotResult<Vec<_>>>()?;
+                    let dest = self.temporary(return_ty.clone());
+                    self.current_block_mut(function)?
+                        .push(Instruction::Randn { dest: dest.clone(), dims });
+                    Ok(dest)
+                }
             }
             AotExpr::CallBuiltin {
                 builtin: AotBuiltinOp::Length,
