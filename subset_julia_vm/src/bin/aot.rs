@@ -2665,6 +2665,7 @@ mod tests {
             opt_level: OptLevel::O2,
             dump_stage: None,
             c_abi_exports: Vec::new(),
+            wasm_imports: Vec::new(),
         };
 
         let result = match compile_program(program, &config) {
