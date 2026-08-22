@@ -32,8 +32,9 @@ test("load writes an owned ABI-v2 RGBA descriptor", () => {
   });
   assert.equal(imports.sjulia_host.load(64, path.length, 0, 128), 0);
   const descriptor = readDescriptor(memory, 128);
-  assert.equal(descriptor.rank, 2);
-  assert.deepEqual(descriptor.dimensions, [1n, 2n]);
+  assert.equal(descriptor.rank, 3);
+  assert.deepEqual(descriptor.dimensions, [4n, 2n, 1n]);
+  assert.deepEqual(descriptor.strides, [1n, 4n, 8n]);
   assert.deepEqual(Array.from(new Uint8Array(memory.buffer, descriptor.dataPointer, 8)), [1, 2, 3, 4, 5, 6, 7, 8]);
 });
 

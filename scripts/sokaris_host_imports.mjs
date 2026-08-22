@@ -46,14 +46,26 @@ export function readDescriptor(memory, pointer) {
   const dataPointer = view.getUint32(pointer + 24, true);
   const elementCount = view.getBigUint64(pointer + 32, true);
   if (rank > 8) throw new HostImportError("invalid_descriptor", "descriptor rank exceeds 8");
+  if (elementTag !== TAG_U8 || elementSize !== 1 || layoutId !== 0) {
+    throw new HostImportError("invalid_descriptor", "host image descriptor must contain primitive UInt8 values");
+  }
   checkedRange(memory, pointer, HEADER_BYTES + rank * AXIS_BYTES, "descriptor metadata");
   const dimensions = [];
   const strides = [];
+  let product = 1n;
+  let maximumOffset = 0n;
   for (let axis = 0; axis < rank; axis += 1) {
-    dimensions.push(view.getBigUint64(pointer + HEADER_BYTES + axis * AXIS_BYTES, true));
-    strides.push(view.getBigInt64(pointer + HEADER_BYTES + axis * AXIS_BYTES + 8, true));
+    const dimension = view.getBigUint64(pointer + HEADER_BYTES + axis * AXIS_BYTES, true);
+    const stride = view.getBigInt64(pointer + HEADER_BYTES + axis * AXIS_BYTES + 8, true);
+    if (stride < 0n) throw new HostImportError("invalid_descriptor", "host image strides must be nonnegative");
+    dimensions.push(dimension);
+    strides.push(stride);
+    product *= dimension;
+    if (dimension > 0n) maximumOffset += (dimension - 1n) * stride;
   }
-  checkedRange(memory, dataPointer, Number(elementCount) * elementSize, "descriptor data");
+  if (product !== elementCount) throw new HostImportError("invalid_descriptor", "descriptor element count does not match dimensions");
+  const extent = elementCount === 0n ? 0 : Number(maximumOffset + 1n) * elementSize;
+  checkedRange(memory, dataPointer, extent, "descriptor data");
   return { pointer, flags, elementTag, elementSize, layoutId, rank, dataPointer, elementCount, dimensions, strides };
 }
 
@@ -63,21 +75,23 @@ function writeImageDescriptor(memory, allocate, outputPointer, pixels, width, he
   const dataPointer = allocate(BigInt(bytes.length), 1);
   if (dataPointer === 0) return 6;
   new Uint8Array(memory.buffer, dataPointer, bytes.length).set(bytes);
-  checkedRange(memory, outputPointer, HEADER_BYTES + 2 * AXIS_BYTES, "output descriptor");
+  checkedRange(memory, outputPointer, HEADER_BYTES + 3 * AXIS_BYTES, "output descriptor");
   const view = memoryView(memory);
   view.setUint32(outputPointer, ABI_VERSION, true);
   view.setUint32(outputPointer + 4, FLAG_MODULE_OWNED | FLAG_MUTABLE | FLAG_CONTIGUOUS, true);
   view.setUint32(outputPointer + 8, TAG_U8, true);
   view.setUint32(outputPointer + 12, 1, true);
   view.setUint32(outputPointer + 16, 0, true);
-  view.setUint32(outputPointer + 20, 2, true);
+  view.setUint32(outputPointer + 20, 3, true);
   view.setUint32(outputPointer + 24, dataPointer, true);
   view.setUint32(outputPointer + 28, 0, true);
   view.setBigUint64(outputPointer + 32, BigInt(bytes.length), true);
-  view.setBigUint64(outputPointer + 40, BigInt(height), true);
+  view.setBigUint64(outputPointer + 40, 4n, true);
   view.setBigInt64(outputPointer + 48, 1n, true);
   view.setBigUint64(outputPointer + 56, BigInt(width), true);
-  view.setBigInt64(outputPointer + 64, BigInt(height), true);
+  view.setBigInt64(outputPointer + 64, 4n, true);
+  view.setBigUint64(outputPointer + 72, BigInt(height), true);
+  view.setBigInt64(outputPointer + 80, BigInt(width * 4), true);
   return 0;
 }
 
