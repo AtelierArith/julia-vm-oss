@@ -61,6 +61,7 @@ fn emit_fill_uniform(
     body.instruction(&W::I64Const(0));
     body.instruction(&W::LocalSet(layout.memory.term));
     
+    body.instruction(&W::Block(BlockType::Empty));
     body.instruction(&W::Loop(BlockType::Empty));
     
     // Check if i >= element_count
@@ -128,6 +129,7 @@ fn emit_fill_uniform(
     
     body.instruction(&W::Br(0));
     body.instruction(&W::End);
+    body.instruction(&W::End);
     
     Ok(())
 }
@@ -180,6 +182,7 @@ fn emit_fill_normal(
     body.instruction(&W::I64Const(0));
     body.instruction(&W::LocalSet(layout.memory.term));
     
+    body.instruction(&W::Block(BlockType::Empty));
     body.instruction(&W::Loop(BlockType::Empty));
     
     // Check if i >= element_count
@@ -236,6 +239,7 @@ fn emit_fill_normal(
     body.instruction(&W::LocalSet(layout.memory.term));
     
     body.instruction(&W::Br(0));
+    body.instruction(&W::End);
     body.instruction(&W::End);
     
     Ok(())
