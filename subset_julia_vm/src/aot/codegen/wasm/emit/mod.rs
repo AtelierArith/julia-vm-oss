@@ -23,6 +23,7 @@ mod memory;
 mod ops;
 mod rng;
 mod rng_array;
+mod rng_array_fill;
 mod rng_normal;
 mod rng_seed;
 mod rng_tables;
