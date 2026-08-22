@@ -3,10 +3,11 @@ use subset_julia_vm_bytecode::rng::{randn, RngLike, Xoshiro};
 use super::support::{compile_rng_module, run_node};
 
 const ARRAY_DECODER: &str = r#"
-const array = (exports, descriptor, elementSize) => {
+const array = (exports, descriptor, elementSize, rank) => {
   const base = Number(descriptor);
   const view = new DataView(exports.memory.buffer);
   if (view.getUint32(base, true) !== 2) throw new Error('expected ABI v2 array descriptor');
+  if (view.getUint32(base + 20, true) !== rank) throw new Error('unexpected array rank');
   const dataPtr = view.getUint32(base + 24, true);
   const count = Number(view.getBigUint64(base + 32, true));
   return elementSize === 8
@@ -34,7 +35,7 @@ fn wasm_rng_array_rank_1_uniform() {
 const e = (await WebAssembly.instantiate(module, {})).exports;
 e.__sjulia_rng_seed(42n);
 const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
-const result = array(e, e.uniform_vec(), 8);
+const result = array(e, e.uniform_vec(), 8, 1);
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   values: Array.from(result, bits).join(','),
@@ -61,7 +62,7 @@ fn wasm_rng_array_rank_1_normal() {
 const e = (await WebAssembly.instantiate(module, {})).exports;
 e.__sjulia_rng_seed(42n);
 const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
-const result = array(e, e.normal_vec(), 8);
+const result = array(e, e.normal_vec(), 8, 1);
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   values: Array.from(result, bits).join(','),
@@ -89,7 +90,7 @@ fn wasm_rng_array_rank_2_uniform() {
 const e = (await WebAssembly.instantiate(module, {})).exports;
 e.__sjulia_rng_seed(42n);
 const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
-const result = array(e, e.uniform_mat(), 8);
+const result = array(e, e.uniform_mat(), 8, 2);
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   values: Array.from(result, bits).join(','),
@@ -117,7 +118,7 @@ fn wasm_rng_array_rank_2_normal() {
 const e = (await WebAssembly.instantiate(module, {})).exports;
 e.__sjulia_rng_seed(42n);
 const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
-const result = array(e, e.normal_mat(), 8);
+const result = array(e, e.normal_mat(), 8, 2);
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   values: Array.from(result, bits).join(','),
@@ -131,7 +132,7 @@ console.log(JSON.stringify({
 
 #[test]
 fn wasm_rng_array_f32_demotion() {
-    let source = "uniform32()::Vector{Float32} = rand(8)";
+    let source = "uniform32()::Vector{Float32} = rand(Float32, 8)";
     let wasm = compile_rng_module(source, &[("uniform32", vec![])]);
     let mut oracle = Xoshiro::new(42);
     let expected = (0..8)
@@ -144,7 +145,7 @@ fn wasm_rng_array_f32_demotion() {
 const e = (await WebAssembly.instantiate(module, {})).exports;
 e.__sjulia_rng_seed(42n);
 const bits = x => new Uint32Array(new Float32Array([x]).buffer)[0].toString();
-const result = array(e, e.uniform32(), 4);
+const result = array(e, e.uniform32(), 4, 1);
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   values: Array.from(result, bits).join(','),
@@ -189,13 +190,13 @@ const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString()
 e.__sjulia_rng_seed(42n);
 const scalars = Array.from({length:4}, () => {
   const s = bits(e.scalar());
-  array(e, e.vec(), 8);
+  array(e, e.vec(), 8, 1);
   return s;
 }).join(',');
 e.__sjulia_rng_seed(42n);
 const vecs = Array.from({length:4}, () => {
   e.scalar();
-  return Array.from(array(e, e.vec(), 8), bits);
+  return Array.from(array(e, e.vec(), 8, 1), bits);
 }).flat().join(',');
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
@@ -221,9 +222,9 @@ fn wasm_rng_array_reseed_determinism() {
 const e = (await WebAssembly.instantiate(module, {})).exports;
 const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
 e.__sjulia_rng_seed(42n);
-const first = Array.from(array(e, e.vec(), 8), bits).join(',');
+const first = Array.from(array(e, e.vec(), 8, 1), bits).join(',');
 e.__sjulia_rng_seed(42n);
-const reseeded = Array.from(array(e, e.vec(), 8), bits).join(',');
+const reseeded = Array.from(array(e, e.vec(), 8, 1), bits).join(',');
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   first,
@@ -254,8 +255,8 @@ const e2 = (await WebAssembly.instantiate(module, {})).exports;
 const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0].toString();
 e1.__sjulia_rng_seed(42n);
 e2.__sjulia_rng_seed(43n);
-const vec1 = Array.from(array(e1, e1.vec(), 8), bits).join(',');
-const vec2 = Array.from(array(e2, e2.vec(), 8), bits).join(',');
+const vec1 = Array.from(array(e1, e1.vec(), 8, 1), bits).join(',');
+const vec2 = Array.from(array(e2, e2.vec(), 8, 1), bits).join(',');
 console.log(JSON.stringify({
   imports: WebAssembly.Module.imports(module).length,
   vec1,
