@@ -74,6 +74,39 @@ const omittedOptions = compiler.compile_to_wasm("forty_two() = 42", undefined);
 assert.equal(omittedOptions.success, true, JSON.stringify(omittedOptions.diagnostics));
 assert.ok(omittedOptions.wasm_bytes instanceof Uint8Array);
 
+const script = compiler.compile_to_wasm(
+  `load(path::String)::Array{UInt8,3} = Array{UInt8,3}(undef, 0, 0, 0)
+image = load("inputs/input.png")`,
+  {
+    entry_mode: "script",
+    imports: [
+      {
+        module: "sjulia_host",
+        name: "load",
+        function_name: "load",
+        params: ["String"],
+        result: "Array{UInt8,3}",
+      },
+    ],
+  },
+);
+assert.equal(script.success, true, JSON.stringify(script.diagnostics));
+assert.equal(script.entry_point, "__sjulia_script_entry");
+assert.deepEqual(script.imports, [
+  {
+    module: "sjulia_host",
+    name: "load",
+    function_name: "load",
+    params: ["String"],
+    result: "Array{UInt8, 3}",
+  },
+]);
+const scriptModule = await WebAssembly.compile(script.wasm_bytes);
+assert.deepEqual(WebAssembly.Module.imports(scriptModule), [
+  { module: "sjulia_host", name: "load", kind: "function" },
+]);
+assert.ok(WebAssembly.Module.exports(scriptModule).some(({ name }) => name === script.entry_point));
+
 const repeatedArithmetic = compile(
   "add_scale(x::Int64, y::Int64) = (x + y) * 2",
   "public_add_scale",

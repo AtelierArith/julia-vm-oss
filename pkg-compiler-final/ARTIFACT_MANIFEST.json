@@ -2,7 +2,7 @@
   "package": "subset_julia_vm_web",
   "package_version": "0.11.1",
   "compiler_abi_version": 2,
-  "source_commit": "d55a2385154abf486a47a77ffd678487fb27e015",
+  "source_commit": "4088a5707c1003e56efe980461e15cdc73d82ae5",
   "source_root": "subset-julia-wasm-compiler",
   "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
   "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
@@ -22,12 +22,12 @@
       "sha256": "47b5866d0c42b7159d89cdd5ced7bb47e59770ae3ffb20ffa8ff3699a35d99f9"
     },
     "subset_julia_vm_web.d.ts": {
-      "bytes": 8520,
-      "sha256": "582b81fb745e6dbec725fd4fb34552f41f2a8c73c192ace348d1835585a86ec1"
+      "bytes": 8577,
+      "sha256": "9220325bc45460d9d15d23c566deac76d3e3390c7d842659af8b84825f4da419"
     },
     "subset_julia_vm_web_bg.wasm": {
-      "bytes": 26810214,
-      "sha256": "09f4df97b61de54132a1160c8764300fa6a96329f3e9c6df1a820ef71f1e47b3"
+      "bytes": 26811077,
+      "sha256": "9b62533a7854884ed35c783b909d67d7cf7924d185aa5a62c1af6eb4ee0f9cb3"
     },
     "subset_julia_vm_web_bg.wasm.d.ts": {
       "bytes": 1868,
