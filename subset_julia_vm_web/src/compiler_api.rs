@@ -276,4 +276,31 @@ impl CompileOptions {
             ..Self::default()
         }
     }
+
+    pub fn for_test_image_script() -> Self {
+        Self {
+            entry_mode: Some("script".to_string()),
+            imports: vec![
+                CompileImport {
+                    module: "sjulia_host".to_string(),
+                    name: "load".to_string(),
+                    function_name: "__sjulia_host_load".to_string(),
+                    params: vec![
+                        "String".to_string(),
+                        "Int64".to_string(),
+                        "Int64".to_string(),
+                    ],
+                    result: Some("Int64".to_string()),
+                },
+                CompileImport {
+                    module: "sjulia_host".to_string(),
+                    name: "save".to_string(),
+                    function_name: "__sjulia_host_save".to_string(),
+                    params: vec!["String".to_string(), "Int64".to_string()],
+                    result: Some("Int64".to_string()),
+                },
+            ],
+            ..Self::default()
+        }
+    }
 }

@@ -58,6 +58,37 @@ test("save validates and forwards the descriptor", () => {
   assert.equal(imports.sjulia_host.save(64, path.length, descriptor), 0);
 });
 
+test("typed load and save use String views, Int64 pointers, and Int64 statuses", () => {
+  const { memory, allocate } = fixture();
+  const path = new TextEncoder().encode("inputs/image.png");
+  const pathData = allocate(BigInt(path.length), 1);
+  new Uint8Array(memory.buffer, pathData, path.length).set(path);
+  const pathView = allocate(8n, 4);
+  const view = new DataView(memory.buffer);
+  view.setUint32(pathView, pathData, true);
+  view.setUint32(pathView + 4, path.length, true);
+  let saved;
+  const imports = createSokarisHostImports({
+    memory,
+    allocate,
+    loadImage: (value) => {
+      assert.equal(value, "inputs/image.png");
+      return { width: 1, height: 1, pixels: [1, 2, 3, 4] };
+    },
+    saveImage: (value, image) => {
+      saved = { value, image };
+    },
+    renderText: () => ({ width: 1, height: 1, pixels: [0, 0, 0, 0] }),
+  });
+
+  const descriptor = allocate(88n, 8);
+  assert.equal(imports.sjulia_host.load(pathView, 0n, BigInt(descriptor)), 0n);
+  assert.equal(readDescriptor(memory, descriptor).elementCount, 4n);
+  assert.equal(imports.sjulia_host.save(pathView, BigInt(descriptor)), 0n);
+  assert.equal(saved.value, "inputs/image.png");
+  assert.equal(saved.image.pointer, descriptor);
+});
+
 test("text overlay maps renderer output and failures to stable statuses", () => {
   const { memory, allocate } = fixture();
   const source = new TextEncoder().encode("hello");

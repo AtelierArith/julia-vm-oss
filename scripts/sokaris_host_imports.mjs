@@ -33,6 +33,12 @@ function readUtf8(memory, pointer, length) {
   return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(memory.buffer, pointer, length));
 }
 
+function readStringView(memory, pointer) {
+  checkedRange(memory, pointer, 8, "String view");
+  const view = memoryView(memory);
+  return readUtf8(memory, view.getUint32(pointer, true), view.getUint32(pointer + 4, true));
+}
+
 export function readDescriptor(memory, pointer) {
   checkedRange(memory, pointer, HEADER_BYTES, "descriptor");
   if (pointer === 0 || pointer % 8 !== 0) throw new HostImportError("invalid_descriptor", "descriptor must be nonzero and 8-byte aligned");
@@ -108,6 +114,17 @@ export function createSokarisHostImports({ memory, allocate, loadImage, saveImag
   return {
     sjulia_host: {
       load(pathPointer, pathLength, _layoutId, outputPointer) {
+        if (arguments.length === 3) {
+          try {
+            const image = loadImage(readStringView(memory, pathPointer));
+            return BigInt(writeImageDescriptor(memory, allocate, Number(_layoutId), image.pixels, image.width, image.height));
+          } catch (error) {
+            if (error?.code === "ENOENT") return 2n;
+            if (error?.code === "EACCES") return 3n;
+            if (error instanceof TypeError) return 4n;
+            return BigInt(error instanceof HostImportError ? 1 : 5);
+          }
+        }
         try {
           const image = loadImage(readUtf8(memory, pathPointer, pathLength));
           return writeImageDescriptor(memory, allocate, outputPointer, image.pixels, image.width, image.height);
@@ -119,6 +136,13 @@ export function createSokarisHostImports({ memory, allocate, loadImage, saveImag
         }
       },
       save(pathPointer, pathLength, imagePointer) {
+        if (arguments.length === 2) {
+          return BigInt(
+            status(() =>
+              saveImage(readStringView(memory, pathPointer), readDescriptor(memory, Number(pathLength))),
+            ),
+          );
+        }
         return status(() => saveImage(readUtf8(memory, pathPointer, pathLength), readDescriptor(memory, imagePointer)));
       },
       text_overlay(pathPointer, pathLength, height, width, outputPointer) {
