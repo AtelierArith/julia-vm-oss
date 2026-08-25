@@ -1548,7 +1548,7 @@ impl<'a> IrConverter<'a> {
                     .env
                     .get(name.as_str())
                     .cloned()
-                    .unwrap_or_else(|| self.engine.lookup_global_or_const(name));
+                    .unwrap_or_else(|| self.engine.infer_expr_type(expr));
                 Ok(AotExpr::Var {
                     name: name.to_string(),
                     ty,
