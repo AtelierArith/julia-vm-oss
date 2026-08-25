@@ -8,7 +8,9 @@ use serde::Deserialize;
 use subset_julia_vm::aot::codegen::CAbiExport;
 use subset_julia_vm::aot::optimizer::OptLevel;
 use subset_julia_vm::aot::types::StaticType;
-use subset_julia_vm::aot::{compile_wasm_source, AotBackend, CompileConfig, WasmImport};
+use subset_julia_vm::aot::{
+    compile_wasm_source, AotBackend, CompileConfig, WasmImport, SCRIPT_ENTRY_NAME,
+};
 use wasm_bindgen::prelude::*;
 
 pub const MAX_SOURCE_BYTES: usize = 1_048_576;
@@ -18,6 +20,7 @@ const MAX_MODULE_BYTES: usize = 16_777_216;
 pub struct CompileOptions {
     source_name: Option<String>,
     opt_level: Option<u8>,
+    entry_mode: Option<String>,
     #[serde(default)]
     exports: Vec<CompileExport>,
     #[serde(default)]
@@ -49,9 +52,9 @@ export interface CompilerDiagnostic { code: string; kind: string; message: strin
 export interface CompileExport { export_name: string; function_name: string; arg_types?: string[]; }
 export interface CompileImport { module: string; name: string; function_name: string; params?: string[]; result?: string; }
 export interface ResolvedWasmImport { module: string; name: string; function_name: string; params: string[]; result?: string; }
-export interface CompileOptions { source_name?: string; opt_level?: 0 | 1 | 2 | 3; exports?: CompileExport[]; imports?: CompileImport[]; }
+export interface CompileOptions { source_name?: string; opt_level?: 0 | 1 | 2 | 3; entry_mode?: "exports" | "script"; exports?: CompileExport[]; imports?: CompileImport[]; }
 export interface PhaseTimings { source_parse_lower_ms: number; dead_code_elimination_ms: number; type_inference_ms: number; ir_conversion_ms: number; optimization_ms: number; wasm_ir_lowering_ms: number; wasm_codegen_ms: number; total_ms: number; }
-export interface CompileToWasmResult { success: boolean; wasm_bytes: Uint8Array; diagnostics: CompilerDiagnostic[]; compiler_version: string; abi_version: number; imports: ResolvedWasmImport[]; phase_timings: PhaseTimings; }
+export interface CompileToWasmResult { success: boolean; wasm_bytes: Uint8Array; diagnostics: CompilerDiagnostic[]; compiler_version: string; abi_version: number; entry_point?: string; imports: ResolvedWasmImport[]; phase_timings: PhaseTimings; }
 export function compile_to_wasm(source: string, options?: CompileOptions): CompileToWasmResult;
 "#;
 
@@ -80,7 +83,7 @@ pub fn compile_to_wasm_internal(source: &str, options: CompileOptions) -> Compil
             ),
         );
     }
-    let config = match compile_config(options) {
+    let (config, entry_point) = match compile_config(options) {
         Ok(config) => config,
         Err(diagnostic) => return failure_with(diagnostic),
     };
@@ -106,6 +109,7 @@ pub fn compile_to_wasm_internal(source: &str, options: CompileOptions) -> Compil
             diagnostics: Vec::new(),
             compiler_version: result::COMPILER_VERSION,
             abi_version: result::WASM_ABI_VERSION,
+            entry_point,
             imports,
             phase_timings: PhaseTimings::from_raw(&output.timings),
         },
@@ -121,7 +125,9 @@ pub fn compile_to_wasm_internal(source: &str, options: CompileOptions) -> Compil
     }
 }
 
-fn compile_config(options: CompileOptions) -> Result<CompileConfig, CompilerDiagnostic> {
+fn compile_config(
+    options: CompileOptions,
+) -> Result<(CompileConfig, Option<String>), CompilerDiagnostic> {
     let opt_level = match options.opt_level.unwrap_or(2) {
         0 => OptLevel::O0,
         1 => OptLevel::O1,
@@ -194,7 +200,18 @@ fn compile_config(options: CompileOptions) -> Result<CompileConfig, CompilerDiag
             result,
         });
     }
-    Ok(CompileConfig {
+    let entry_point = match options.entry_mode.as_deref().unwrap_or("exports") {
+        "exports" => None,
+        "script" => Some(SCRIPT_ENTRY_NAME.to_string()),
+        value => {
+            return Err(diagnostic(
+                "invalid_entry_mode",
+                "options",
+                format!("invalid entry mode {value}; expected exports or script"),
+            ))
+        }
+    };
+    let mut config = CompileConfig {
         source_name: options
             .source_name
             .unwrap_or_else(|| "<browser>".to_string()),
@@ -203,7 +220,11 @@ fn compile_config(options: CompileOptions) -> Result<CompileConfig, CompilerDiag
         c_abi_exports: exports,
         wasm_imports: imports,
         ..CompileConfig::default()
-    })
+    };
+    if entry_point.is_some() {
+        config.enable_script_entry();
+    }
+    Ok((config, entry_point))
 }
 
 fn serialize_result(result: CompileToWasmResult) -> JsValue {
@@ -239,6 +260,20 @@ impl CompileOptions {
                 result: result.map(str::to_string),
             }],
             ..Self::for_test_export("answer", &["Int64"])
+        }
+    }
+
+    pub fn for_test_script() -> Self {
+        Self {
+            entry_mode: Some("script".to_string()),
+            ..Self::default()
+        }
+    }
+
+    pub fn for_test_entry_mode(entry_mode: &str) -> Self {
+        Self {
+            entry_mode: Some(entry_mode.to_string()),
+            ..Self::default()
         }
     }
 }

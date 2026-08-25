@@ -123,3 +123,38 @@ answer(value::Int64)::Int64 = host_scale(value) + 2
     assert_eq!(result.imports[0].params, ["Int64"]);
     assert_eq!(result.imports[0].result.as_deref(), Some("Int64"));
 }
+
+#[test]
+fn compile_to_wasm_exposes_script_entry_metadata_issue_2() {
+    let result =
+        compile_to_wasm_internal("x = 40\ny = 2\nx + y\n", CompileOptions::for_test_script());
+
+    assert!(
+        result.success,
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.entry_point.as_deref(), Some("__sjulia_script_entry"));
+}
+
+#[test]
+fn compile_to_wasm_preserves_exports_mode_by_default_issue_2() {
+    let result = compile_to_wasm_internal(
+        "answer()::Int64 = 42",
+        CompileOptions::for_test_export("answer", &[]),
+    );
+
+    assert!(result.success);
+    assert_eq!(result.entry_point, None);
+}
+
+#[test]
+fn compile_to_wasm_rejects_invalid_entry_mode_issue_2() {
+    let result = compile_to_wasm_internal(
+        "x = 42",
+        CompileOptions::for_test_entry_mode("rewritten-main"),
+    );
+
+    assert!(!result.success);
+    assert_eq!(result.diagnostics[0].code, "invalid_entry_mode");
+}

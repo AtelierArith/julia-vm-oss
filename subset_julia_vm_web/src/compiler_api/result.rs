@@ -44,6 +44,7 @@ pub struct CompileToWasmResult {
     pub diagnostics: Vec<CompilerDiagnostic>,
     pub compiler_version: &'static str,
     pub abi_version: i32,
+    pub entry_point: Option<String>,
     pub imports: Vec<ResolvedWasmImport>,
     pub phase_timings: PhaseTimings,
 }
@@ -109,6 +110,7 @@ pub fn failure_with(diagnostic: CompilerDiagnostic) -> CompileToWasmResult {
         diagnostics: vec![diagnostic],
         compiler_version: COMPILER_VERSION,
         abi_version: WASM_ABI_VERSION,
+        entry_point: None,
         imports: Vec::new(),
         phase_timings: PhaseTimings::default(),
     }
