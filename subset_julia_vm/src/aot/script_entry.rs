@@ -32,6 +32,28 @@ fn module_contains_function(module: &Module, name: &str) -> bool {
             .any(|submodule| module_contains_function(submodule, name))
 }
 
+fn executable_script_statement(statement: Stmt) -> Option<Stmt> {
+    match statement {
+        Stmt::FunctionDef { .. }
+        | Stmt::EvalFunctionDef { .. }
+        | Stmt::Using { .. }
+        | Stmt::Export { .. }
+        | Stmt::Expr {
+            expr: crate::ir::core::Expr::Literal(crate::ir::core::Literal::Nothing, _),
+            ..
+        } => None,
+        Stmt::Block(mut block) => {
+            block.stmts = block
+                .stmts
+                .into_iter()
+                .filter_map(executable_script_statement)
+                .collect();
+            (!block.stmts.is_empty()).then_some(Stmt::Block(block))
+        }
+        other => Some(other),
+    }
+}
+
 pub(super) fn lift_script_entry(program: &mut Program) -> AotResult<()> {
     let reserved_name_exists = program
         .functions
@@ -48,7 +70,10 @@ pub(super) fn lift_script_entry(program: &mut Program) -> AotResult<()> {
     }
 
     let span = program.main.span;
-    let mut statements = std::mem::take(&mut program.main.stmts);
+    let mut statements: Vec<_> = std::mem::take(&mut program.main.stmts)
+        .into_iter()
+        .filter_map(executable_script_statement)
+        .collect();
     statements.push(Stmt::Return { value: None, span });
     program.functions.push(Arc::new(Function {
         name: SCRIPT_ENTRY_NAME.to_string(),

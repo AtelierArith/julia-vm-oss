@@ -16,20 +16,31 @@ use crate::aot::ir::{
     AotExpr, AotFunction, AotProgram, AotStmt, BasicBlock, IrFunction, IrModule, Terminator, VarRef,
 };
 use crate::aot::types::StaticType;
-use crate::aot::{AotError, AotResult};
+use crate::aot::{AotError, AotResult, WasmImport};
 
 use super::layout::LayoutRegistry;
 use super::types::unsupported;
 use ops::{ensure_return_type, ensure_type};
 
-pub(super) fn lower_program(program: &AotProgram) -> AotResult<IrModule> {
+pub(super) fn lower_program(program: &AotProgram, imports: &[WasmImport]) -> AotResult<IrModule> {
     if !program.globals.is_empty() || !program.enums.is_empty() {
         return Err(unsupported("Wasm AoT does not support globals or enums"));
     }
     let mut layouts = LayoutRegistry::collect(program)?;
     let mut module = IrModule::new("subset_julia_wasm".to_string());
     for function in &program.functions {
-        module.add_function(Lowerer::new(function, &mut layouts).lower()?);
+        if imports
+            .iter()
+            .any(|import| import.function_name == function.name)
+        {
+            module.add_function(IrFunction::new(
+                function.name.clone(),
+                function.params.clone(),
+                function.return_type.clone(),
+            ));
+        } else {
+            module.add_function(Lowerer::new(function, &mut layouts).lower()?);
+        }
     }
     if !program.main.is_empty() {
         let main = AotFunction {
@@ -191,7 +202,9 @@ impl<'source, 'layouts> Lowerer<'source, 'layouts> {
 #[cfg(test)]
 mod tests {
     use super::lower_program;
-    use crate::aot::ir::{AotExpr, AotFunction, AotProgram, AotStmt, Terminator};
+    use crate::aot::ir::{
+        AotExpr, AotFunction, AotInlinePolicy, AotProgram, AotStmt, Instruction, Terminator,
+    };
     use crate::aot::types::StaticType;
     use crate::aot::AotError;
 
@@ -206,7 +219,7 @@ mod tests {
         program.add_function(function);
 
         // When: Wasm lowering builds backend-neutral control flow.
-        let module = lower_program(&program).expect("retained carrier should lower");
+        let module = lower_program(&program, &[]).expect("retained carrier should lower");
 
         // Then: the open block returns its value rather than jumping to itself.
         assert!(matches!(
@@ -223,9 +236,29 @@ mod tests {
         program.add_function(function);
 
         // When: Wasm lowering reaches the open typed block.
-        let error = lower_program(&program).expect_err("ambiguous return must fail");
+        let error = lower_program(&program, &[]).expect_err("ambiguous return must fail");
 
         // Then: lowering returns the typed unsupported boundary.
         assert!(matches!(error, AotError::UnsupportedInstruction(_)));
+    }
+
+    #[test]
+    fn nothing_returning_call_lowers_for_effect_issue_5() {
+        let mut function = AotFunction::new("entry".to_string(), Vec::new(), StaticType::Nothing);
+        function.body.push(AotStmt::Expr(AotExpr::CallStatic {
+            function: "save".to_string(),
+            args: Vec::new(),
+            return_ty: StaticType::Nothing,
+            inline_policy: AotInlinePolicy::Auto,
+        }));
+        let mut program = AotProgram::new();
+        program.add_function(function);
+
+        let module = lower_program(&program, &[]).expect("effect call should lower");
+
+        assert!(matches!(
+            module.functions[0].blocks[0].instructions.first(),
+            Some(Instruction::Call { dest: None, func, .. }) if func == "save"
+        ));
     }
 }

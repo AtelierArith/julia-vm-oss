@@ -87,6 +87,23 @@ impl Lowerer<'_, '_> {
             } => Err(unsupported(
                 "Wasm tuple and isbits-struct values are immutable",
             )),
+            AotStmt::Expr(AotExpr::CallStatic {
+                function: callee,
+                args,
+                return_ty: StaticType::Nothing,
+                ..
+            }) => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr(arg, function))
+                    .collect::<AotResult<Vec<_>>>()?;
+                self.current_block_mut(function)?.push(Instruction::Call {
+                    dest: None,
+                    func: callee.clone(),
+                    args,
+                });
+                Ok(())
+            }
             AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => {
                 self.expr(expr, function).map(|_| ())
             }

@@ -479,10 +479,12 @@ fn prepare_aot_program(
     // Type inference
     let t = AotTimer::start();
     let mut type_engine = TypeInferenceEngine::new();
-    let typed_program = type_engine.analyze_program(&program)?;
+    let mut typed_program = type_engine.analyze_program(&program)?;
     stats.functions_compiled = program.functions.len();
     stats.type_inferences = typed_program.function_count();
     timings.push(("type-inference", t.elapsed()));
+
+    apply_wasm_import_declarations(&mut program, &mut typed_program, &config.wasm_imports)?;
 
     // Convert Core IR to AoT IR
     let t = AotTimer::start();
@@ -526,6 +528,77 @@ fn prepare_aot_program(
         dynamic_count,
         dynamic_diagnostics,
     })
+}
+
+fn apply_wasm_import_declarations(
+    program: &mut crate::ir::core::Program,
+    typed: &mut inference::TypedProgram,
+    imports: &[WasmImport],
+) -> AotResult<()> {
+    for import in imports {
+        let matches: Vec<_> = program
+            .functions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, function)| {
+                (function.name == import.function_name).then_some(index)
+            })
+            .collect();
+        let [index] = matches.as_slice() else {
+            return Err(AotError::UnsupportedInstruction(
+                UnsupportedInstructionDiagnostic::new(format!(
+                    "Wasm import `{}.{}` must resolve to exactly one top-level function `{}`; found {}",
+                    import.module,
+                    import.name,
+                    import.function_name,
+                    matches.len()
+                )),
+            ));
+        };
+        let typed_functions = typed
+            .functions
+            .get_mut(&import.function_name)
+            .ok_or_else(|| {
+                AotError::InternalError(format!(
+                    "missing inferred signature for Wasm import `{}`",
+                    import.function_name
+                ))
+            })?;
+        let [typed_function] = typed_functions.as_mut_slice() else {
+            return Err(AotError::UnsupportedInstruction(
+                UnsupportedInstructionDiagnostic::new(format!(
+                    "Wasm import `{}.{}` requires one inferred signature for `{}`; found {}",
+                    import.module,
+                    import.name,
+                    import.function_name,
+                    typed_functions.len()
+                )),
+            ));
+        };
+        if typed_function.signature.param_names.len() != import.params.len() {
+            return Err(AotError::UnsupportedInstruction(
+                UnsupportedInstructionDiagnostic::new(format!(
+                    "Wasm import `{}.{}` parameter count does not match `{}`",
+                    import.module, import.name, import.function_name
+                )),
+            ));
+        }
+        typed_function.signature = inference::FunctionSignature::new(
+            import.function_name.clone(),
+            typed_function.signature.param_names.clone(),
+            import.params.clone(),
+            import.result.clone().unwrap_or(types::StaticType::Nothing),
+        );
+        let function = std::sync::Arc::make_mut(&mut program.functions[*index]);
+        function.body.stmts = vec![crate::ir::core::Stmt::Meta {
+            annotation: crate::ir::core::MetaAnnotation {
+                name: "noinline".to_string(),
+                args: Vec::new(),
+            },
+            span: function.span,
+        }];
+    }
+    Ok(())
 }
 
 fn codegen_config_from_compile_config(config: &CompileConfig) -> codegen::CodegenConfig {
@@ -576,7 +649,8 @@ pub fn compile_wasm(
         &prepared.aot_program,
     )?;
     let started = AotTimer::start();
-    let module = codegen::wasm::lower_program(&prepared.aot_program)?;
+    let module =
+        codegen::wasm::lower_program_with_imports(&prepared.aot_program, &config.wasm_imports)?;
     prepared
         .timings
         .push(("wasm-ir-lowering", started.elapsed()));
@@ -2954,6 +3028,46 @@ mod tests {
             .wasm_bytes
             .windows(SCRIPT_ENTRY_NAME.len())
             .any(|window| window == SCRIPT_ENTRY_NAME.as_bytes()));
+    }
+
+    #[cfg(feature = "aot-wasm")]
+    #[test]
+    fn imported_array_call_survives_aot_conversion_issue_5() {
+        let source = r#"
+load(path::String)::Array{UInt8,3} = Array{UInt8,3}(undef, 0, 0, 0)
+image = load("inputs/input.png")
+"#;
+        let program = crate::pipeline::parse_source(source).expect("source should lower");
+        let mut config = CompileConfig {
+            backend: AotBackend::Wasm,
+            wasm_imports: vec![WasmImport {
+                module: "sjulia_host".to_string(),
+                name: "load".to_string(),
+                function_name: "load".to_string(),
+                params: vec![types::StaticType::Str],
+                result: Some(types::StaticType::Array {
+                    element: Box::new(types::StaticType::U8),
+                    ndims: Some(3),
+                }),
+            }],
+            ..CompileConfig::default()
+        };
+        config.enable_script_entry();
+
+        let prepared = prepare_aot_program(program, &config).expect("AoT preparation should pass");
+        let entry = prepared
+            .aot_program
+            .functions
+            .iter()
+            .find(|function| function.name == SCRIPT_ENTRY_NAME)
+            .expect("script entry should exist");
+
+        assert!(
+            !format!("{:?}", entry.body).contains("LitNothing"),
+            "script entry contains a placeholder: {:?}",
+            entry.body
+        );
+        assert!(format!("{:?}", entry.body).contains("CallStatic"));
     }
 
     #[cfg(not(feature = "cranelift"))]

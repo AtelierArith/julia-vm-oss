@@ -162,10 +162,8 @@ fn compile_to_wasm_rejects_invalid_entry_mode_issue_2() {
 #[test]
 fn compile_to_wasm_script_resolves_typed_image_host_imports() {
     let source = r#"
-__sjulia_host_load(path::String, layout::Int64, output::Int64)::Int64 = 0
-__sjulia_host_save(path::String, image::Int64)::Int64 = 0
-load_status = __sjulia_host_load("inputs/input.png", 0, 0)
-save_status = __sjulia_host_save("output.png", 0)
+load(path::String)::Array{UInt8,3} = Array{UInt8,3}(undef, 0, 0, 0)
+image = load("inputs/input.png")
 "#;
     let result = compile_to_wasm_internal(source, CompileOptions::for_test_image_script());
 
@@ -175,11 +173,8 @@ save_status = __sjulia_host_save("output.png", 0)
         result.diagnostics
     );
     assert_eq!(result.entry_point.as_deref(), Some("__sjulia_script_entry"));
-    assert_eq!(result.imports.len(), 2);
-    assert_eq!(result.imports[0].function_name, "__sjulia_host_load");
-    assert_eq!(result.imports[0].params, ["String", "Int64", "Int64"]);
-    assert_eq!(result.imports[0].result.as_deref(), Some("Int64"));
-    assert_eq!(result.imports[1].function_name, "__sjulia_host_save");
-    assert_eq!(result.imports[1].params, ["String", "Int64"]);
-    assert_eq!(result.imports[1].result.as_deref(), Some("Int64"));
+    assert_eq!(result.imports.len(), 1);
+    assert_eq!(result.imports[0].function_name, "load");
+    assert_eq!(result.imports[0].params, ["String"]);
+    assert_eq!(result.imports[0].result.as_deref(), Some("Array{UInt8, 3}"));
 }
