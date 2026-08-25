@@ -13,6 +13,7 @@ use subset_julia_vm::aot::call_graph::CallGraph;
 use subset_julia_vm::aot::codegen::aot_codegen::AotCodeGenerator;
 use subset_julia_vm::aot::codegen::{CAbiExport, CodegenConfig};
 use subset_julia_vm::aot::inference::TypeInferenceEngine;
+use subset_julia_vm::aot::ir::AotStmt;
 use subset_julia_vm::aot::optimizer::optimize_aot_program_full;
 use subset_julia_vm::aot::types::StaticType;
 use subset_julia_vm::aot::{compile_program, CompileConfig};
@@ -2353,6 +2354,52 @@ f()
         ),
         "mapreduce should map then reduce with the operator: {rust_code}"
     );
+}
+
+#[test]
+fn issue_3_generic_hof_specializes_each_named_callable() {
+    // Given: one generic wrapper is called with two named functions sharing an ABI.
+    let source = r#"
+increment(x::Int64)::Int64 = x + 1
+double(x::Int64)::Int64 = x * 2
+identity_image(x::Array{UInt8,3})::Array{UInt8,3} = x
+apply(x, f) = f(x)
+apply_image(x, f)::Array{UInt8,3} = f(x)
+
+incremented = apply(3, increment)
+doubled = apply(3, double)
+image = zeros(UInt8, 1, 1, 1)
+output = apply_image(image, identity_image)
+println(incremented)
+println(doubled)
+println(length(output))
+"#;
+
+    // When: the canonical AoT pipeline compiles and runs the program.
+    let program = lower_for_aot(source).expect("generic HOF source should lower");
+    let mut type_engine = TypeInferenceEngine::new();
+    let typed_program = type_engine
+        .analyze_program(&program)
+        .expect("generic HOF source should infer");
+    let mut aot_program =
+        program_to_aot_ir(&program, &typed_program).expect("generic HOF should convert to AoT IR");
+    optimize_aot_program_full(&mut aot_program);
+    let output = aot_program
+        .main
+        .iter()
+        .find(|statement| matches!(statement, AotStmt::Let { name, .. } if name == "output"))
+        .expect("optimized output binding should remain");
+    assert!(
+        matches!(output, AotStmt::Let { value, .. } if matches!(value.get_type(), StaticType::Array { element, ndims: Some(3) } if matches!(element.as_ref(), StaticType::U8))),
+        "optimized output should retain Array{{UInt8,3}}: {output:?}"
+    );
+    let mut codegen = AotCodeGenerator::new(CodegenConfig::default());
+    let rust_code = codegen
+        .generate_program(&aot_program)
+        .expect("generic HOF should compile per named target");
+
+    // Then: each call site retains its own named callable identity.
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_generic_named_hof_issue_3", "4\n6\n1");
 }
 
 #[test]

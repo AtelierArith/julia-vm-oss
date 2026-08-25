@@ -53,6 +53,7 @@ pub struct AotInliner {
     var_counter: usize,
     /// Functions that have been analyzed
     inline_candidates: HashMap<String, InlineCandidate>,
+    specialized_boxed_returns: HashSet<String>,
 }
 
 impl AotInliner {
@@ -62,6 +63,7 @@ impl AotInliner {
             max_inline_size,
             var_counter: 0,
             inline_candidates: HashMap::new(),
+            specialized_boxed_returns: HashSet::new(),
         }
     }
 
@@ -150,13 +152,38 @@ impl AotInliner {
 
         // Inline in functions
         for func in &mut program.functions {
-            let inlined = self.inline_calls_in_stmts(&mut func.body, &function_bodies, 0);
+            let mut caller_functions = function_bodies.clone();
+            caller_functions.remove(&func.name);
+            let inlined = self.inline_calls_in_stmts(&mut func.body, &caller_functions, 0);
             total_inlined += inlined;
         }
 
         // Inline in main block
         let inlined = self.inline_calls_in_stmts(&mut program.main, &function_bodies, 0);
         total_inlined += inlined;
+
+        let specialized = self.specialized_boxed_returns.clone();
+        let optimized_functions = program.functions.clone();
+        let remaining_specialized_refs = specialized
+            .iter()
+            .filter(|target| {
+                program.main.iter().any(|stmt| {
+                    Self::stmt_calls_function(target, stmt, &AotProgram::new(), &mut HashSet::new())
+                }) || optimized_functions.iter().any(|caller| {
+                    &caller.name != *target
+                        && Self::calls_function(
+                            target,
+                            &caller.body,
+                            &AotProgram::new(),
+                            &mut HashSet::new(),
+                        )
+                })
+            })
+            .cloned()
+            .collect::<HashSet<_>>();
+        program.functions.retain(|func| {
+            !specialized.contains(&func.name) || remaining_specialized_refs.contains(&func.name)
+        });
 
         total_inlined
     }
@@ -671,9 +698,14 @@ impl AotInliner {
                     self.try_inline_expr(value, functions, depth)
                 {
                     let mut stmts = inlined_stmts;
+                    let result_ty = result_expr.get_type();
                     stmts.push(AotStmt::Let {
                         name: name.clone(),
-                        ty: ty.clone(),
+                        ty: if matches!(ty, StaticType::Any) {
+                            result_ty
+                        } else {
+                            ty.clone()
+                        },
                         value: result_expr,
                         is_mutable: *is_mutable,
                     });
@@ -747,22 +779,46 @@ impl AotInliner {
         } = expr
         {
             // Check if this function should be inlined
-            if let Some(candidate) = self.inline_candidates.get(function) {
+            if let Some(candidate) = self.inline_candidates.get(function).cloned() {
                 let should_inline = match inline_policy {
                     AotInlinePolicy::Never => false,
                     AotInlinePolicy::Always => {
-                        !candidate.is_recursive && !candidate.return_needs_value
+                        !candidate.is_recursive
+                            && (!candidate.return_needs_value
+                                || functions.get(function).is_some_and(|func| {
+                                    Self::boxed_return_is_callable_specializable(func, args)
+                                }))
                     }
-                    AotInlinePolicy::Auto => candidate.should_inline(self.max_inline_size),
+                    AotInlinePolicy::Auto => {
+                        candidate.should_inline(self.max_inline_size)
+                            || (candidate.return_needs_value
+                                && !candidate.is_recursive
+                                && candidate.size <= self.max_inline_size
+                                && candidate.score > 0
+                                && functions.get(function).is_some_and(|func| {
+                                    Self::boxed_return_is_callable_specializable(func, args)
+                                }))
+                    }
                 };
                 if should_inline {
                     if let Some(func) = functions.get(function) {
-                        return self.inline_function_call(func, args, return_ty, depth);
+                        let inlined = self.inline_function_call(func, args, return_ty, depth);
+                        if inlined.is_some() && candidate.return_needs_value {
+                            self.specialized_boxed_returns.insert(function.clone());
+                        }
+                        return inlined;
                     }
                 }
             }
         }
         None
+    }
+
+    fn boxed_return_is_callable_specializable(func: &AotFunction, args: &[AotExpr]) -> bool {
+        func.params.iter().zip(args).any(|((_, param_ty), arg)| {
+            matches!(param_ty, StaticType::Any)
+                && matches!(arg.get_type(), StaticType::Function { .. })
+        })
     }
 
     /// Inline a function call
@@ -778,25 +834,39 @@ impl AotInliner {
         self.var_counter += 1;
 
         let mut stmts = Vec::new();
+        let specialized_types = func
+            .params
+            .iter()
+            .zip(args)
+            .map(|((name, _), arg)| (name.clone(), arg.get_type()))
+            .collect::<HashMap<_, _>>();
 
         // Create bindings for parameters
         for ((param_name, param_ty), arg) in func.params.iter().zip(args.iter()) {
+            if matches!(arg.get_type(), StaticType::Function { .. }) {
+                continue;
+            }
             let new_name = format!("{}{}", prefix, param_name);
             // Check if we need to convert the argument type to match the parameter type
             let arg_ty = arg.get_type();
+            let binding_ty = if matches!(param_ty, StaticType::Any) {
+                arg_ty.clone()
+            } else {
+                param_ty.clone()
+            };
             let converted_arg =
-                if arg_ty != *param_ty && Self::needs_type_conversion(&arg_ty, param_ty) {
+                if arg_ty != binding_ty && Self::needs_type_conversion(&arg_ty, &binding_ty) {
                     // Wrap in Convert expression to handle type promotion
                     AotExpr::Convert {
                         value: Box::new(arg.clone()),
-                        target_ty: param_ty.clone(),
+                        target_ty: binding_ty.clone(),
                     }
                 } else {
                     arg.clone()
                 };
             stmts.push(AotStmt::Let {
                 name: new_name,
-                ty: param_ty.clone(),
+                ty: binding_ty,
                 value: converted_arg,
                 is_mutable: false,
             });
@@ -806,7 +876,17 @@ impl AotInliner {
         let mut rename_map: HashMap<String, String> = func
             .params
             .iter()
-            .map(|(name, _)| (name.clone(), format!("{}{}", prefix, name)))
+            .zip(args)
+            .map(|((name, _), arg)| {
+                let replacement = match arg {
+                    AotExpr::Var {
+                        name,
+                        ty: StaticType::Function { .. },
+                    } => name.clone(),
+                    _ => format!("{}{}", prefix, name),
+                };
+                (name.clone(), replacement)
+            })
             .collect();
 
         // Process function body
@@ -814,7 +894,8 @@ impl AotInliner {
 
         for (i, stmt) in func.body.iter().enumerate() {
             let is_last = i == func.body.len() - 1;
-            let renamed_stmt = self.rename_variables_in_stmt(stmt, &prefix, &mut rename_map);
+            let renamed_stmt =
+                self.rename_variables_in_stmt(stmt, &prefix, &mut rename_map, &specialized_types);
 
             match renamed_stmt {
                 AotStmt::Return(Some(expr)) => {
@@ -851,6 +932,7 @@ impl AotInliner {
         stmt: &AotStmt,
         prefix: &str,
         rename_map: &mut HashMap<String, String>,
+        specialized_types: &HashMap<String, StaticType>,
     ) -> AotStmt {
         match stmt {
             AotStmt::Let {
@@ -864,50 +946,60 @@ impl AotInliner {
                 AotStmt::Let {
                     name: new_name,
                     ty: ty.clone(),
-                    value: self.rename_variables_in_expr(value, rename_map),
+                    value: self.rename_variables_in_expr(value, rename_map, specialized_types),
                     is_mutable: *is_mutable,
                 }
             }
             AotStmt::Assign { target, value } => AotStmt::Assign {
-                target: self.rename_variables_in_expr(target, rename_map),
-                value: self.rename_variables_in_expr(value, rename_map),
+                target: self.rename_variables_in_expr(target, rename_map, specialized_types),
+                value: self.rename_variables_in_expr(value, rename_map, specialized_types),
             },
             AotStmt::CompoundAssign { target, op, value } => AotStmt::CompoundAssign {
-                target: self.rename_variables_in_expr(target, rename_map),
+                target: self.rename_variables_in_expr(target, rename_map, specialized_types),
                 op: *op,
-                value: self.rename_variables_in_expr(value, rename_map),
+                value: self.rename_variables_in_expr(value, rename_map, specialized_types),
             },
-            AotStmt::Expr(expr) => AotStmt::Expr(self.rename_variables_in_expr(expr, rename_map)),
-            AotStmt::ValueCarrier(expr) => {
-                AotStmt::ValueCarrier(self.rename_variables_in_expr(expr, rename_map))
+            AotStmt::Expr(expr) => {
+                AotStmt::Expr(self.rename_variables_in_expr(expr, rename_map, specialized_types))
             }
+            AotStmt::ValueCarrier(expr) => AotStmt::ValueCarrier(self.rename_variables_in_expr(
+                expr,
+                rename_map,
+                specialized_types,
+            )),
             AotStmt::Return(opt_expr) => AotStmt::Return(
                 opt_expr
                     .as_ref()
-                    .map(|e| self.rename_variables_in_expr(e, rename_map)),
+                    .map(|e| self.rename_variables_in_expr(e, rename_map, specialized_types)),
             ),
             AotStmt::If {
                 condition,
                 then_branch,
                 else_branch,
             } => AotStmt::If {
-                condition: self.rename_variables_in_expr(condition, rename_map),
+                condition: self.rename_variables_in_expr(condition, rename_map, specialized_types),
                 then_branch: then_branch
                     .iter()
-                    .map(|s| self.rename_variables_in_stmt(s, prefix, rename_map))
+                    .map(|s| {
+                        self.rename_variables_in_stmt(s, prefix, rename_map, specialized_types)
+                    })
                     .collect(),
                 else_branch: else_branch.as_ref().map(|stmts| {
                     stmts
                         .iter()
-                        .map(|s| self.rename_variables_in_stmt(s, prefix, rename_map))
+                        .map(|s| {
+                            self.rename_variables_in_stmt(s, prefix, rename_map, specialized_types)
+                        })
                         .collect()
                 }),
             },
             AotStmt::While { condition, body } => AotStmt::While {
-                condition: self.rename_variables_in_expr(condition, rename_map),
+                condition: self.rename_variables_in_expr(condition, rename_map, specialized_types),
                 body: body
                     .iter()
-                    .map(|s| self.rename_variables_in_stmt(s, prefix, rename_map))
+                    .map(|s| {
+                        self.rename_variables_in_stmt(s, prefix, rename_map, specialized_types)
+                    })
                     .collect(),
             },
             AotStmt::ForRange {
@@ -921,14 +1013,16 @@ impl AotInliner {
                 rename_map.insert(var.clone(), new_var.clone());
                 AotStmt::ForRange {
                     var: new_var,
-                    start: self.rename_variables_in_expr(start, rename_map),
-                    stop: self.rename_variables_in_expr(stop, rename_map),
+                    start: self.rename_variables_in_expr(start, rename_map, specialized_types),
+                    stop: self.rename_variables_in_expr(stop, rename_map, specialized_types),
                     step: step
                         .as_ref()
-                        .map(|s| self.rename_variables_in_expr(s, rename_map)),
+                        .map(|s| self.rename_variables_in_expr(s, rename_map, specialized_types)),
                     body: body
                         .iter()
-                        .map(|s| self.rename_variables_in_stmt(s, prefix, rename_map))
+                        .map(|s| {
+                            self.rename_variables_in_stmt(s, prefix, rename_map, specialized_types)
+                        })
                         .collect(),
                 }
             }
@@ -937,10 +1031,12 @@ impl AotInliner {
                 rename_map.insert(var.clone(), new_var.clone());
                 AotStmt::ForEach {
                     var: new_var,
-                    iter: self.rename_variables_in_expr(iter, rename_map),
+                    iter: self.rename_variables_in_expr(iter, rename_map, specialized_types),
                     body: body
                         .iter()
-                        .map(|s| self.rename_variables_in_stmt(s, prefix, rename_map))
+                        .map(|s| {
+                            self.rename_variables_in_stmt(s, prefix, rename_map, specialized_types)
+                        })
                         .collect(),
                 }
             }
@@ -954,13 +1050,17 @@ impl AotInliner {
         &self,
         expr: &AotExpr,
         rename_map: &HashMap<String, String>,
+        specialized_types: &HashMap<String, StaticType>,
     ) -> AotExpr {
         match expr {
             AotExpr::Var { name, ty } => {
                 if let Some(new_name) = rename_map.get(name) {
                     AotExpr::Var {
                         name: new_name.clone(),
-                        ty: ty.clone(),
+                        ty: specialized_types
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| ty.clone()),
                     }
                 } else {
                     expr.clone()
@@ -973,14 +1073,22 @@ impl AotInliner {
                 result_ty,
             } => AotExpr::BinOpStatic {
                 op: *op,
-                left: Box::new(self.rename_variables_in_expr(left, rename_map)),
-                right: Box::new(self.rename_variables_in_expr(right, rename_map)),
+                left: Box::new(self.rename_variables_in_expr(left, rename_map, specialized_types)),
+                right: Box::new(self.rename_variables_in_expr(
+                    right,
+                    rename_map,
+                    specialized_types,
+                )),
                 result_ty: result_ty.clone(),
             },
             AotExpr::BinOpDynamic { op, left, right } => AotExpr::BinOpDynamic {
                 op: *op,
-                left: Box::new(self.rename_variables_in_expr(left, rename_map)),
-                right: Box::new(self.rename_variables_in_expr(right, rename_map)),
+                left: Box::new(self.rename_variables_in_expr(left, rename_map, specialized_types)),
+                right: Box::new(self.rename_variables_in_expr(
+                    right,
+                    rename_map,
+                    specialized_types,
+                )),
             },
             AotExpr::UnaryOp {
                 op,
@@ -988,7 +1096,11 @@ impl AotInliner {
                 result_ty,
             } => AotExpr::UnaryOp {
                 op: *op,
-                operand: Box::new(self.rename_variables_in_expr(operand, rename_map)),
+                operand: Box::new(self.rename_variables_in_expr(
+                    operand,
+                    rename_map,
+                    specialized_types,
+                )),
                 result_ty: result_ty.clone(),
             },
             AotExpr::CallStatic {
@@ -997,21 +1109,42 @@ impl AotInliner {
                 return_ty,
                 inline_policy,
             } => AotExpr::CallStatic {
-                function: function.clone(),
+                function: rename_map
+                    .get(function)
+                    .cloned()
+                    .unwrap_or_else(|| function.clone()),
                 args: args
                     .iter()
-                    .map(|a| self.rename_variables_in_expr(a, rename_map))
+                    .map(|a| self.rename_variables_in_expr(a, rename_map, specialized_types))
                     .collect(),
-                return_ty: return_ty.clone(),
+                return_ty: match specialized_types.get(function) {
+                    Some(StaticType::Function { ret, .. }) => ret.as_ref().clone(),
+                    _ => return_ty.clone(),
+                },
                 inline_policy: *inline_policy,
             },
-            AotExpr::CallDynamic { function, args } => AotExpr::CallDynamic {
-                function: function.clone(),
-                args: args
+            AotExpr::CallDynamic { function, args } => {
+                let function_name = rename_map
+                    .get(function)
+                    .cloned()
+                    .unwrap_or_else(|| function.clone());
+                let args = args
                     .iter()
-                    .map(|a| self.rename_variables_in_expr(a, rename_map))
-                    .collect(),
-            },
+                    .map(|a| self.rename_variables_in_expr(a, rename_map, specialized_types))
+                    .collect();
+                match specialized_types.get(function) {
+                    Some(StaticType::Function { ret, .. }) => AotExpr::CallStatic {
+                        function: function_name,
+                        args,
+                        return_ty: ret.as_ref().clone(),
+                        inline_policy: AotInlinePolicy::Auto,
+                    },
+                    _ => AotExpr::CallDynamic {
+                        function: function_name,
+                        args,
+                    },
+                }
+            }
             AotExpr::CallBuiltin {
                 builtin,
                 args,
@@ -1020,7 +1153,7 @@ impl AotInliner {
                 builtin: *builtin,
                 args: args
                     .iter()
-                    .map(|a| self.rename_variables_in_expr(a, rename_map))
+                    .map(|a| self.rename_variables_in_expr(a, rename_map, specialized_types))
                     .collect(),
                 return_ty: return_ty.clone(),
             },
@@ -1031,19 +1164,19 @@ impl AotInliner {
             } => AotExpr::ArrayLit {
                 elements: elements
                     .iter()
-                    .map(|e| self.rename_variables_in_expr(e, rename_map))
+                    .map(|e| self.rename_variables_in_expr(e, rename_map, specialized_types))
                     .collect(),
                 elem_ty: elem_ty.clone(),
                 shape: shape.clone(),
             },
             AotExpr::SetFromIter { iter, elem_ty } => AotExpr::SetFromIter {
-                iter: Box::new(self.rename_variables_in_expr(iter, rename_map)),
+                iter: Box::new(self.rename_variables_in_expr(iter, rename_map, specialized_types)),
                 elem_ty: elem_ty.clone(),
             },
             AotExpr::TupleLit { elements } => AotExpr::TupleLit {
                 elements: elements
                     .iter()
-                    .map(|e| self.rename_variables_in_expr(e, rename_map))
+                    .map(|e| self.rename_variables_in_expr(e, rename_map, specialized_types))
                     .collect(),
             },
             AotExpr::Index {
@@ -1052,10 +1185,14 @@ impl AotInliner {
                 elem_ty,
                 is_tuple,
             } => AotExpr::Index {
-                array: Box::new(self.rename_variables_in_expr(array, rename_map)),
+                array: Box::new(self.rename_variables_in_expr(
+                    array,
+                    rename_map,
+                    specialized_types,
+                )),
                 indices: indices
                     .iter()
-                    .map(|i| self.rename_variables_in_expr(i, rename_map))
+                    .map(|i| self.rename_variables_in_expr(i, rename_map, specialized_types))
                     .collect(),
                 elem_ty: elem_ty.clone(),
                 is_tuple: *is_tuple,
@@ -1066,11 +1203,15 @@ impl AotInliner {
                 step,
                 elem_ty,
             } => AotExpr::Range {
-                start: Box::new(self.rename_variables_in_expr(start, rename_map)),
-                stop: Box::new(self.rename_variables_in_expr(stop, rename_map)),
-                step: step
-                    .as_ref()
-                    .map(|s| Box::new(self.rename_variables_in_expr(s, rename_map))),
+                start: Box::new(self.rename_variables_in_expr(
+                    start,
+                    rename_map,
+                    specialized_types,
+                )),
+                stop: Box::new(self.rename_variables_in_expr(stop, rename_map, specialized_types)),
+                step: step.as_ref().map(|s| {
+                    Box::new(self.rename_variables_in_expr(s, rename_map, specialized_types))
+                }),
                 elem_ty: elem_ty.clone(),
             },
             AotExpr::Generator {
@@ -1083,12 +1224,24 @@ impl AotInliner {
                 let mut inner_map = rename_map.clone();
                 inner_map.remove(var);
                 AotExpr::Generator {
-                    body: Box::new(self.rename_variables_in_expr(body, &inner_map)),
+                    body: Box::new(self.rename_variables_in_expr(
+                        body,
+                        &inner_map,
+                        specialized_types,
+                    )),
                     var: var.clone(),
-                    iter: Box::new(self.rename_variables_in_expr(iter, rename_map)),
-                    filter: filter
-                        .as_ref()
-                        .map(|filter| Box::new(self.rename_variables_in_expr(filter, &inner_map))),
+                    iter: Box::new(self.rename_variables_in_expr(
+                        iter,
+                        rename_map,
+                        specialized_types,
+                    )),
+                    filter: filter.as_ref().map(|filter| {
+                        Box::new(self.rename_variables_in_expr(
+                            filter,
+                            &inner_map,
+                            specialized_types,
+                        ))
+                    }),
                     elem_ty: elem_ty.clone(),
                 }
             }
@@ -1096,7 +1249,7 @@ impl AotInliner {
                 name: name.clone(),
                 fields: fields
                     .iter()
-                    .map(|f| self.rename_variables_in_expr(f, rename_map))
+                    .map(|f| self.rename_variables_in_expr(f, rename_map, specialized_types))
                     .collect(),
             },
             AotExpr::FieldAccess {
@@ -1104,7 +1257,11 @@ impl AotInliner {
                 field,
                 field_ty,
             } => AotExpr::FieldAccess {
-                object: Box::new(self.rename_variables_in_expr(object, rename_map)),
+                object: Box::new(self.rename_variables_in_expr(
+                    object,
+                    rename_map,
+                    specialized_types,
+                )),
                 field: field.clone(),
                 field_ty: field_ty.clone(),
             },
@@ -1114,22 +1271,47 @@ impl AotInliner {
                 else_expr,
                 result_ty,
             } => AotExpr::Ternary {
-                condition: Box::new(self.rename_variables_in_expr(condition, rename_map)),
-                then_expr: Box::new(self.rename_variables_in_expr(then_expr, rename_map)),
-                else_expr: Box::new(self.rename_variables_in_expr(else_expr, rename_map)),
+                condition: Box::new(self.rename_variables_in_expr(
+                    condition,
+                    rename_map,
+                    specialized_types,
+                )),
+                then_expr: Box::new(self.rename_variables_in_expr(
+                    then_expr,
+                    rename_map,
+                    specialized_types,
+                )),
+                else_expr: Box::new(self.rename_variables_in_expr(
+                    else_expr,
+                    rename_map,
+                    specialized_types,
+                )),
                 result_ty: result_ty.clone(),
             },
-            AotExpr::Box(inner) => {
-                AotExpr::Box(Box::new(self.rename_variables_in_expr(inner, rename_map)))
-            }
+            AotExpr::Box(inner) => AotExpr::Box(Box::new(self.rename_variables_in_expr(
+                inner,
+                rename_map,
+                specialized_types,
+            ))),
             AotExpr::Unbox { value, target_ty } => AotExpr::Unbox {
-                value: Box::new(self.rename_variables_in_expr(value, rename_map)),
+                value: Box::new(self.rename_variables_in_expr(
+                    value,
+                    rename_map,
+                    specialized_types,
+                )),
                 target_ty: target_ty.clone(),
             },
-            AotExpr::Convert { value, target_ty } => AotExpr::Convert {
-                value: Box::new(self.rename_variables_in_expr(value, rename_map)),
-                target_ty: target_ty.clone(),
-            },
+            AotExpr::Convert { value, target_ty } => {
+                let value = self.rename_variables_in_expr(value, rename_map, specialized_types);
+                if matches!(target_ty, StaticType::Any) {
+                    value
+                } else {
+                    AotExpr::Convert {
+                        value: Box::new(value),
+                        target_ty: target_ty.clone(),
+                    }
+                }
+            }
             AotExpr::Lambda {
                 params,
                 body,
@@ -1143,7 +1325,11 @@ impl AotInliner {
                 }
                 AotExpr::Lambda {
                     params: params.clone(),
-                    body: Box::new(self.rename_variables_in_expr(body, &inner_map)),
+                    body: Box::new(self.rename_variables_in_expr(
+                        body,
+                        &inner_map,
+                        specialized_types,
+                    )),
                     captures: captures.clone(),
                     return_ty: return_ty.clone(),
                 }
@@ -1263,6 +1449,66 @@ mod tests {
         let mut inliner = AotInliner::new(10);
         inliner.analyze_program(&program);
         assert!(!inliner.get_candidates()["wrapper"].is_pure);
+    }
+
+    #[test]
+    fn callable_argument_specializes_boxed_wrapper_issue_3() {
+        let function_ty = StaticType::Function {
+            params: vec![StaticType::I64],
+            ret: Box::new(StaticType::I64),
+        };
+        let mut wrapper = AotFunction::new(
+            "apply".to_string(),
+            vec![
+                ("x".to_string(), StaticType::Any),
+                ("f".to_string(), StaticType::Any),
+            ],
+            StaticType::Any,
+        );
+        wrapper
+            .body
+            .push(AotStmt::Return(Some(AotExpr::CallDynamic {
+                function: "f".to_string(),
+                args: vec![AotExpr::Var {
+                    name: "x".to_string(),
+                    ty: StaticType::Any,
+                }],
+            })));
+        let mut program = AotProgram::new();
+        program.add_function(wrapper);
+        program.main.push(AotStmt::Let {
+            name: "result".to_string(),
+            ty: StaticType::Any,
+            value: AotExpr::CallStatic {
+                function: "apply".to_string(),
+                args: vec![
+                    AotExpr::LitI64(3),
+                    AotExpr::Var {
+                        name: "increment".to_string(),
+                        ty: function_ty,
+                    },
+                ],
+                return_ty: StaticType::Any,
+                inline_policy: AotInlinePolicy::Auto,
+            },
+            is_mutable: false,
+        });
+
+        let mut inliner = AotInliner::new(10);
+        assert_eq!(inliner.optimize_program(&mut program), 1);
+        assert!(program.functions.is_empty());
+        assert!(matches!(
+            program.main.last(),
+            Some(AotStmt::Let {
+                ty: StaticType::I64,
+                value: AotExpr::CallStatic {
+                    function,
+                    return_ty: StaticType::I64,
+                    ..
+                },
+                ..
+            }) if function == "increment"
+        ));
     }
 
     #[test]
