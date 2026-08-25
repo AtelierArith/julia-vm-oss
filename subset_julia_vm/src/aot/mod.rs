@@ -82,8 +82,11 @@ pub mod native_calls;
 pub mod optimizer;
 pub mod pass_pipeline;
 pub mod rooting;
+mod script_entry;
 pub mod specialization;
 pub mod types;
+
+pub use script_entry::SCRIPT_ENTRY_NAME;
 
 /// Code-generation backend selected for the AoT pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -431,7 +434,7 @@ pub fn compile_program(
 }
 
 fn prepare_aot_program(
-    program: crate::ir::core::Program,
+    mut program: crate::ir::core::Program,
     config: &CompileConfig,
 ) -> AotResult<PreparedAotProgram> {
     use crate::aot::analyze::program_to_aot_ir;
@@ -439,6 +442,10 @@ fn prepare_aot_program(
     use crate::aot::inference::TypeInferenceEngine;
     use crate::aot::optimizer::optimize_aot_program_at_level_with_options;
     use crate::aot::pass_pipeline::{AotDumpSelection, AotPassDiagnostics, AotPassStage};
+
+    if config.requests_script_entry() {
+        script_entry::lift_script_entry(&mut program)?;
+    }
 
     let mut stats = AotStats::new();
     let mut timings: Vec<(&'static str, std::time::Duration)> = Vec::new();
@@ -2877,6 +2884,76 @@ mod tests {
             span,
         });
         program
+    }
+
+    #[test]
+    fn script_entry_lifts_main_and_preserves_spans_issue_2() {
+        let mut program = scalar_bool_main_program();
+        let main_span = program.main.span;
+        let statement = program.main.stmts[0].clone();
+
+        script_entry::lift_script_entry(&mut program).expect("script entry should lift main");
+
+        assert!(program.main.stmts.is_empty());
+        assert_eq!(program.functions.len(), 1);
+        let entry = &program.functions[0];
+        assert_eq!(entry.name, SCRIPT_ENTRY_NAME);
+        assert!(entry.params.is_empty());
+        assert_eq!(entry.body.span, main_span);
+        assert_eq!(entry.body.stmts.first(), Some(&statement));
+        assert!(matches!(
+            entry.body.stmts.last(),
+            Some(Stmt::Return { value: None, .. })
+        ));
+    }
+
+    #[test]
+    fn script_entry_rejects_reserved_name_collision_issue_2() {
+        let mut program = empty_program();
+        let span = Span::new(0, 4, 1, 1, 1, 5);
+        program.functions.push(Arc::new(Function {
+            name: SCRIPT_ENTRY_NAME.to_string(),
+            params: vec![],
+            kwparams: vec![],
+            type_params: vec![],
+            return_type: None,
+            body: Block {
+                stmts: vec![],
+                span,
+            },
+            is_base_extension: false,
+            is_runtime_eval: false,
+            new_struct_name: None,
+            span,
+        }));
+
+        let error = script_entry::lift_script_entry(&mut program)
+            .expect_err("reserved name must be rejected");
+
+        assert!(error.to_string().contains(SCRIPT_ENTRY_NAME));
+    }
+
+    #[test]
+    fn default_compile_config_does_not_request_script_entry_issue_2() {
+        assert!(!CompileConfig::default().requests_script_entry());
+    }
+
+    #[cfg(feature = "aot-wasm")]
+    #[test]
+    fn script_entry_survives_source_to_wasm_pipeline_issue_2() {
+        let mut config = CompileConfig {
+            backend: AotBackend::Wasm,
+            ..CompileConfig::default()
+        };
+        config.enable_script_entry();
+
+        let output = compile_wasm_source("x = 40\ny = 2\nx + y\n", &config)
+            .expect("top-level source should compile through the script entry");
+
+        assert!(output
+            .wasm_bytes
+            .windows(SCRIPT_ENTRY_NAME.len())
+            .any(|window| window == SCRIPT_ENTRY_NAME.as_bytes()));
     }
 
     #[cfg(not(feature = "cranelift"))]
