@@ -86,13 +86,10 @@ impl StaticStrings {
         self.heap_base
     }
 
-    pub(super) fn data_section(&self) -> Option<DataSection> {
-        if self.data.is_empty() {
-            return None;
+    pub(super) fn append_data(&self, section: &mut DataSection) {
+        if !self.data.is_empty() {
+            section.active(0, &ConstExpr::i32_const(self.data_base), self.data.clone());
         }
-        let mut section = DataSection::new();
-        section.active(0, &ConstExpr::i32_const(self.data_base), self.data.clone());
-        Some(section)
     }
 }
 

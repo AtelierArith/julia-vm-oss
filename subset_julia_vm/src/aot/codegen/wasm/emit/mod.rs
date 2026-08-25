@@ -38,9 +38,9 @@ use crate::aot::ir::{BasicBlock, IrFunction, IrModule};
 use crate::aot::types::StaticType;
 use crate::aot::{AotError, AotResult, WasmImport};
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, GlobalSection, ImportSection, Instruction as W, MemorySection, MemoryType,
-    Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
+    Function, FunctionSection, GlobalSection, ImportSection, Instruction as W, MemorySection,
+    MemoryType, Module, TypeSection, ValType,
 };
 
 use super::types::{unsupported, value_type, ABI_VERSION};
@@ -232,13 +232,11 @@ pub fn emit_module(
     abi.instruction(&W::End);
     code.function(&abi);
     module.section(&code);
-    if let Some(data) = layouts.data_section() {
-        module.section(&data);
-    }
-    module.section(&rng_tables.data_section());
-    if let Some(data) = strings.data_section() {
-        module.section(&data);
-    }
+    let mut data = DataSection::new();
+    layouts.append_data(&mut data);
+    rng_tables.append_data(&mut data);
+    strings.append_data(&mut data);
+    module.section(&data);
     Ok(module.finish())
 }
 

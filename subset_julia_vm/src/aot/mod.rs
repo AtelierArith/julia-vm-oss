@@ -3070,6 +3070,58 @@ image = load("inputs/input.png")
         assert!(format!("{:?}", entry.body).contains("CallStatic"));
     }
 
+    #[cfg(feature = "aot-wasm")]
+    #[test]
+    fn wasm_static_payloads_share_one_data_section_issue_6() {
+        fn read_leb(bytes: &[u8], cursor: &mut usize) -> usize {
+            let mut value = 0_usize;
+            let mut shift = 0;
+            loop {
+                let byte = bytes[*cursor];
+                *cursor += 1;
+                value |= usize::from(byte & 0x7f) << shift;
+                if byte & 0x80 == 0 {
+                    return value;
+                }
+                shift += 7;
+            }
+        }
+
+        let mut config = CompileConfig {
+            backend: AotBackend::Wasm,
+            wasm_imports: vec![WasmImport {
+                module: "host".to_string(),
+                name: "value".to_string(),
+                function_name: "host_value".to_string(),
+                params: vec![types::StaticType::Str],
+                result: Some(types::StaticType::I64),
+            }],
+            ..CompileConfig::default()
+        };
+        config
+            .c_abi_exports
+            .push(codegen::CAbiExport::new("answer", "answer"));
+        let source = r#"
+host_value(value::String)::Int64 = 0
+answer()::Int64 = host_value("static payload")
+"#;
+
+        let output = compile_wasm_source(source, &config).expect("module should compile");
+        let mut cursor = 8;
+        let mut data_sections = 0;
+        while cursor < output.wasm_bytes.len() {
+            let section = output.wasm_bytes[cursor];
+            cursor += 1;
+            let size = read_leb(&output.wasm_bytes, &mut cursor);
+            if section == 11 {
+                data_sections += 1;
+            }
+            cursor += size;
+        }
+
+        assert_eq!(data_sections, 1);
+    }
+
     #[cfg(not(feature = "cranelift"))]
     #[test]
     fn cranelift_backend_requires_feature_issue_6927() {

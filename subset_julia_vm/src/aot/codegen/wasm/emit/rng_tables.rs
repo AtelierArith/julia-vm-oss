@@ -42,10 +42,8 @@ impl RngTables {
             .map_err(|_| too_large())
     }
 
-    pub(super) fn data_section(&self) -> DataSection {
-        let mut section = DataSection::new();
+    pub(super) fn append_data(&self, section: &mut DataSection) {
         section.active(0, &ConstExpr::i32_const(self.base), self.data.clone());
-        section
     }
 }
 
