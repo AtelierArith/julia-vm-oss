@@ -742,7 +742,7 @@ impl AotInliner {
         functions: &HashMap<String, AotFunction>,
         depth: usize,
     ) -> usize {
-        if depth > 3 {
+        if depth > 64 {
             return 0; // Prevent infinite inlining
         }
 
@@ -1695,6 +1695,52 @@ mod tests {
                 },
                 ..
             }) if function == "increment"
+        ));
+    }
+
+    #[test]
+    fn nested_calls_inline_beyond_legacy_depth_limit_issue_3() {
+        let mut leaf = AotFunction::new(
+            "identity".to_string(),
+            vec![("value".to_string(), StaticType::I64)],
+            StaticType::I64,
+        );
+        leaf.body.push(AotStmt::Return(Some(AotExpr::Var {
+            name: "value".to_string(),
+            ty: StaticType::I64,
+        })));
+        let mut nested = AotExpr::LitI64(7);
+        for _ in 0..12 {
+            nested = AotExpr::CallStatic {
+                function: "identity".to_string(),
+                args: vec![nested],
+                return_ty: StaticType::I64,
+                inline_policy: AotInlinePolicy::Auto,
+            };
+        }
+        let mut program = AotProgram::new();
+        program.add_function(leaf);
+        program.main.push(AotStmt::Let {
+            name: "result".to_string(),
+            ty: StaticType::I64,
+            value: nested,
+            is_mutable: false,
+        });
+
+        let mut inliner = AotInliner::new(10);
+        assert!(inliner.optimize_program(&mut program) >= 12);
+        assert!(matches!(
+            program.main.last(),
+            Some(AotStmt::Let {
+                value: AotExpr::Var {
+                    ty: StaticType::I64,
+                    ..
+                },
+                ..
+            }) | Some(AotStmt::Let {
+                value: AotExpr::LitI64(7),
+                ..
+            })
         ));
     }
 
