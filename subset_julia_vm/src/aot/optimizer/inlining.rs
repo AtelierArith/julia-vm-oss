@@ -1209,6 +1209,14 @@ impl AotInliner {
         // Create bindings for parameters
         for ((param_name, param_ty), arg) in func.params.iter().zip(args.iter()) {
             if matches!(arg.get_type(), StaticType::Function { .. }) {
+                if matches!(arg, AotExpr::Lambda { .. }) {
+                    stmts.push(AotStmt::Let {
+                        name: format!("{}{}", prefix, param_name),
+                        ty: arg.get_type(),
+                        value: arg.clone(),
+                        is_mutable: false,
+                    });
+                }
                 continue;
             }
             let new_name = format!("{}{}", prefix, param_name);
@@ -1248,6 +1256,7 @@ impl AotInliner {
                         name,
                         ty: StaticType::Function { .. },
                     } => name.clone(),
+                    AotExpr::Lambda { .. } => format!("{}{}", prefix, name),
                     _ => format!("{}{}", prefix, name),
                 };
                 (name.clone(), replacement)
@@ -1926,6 +1935,57 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn lambda_argument_gets_local_binding_for_hof_inlining_issue_3() {
+        let function_ty = StaticType::Function {
+            params: vec![StaticType::I64],
+            ret: Box::new(StaticType::I64),
+        };
+        let mut apply = AotFunction::new(
+            "apply".to_string(),
+            vec![
+                ("value".to_string(), StaticType::I64),
+                ("operation".to_string(), function_ty.clone()),
+            ],
+            StaticType::I64,
+        );
+        apply.body.push(AotStmt::Return(Some(AotExpr::CallStatic {
+            function: "operation".to_string(),
+            args: vec![AotExpr::Var {
+                name: "value".to_string(),
+                ty: StaticType::I64,
+            }],
+            return_ty: StaticType::I64,
+            inline_policy: AotInlinePolicy::Auto,
+        })));
+        let lambda = AotExpr::Lambda {
+            params: vec![("x".to_string(), StaticType::I64)],
+            body: vec![AotStmt::Return(Some(AotExpr::Var {
+                name: "x".to_string(),
+                ty: StaticType::I64,
+            }))],
+            captures: vec![],
+            return_ty: StaticType::I64,
+        };
+        let mut program = AotProgram::new();
+        program.add_function(apply);
+        program.main.push(AotStmt::Let {
+            name: "result".to_string(),
+            ty: StaticType::I64,
+            value: AotExpr::CallStatic {
+                function: "apply".to_string(),
+                args: vec![AotExpr::LitI64(7), lambda],
+                return_ty: StaticType::I64,
+                inline_policy: AotInlinePolicy::Auto,
+            },
+            is_mutable: false,
+        });
+
+        let mut inliner = AotInliner::new(10);
+        assert!(inliner.optimize_program(&mut program) >= 2);
+        assert!(!format!("{:?}", program.main).contains("Lambda"));
     }
 
     #[test]
