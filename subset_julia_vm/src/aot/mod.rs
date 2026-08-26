@@ -456,15 +456,13 @@ fn prepare_aot_program(
     // Dead Code Elimination
     let t = AotTimer::start();
     stats.functions_total = program.functions.len();
-    let program = if config.c_abi_exports.is_empty() {
-        let call_graph = CallGraph::from_program(&program);
-        call_graph.filter_program(&program)
-    } else {
-        // C ABI exports are resolved after inference/AoT conversion and may name
-        // generated method symbols such as `add_i64_i64`; keep all functions so
-        // DCE cannot delete export candidates before codegen validates them.
-        program
-    };
+    let call_graph = CallGraph::from_program(&program);
+    let export_roots = config
+        .c_abi_exports
+        .iter()
+        .map(|export| export.function_name.clone())
+        .collect::<Vec<_>>();
+    let program = call_graph.filter_program_with_roots(&program, &export_roots);
     stats.functions_eliminated = stats.functions_total - program.functions.len();
     timings.push(("dead-code-elimination", t.elapsed()));
 

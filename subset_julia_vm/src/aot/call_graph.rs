@@ -666,8 +666,17 @@ impl CallGraph {
 
     /// Compute the set of reachable functions from roots
     pub fn reachable_functions(&self) -> HashSet<String> {
+        self.reachable_functions_with_roots(&[])
+    }
+
+    fn reachable_functions_with_roots(&self, extra_roots: &[String]) -> HashSet<String> {
         let mut reachable = HashSet::new();
-        let mut worklist: VecDeque<String> = self.roots.iter().cloned().collect();
+        let mut worklist: VecDeque<String> = self
+            .roots
+            .iter()
+            .cloned()
+            .chain(extra_roots.iter().cloned())
+            .collect();
 
         while let Some(func) = worklist.pop_front() {
             if reachable.contains(&func) {
@@ -694,7 +703,11 @@ impl CallGraph {
 
     /// Filter a program to only include reachable functions
     pub fn filter_program(&self, program: &Program) -> Program {
-        let reachable = self.reachable_functions();
+        self.filter_program_with_roots(program, &[])
+    }
+
+    pub fn filter_program_with_roots(&self, program: &Program, extra_roots: &[String]) -> Program {
+        let reachable = self.reachable_functions_with_roots(extra_roots);
 
         // Filter functions
         let filtered_functions: Vec<std::sync::Arc<Function>> = program
