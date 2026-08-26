@@ -510,7 +510,7 @@ impl AotCodeGenerator {
                 Self::type_uses_complex(return_ty)
                     || params.iter().any(|(_, ty)| Self::type_uses_complex(ty))
                     || captures.iter().any(|(_, ty)| Self::type_uses_complex(ty))
-                    || Self::expr_uses_complex(body)
+                    || Self::stmts_use_complex(body)
             }
             AotExpr::LitI64(_)
             | AotExpr::LitI32(_)

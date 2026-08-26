@@ -2,7 +2,7 @@ use super::escape_rust_ident;
 use super::global_static_ident;
 use super::AotCodeGenerator;
 use crate::aot::abi::AotAbiValue;
-use crate::aot::ir::{AotBinOp, AotBuiltinOp, AotExpr, AotFunction, AotUnaryOp};
+use crate::aot::ir::{AotBinOp, AotBuiltinOp, AotExpr, AotFunction, AotStmt, AotUnaryOp};
 use crate::aot::types::StaticType;
 use crate::aot::{AotError, AotResult, UnsupportedInstructionDiagnostic};
 
@@ -1228,7 +1228,7 @@ impl AotCodeGenerator {
     fn emit_lambda(
         &self,
         params: &[(String, StaticType)],
-        body: &AotExpr,
+        body: &[AotStmt],
         captures: &[(String, StaticType)],
         return_ty: &StaticType,
     ) -> AotResult<String> {
@@ -1241,8 +1241,22 @@ impl AotCodeGenerator {
         // Generate return type
         let ret_ty_str = self.type_to_rust(return_ty);
 
-        // Generate body expression
-        let body_str = self.emit_expr_to_string(body)?;
+        let mut body_codegen = AotCodeGenerator::new(self.config.clone());
+        body_codegen.multidispatch_funcs = self.multidispatch_funcs.clone();
+        body_codegen.method_table = self.method_table.clone();
+        body_codegen.function_method_counts = self.function_method_counts.clone();
+        body_codegen.current_function_return_type = Some(return_ty.clone());
+        body_codegen.global_names = self.global_names.clone();
+        body_codegen.current_function_param_names =
+            params.iter().map(|(name, _)| name.clone()).collect();
+        for (index, stmt) in body.iter().enumerate() {
+            if index + 1 == body.len() {
+                body_codegen.emit_stmt_maybe_return(stmt, return_ty)?;
+            } else {
+                body_codegen.emit_stmt(stmt)?;
+            }
+        }
+        let body_str = body_codegen.output;
 
         // Use 'move' if there are captured variables
         let move_keyword = if !captures.is_empty() { "move " } else { "" };

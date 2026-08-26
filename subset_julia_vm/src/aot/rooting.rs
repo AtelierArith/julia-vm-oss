@@ -421,7 +421,10 @@ fn collect_expr_obligations(
         | AotExpr::Convert { value: inner, .. } => {
             collect_expr_obligations(function, inner, env, plan);
         }
-        AotExpr::Lambda { body, .. } => collect_expr_obligations(function, body, env, plan),
+        AotExpr::Lambda { body, .. } => {
+            let mut lambda_env = env.clone();
+            collect_stmt_obligations(function, body, &mut lambda_env, plan);
+        }
         AotExpr::LitI64(_)
         | AotExpr::LitI32(_)
         | AotExpr::LitF64(_)

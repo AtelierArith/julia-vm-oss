@@ -180,7 +180,10 @@ pub(super) fn verify_expr(stage: AotPassStage, function: &str, expr: &AotExpr) -
                     return error(stage, function, "lambda binding has an empty name");
                 }
             }
-            verify_expr(stage, function, body)
+            for (index, stmt) in body.iter().enumerate() {
+                super::stmt::verify_stmt(stage, function, index, stmt)?;
+            }
+            Ok(())
         }
         AotExpr::LitI64(_)
         | AotExpr::LitI32(_)

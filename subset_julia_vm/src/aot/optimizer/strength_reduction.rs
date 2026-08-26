@@ -688,12 +688,14 @@ impl AotStrengthReducer {
                 captures,
                 return_ty,
             } => {
-                let (reduced_body, red) = self.reduce_expr(body);
+                let mut reduced_body = body.clone();
+                let mut reducer = Self::new();
+                let red = reducer.optimize_stmts(&mut reduced_body);
                 if red > 0 {
                     return (
                         AotExpr::Lambda {
                             params: params.clone(),
-                            body: Box::new(reduced_body),
+                            body: reduced_body,
                             captures: captures.clone(),
                             return_ty: return_ty.clone(),
                         },

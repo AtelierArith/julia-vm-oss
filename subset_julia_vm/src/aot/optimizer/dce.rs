@@ -409,7 +409,7 @@ impl AotDeadCodeEliminator {
                 for (name, _) in captures {
                     vars.insert(name.clone());
                 }
-                Self::collect_expr_vars(body, vars);
+                Self::collect_stmt_vars_conservative(body, vars);
             }
             AotExpr::LitI64(_)
             | AotExpr::LitI32(_)

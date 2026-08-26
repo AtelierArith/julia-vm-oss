@@ -373,9 +373,7 @@ impl AotInliner {
                         .as_ref()
                         .is_some_and(|s| Self::expr_calls_function(target, s, program, visited))
             }
-            AotExpr::Lambda { body, .. } => {
-                Self::expr_calls_function(target, body, program, visited)
-            }
+            AotExpr::Lambda { body, .. } => Self::calls_function(target, body, program, visited),
             AotExpr::Generator {
                 body, iter, filter, ..
             } => {
@@ -1325,11 +1323,17 @@ impl AotInliner {
                 }
                 AotExpr::Lambda {
                     params: params.clone(),
-                    body: Box::new(self.rename_variables_in_expr(
-                        body,
-                        &inner_map,
-                        specialized_types,
-                    )),
+                    body: body
+                        .iter()
+                        .map(|stmt| {
+                            self.rename_variables_in_stmt(
+                                stmt,
+                                "",
+                                &mut inner_map,
+                                specialized_types,
+                            )
+                        })
+                        .collect(),
                     captures: captures.clone(),
                     return_ty: return_ty.clone(),
                 }

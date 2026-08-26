@@ -382,7 +382,7 @@ impl AotProgram {
                 Self::collect_reachable_refs_in_expr(value, all_names, worklist)
             }
             AotExpr::Lambda { body, .. } => {
-                Self::collect_reachable_refs_in_expr(body, all_names, worklist)
+                Self::collect_reachable_refs_in_stmts(body, all_names, worklist)
             }
             // Literals carry no references.
             _ => false,
@@ -1251,8 +1251,8 @@ pub enum AotExpr {
     Lambda {
         /// Parameters (name, type)
         params: Vec<(String, StaticType)>,
-        /// Body expression
-        body: Box<AotExpr>,
+        /// Body statements
+        body: Vec<AotStmt>,
         /// Captured variables from outer scope (name, type)
         captures: Vec<(String, StaticType)>,
         /// Return type of the lambda

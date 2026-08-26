@@ -98,7 +98,7 @@ fn collect_expr_reads(expr: &AotExpr, out: &mut HashSet<String>) {
             for (name, _) in captures {
                 out.insert(name.clone());
             }
-            collect_expr_reads(body, out);
+            collect_stmt_reads(body, out);
         }
         AotExpr::LitI64(_)
         | AotExpr::LitI32(_)
@@ -109,6 +109,54 @@ fn collect_expr_reads(expr: &AotExpr, out: &mut HashSet<String>) {
         | AotExpr::LitChar(_)
         | AotExpr::LitNothing
         | AotExpr::LitMissing => {}
+    }
+}
+
+fn collect_stmt_reads(stmts: &[AotStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            AotStmt::Let { value, .. } => collect_expr_reads(value, out),
+            AotStmt::Assign { target, value } | AotStmt::CompoundAssign { target, value, .. } => {
+                collect_expr_reads(target, out);
+                collect_expr_reads(value, out);
+            }
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) => collect_expr_reads(expr, out),
+            AotStmt::Return(Some(expr)) => collect_expr_reads(expr, out),
+            AotStmt::Return(None) | AotStmt::Break | AotStmt::Continue => {}
+            AotStmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                collect_expr_reads(condition, out);
+                collect_stmt_reads(then_branch, out);
+                if let Some(else_branch) = else_branch {
+                    collect_stmt_reads(else_branch, out);
+                }
+            }
+            AotStmt::While { condition, body } => {
+                collect_expr_reads(condition, out);
+                collect_stmt_reads(body, out);
+            }
+            AotStmt::ForRange {
+                start,
+                stop,
+                step,
+                body,
+                ..
+            } => {
+                collect_expr_reads(start, out);
+                collect_expr_reads(stop, out);
+                if let Some(step) = step {
+                    collect_expr_reads(step, out);
+                }
+                collect_stmt_reads(body, out);
+            }
+            AotStmt::ForEach { iter, body, .. } => {
+                collect_expr_reads(iter, out);
+                collect_stmt_reads(body, out);
+            }
+        }
     }
 }
 

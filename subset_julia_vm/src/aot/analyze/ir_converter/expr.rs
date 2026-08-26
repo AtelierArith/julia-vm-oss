@@ -1522,7 +1522,7 @@ impl<'a> IrConverter<'a> {
 
         Ok(AotExpr::Lambda {
             params,
-            body: Box::new(body_expr),
+            body: vec![AotStmt::ValueCarrier(body_expr)],
             captures,
             return_ty,
         })

@@ -824,7 +824,10 @@ impl AotLoopOptimizer {
                 } else {
                     AotExpr::Lambda {
                         params: params.clone(),
-                        body: Box::new(self.substitute_var_in_expr(body, var, value)),
+                        body: body
+                            .iter()
+                            .map(|stmt| self.substitute_var_in_stmt(stmt, var, value))
+                            .collect(),
                         captures: captures.clone(),
                         return_ty: return_ty.clone(),
                     }
