@@ -152,6 +152,7 @@ impl AotInliner {
 
         // Inline in functions
         for func in &mut program.functions {
+            total_inlined += self.inline_local_lambdas(&mut func.body);
             let mut caller_functions = function_bodies.clone();
             caller_functions.remove(&func.name);
             let inlined = self.inline_calls_in_stmts(&mut func.body, &caller_functions, 0);
@@ -159,6 +160,7 @@ impl AotInliner {
         }
 
         // Inline in main block
+        total_inlined += self.inline_local_lambdas(&mut program.main);
         let inlined = self.inline_calls_in_stmts(&mut program.main, &function_bodies, 0);
         total_inlined += inlined;
 
@@ -186,6 +188,96 @@ impl AotInliner {
         });
 
         total_inlined
+    }
+
+    fn inline_local_lambdas(&mut self, stmts: &mut Vec<AotStmt>) -> usize {
+        let mut total = 0;
+        let mut index = 0;
+        while index < stmts.len() {
+            let Some((name, params, body, return_ty)) = (match &stmts[index] {
+                AotStmt::Let {
+                    name,
+                    value:
+                        AotExpr::Lambda {
+                            params,
+                            body,
+                            return_ty,
+                            ..
+                        },
+                    ..
+                } => Some((
+                    name.clone(),
+                    params.clone(),
+                    body.clone(),
+                    return_ty.clone(),
+                )),
+                _ => None,
+            }) else {
+                index += 1;
+                continue;
+            };
+            let mut consumed = 0;
+            let lambda = AotFunction::new(name.clone(), params, return_ty);
+            let lambda = AotFunction { body, ..lambda };
+            let mut cursor = index + 1;
+            while cursor < stmts.len() {
+                if let Some((prefix, result, count)) =
+                    self.try_inline_local_lambda_stmt(&stmts[cursor], &lambda)
+                {
+                    let mut replacement = prefix;
+                    replacement.push(match &stmts[cursor] {
+                        AotStmt::Let {
+                            name, is_mutable, ..
+                        } => AotStmt::Let {
+                            name: name.clone(),
+                            ty: result.get_type(),
+                            value: result,
+                            is_mutable: *is_mutable,
+                        },
+                        AotStmt::Return(Some(_)) => AotStmt::Return(Some(result)),
+                        _ => AotStmt::Expr(result),
+                    });
+                    let replacement_len = replacement.len();
+                    stmts.splice(cursor..=cursor, replacement);
+                    cursor += replacement_len;
+                    consumed += count;
+                } else {
+                    cursor += 1;
+                }
+            }
+            if consumed > 0
+                && !stmts[index + 1..].iter().any(|stmt| {
+                    Self::stmt_calls_function(&name, stmt, &AotProgram::new(), &mut HashSet::new())
+                })
+            {
+                stmts.remove(index);
+                total += consumed;
+            } else {
+                index += 1;
+            }
+        }
+        total
+    }
+
+    fn try_inline_local_lambda_stmt(
+        &mut self,
+        stmt: &AotStmt,
+        lambda: &AotFunction,
+    ) -> Option<(Vec<AotStmt>, AotExpr, usize)> {
+        let expr = match stmt {
+            AotStmt::Let { value, .. }
+            | AotStmt::Expr(value)
+            | AotStmt::ValueCarrier(value)
+            | AotStmt::Return(Some(value)) => value,
+            _ => return None,
+        };
+        let AotExpr::CallStatic { function, args, .. } = expr else {
+            return None;
+        };
+        if function != &lambda.name || args.len() != lambda.params.len() {
+            return None;
+        }
+        self.inline_function_call(lambda, args, &lambda.return_type, 0)
     }
 
     /// Count statements in a function body
