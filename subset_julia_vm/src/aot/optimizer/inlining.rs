@@ -157,12 +157,14 @@ impl AotInliner {
             caller_functions.remove(&func.name);
             let inlined = self.inline_calls_in_stmts(&mut func.body, &caller_functions, 0);
             total_inlined += inlined;
+            total_inlined += self.inline_local_lambdas(&mut func.body);
         }
 
         // Inline in main block
         total_inlined += self.inline_local_lambdas(&mut program.main);
         let inlined = self.inline_calls_in_stmts(&mut program.main, &function_bodies, 0);
         total_inlined += inlined;
+        total_inlined += self.inline_local_lambdas(&mut program.main);
 
         let specialized = self.specialized_boxed_returns.clone();
         let optimized_functions = program.functions.clone();
@@ -271,13 +273,25 @@ impl AotInliner {
             | AotStmt::Return(Some(value)) => value,
             _ => return None,
         };
-        let AotExpr::CallStatic { function, args, .. } = expr else {
+        let (call, wrapper) = match expr {
+            call @ AotExpr::CallStatic { .. } => (call, None),
+            AotExpr::Convert { value, target_ty } => (value.as_ref(), Some(target_ty)),
+            _ => return None,
+        };
+        let AotExpr::CallStatic { function, args, .. } = call else {
             return None;
         };
         if function != &lambda.name || args.len() != lambda.params.len() {
             return None;
         }
         self.inline_function_call(lambda, args, &lambda.return_type, 0)
+            .map(|(stmts, result, count)| {
+                let result = wrapper.map_or(result.clone(), |target_ty| AotExpr::Convert {
+                    value: Box::new(result),
+                    target_ty: target_ty.clone(),
+                });
+                (stmts, result, count)
+            })
     }
 
     /// Count statements in a function body
