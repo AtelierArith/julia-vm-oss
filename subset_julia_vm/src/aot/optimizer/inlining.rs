@@ -981,10 +981,7 @@ impl AotInliner {
                 if should_inline {
                     if let Some(func) = functions.get(function) {
                         let inlined = self.inline_function_call(func, args, return_ty, depth);
-                        if inlined.is_some()
-                            && (candidate.return_needs_value
-                                || matches!(func.return_type, StaticType::Function { .. }))
-                        {
+                        if inlined.is_some() {
                             self.specialized_boxed_returns.insert(function.clone());
                         }
                         return inlined;

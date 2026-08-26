@@ -3074,6 +3074,34 @@ result = correct(0.25)
 
     #[cfg(feature = "aot-wasm")]
     #[test]
+    fn script_entry_prunes_inlined_named_pipeline_helpers_issue_3() {
+        let source = r#"
+▷(value, transform) = transform(value)
+float(image::Array{UInt8,3})::Array{UInt8,3} = image
+image = zeros(UInt8, 4, 1, 1)
+processed = image ▷ float
+"#;
+        let program = crate::pipeline::parse_source(source).expect("source should lower");
+        let mut config = CompileConfig {
+            backend: AotBackend::Wasm,
+            ..CompileConfig::default()
+        };
+        config.enable_script_entry();
+
+        let prepared = prepare_aot_program(program, &config).expect("AoT preparation should pass");
+        assert_eq!(
+            prepared
+                .aot_program
+                .functions
+                .iter()
+                .map(|function| function.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![SCRIPT_ENTRY_NAME]
+        );
+    }
+
+    #[cfg(feature = "aot-wasm")]
+    #[test]
     fn imported_array_call_survives_aot_conversion_issue_5() {
         let source = r#"
 load(path::String)::Array{UInt8,3} = Array{UInt8,3}(undef, 0, 0, 0)
