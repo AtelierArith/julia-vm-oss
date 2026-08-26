@@ -70,6 +70,21 @@ const arithmeticInstance = await instantiate(arithmetic);
 assert.equal(arithmeticInstance.exports.public_add_scale(10n, 11n), 42n);
 assert.equal(Object.hasOwn(arithmeticInstance.exports, "add_scale"), false);
 
+const capturedClosure = compiler.compile_to_wasm(
+  `function gamma(exponent::Float64)
+    return function(channel::Float64)::Float64
+      adjusted = channel ^ exponent
+      return adjusted
+    end
+  end
+  correct = gamma(0.85)
+  result = correct(0.25)`,
+  { entry_mode: "script", opt_level: 2 },
+);
+assert.equal(capturedClosure.success, true, JSON.stringify(capturedClosure.diagnostics));
+const capturedClosureInstance = await instantiate(capturedClosure);
+capturedClosureInstance.exports[capturedClosure.entry_point]();
+
 const omittedOptions = compiler.compile_to_wasm("forty_two() = 42", undefined);
 assert.equal(omittedOptions.success, true, JSON.stringify(omittedOptions.diagnostics));
 assert.ok(omittedOptions.wasm_bytes instanceof Uint8Array);

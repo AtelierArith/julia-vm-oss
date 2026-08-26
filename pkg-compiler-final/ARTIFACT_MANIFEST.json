@@ -2,12 +2,12 @@
   "package": "subset_julia_vm_web",
   "package_version": "0.11.1",
   "compiler_abi_version": 2,
-  "source_commit": "4088a5707c1003e56efe980461e15cdc73d82ae5",
+  "source_commit": "86c83a042f75eb472ac4564dae0ade9ece32f0b5",
   "source_root": "subset-julia-wasm-compiler",
   "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
   "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
   "wasm_pack": "wasm-pack 0.15.0",
-  "build": "wasm-pack build --target web --profile web-release --out-dir ../pkg-compiler-final --locked -- --features aot-wasm",
+  "build": "wasm-pack build subset_julia_vm_web --target web --profile web-release --out-dir ../pkg-compiler-final --locked --features aot-wasm",
   "artifacts": {
     "README.md": {
       "bytes": 7262,
@@ -26,8 +26,8 @@
       "sha256": "9220325bc45460d9d15d23c566deac76d3e3390c7d842659af8b84825f4da419"
     },
     "subset_julia_vm_web_bg.wasm": {
-      "bytes": 26811077,
-      "sha256": "9b62533a7854884ed35c783b909d67d7cf7924d185aa5a62c1af6eb4ee0f9cb3"
+      "bytes": 24258248,
+      "sha256": "b7449cfadd4dcce070213a8cea3859dc2314d7e43aad139ca500d8527cf940a0"
     },
     "subset_julia_vm_web_bg.wasm.d.ts": {
       "bytes": 1868,
