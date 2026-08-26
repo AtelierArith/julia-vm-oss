@@ -896,6 +896,59 @@ impl AotInliner {
         functions: &HashMap<String, AotFunction>,
         depth: usize,
     ) -> Option<(Vec<AotStmt>, AotExpr, usize)> {
+        if let AotExpr::CallDynamic { function, args } = expr {
+            for (index, arg) in args.iter().enumerate() {
+                if let Some((stmts, replacement, count)) =
+                    self.try_inline_expr(arg, functions, depth + 1)
+                {
+                    let mut rewritten_args = args.clone();
+                    rewritten_args[index] = replacement;
+                    return Some((
+                        stmts,
+                        AotExpr::CallDynamic {
+                            function: function.clone(),
+                            args: rewritten_args,
+                        },
+                        count,
+                    ));
+                }
+            }
+            if let Some(func) = functions.get(function) {
+                if Self::boxed_return_is_callable_specializable(func, args) {
+                    let inlined = self.inline_function_call(func, args, &StaticType::Any, depth);
+                    if inlined.is_some() {
+                        self.specialized_boxed_returns.insert(function.clone());
+                    }
+                    return inlined;
+                }
+            }
+        }
+        if let AotExpr::CallStatic {
+            function,
+            args,
+            return_ty,
+            inline_policy,
+        } = expr
+        {
+            for (index, arg) in args.iter().enumerate() {
+                if let Some((stmts, replacement, count)) =
+                    self.try_inline_expr(arg, functions, depth + 1)
+                {
+                    let mut rewritten_args = args.clone();
+                    rewritten_args[index] = replacement;
+                    return Some((
+                        stmts,
+                        AotExpr::CallStatic {
+                            function: function.clone(),
+                            args: rewritten_args,
+                            return_ty: return_ty.clone(),
+                            inline_policy: *inline_policy,
+                        },
+                        count,
+                    ));
+                }
+            }
+        }
         if let AotExpr::CallStatic {
             function,
             args,

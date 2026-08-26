@@ -2403,6 +2403,25 @@ println(length(output))
 }
 
 #[test]
+fn issue_3_nested_pipeline_calls_specialize_inside_out() {
+    // Given: parser-lowered pipeline calls are nested in the outer call argument.
+    let source = r#"
+▷(value, transform) = transform(value)
+increment(value::Int64)::Int64 = value + 1
+double(value::Int64)::Int64 = value * 2
+result = 3 ▷ increment ▷ double
+println(result)
+"#;
+
+    // When: the optimized AoT pipeline compiles and executes the nested calls.
+    let rust_code = compile_to_rust_with_base_optimized(source)
+        .expect("nested pipeline calls should specialize");
+
+    // Then: specialization proceeds from the inner pipeline step to the outer step.
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_nested_pipeline_issue_3", "8");
+}
+
+#[test]
 fn issue_3_curried_gamma_preserves_captured_multistatement_body() {
     // Given: gamma returns a closure with a captured exponent and local assignment.
     let source = r#"
