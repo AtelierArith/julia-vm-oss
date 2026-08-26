@@ -1482,50 +1482,53 @@ impl<'a> IrConverter<'a> {
             })
             .collect();
 
-        // Convert the body - currently AoT lambdas carry a single expression.
-        let body_expr = if let Some(Stmt::Return {
-            value: Some(expr), ..
-        }) = func.body.stmts.first()
-        {
-            self.convert_expr(expr)?
-        } else if func.body.stmts.len() == 1 {
-            // Handle single expression statement
-            if let Stmt::Expr { expr, .. } = &func.body.stmts[0] {
-                self.convert_expr(expr)?
-            } else {
-                return Err(AotError::UnsupportedInstruction(
-                    UnsupportedInstructionDiagnostic::new(format!(
-                        "AoT lambda `{}` body is not a single expression or return expression",
-                        func.name
-                    ))
-                    .with_span(func.body.span)
-                    .with_workaround(
-                        "rewrite the closure as a single expression, lift it to a named function supported by AoT, or run it on the VM",
-                    ),
-                ));
-            }
-        } else {
-            return Err(AotError::UnsupportedInstruction(
-                UnsupportedInstructionDiagnostic::new(format!(
-                    "AoT lambda `{}` has a multi-statement body, which is not supported yet",
-                    func.name
-                ))
-                .with_span(func.body.span)
-                .with_workaround(
-                    "rewrite the closure as a single expression, lift it to a named function supported by AoT, or run it on the VM",
-                ),
-            ));
-        };
-
-        // Infer return type from body
-        let return_ty = body_expr.get_type();
+        let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+        let return_ty = func
+            .return_type
+            .as_ref()
+            .map(StaticType::from)
+            .unwrap_or_else(|| {
+                self.engine.infer_return_type(
+                    &func.body,
+                    &func
+                        .params
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect::<Vec<_>>(),
+                    &param_types,
+                )
+            });
+        let mut converter = self.fork_for_lambda();
+        converter.current_return_type = Some(return_ty.clone());
+        converter.declared_locals = params.iter().map(|(name, _)| name.clone()).collect();
+        for (name, ty) in &params {
+            converter.engine.env.insert(name.clone(), ty.clone());
+        }
+        let body = converter.convert_block(&func.body)?;
 
         Ok(AotExpr::Lambda {
             params,
-            body: vec![AotStmt::ValueCarrier(body_expr)],
+            body,
             captures,
             return_ty,
         })
+    }
+
+    fn fork_for_lambda(&self) -> Self {
+        Self {
+            typed: self.typed,
+            engine: self.engine.clone(),
+            declared_locals: HashSet::new(),
+            functions: self.functions.clone(),
+            generic_any_function_names: self.generic_any_function_names.clone(),
+            function_occurrences: self.function_occurrences.clone(),
+            current_return_type: None,
+            abstract_types: self.abstract_types.clone(),
+            scope_stack: Vec::new(),
+            statement_let_passthrough_stack: Vec::new(),
+            internal_local_counter: self.internal_local_counter,
+            reserved_rust_locals: self.reserved_rust_locals.clone(),
+        }
     }
 
     /// Convert a complete program
@@ -1610,6 +1613,35 @@ impl<'a> IrConverter<'a> {
                 if bindings.is_empty() && body.stmts.len() == 1 {
                     if let Some(Stmt::Expr { expr, .. }) = body.stmts.first() {
                         return self.convert_expr(expr);
+                    }
+                }
+                if bindings.is_empty() {
+                    if let Some((nested, trailing)) = body.stmts.split_last() {
+                        if let Stmt::Expr {
+                            expr: Expr::Var(name, _) | Expr::FunctionRef { name, .. },
+                            ..
+                        } = nested
+                        {
+                            let definitions = trailing
+                                .iter()
+                                .filter_map(|stmt| match stmt {
+                                    Stmt::FunctionDef { func, .. } => Some(func.as_ref()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>();
+                            if let Some(func) = definitions
+                                .iter()
+                                .copied()
+                                .find(|func| func.name == name.as_str())
+                                .or_else(|| definitions.as_slice().first().copied())
+                                .filter(|_| {
+                                    definitions.len() == 1
+                                        || definitions.iter().any(|func| func.name == name.as_str())
+                                })
+                            {
+                                return self.convert_lambda_function(func);
+                            }
+                        }
                     }
                 }
                 // #7014 relaxation for the "nested function definitions + single
@@ -2090,6 +2122,18 @@ impl<'a> IrConverter<'a> {
                 let all_static = arg_types.iter().all(|t| t.is_fully_static());
 
                 if all_static {
+                    if let Some(StaticType::Function { params, ret }) =
+                        self.engine.env.get(function.as_str())
+                    {
+                        if params.len() == arg_types.len() {
+                            return Ok(AotExpr::CallStatic {
+                                function: function.to_string(),
+                                args: aot_args,
+                                return_ty: ret.as_ref().clone(),
+                                inline_policy: AotInlinePolicy::Auto,
+                            });
+                        }
+                    }
                     // First check if this is a user-defined function with known return type
                     // This is essential for recursive function calls
                     let known_return_ty = self.get_function_return_type(function, &arg_types);

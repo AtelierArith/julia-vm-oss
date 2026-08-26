@@ -72,6 +72,7 @@ fn unwrap_broadcast_ref_expr(expr: &Expr) -> &Expr {
     }
 }
 
+#[derive(Clone)]
 pub struct TypeInferenceEngine {
     /// Built-in function signatures (name -> return type for common arities)
     pub(crate) builtins: HashMap<String, Vec<(Vec<StaticType>, StaticType)>>,
@@ -1305,6 +1306,52 @@ impl TypeInferenceEngine {
             }
             Expr::AssignExpr { value, .. } => self.infer_expr_type_with_env(value, env),
             Expr::LetBlock { bindings, body, .. } => {
+                if bindings.is_empty() {
+                    if let Some((
+                        Stmt::Expr {
+                            expr: Expr::Var(name, _) | Expr::FunctionRef { name, .. },
+                            ..
+                        },
+                        prefix,
+                    )) = body.stmts.split_last()
+                    {
+                        let definitions = prefix
+                            .iter()
+                            .filter_map(|stmt| match stmt {
+                                Stmt::FunctionDef { func, .. } => Some(func.as_ref()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>();
+                        if let Some(func) = definitions
+                            .iter()
+                            .copied()
+                            .find(|func| func.name == name.as_str())
+                            .or_else(|| (definitions.len() == 1).then_some(definitions[0]))
+                        {
+                            let param_names = func
+                                .params
+                                .iter()
+                                .map(|param| param.name.clone())
+                                .collect::<Vec<_>>();
+                            let param_types = func
+                                .params
+                                .iter()
+                                .map(|param| StaticType::from(&param.effective_type()))
+                                .collect::<Vec<_>>();
+                            let ret = func
+                                .return_type
+                                .as_ref()
+                                .map(StaticType::from)
+                                .unwrap_or_else(|| {
+                                    self.infer_return_type(&func.body, &param_names, &param_types)
+                                });
+                            return StaticType::Function {
+                                params: param_types,
+                                ret: Box::new(ret),
+                            };
+                        }
+                    }
+                }
                 let mut local_env = env.clone();
                 for (name, value) in bindings {
                     let ty = self.infer_expr_type_with_env(value, &local_env);
@@ -1402,6 +1449,11 @@ impl TypeInferenceEngine {
                     .iter()
                     .map(|a| self.infer_expr_type_with_env(a, env))
                     .collect();
+                if let Some(StaticType::Function { params, ret }) = env.get(function.as_ref()) {
+                    if params.len() == arg_types.len() {
+                        return ret.as_ref().clone();
+                    }
+                }
                 if let Some(dict_ty) = Self::dict_constructor_type(function, &arg_types) {
                     return dict_ty;
                 }

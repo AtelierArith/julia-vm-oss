@@ -2253,30 +2253,35 @@ fn test_convert_lambda_with_capture() {
 }
 
 #[test]
-fn lambda_multi_statement_body_rejects_with_span_issue_6938() {
+fn lambda_multi_statement_body_preserves_capture_and_order_issue_3() {
     let typed = TypedProgram::new();
     let body_span = Span::new(10, 40, 2, 3, 5, 8);
 
     let lambda_func = Function {
         new_struct_name: None,
         name: "__lambda_0__".to_string(),
-        params: vec![TypedParam::new("x".to_string(), None, test_span())],
+        params: vec![TypedParam::new(
+            "channel".to_string(),
+            Some(crate::types::JuliaType::Float64),
+            test_span(),
+        )],
         kwparams: vec![],
         type_params: vec![],
         return_type: None,
         body: Block {
             stmts: vec![
-                Stmt::Expr {
-                    expr: Expr::BinaryOp {
-                        op: BinaryOp::Add,
-                        left: Box::new(Expr::Var("x".to_string().into(), test_span())),
-                        right: Box::new(Expr::Literal(Literal::Int(1), test_span())),
+                Stmt::Assign {
+                    var: "adjusted".to_string(),
+                    value: Expr::BinaryOp {
+                        op: BinaryOp::Pow,
+                        left: Box::new(Expr::Var("channel".to_string().into(), test_span())),
+                        right: Box::new(Expr::Var("exponent".to_string().into(), test_span())),
                         span: test_span(),
                     },
                     span: test_span(),
                 },
                 Stmt::Return {
-                    value: Some(Expr::Var("x".to_string().into(), test_span())),
+                    value: Some(Expr::Var("adjusted".to_string().into(), test_span())),
                     span: test_span(),
                 },
             ],
@@ -2303,29 +2308,34 @@ fn lambda_multi_statement_body_rejects_with_span_issue_6938() {
             span: test_span(),
         },
     };
-    let converter = IrConverter::new(&typed, &program);
+    let mut converter = IrConverter::new(&typed, &program);
+    converter
+        .engine
+        .env
+        .insert("exponent".to_string(), StaticType::F64);
     let func_ref = Expr::FunctionRef {
         name: "__lambda_0__".to_string().into(),
         span: test_span(),
     };
 
-    let err = converter.convert_expr(&func_ref).unwrap_err();
-
-    match err {
-        crate::aot::AotError::UnsupportedInstruction(diagnostic) => {
-            assert!(
-                diagnostic.message.contains("multi-statement body"),
-                "unexpected message: {}",
-                diagnostic.message
-            );
-            assert_eq!(diagnostic.span, Some(body_span));
-            assert!(diagnostic
-                .workaround
-                .as_deref()
-                .is_some_and(|workaround| workaround.contains("single expression")));
-        }
-        other => panic!("expected UnsupportedInstruction, got {other:?}"),
-    }
+    let result = converter.convert_expr(&func_ref).unwrap();
+    let AotExpr::Lambda {
+        params,
+        body,
+        captures,
+        return_ty,
+    } = result
+    else {
+        panic!("expected Lambda")
+    };
+    assert_eq!(params, vec![("channel".to_string(), StaticType::F64)]);
+    assert_eq!(captures, vec![("exponent".to_string(), StaticType::F64)]);
+    assert_eq!(return_ty, StaticType::F64);
+    assert!(matches!(
+        body.as_slice(),
+        [AotStmt::Let { name, .. }, AotStmt::Return(Some(AotExpr::Var { name: returned, .. }))]
+            if name == "adjusted" && returned == "adjusted"
+    ));
 }
 
 #[test]

@@ -781,7 +781,7 @@ impl<'a> IrConverter<'a> {
     }
 
     /// Convert a block to a list of statements
-    fn convert_block(&mut self, block: &Block) -> AotResult<Vec<AotStmt>> {
+    pub(super) fn convert_block(&mut self, block: &Block) -> AotResult<Vec<AotStmt>> {
         let mut stmts = Vec::new();
         for stmt in &block.stmts {
             let expanded = self.convert_stmt_expanded(stmt)?;

@@ -2403,6 +2403,31 @@ println(length(output))
 }
 
 #[test]
+fn issue_3_curried_gamma_preserves_captured_multistatement_body() {
+    // Given: gamma returns a closure with a captured exponent and local assignment.
+    let source = r#"
+function gamma(exponent::Float64)
+    return function(channel::Float64)::Float64
+        adjusted = channel ^ exponent
+        return adjusted
+    end
+end
+
+correct = gamma(0.85)
+result = correct(0.25)
+println(result)
+"#;
+
+    // When: the canonical AoT pipeline compiles and executes the curried closure.
+    let rust_code =
+        compile_to_rust_with_base_optimized(source).expect("curried gamma closure should compile");
+
+    // Then: the captured exponent and full closure body determine the result.
+    let expected = 0.25_f64.powf(0.85).to_string();
+    assert_generated_rust_runs_with_stdout(&rust_code, "aot_curried_gamma_issue_3", &expected);
+}
+
+#[test]
 fn issue_7070_string_map_filter_keep_non_copy_element_types() {
     let source = r#"
 function idstr(x::String)::String

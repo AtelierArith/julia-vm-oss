@@ -816,7 +816,10 @@ impl AotInliner {
         func.params.iter().zip(args).any(|((_, param_ty), arg)| {
             matches!(param_ty, StaticType::Any)
                 && matches!(arg.get_type(), StaticType::Function { .. })
-        })
+        }) || func
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt, AotStmt::Return(Some(AotExpr::Lambda { .. }))))
     }
 
     /// Inline a function call

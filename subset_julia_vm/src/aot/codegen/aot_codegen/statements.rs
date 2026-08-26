@@ -24,15 +24,24 @@ impl AotCodeGenerator {
                     // plain assignment so it does not re-shadow inside the block.
                     self.write_line(&format!("{} = {};", escape_rust_ident(name), value_str));
                 } else {
-                    let rust_ty = self.type_to_rust(ty);
                     let mut_kw = if *is_mutable { "mut " } else { "" };
-                    self.write_line(&format!(
-                        "let {}{}: {} = {};",
-                        mut_kw,
-                        escape_rust_ident(name),
-                        rust_ty,
-                        value_str
-                    ));
+                    if matches!(value, AotExpr::Lambda { captures, .. } if !captures.is_empty()) {
+                        self.write_line(&format!(
+                            "let {}{} = {};",
+                            mut_kw,
+                            escape_rust_ident(name),
+                            value_str
+                        ));
+                    } else {
+                        let rust_ty = self.type_to_rust(ty);
+                        self.write_line(&format!(
+                            "let {}{}: {} = {};",
+                            mut_kw,
+                            escape_rust_ident(name),
+                            rust_ty,
+                            value_str
+                        ));
+                    }
                 }
             }
 
