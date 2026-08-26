@@ -1093,6 +1093,18 @@ impl AotInliner {
                     }
                     return inlined;
                 }
+                if args.iter().all(|arg| arg.get_type().is_fully_static()) {
+                    return Some((
+                        Vec::new(),
+                        AotExpr::CallStatic {
+                            function: function.clone(),
+                            args: args.clone(),
+                            return_ty: func.return_type.clone(),
+                            inline_policy: func.inline_policy,
+                        },
+                        1,
+                    ));
+                }
             }
         }
         if let AotExpr::CallStatic {
