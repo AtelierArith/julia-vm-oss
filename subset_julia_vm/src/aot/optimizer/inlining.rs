@@ -755,7 +755,19 @@ impl AotInliner {
 
             if inlined > 0 {
                 // Replace the statement with inlined version
+                let refined_local = new_stmts.last().and_then(|stmt| match stmt {
+                    AotStmt::Let { name, ty, .. } if !matches!(ty, StaticType::Any) => {
+                        Some((name.clone(), ty.clone()))
+                    }
+                    _ => None,
+                });
+                let replacement_len = new_stmts.len();
                 stmts.splice(i..=i, new_stmts);
+                if let Some((name, ty)) = refined_local {
+                    for stmt in &mut stmts[i + replacement_len..] {
+                        Self::refine_stmt_var_type(stmt, &name, &ty);
+                    }
+                }
                 total_inlined += inlined;
             } else {
                 // Process nested blocks
@@ -782,6 +794,166 @@ impl AotInliner {
         }
 
         total_inlined
+    }
+
+    fn refine_stmt_var_type(stmt: &mut AotStmt, name: &str, ty: &StaticType) {
+        match stmt {
+            AotStmt::Let { value, .. } => Self::refine_expr_var_type(value, name, ty),
+            AotStmt::Assign { target, value } | AotStmt::CompoundAssign { target, value, .. } => {
+                Self::refine_expr_var_type(target, name, ty);
+                Self::refine_expr_var_type(value, name, ty);
+            }
+            AotStmt::Expr(expr) | AotStmt::ValueCarrier(expr) | AotStmt::Return(Some(expr)) => {
+                Self::refine_expr_var_type(expr, name, ty)
+            }
+            AotStmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                Self::refine_expr_var_type(condition, name, ty);
+                for stmt in then_branch {
+                    Self::refine_stmt_var_type(stmt, name, ty);
+                }
+                if let Some(else_branch) = else_branch {
+                    for stmt in else_branch {
+                        Self::refine_stmt_var_type(stmt, name, ty);
+                    }
+                }
+            }
+            AotStmt::While { condition, body } => {
+                Self::refine_expr_var_type(condition, name, ty);
+                for stmt in body {
+                    Self::refine_stmt_var_type(stmt, name, ty);
+                }
+            }
+            AotStmt::ForRange {
+                start,
+                stop,
+                step,
+                body,
+                ..
+            } => {
+                Self::refine_expr_var_type(start, name, ty);
+                Self::refine_expr_var_type(stop, name, ty);
+                if let Some(step) = step {
+                    Self::refine_expr_var_type(step, name, ty);
+                }
+                for stmt in body {
+                    Self::refine_stmt_var_type(stmt, name, ty);
+                }
+            }
+            AotStmt::ForEach { iter, body, .. } => {
+                Self::refine_expr_var_type(iter, name, ty);
+                for stmt in body {
+                    Self::refine_stmt_var_type(stmt, name, ty);
+                }
+            }
+            AotStmt::Return(None) | AotStmt::Break | AotStmt::Continue => {}
+        }
+    }
+
+    fn refine_expr_var_type(expr: &mut AotExpr, name: &str, ty: &StaticType) {
+        match expr {
+            AotExpr::Var {
+                name: var,
+                ty: var_ty,
+            } if var == name => *var_ty = ty.clone(),
+            AotExpr::CallStatic { args, .. }
+            | AotExpr::CallDynamic { args, .. }
+            | AotExpr::CallBuiltin { args, .. }
+            | AotExpr::ArrayLit { elements: args, .. }
+            | AotExpr::TupleLit { elements: args }
+            | AotExpr::StructNew { fields: args, .. } => {
+                for arg in args {
+                    Self::refine_expr_var_type(arg, name, ty);
+                }
+            }
+            AotExpr::BinOpStatic { left, right, .. }
+            | AotExpr::BinOpDynamic { left, right, .. } => {
+                Self::refine_expr_var_type(left, name, ty);
+                Self::refine_expr_var_type(right, name, ty);
+            }
+            AotExpr::UnaryOp { operand, .. }
+            | AotExpr::Box(operand)
+            | AotExpr::Unbox { value: operand, .. }
+            | AotExpr::Convert { value: operand, .. }
+            | AotExpr::SetFromIter { iter: operand, .. }
+            | AotExpr::FieldAccess {
+                object: operand, ..
+            } => Self::refine_expr_var_type(operand, name, ty),
+            AotExpr::Index { array, indices, .. } => {
+                Self::refine_expr_var_type(array, name, ty);
+                for index in indices {
+                    Self::refine_expr_var_type(index, name, ty);
+                }
+            }
+            AotExpr::Range {
+                start, stop, step, ..
+            } => {
+                Self::refine_expr_var_type(start, name, ty);
+                Self::refine_expr_var_type(stop, name, ty);
+                if let Some(step) = step {
+                    Self::refine_expr_var_type(step, name, ty);
+                }
+            }
+            AotExpr::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::refine_expr_var_type(condition, name, ty);
+                Self::refine_expr_var_type(then_expr, name, ty);
+                Self::refine_expr_var_type(else_expr, name, ty);
+            }
+            AotExpr::Lambda { body, .. } => {
+                for stmt in body {
+                    Self::refine_stmt_var_type(stmt, name, ty);
+                }
+            }
+            AotExpr::Comprehension {
+                body, iter, filter, ..
+            }
+            | AotExpr::Generator {
+                body, iter, filter, ..
+            } => {
+                Self::refine_expr_var_type(body, name, ty);
+                Self::refine_expr_var_type(iter, name, ty);
+                if let Some(filter) = filter {
+                    Self::refine_expr_var_type(filter, name, ty);
+                }
+            }
+            AotExpr::MultiComprehension {
+                body,
+                iterations,
+                filter,
+                ..
+            } => {
+                Self::refine_expr_var_type(body, name, ty);
+                for (_, iter) in iterations {
+                    Self::refine_expr_var_type(iter, name, ty);
+                }
+                if let Some(filter) = filter {
+                    Self::refine_expr_var_type(filter, name, ty);
+                }
+            }
+            AotExpr::NamedTupleLit { fields } => {
+                for (_, field) in fields {
+                    Self::refine_expr_var_type(field, name, ty);
+                }
+            }
+            AotExpr::Var { .. }
+            | AotExpr::LitI64(_)
+            | AotExpr::LitI32(_)
+            | AotExpr::LitF64(_)
+            | AotExpr::LitF32(_)
+            | AotExpr::LitBool(_)
+            | AotExpr::LitStr(_)
+            | AotExpr::LitChar(_)
+            | AotExpr::LitNothing
+            | AotExpr::LitMissing => {}
+        }
     }
 
     /// True when an inlined call's result expression, discarded in statement
