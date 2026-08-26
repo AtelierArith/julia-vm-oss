@@ -3032,6 +3032,48 @@ mod tests {
 
     #[cfg(feature = "aot-wasm")]
     #[test]
+    fn script_entry_eliminates_captured_closure_types_issue_3() {
+        let source = r#"
+function gamma(exponent::Float64)
+    return function(channel::Float64)::Float64
+        adjusted = channel ^ exponent
+        return adjusted
+    end
+end
+correct = gamma(0.85)
+result = correct(0.25)
+"#;
+        let program = crate::pipeline::parse_source(source).expect("source should lower");
+        let mut config = CompileConfig {
+            backend: AotBackend::Wasm,
+            ..CompileConfig::default()
+        };
+        config.enable_script_entry();
+
+        let prepared = prepare_aot_program(program, &config).expect("AoT preparation should pass");
+        let entry = prepared
+            .aot_program
+            .functions
+            .iter()
+            .find(|function| function.name == SCRIPT_ENTRY_NAME)
+            .expect("script entry should exist");
+        let rendered = format!("{:#?}", entry.body);
+        assert!(!rendered.contains("Lambda"), "closure survived: {rendered}");
+        assert!(
+            !rendered.contains("Function {"),
+            "function slot survived: {rendered}"
+        );
+        let program_rendered = format!("{:#?}", prepared.aot_program.functions);
+        assert!(
+            !program_rendered.contains("Lambda")
+                && !program_rendered.contains("return_type: Function")
+                && !program_rendered.contains("ty: Function"),
+            "closure helper survived: {program_rendered}"
+        );
+    }
+
+    #[cfg(feature = "aot-wasm")]
+    #[test]
     fn imported_array_call_survives_aot_conversion_issue_5() {
         let source = r#"
 load(path::String)::Array{UInt8,3} = Array{UInt8,3}(undef, 0, 0, 0)

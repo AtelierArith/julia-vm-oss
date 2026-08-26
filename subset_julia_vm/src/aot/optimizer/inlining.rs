@@ -175,12 +175,14 @@ impl AotInliner {
                     Self::stmt_calls_function(target, stmt, &AotProgram::new(), &mut HashSet::new())
                 }) || optimized_functions.iter().any(|caller| {
                     &caller.name != *target
-                        && Self::calls_function(
-                            target,
-                            &caller.body,
-                            &AotProgram::new(),
-                            &mut HashSet::new(),
-                        )
+                        && caller.body.iter().any(|stmt| {
+                            Self::stmt_calls_function(
+                                target,
+                                stmt,
+                                &AotProgram::new(),
+                                &mut HashSet::new(),
+                            )
+                        })
                 })
             })
             .cloned()
@@ -194,6 +196,25 @@ impl AotInliner {
 
     fn inline_local_lambdas(&mut self, stmts: &mut Vec<AotStmt>) -> usize {
         let mut total = 0;
+        for stmt in stmts.iter_mut() {
+            total += match stmt {
+                AotStmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    let mut count = self.inline_local_lambdas(then_branch);
+                    if let Some(else_branch) = else_branch {
+                        count += self.inline_local_lambdas(else_branch);
+                    }
+                    count
+                }
+                AotStmt::While { body, .. }
+                | AotStmt::ForRange { body, .. }
+                | AotStmt::ForEach { body, .. } => self.inline_local_lambdas(body),
+                _ => 0,
+            };
+        }
         let mut index = 0;
         while index < stmts.len() {
             let Some((name, params, body, return_ty)) = (match &stmts[index] {
@@ -907,7 +928,10 @@ impl AotInliner {
                 if should_inline {
                     if let Some(func) = functions.get(function) {
                         let inlined = self.inline_function_call(func, args, return_ty, depth);
-                        if inlined.is_some() && candidate.return_needs_value {
+                        if inlined.is_some()
+                            && (candidate.return_needs_value
+                                || matches!(func.return_type, StaticType::Function { .. }))
+                        {
                             self.specialized_boxed_returns.insert(function.clone());
                         }
                         return inlined;
